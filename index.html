@@ -186,9 +186,48 @@
   .pag-info { font-size: 12px; color: var(--gray-400); margin-right: 8px; }
 
   ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: var(--gray-200); border-radius: 3px; }
+
+  /* LOGIN */
+  .login-screen {
+    position: fixed; inset: 0;
+    background: var(--navy-dark);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 999;
+  }
+  .login-screen.hidden { display: none; }
+  .login-box {
+    background: white;
+    border-radius: 20px;
+    padding: 40px;
+    width: 380px;
+    max-width: 95vw;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.4);
+    text-align: center;
+  }
+  .login-logo { font-size: 40px; margin-bottom: 8px; }
+  .login-title { font-size: 22px; font-weight: 700; color: var(--navy); margin-bottom: 4px; }
+  .login-sub { font-size: 13px; color: var(--gray-400); margin-bottom: 28px; }
+  .login-error { background: var(--red-light); color: #991B1B; font-size: 12px; font-weight: 600; padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; display: none; }
+  .login-box .input { margin-bottom: 12px; text-align: left; }
+  .login-box .btn-primary { width: 100%; padding: 12px; font-size: 15px; margin-top: 4px; }
+  .login-footer { font-size: 11px; color: var(--gray-400); margin-top: 20px; }
 </style>
 </head>
 <body>
+
+<!-- LOGIN -->
+<div class="login-screen" id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">🏪</div>
+    <div class="login-title">Moloka Store</div>
+    <div class="login-sub">Panel de Control · Acceso privado</div>
+    <div class="login-error" id="login-error">Usuario o contraseña incorrectos</div>
+    <input class="input" type="text" id="login-user" placeholder="Usuario" autocomplete="username">
+    <input class="input" type="password" id="login-pass" placeholder="Contraseña" autocomplete="current-password">
+    <button class="btn btn-primary" onclick="hacerLogin()">Entrar</button>
+    <div class="login-footer">Acceso restringido a Moloka Store S.L.U.</div>
+  </div>
+</div>
 
 <!-- SIDEBAR -->
 <aside class="sidebar">
@@ -1074,6 +1113,41 @@ function switchTabTareas(el, tab) {
 }
 
 // ============================================================
+// LOGIN
+// ============================================================
+const USUARIOS = {
+  'moloka': 'Moloka2026!',
+  'elena': 'Moloka2026!'
+};
+
+function hacerLogin() {
+  const user = document.getElementById('login-user').value.trim().toLowerCase();
+  const pass = document.getElementById('login-pass').value;
+  const error = document.getElementById('login-error');
+
+  if (USUARIOS[user] && USUARIOS[user] === pass) {
+    sessionStorage.setItem('moloka_auth', 'ok');
+    document.getElementById('login-screen').classList.add('hidden');
+    init();
+  } else {
+    error.style.display = 'block';
+    document.getElementById('login-pass').value = '';
+  }
+}
+
+function checkLogin() {
+  if (sessionStorage.getItem('moloka_auth') === 'ok') {
+    document.getElementById('login-screen').classList.add('hidden');
+    return true;
+  }
+  return false;
+}
+
+// Enter en login
+document.getElementById('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') hacerLogin(); });
+document.getElementById('login-user').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('login-pass').focus(); });
+
+// ============================================================
 // INIT
 // ============================================================
 async function init() {
@@ -1095,7 +1169,8 @@ document.getElementById('envio-fecha').textContent = 'Fecha: ' + new Date().toLo
 document.getElementById('scan-ean').addEventListener('keydown', e => { if (e.key === 'Enter') buscarProductoEscaneo(); });
 document.getElementById('envio-scan').addEventListener('keydown', e => { if (e.key === 'Enter') addProductoEnvio(); });
 
-init();
+// Arranque — verificar login
+if (checkLogin()) init();
 </script>
 </body>
 </html>
