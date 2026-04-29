@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Moloka Store</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --navy: #1A2E44; --navy-dark: #0F1E2E; --navy-mid: #2E4B6B; --navy-light: #4A6B8A;
+    --accent: #3B82F6; --accent-light: #EFF6FF;
+    --green: #10B981; --green-light: #DCFCE7;
+    --amber: #F59E0B; --amber-light: #FEF3C7;
+    --red: #EF4444; --red-light: #FEE2E2;
+    --gray-50: #F8FAFC; --gray-100: #F0F4F8; --gray-200: #E2E8F0;
+    --gray-400: #94A3B8; --gray-500: #64748B; --gray-700: #374151; --gray-900: #111827;
+    --white: #FFFFFF; --sidebar-w: 220px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'DM Sans', sans-serif; background: var(--gray-100); color: var(--gray-700); height: 100vh; display: flex; overflow: hidden; }
+
+  /* SIDEBAR */
+  .sidebar { width: var(--sidebar-w); background: var(--navy-dark); height: 100vh; display: flex; flex-direction: column; flex-shrink: 0; }
+  .sidebar-logo { padding: 24px 20px 20px; border-bottom: 1px solid rgba(255,255,255,0.07); }
+  .sidebar-logo .logo-name { font-size: 18px; font-weight: 700; color: white; }
+  .sidebar-logo .logo-sub { font-size: 11px; color: var(--navy-light); margin-top: 2px; }
+  .sidebar-nav { padding: 12px 10px; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; cursor: pointer; transition: all 0.15s; color: var(--navy-light); font-size: 13.5px; font-weight: 500; }
+  .nav-item:hover { background: rgba(255,255,255,0.06); color: white; }
+  .nav-item.active { background: var(--navy-mid); color: white; }
+  .nav-item .nav-icon { font-size: 16px; width: 20px; text-align: center; }
+  .nav-badge { margin-left: auto; background: var(--red); color: white; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 10px; min-width: 18px; text-align: center; }
+  .nav-badge.amber { background: var(--amber); }
+  .sidebar-footer { padding: 16px 20px; border-top: 1px solid rgba(255,255,255,0.07); font-size: 11px; color: var(--navy-light); }
+
+  /* MAIN */
+  .main { flex: 1; overflow-y: auto; padding: 28px; }
+  .page { display: none; animation: fadeIn 0.2s ease; }
+  .page.active { display: block; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+
+  /* PAGE HEADER */
+  .page-header { margin-bottom: 24px; display: flex; align-items: flex-start; justify-content: space-between; }
+  .page-title { font-size: 24px; font-weight: 700; color: var(--navy); letter-spacing: -0.5px; }
+  .page-sub { font-size: 13px; color: var(--gray-400); margin-top: 3px; }
+
+  /* CARDS */
+  .card { background: white; border-radius: 14px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04); margin-bottom: 16px; }
+
+  /* STATS */
+  .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
+  .stat-card { background: white; border-radius: 12px; padding: 16px 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .stat-label { font-size: 11px; font-weight: 600; color: var(--gray-400); text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-value { font-size: 28px; font-weight: 700; color: var(--navy); margin-top: 4px; letter-spacing: -1px; }
+  .stat-value.red { color: var(--red); } .stat-value.green { color: var(--green); } .stat-value.amber { color: var(--amber); }
+  .stat-sub { font-size: 11px; color: var(--gray-400); margin-top: 2px; }
+
+  /* TABLE */
+  .table-wrap { border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  table { width: 100%; border-collapse: collapse; background: white; }
+  thead th { background: var(--gray-50); font-size: 11px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.5px; padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--gray-200); }
+  tbody tr { border-bottom: 1px solid var(--gray-100); transition: background 0.1s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--gray-50); }
+  td { padding: 11px 14px; font-size: 13px; vertical-align: middle; }
+  .td-main { font-weight: 600; color: var(--navy); font-size: 13px; }
+  .td-sub { font-size: 11px; color: var(--gray-400); margin-top: 2px; }
+  .td-mono { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--gray-500); }
+  .td-asin { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--accent); }
+
+  /* BADGES */
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+  .badge-green { background: var(--green-light); color: #065F46; }
+  .badge-red { background: var(--red-light); color: #991B1B; }
+  .badge-amber { background: var(--amber-light); color: #92400E; }
+  .badge-gray { background: var(--gray-100); color: var(--gray-500); }
+  .badge-blue { background: var(--accent-light); color: #1E40AF; }
+  .no-asin { background: var(--amber-light); color: #B45309; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; font-family: 'DM Mono', monospace; }
+  .loc-tag { display: inline-block; background: var(--gray-100); color: var(--gray-700); font-size: 11px; font-weight: 600; font-family: 'DM Mono', monospace; padding: 2px 7px; border-radius: 4px; margin: 1px; }
+
+  /* BUTTONS */
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all 0.15s; font-family: 'DM Sans', sans-serif; }
+  .btn-primary { background: var(--navy); color: white; }
+  .btn-primary:hover { background: var(--navy-mid); }
+  .btn-danger { background: var(--red); color: white; }
+  .btn-ghost { background: white; color: var(--gray-700); border: 1px solid var(--gray-200); }
+  .btn-ghost:hover { background: var(--gray-50); }
+  .btn-green { background: var(--green); color: white; }
+  .btn-sm { padding: 6px 12px; font-size: 12px; }
+
+  /* INPUTS */
+  .input { width: 100%; padding: 9px 14px; border: 1.5px solid var(--gray-200); border-radius: 8px; font-size: 13px; font-family: 'DM Sans', sans-serif; color: var(--gray-900); background: white; transition: border 0.15s; outline: none; }
+  .input:focus { border-color: var(--accent); }
+  .input.scan-input { border: 2px solid var(--navy); background: var(--gray-50); font-family: 'DM Mono', monospace; font-size: 14px; letter-spacing: 1px; }
+  .input-label { font-size: 11px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
+  .input-group { margin-bottom: 14px; }
+  select.input { cursor: pointer; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  /* TABS */
+  .tabs { display: flex; gap: 4px; background: var(--gray-100); padding: 4px; border-radius: 10px; width: fit-content; margin-bottom: 20px; }
+  .tab { padding: 8px 18px; border-radius: 7px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; color: var(--gray-500); }
+  .tab.active { background: white; color: var(--navy); box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+
+  /* ALERT CARDS */
+  .alert-card { border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; border-left: 4px solid; display: flex; align-items: flex-start; gap: 12px; }
+  .alert-card.red { background: var(--red-light); border-color: var(--red); }
+  .alert-card.amber { background: var(--amber-light); border-color: var(--amber); }
+  .alert-icon { font-size: 20px; margin-top: 1px; }
+  .alert-title { font-size: 13px; font-weight: 700; color: var(--navy); }
+  .alert-detail { font-size: 12px; color: var(--gray-500); margin-top: 2px; }
+  .alert-urgency { font-size: 11px; font-weight: 700; margin-top: 4px; }
+  .alert-card.red .alert-urgency { color: var(--red); }
+  .alert-card.amber .alert-urgency { color: #B45309; }
+
+  /* TASK CARDS */
+  .task-card { background: white; border-radius: 10px; padding: 14px 16px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; align-items: flex-start; gap: 12px; border-left: 3px solid var(--gray-200); transition: all 0.15s; }
+  .task-card.overdue { border-left-color: var(--red); }
+  .task-card.today { border-left-color: var(--amber); }
+  .task-card.upcoming { border-left-color: var(--accent); }
+  .task-card.done { opacity: 0.5; border-left-color: var(--green); }
+  .task-check { width: 20px; height: 20px; border-radius: 6px; border: 2px solid var(--gray-200); cursor: pointer; flex-shrink: 0; margin-top: 1px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+  .task-check:hover { border-color: var(--green); background: var(--green-light); }
+  .task-check.checked { background: var(--green); border-color: var(--green); color: white; font-size: 12px; }
+  .task-title { font-size: 13px; font-weight: 600; color: var(--navy); }
+  .task-desc { font-size: 12px; color: var(--gray-500); margin-top: 2px; }
+  .task-meta { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+
+  /* MODALES */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(15,30,46,0.5); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; z-index: 100; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+  .modal-overlay.open { opacity: 1; pointer-events: all; }
+  .modal { background: white; border-radius: 16px; padding: 28px; width: 500px; max-width: 95vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.2); transform: translateY(16px); transition: transform 0.2s; }
+  .modal-overlay.open .modal { transform: translateY(0); }
+  .modal-title { font-size: 18px; font-weight: 700; color: var(--navy); margin-bottom: 20px; }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+
+  /* LOADER */
+  .loader { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-state { text-align: center; padding: 40px; color: var(--gray-400); }
+  .loading-state .big-loader { width: 32px; height: 32px; border: 3px solid var(--gray-200); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; margin: 0 auto 12px; }
+
+  /* SEARCH */
+  .search-bar { display: flex; gap: 10px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
+
+  /* PRODUCT FOUND */
+  .product-found { background: var(--green-light); border: 1.5px solid #86EFAC; border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
+  .pf-label { font-size: 11px; font-weight: 700; color: var(--green); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .pf-name { font-size: 15px; font-weight: 700; color: var(--navy); }
+  .pf-meta { font-size: 12px; color: var(--gray-500); margin-top: 4px; }
+
+  /* SECTION HEADER */
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .section-title { font-size: 15px; font-weight: 700; color: var(--navy); }
+
+  /* GRID */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+  /* INFO BOXES */
+  .info-box { background: var(--accent-light); border: 1px solid #BFDBFE; border-radius: 8px; padding: 12px 14px; font-size: 12px; color: #1E40AF; margin-bottom: 14px; }
+  .warning-box { background: var(--amber-light); border: 1px solid #FCD34D; border-radius: 8px; padding: 12px 14px; font-size: 12px; color: #92400E; margin-bottom: 14px; }
+
+  /* QTY CONTROL */
+  .qty-control { display: flex; align-items: center; gap: 4px; }
+  .qty-btn { width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--gray-200); background: var(--gray-50); cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; transition: all 0.1s; }
+  .qty-btn:hover { background: var(--navy); color: white; }
+  .qty-num { width: 40px; text-align: center; font-weight: 700; font-size: 14px; color: var(--navy); }
+
+  /* TOAST */
+  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--navy); color: white; padding: 12px 20px; border-radius: 10px; font-size: 13px; font-weight: 600; z-index: 200; transform: translateY(80px); transition: transform 0.3s; box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
+  .toast.show { transform: translateY(0); }
+  .toast.success { background: var(--green); }
+  .toast.error { background: var(--red); }
+
+  /* EMPTY STATE */
+  .empty-state { text-align: center; padding: 48px 20px; color: var(--gray-400); }
+  .empty-state .empty-icon { font-size: 40px; margin-bottom: 12px; }
+  .empty-state p { font-size: 14px; }
+
+  /* PAGINATION */
+  .pagination { display: flex; align-items: center; gap: 6px; margin-top: 14px; justify-content: flex-end; }
+  .pag-btn { width: 32px; height: 32px; border-radius: 6px; border: 1px solid var(--gray-200); background: white; cursor: pointer; font-size: 13px; display: flex; align-items: center; justify-content: center; transition: all 0.1s; color: var(--gray-700); }
+  .pag-btn.active { background: var(--navy); color: white; border-color: var(--navy); }
+  .pag-btn:hover:not(.active) { background: var(--gray-50); }
+  .pag-info { font-size: 12px; color: var(--gray-400); margin-right: 8px; }
+
+  ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: var(--gray-200); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-name">🏪 Moloka Store</div>
+    <div class="logo-sub">Panel de Control</div>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-item active" data-page="alertas" onclick="showPage('alertas',this)">
+      <span class="nav-icon">⚠️</span> Alertas
+      <span class="nav-badge" id="badge-alertas" style="display:none">0</span>
+    </div>
+    <div class="nav-item" data-page="inventario" onclick="showPage('inventario',this)">
+      <span class="nav-icon">📦</span> Inventario
+    </div>
+    <div class="nav-item" data-page="entrada" onclick="showPage('entrada',this)">
+      <span class="nav-icon">🔄</span> Entrada mercancía
+    </div>
+    <div class="nav-item" data-page="envio" onclick="showPage('envio',this)">
+      <span class="nav-icon">🚚</span> Envío FBA
+    </div>
+    <div class="nav-item" data-page="facturas" onclick="showPage('facturas',this)">
+      <span class="nav-icon">📄</span> Facturas
+    </div>
+    <div class="nav-item" data-page="tareas" onclick="showPage('tareas',this)">
+      <span class="nav-icon">📝</span> Tareas
+      <span class="nav-badge amber" id="badge-tareas" style="display:none">0</span>
+    </div>
+    <div class="nav-item" data-page="rentabilidad" onclick="showPage('rentabilidad',this)">
+      <span class="nav-icon">📊</span> Rentabilidad
+    </div>
+  </nav>
+  <div class="sidebar-footer" id="conn-status">Conectando...</div>
+</aside>
+
+<!-- MAIN -->
+<main class="main">
+
+  <!-- ALERTAS -->
+  <div class="page active" id="page-alertas">
+    <div class="page-header">
+      <div><div class="page-title">⚠️ Alertas de Stock</div><div class="page-sub">Productos que necesitan atención</div></div>
+    </div>
+    <div class="stats-row">
+      <div class="stat-card"><div class="stat-label">Críticos</div><div class="stat-value red" id="stat-criticos">—</div><div class="stat-sub">Ruptura inminente</div></div>
+      <div class="stat-card"><div class="stat-label">A revisar</div><div class="stat-value amber" id="stat-revisar">—</div><div class="stat-sub">Próximo pedido</div></div>
+      <div class="stat-card"><div class="stat-label">Sin ASIN</div><div class="stat-value amber" id="stat-sin-asin">—</div><div class="stat-sub">Datos incompletos</div></div>
+      <div class="stat-card"><div class="stat-label">Productos OK</div><div class="stat-value green" id="stat-ok">—</div><div class="stat-sub">Stock suficiente</div></div>
+    </div>
+    <div class="grid-2" style="gap:20px;align-items:start">
+      <div>
+        <div class="section-header"><div class="section-title">🔴 Críticos — Reponer ya</div></div>
+        <div id="alertas-criticas"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></div>
+        <div class="section-header" style="margin-top:20px"><div class="section-title">🟡 Revisar — Próximo pedido</div></div>
+        <div id="alertas-revisar"><div class="loading-state"><div class="big-loader"></div></div></div>
+      </div>
+      <div>
+        <div class="section-header"><div class="section-title">⚠️ Productos sin ASIN</div></div>
+        <div class="card" style="padding:16px">
+          <p style="font-size:12px;color:var(--gray-400);margin-bottom:12px">Sin ASIN no se puede conectar el producto con Amazon.</p>
+          <div id="sin-asin-list"><div class="loading-state"><div class="big-loader"></div></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- INVENTARIO -->
+  <div class="page" id="page-inventario">
+    <div class="page-header">
+      <div><div class="page-title">📦 Inventario</div><div class="page-sub" id="inv-subtitle">Cargando...</div></div>
+      <button class="btn btn-primary btn-sm" onclick="openModal('modal-nuevo-producto')">+ Nuevo producto</button>
+    </div>
+    <div class="card">
+      <div class="search-bar">
+        <input class="input" placeholder="🔍  Buscar producto, EAN, ASIN..." style="max-width:380px;flex:1" id="inv-search" oninput="buscarInventario()">
+        <button class="btn btn-ghost btn-sm" onclick="filtrarEstado('')">Todos</button>
+        <button class="btn btn-ghost btn-sm" onclick="filtrarEstado('CRÍTICO')">🔴 Críticos</button>
+        <button class="btn btn-ghost btn-sm" onclick="filtrarEstado('REVISAR')">🟡 Revisar</button>
+        <button class="btn btn-ghost btn-sm" onclick="filtrarEstado('SIN_STOCK_LOCAL')">📦 Sin stock</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Producto</th><th>EAN</th><th>ASIN</th><th>Proveedor</th>
+            <th style="text-align:center">Stock Moloka</th><th style="text-align:center">Stock FBA</th>
+            <th>Ubicación</th><th>PVD</th><th style="text-align:center">Estado</th>
+          </tr></thead>
+          <tbody id="inv-tbody"><tr><td colspan="9"><div class="loading-state"><div class="big-loader"></div><p>Cargando inventario...</p></div></td></tr></tbody>
+        </table>
+      </div>
+      <div class="pagination" id="inv-pagination"></div>
+    </div>
+  </div>
+
+  <!-- ENTRADA -->
+  <div class="page" id="page-entrada">
+    <div class="page-header">
+      <div><div class="page-title">🔄 Entrada de Mercancía</div><div class="page-sub">Registra la mercancía que llega al almacén</div></div>
+    </div>
+    <div class="grid-2" style="align-items:start">
+      <div>
+        <div class="card" style="margin-bottom:14px">
+          <div class="input-group">
+            <div class="input-label">Escanea o escribe EAN / FNSKU</div>
+            <input class="input scan-input" id="scan-ean" placeholder="EAN / FNSKU..." autocomplete="off">
+            <div style="font-size:11px;color:var(--gray-400);margin-top:6px">Compatible con código del fabricante (EAN-13) y etiqueta Amazon (FNSKU)</div>
+          </div>
+          <button class="btn btn-primary" style="width:100%" onclick="buscarProductoEscaneo()">🔍 Buscar producto</button>
+        </div>
+
+        <div id="product-found-area" style="display:none">
+          <div class="product-found">
+            <div class="pf-label">✅ Producto encontrado</div>
+            <div class="pf-name" id="pf-name">—</div>
+            <div class="pf-meta" id="pf-meta">—</div>
+          </div>
+          <div class="card">
+            <div class="form-row">
+              <div class="input-group"><div class="input-label">Unidades que entran</div><input class="input" type="number" id="entrada-qty" value="1" min="1"></div>
+              <div class="input-group"><div class="input-label">Ubicación</div><input class="input" id="entrada-loc" placeholder="D-1, A-3..."></div>
+            </div>
+            <button class="btn btn-green" style="width:100%" id="btn-confirmar-entrada" onclick="confirmarEntrada()">✅ Confirmar entrada</button>
+          </div>
+        </div>
+
+        <div id="product-new-area" style="display:none">
+          <div class="warning-box">⚠️ Producto no encontrado — rellena los datos para añadirlo</div>
+          <div class="card">
+            <div class="input-group"><div class="input-label">EAN detectado</div><input class="input" id="new-ean" readonly style="background:var(--gray-50)"></div>
+            <div class="input-group"><div class="input-label">Nombre del producto</div><input class="input" id="new-nombre" placeholder="Nombre completo"></div>
+            <div class="form-row">
+              <div class="input-group"><div class="input-label">ASIN</div><input class="input" id="new-asin" placeholder="B0XXXXXXXX"></div>
+              <div class="input-group"><div class="input-label">Proveedor</div>
+                <select class="input" id="new-proveedor"><option>DBLine</option><option>OSMA</option><option>Zentrada</option><option>TCG</option><option>BEMS</option><option>HEO</option><option>Dinotoys</option><option>Otro</option></select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="input-group"><div class="input-label">Marca</div><input class="input" id="new-marca" placeholder="Funko, Lenor..."></div>
+              <div class="input-group"><div class="input-label">PVD (€)</div><input class="input" type="number" id="new-pvd" placeholder="0.00" step="0.01"></div>
+            </div>
+            <div class="form-row">
+              <div class="input-group"><div class="input-label">Unidades que entran</div><input class="input" type="number" id="new-qty" value="1"></div>
+              <div class="input-group"><div class="input-label">Ubicación</div><input class="input" id="new-loc" placeholder="D-1, A-3..."></div>
+            </div>
+            <div class="input-group"><div class="input-label">Stock mínimo (reposición)</div><input class="input" type="number" id="new-min" placeholder="20"></div>
+            <button class="btn btn-primary" style="width:100%" onclick="crearProductoYEntrada()">➕ Añadir producto y registrar entrada</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-header">
+          <div class="section-title">Registros de esta sesión</div>
+          <span style="font-size:12px;color:var(--gray-400)" id="sesion-count">0 entradas</span>
+        </div>
+        <div id="sesion-list"><div class="empty-state"><div class="empty-icon">📦</div><p>Escanea el primer producto para empezar</p></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ENVIO FBA -->
+  <div class="page" id="page-envio">
+    <div class="page-header">
+      <div><div class="page-title">🚚 Preparar Envío FBA</div><div class="page-sub">Escanea los productos que salen al almacén de Amazon</div></div>
+    </div>
+    <div class="grid-2" style="align-items:start;margin-bottom:16px">
+      <div class="card">
+        <div class="input-label" style="margin-bottom:8px">Escanea EAN o FNSKU</div>
+        <input class="input scan-input" id="envio-scan" placeholder="EAN / FNSKU...">
+        <button class="btn btn-primary" style="width:100%;margin-top:10px" onclick="addProductoEnvio()">+ Añadir al envío</button>
+      </div>
+      <div class="card" style="background:var(--accent-light);border:1px solid #BFDBFE">
+        <div style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Envío en preparación</div>
+        <div style="font-size:24px;font-weight:700;color:var(--navy)" id="envio-resumen">0 unidades · 0 productos</div>
+        <div style="font-size:11px;color:var(--gray-400);margin-top:2px" id="envio-fecha"></div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:14px">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Producto</th><th>EAN</th><th>Ubicación</th><th style="text-align:center">Stock Moloka</th><th style="text-align:center">Enviando</th><th style="text-align:center">Quedará</th><th></th></tr></thead>
+          <tbody id="envio-tbody"><tr><td colspan="7"><div class="empty-state"><div class="empty-icon">🚚</div><p>Escanea el primer producto para empezar el envío</p></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="warning-box">⚠️ <strong>Al confirmar:</strong> el stock de Moloka se reducirá. El stock FBA en Amazon NO se actualiza aquí — actualízalo desde el CSV del Seller Central.</div>
+    <div style="display:flex;gap:10px">
+      <button class="btn btn-danger" onclick="confirmarEnvioFBA()">✅ Confirmar envío y restar stock</button>
+      <button class="btn btn-ghost" onclick="cancelarEnvio()">Cancelar</button>
+    </div>
+  </div>
+
+  <!-- FACTURAS -->
+  <div class="page" id="page-facturas">
+    <div class="page-header">
+      <div><div class="page-title">📄 Archivo de Facturas</div><div class="page-sub">Busca por EAN o producto para reclamaciones Amazon</div></div>
+      <button class="btn btn-primary btn-sm" onclick="openModal('modal-nueva-factura')">+ Nueva factura</button>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="input-label" style="margin-bottom:8px">Buscar facturas por EAN, producto o proveedor</div>
+      <input class="input" placeholder="EAN, nombre o proveedor..." id="facturas-search" oninput="buscarFacturas(this.value)">
+    </div>
+    <div id="facturas-resultado" style="display:none;margin-bottom:16px">
+      <div class="info-box" id="facturas-resultado-info">—</div>
+      <div class="table-wrap" style="margin-bottom:10px">
+        <table><thead><tr><th>Factura</th><th>Proveedor</th><th>Fecha</th><th>Importe</th><th>Estado</th></tr></thead>
+        <tbody id="facturas-resultado-tbody"></tbody></table>
+      </div>
+    </div>
+    <div class="section-header"><div class="section-title">Todas las facturas</div></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Referencia</th><th>Proveedor</th><th>Fecha</th><th>Importe</th><th>Estado</th></tr></thead>
+        <tbody id="facturas-tbody"><tr><td colspan="5"><div class="loading-state"><div class="big-loader"></div></div></td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- TAREAS -->
+  <div class="page" id="page-tareas">
+    <div class="page-header">
+      <div><div class="page-title">📝 Tareas Pendientes</div><div class="page-sub">Notas de seguimiento para Amazon, envíos, precios y proveedores</div></div>
+      <button class="btn btn-primary btn-sm" onclick="openModal('modal-nueva-tarea')">+ Nueva tarea</button>
+    </div>
+    <div class="tabs">
+      <div class="tab active" onclick="switchTabTareas(this,'pendientes')">Pendientes</div>
+      <div class="tab" onclick="switchTabTareas(this,'hechas')">Completadas</div>
+    </div>
+    <div id="tareas-pendientes"><div class="loading-state"><div class="big-loader"></div><p>Cargando tareas...</p></div></div>
+    <div id="tareas-hechas" style="display:none"><div class="loading-state"><div class="big-loader"></div></div></div>
+  </div>
+
+  <!-- RENTABILIDAD -->
+  <div class="page" id="page-rentabilidad">
+    <div class="page-header">
+      <div><div class="page-title">📊 Rentabilidad</div><div class="page-sub">Carga el TXT de ventas de Seller Central</div></div>
+    </div>
+    <div class="info-box">📋 Módulo en construcción — disponible próximamente. Por ahora puedes cargar el TXT de ventas desde aquí cuando esté listo.</div>
+    <div class="card" style="text-align:center;padding:40px">
+      <div style="font-size:48px;margin-bottom:16px">📊</div>
+      <div style="font-size:16px;font-weight:700;color:var(--navy);margin-bottom:8px">Rentabilidad semanal y mensual</div>
+      <div style="font-size:13px;color:var(--gray-400)">Este módulo se activará en la siguiente versión.</div>
+    </div>
+  </div>
+
+</main>
+
+<!-- MODALES -->
+<div class="modal-overlay" id="modal-nuevo-producto">
+  <div class="modal">
+    <div class="modal-title">➕ Nuevo producto</div>
+    <div class="input-group"><div class="input-label">EAN</div><input class="input" id="np-ean" placeholder="Escanea o escribe el EAN"></div>
+    <div class="input-group"><div class="input-label">Nombre del producto</div><input class="input" id="np-nombre" placeholder="Nombre completo"></div>
+    <div class="form-row">
+      <div class="input-group"><div class="input-label">ASIN</div><input class="input" id="np-asin" placeholder="B0XXXXXXXX"></div>
+      <div class="input-group"><div class="input-label">FNSKU</div><input class="input" id="np-fnsku" placeholder="X00XXXXXXX"></div>
+    </div>
+    <div class="form-row">
+      <div class="input-group"><div class="input-label">Proveedor</div>
+        <select class="input" id="np-proveedor"><option>DBLine</option><option>OSMA</option><option>Zentrada</option><option>TCG</option><option>BEMS</option><option>HEO</option><option>Dinotoys</option><option>Otro</option></select>
+      </div>
+      <div class="input-group"><div class="input-label">Marca</div><input class="input" id="np-marca" placeholder="Funko, Lenor..."></div>
+    </div>
+    <div class="form-row">
+      <div class="input-group"><div class="input-label">PVD (€)</div><input class="input" type="number" id="np-pvd" placeholder="0.00" step="0.01"></div>
+      <div class="input-group"><div class="input-label">Precio venta (€)</div><input class="input" type="number" id="np-precio-venta" placeholder="0.00" step="0.01"></div>
+    </div>
+    <div class="form-row">
+      <div class="input-group"><div class="input-label">Ubicación</div><input class="input" id="np-ubicacion" placeholder="D-1, A-3..."></div>
+      <div class="input-group"><div class="input-label">Stock mínimo</div><input class="input" type="number" id="np-min" placeholder="20"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modal-nuevo-producto')">Cancelar</button>
+      <button class="btn btn-primary" id="btn-guardar-producto" onclick="guardarNuevoProducto()">Guardar producto</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-nueva-tarea">
+  <div class="modal">
+    <div class="modal-title">📝 Nueva tarea</div>
+    <div class="input-group"><div class="input-label">Título</div><input class="input" id="t-titulo" placeholder="Describe brevemente la tarea"></div>
+    <div class="input-group"><div class="input-label">Descripción</div><textarea class="input" id="t-desc" rows="3" placeholder="Más detalles..." style="resize:vertical"></textarea></div>
+    <div class="form-row">
+      <div class="input-group"><div class="input-label">Tipo</div>
+        <select class="input" id="t-tipo">
+          <option>🚚 Envío FBA</option><option>💰 Pricing</option><option>🏭 Proveedor</option>
+          <option>📋 Amazon</option><option>📦 Inventario</option><option>🔧 Otro</option>
+        </select>
+      </div>
+      <div class="input-group"><div class="input-label">Fecha de revisión</div><input class="input" type="date" id="t-fecha"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modal-nueva-tarea')">Cancelar</button>
+      <button class="btn btn-primary" id="btn-guardar-tarea" onclick="guardarTarea()">Guardar tarea</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-nueva-factura">
+  <div class="modal">
+    <div class="modal-title">📄 Nueva factura</div>
+    <div class="input-group"><div class="input-label">Referencia / Nº factura</div><input class="input" id="f-ref" placeholder="DBL-2026-XXXXX"></div>
+    <div class="form-row">
+      <div class="input-group"><div class="input-label">Proveedor</div>
+        <select class="input" id="f-proveedor"><option>DBLine</option><option>OSMA</option><option>Zentrada</option><option>TCG</option><option>BEMS</option><option>HEO</option><option>Otro</option></select>
+      </div>
+      <div class="input-group"><div class="input-label">Fecha factura</div><input class="input" type="date" id="f-fecha"></div>
+    </div>
+    <div class="input-group"><div class="input-label">Importe total (€)</div><input class="input" type="number" id="f-importe" placeholder="0.00" step="0.01"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modal-nueva-factura')">Cancelar</button>
+      <button class="btn btn-primary" id="btn-guardar-factura" onclick="guardarFactura()">Guardar factura</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ============================================================
+// CONFIGURACIÓN SUPABASE
+// ============================================================
+const SUPABASE_URL = 'https://ogfbjjdxcltzpygzuyla.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_72BOqeDR2K7qlDuC6oWegA_4d128UUj';
+const { createClient } = supabase;
+const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ============================================================
+// ESTADO GLOBAL
+// ============================================================
+let paginaActual = 1;
+const POR_PAGINA = 25;
+let totalProductos = 0;
+let filtroTexto = '';
+let filtroEstadoActual = '';
+let productoEnEdicion = null;
+let envioItems = [];
+let sesionEntradas = [];
+
+// ============================================================
+// NAVEGACIÓN
+// ============================================================
+function showPage(id, el) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  if (el) el.classList.add('active');
+
+  if (id === 'alertas') cargarAlertas();
+  if (id === 'inventario') { paginaActual = 1; cargarInventario(); }
+  if (id === 'facturas') cargarFacturas();
+  if (id === 'tareas') cargarTareas();
+}
+
+// ============================================================
+// TOAST
+// ============================================================
+function showToast(msg, type = '') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + type;
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// ============================================================
+// MODALES
+// ============================================================
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-overlay').forEach(m => {
+  m.addEventListener('click', e => { if (e.target === m) m.classList.remove('open'); });
+});
+
+// ============================================================
+// ALERTAS
+// ============================================================
+async function cargarAlertas() {
+  try {
+    const { data, error } = await db.from('productos').select('*').eq('activo', true);
+    if (error) throw error;
+
+    const criticos = data.filter(p => p.estado === 'CRÍTICO');
+    const revisar = data.filter(p => p.estado === 'REVISAR');
+    const sinAsin = data.filter(p => !p.asin && p.stock_moloka > 0);
+    const ok = data.filter(p => p.estado === 'OK' || p.estado === 'SIN_STOCK_LOCAL');
+
+    document.getElementById('stat-criticos').textContent = criticos.length;
+    document.getElementById('stat-revisar').textContent = revisar.length;
+    document.getElementById('stat-sin-asin').textContent = sinAsin.length;
+    document.getElementById('stat-ok').textContent = ok.length;
+
+    const badge = document.getElementById('badge-alertas');
+    const total = criticos.length + revisar.length;
+    if (total > 0) { badge.textContent = total; badge.style.display = 'block'; }
+
+    // Render críticos
+    const elCrit = document.getElementById('alertas-criticas');
+    if (criticos.length === 0) {
+      elCrit.innerHTML = '<div class="alert-card" style="background:var(--green-light);border-color:var(--green)"><div>✅ No hay productos en estado crítico</div></div>';
+    } else {
+      elCrit.innerHTML = criticos.map(p => `
+        <div class="alert-card red">
+          <div class="alert-icon">🔴</div>
+          <div>
+            <div class="alert-title">${p.nombre}</div>
+            <div class="alert-detail">Stock Moloka: <strong>${p.stock_moloka} ud</strong> · Mínimo: ${p.stock_minimo || '—'} ud · ${p.proveedor || '—'}</div>
+            ${p.ubicaciones?.length ? `<div class="alert-detail">Ubicación: ${p.ubicaciones.join(', ')}</div>` : ''}
+            <div class="alert-urgency">Stock FBA: ${p.stock_fba} ud</div>
+          </div>
+        </div>`).join('');
+    }
+
+    // Render revisar
+    const elRev = document.getElementById('alertas-revisar');
+    if (revisar.length === 0) {
+      elRev.innerHTML = '<div style="color:var(--gray-400);font-size:13px;padding:8px 0">No hay productos a revisar</div>';
+    } else {
+      elRev.innerHTML = revisar.map(p => `
+        <div class="alert-card amber">
+          <div class="alert-icon">🟡</div>
+          <div>
+            <div class="alert-title">${p.nombre}</div>
+            <div class="alert-detail">Stock Moloka: <strong>${p.stock_moloka} ud</strong> · Mínimo: ${p.stock_minimo || '—'} ud · ${p.proveedor || '—'}</div>
+            <div class="alert-urgency">Incluir en próximo pedido</div>
+          </div>
+        </div>`).join('');
+    }
+
+    // Render sin ASIN
+    const elAsin = document.getElementById('sin-asin-list');
+    if (sinAsin.length === 0) {
+      elAsin.innerHTML = '<div style="color:var(--gray-400);font-size:13px">Todos los productos tienen ASIN ✅</div>';
+    } else {
+      elAsin.innerHTML = `<table style="width:100%"><tbody>${sinAsin.slice(0,8).map(p => `
+        <tr>
+          <td style="padding:8px 0;font-size:12px;font-weight:600;color:var(--navy)">${p.nombre.substring(0,40)}${p.nombre.length>40?'...':''}</td>
+          <td style="font-size:11px;font-family:'DM Mono',monospace;color:var(--gray-400)">${p.ean || '—'}</td>
+        </tr>`).join('')}</tbody></table>`;
+    }
+
+  } catch(e) {
+    console.error(e);
+    document.getElementById('alertas-criticas').innerHTML = '<div style="color:var(--red);font-size:13px">Error cargando alertas: ' + e.message + '</div>';
+  }
+}
+
+// ============================================================
+// INVENTARIO
+// ============================================================
+async function cargarInventario() {
+  const tbody = document.getElementById('inv-tbody');
+  tbody.innerHTML = '<tr><td colspan="9"><div class="loading-state"><div class="big-loader"></div><p>Cargando inventario...</p></div></td></tr>';
+
+  try {
+    let query = db.from('productos').select('*', { count: 'exact' }).eq('activo', true);
+    if (filtroEstadoActual) query = query.eq('estado', filtroEstadoActual);
+    if (filtroTexto) query = query.or(`nombre.ilike.%${filtroTexto}%,ean.ilike.%${filtroTexto}%,asin.ilike.%${filtroTexto}%,proveedor.ilike.%${filtroTexto}%`);
+
+    const from = (paginaActual - 1) * POR_PAGINA;
+    query = query.range(from, from + POR_PAGINA - 1).order('nombre');
+
+    const { data, error, count } = await query;
+    if (error) throw error;
+
+    totalProductos = count || 0;
+    document.getElementById('inv-subtitle').textContent = `${totalProductos} productos · Actualizado ahora`;
+
+    if (!data || data.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="9"><div class="empty-state"><div class="empty-icon">📦</div><p>No se encontraron productos</p></div></td></tr>';
+    } else {
+      tbody.innerHTML = data.map(p => `
+        <tr>
+          <td><div class="td-main" title="${p.nombre}">${p.nombre.substring(0,45)}${p.nombre.length>45?'...':''}</div><div class="td-sub">${p.marca || ''}</div></td>
+          <td class="td-mono">${p.ean || '—'}</td>
+          <td>${p.asin ? `<span class="td-asin">${p.asin}</span>` : '<span class="no-asin">⚠️ Sin ASIN</span>'}</td>
+          <td>${p.proveedor || '—'}</td>
+          <td style="text-align:center;font-weight:700;font-size:14px;color:${p.stock_moloka===0?'var(--gray-400)':p.stock_minimo&&p.stock_moloka<p.stock_minimo?'var(--red)':'var(--navy)'}">${p.stock_moloka}</td>
+          <td style="text-align:center;color:var(--gray-400);font-size:12px">${p.stock_fba > 0 ? p.stock_fba : "<span title=\"Pendiente actualizar desde Seller Central\">—</span>"}</td>
+          <td>${(p.ubicaciones||[]).map(l=>`<span class="loc-tag">${l}</span>`).join('') || '—'}</td>
+          <td style="font-family:'DM Mono',monospace;font-size:12px">${p.pvd ? p.pvd.toFixed(2)+'€' : '—'}</td>
+          <td style="text-align:center">${estadoBadge(p.estado)}</td>
+        </tr>`).join('');
+    }
+
+    renderPaginacion();
+  } catch(e) {
+    console.error(e);
+    tbody.innerHTML = `<tr><td colspan="9" style="padding:20px;color:var(--red);text-align:center">Error: ${e.message}</td></tr>`;
+  }
+}
+
+function estadoBadge(estado) {
+  if (estado === 'CRÍTICO') return '<span class="badge badge-red">🔴 CRÍTICO</span>';
+  if (estado === 'REVISAR') return '<span class="badge badge-amber">🟡 REVISAR</span>';
+  if (estado === 'SIN_STOCK_LOCAL') return '<span class="badge badge-gray">📦 Sin stock</span>';
+  return '<span class="badge badge-green">🟢 OK</span>';
+}
+
+function renderPaginacion() {
+  const totalPag = Math.ceil(totalProductos / POR_PAGINA);
+  const el = document.getElementById('inv-pagination');
+  if (totalPag <= 1) { el.innerHTML = ''; return; }
+
+  let html = `<span class="pag-info">Mostrando ${Math.min((paginaActual-1)*POR_PAGINA+1, totalProductos)}-${Math.min(paginaActual*POR_PAGINA, totalProductos)} de ${totalProductos}</span>`;
+  html += `<button class="pag-btn" onclick="irPagina(${paginaActual-1})" ${paginaActual===1?'disabled':''}>‹</button>`;
+  for (let i = Math.max(1, paginaActual-2); i <= Math.min(totalPag, paginaActual+2); i++) {
+    html += `<button class="pag-btn ${i===paginaActual?'active':''}" onclick="irPagina(${i})">${i}</button>`;
+  }
+  html += `<button class="pag-btn" onclick="irPagina(${paginaActual+1})" ${paginaActual===totalPag?'disabled':''}>›</button>`;
+  el.innerHTML = html;
+}
+
+function irPagina(n) {
+  if (n < 1) return;
+  paginaActual = n;
+  cargarInventario();
+}
+
+let searchTimeout;
+function buscarInventario() {
+  filtroTexto = document.getElementById('inv-search').value;
+  paginaActual = 1;
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(cargarInventario, 400);
+}
+
+function filtrarEstado(estado) {
+  filtroEstadoActual = estado;
+  paginaActual = 1;
+  cargarInventario();
+}
+
+async function guardarNuevoProducto() {
+  const btn = document.getElementById('btn-guardar-producto');
+  const nombre = document.getElementById('np-nombre').value.trim();
+  if (!nombre) { showToast('El nombre es obligatorio', 'error'); return; }
+
+  btn.innerHTML = '<span class="loader"></span> Guardando...';
+  btn.disabled = true;
+
+  const ubicacion = document.getElementById('np-ubicacion').value.trim();
+  const { error } = await db.from('productos').insert({
+    nombre,
+    ean: document.getElementById('np-ean').value.trim() || null,
+    asin: document.getElementById('np-asin').value.trim() || null,
+    fnsku: document.getElementById('np-fnsku').value.trim() || null,
+    proveedor: document.getElementById('np-proveedor').value,
+    marca: document.getElementById('np-marca').value.trim() || null,
+    pvd: parseFloat(document.getElementById('np-pvd').value) || null,
+    precio_venta: parseFloat(document.getElementById('np-precio-venta').value) || null,
+    stock_minimo: parseInt(document.getElementById('np-min').value) || null,
+    ubicaciones: ubicacion ? ubicacion.split(',').map(s=>s.trim()).filter(Boolean) : [],
+    estado: 'OK', activo: true
+  });
+
+  btn.innerHTML = 'Guardar producto'; btn.disabled = false;
+  if (error) { showToast('Error: ' + error.message, 'error'); return; }
+  showToast('Producto guardado ✅', 'success');
+  closeModal('modal-nuevo-producto');
+  cargarInventario();
+}
+
+// ============================================================
+// ENTRADA MERCANCÍA
+// ============================================================
+async function buscarProductoEscaneo() {
+  const val = document.getElementById('scan-ean').value.trim();
+  if (!val) return;
+
+  document.getElementById('product-found-area').style.display = 'none';
+  document.getElementById('product-new-area').style.display = 'none';
+
+  const { data } = await db.from('productos').select('*')
+    .or(`ean.eq.${val},fnsku.eq.${val},asin.eq.${val}`).limit(1);
+
+  if (data && data.length > 0) {
+    const p = data[0];
+    productoEnEdicion = p;
+    document.getElementById('pf-name').textContent = p.nombre;
+    document.getElementById('pf-meta').textContent = `EAN: ${p.ean||'—'} · ASIN: ${p.asin||'Sin ASIN'} · ${p.proveedor||'—'} · PVD: ${p.pvd?p.pvd.toFixed(2)+'€':'—'} · Stock actual: ${p.stock_moloka} ud`;
+    document.getElementById('entrada-loc').value = (p.ubicaciones||[]).join(', ');
+    document.getElementById('product-found-area').style.display = 'block';
+  } else {
+    document.getElementById('new-ean').value = val;
+    document.getElementById('product-new-area').style.display = 'block';
+  }
+}
+
+async function confirmarEntrada() {
+  if (!productoEnEdicion) return;
+  const qty = parseInt(document.getElementById('entrada-qty').value) || 1;
+  const loc = document.getElementById('entrada-loc').value.trim();
+  const btn = document.getElementById('btn-confirmar-entrada');
+  btn.innerHTML = '<span class="loader"></span>';
+  btn.disabled = true;
+
+  const nuevaUbicaciones = loc ? [...new Set([...(productoEnEdicion.ubicaciones||[]), ...loc.split(',').map(s=>s.trim()).filter(Boolean)])] : productoEnEdicion.ubicaciones;
+  const nuevoStock = productoEnEdicion.stock_moloka + qty;
+
+  const { error } = await db.from('productos').update({
+    stock_moloka: nuevoStock,
+    ubicaciones: nuevaUbicaciones,
+    updated_at: new Date().toISOString()
+  }).eq('id', productoEnEdicion.id);
+
+  if (!error) {
+    await db.from('movimientos').insert({
+      producto_id: productoEnEdicion.id,
+      tipo: 'entrada',
+      cantidad: qty,
+      ubicacion: loc || null
+    });
+  }
+
+  btn.innerHTML = '✅ Confirmar entrada'; btn.disabled = false;
+  if (error) { showToast('Error: ' + error.message, 'error'); return; }
+
+  sesionEntradas.push({ nombre: productoEnEdicion.nombre, qty, loc });
+  renderSesion();
+  productoEnEdicion.stock_moloka = nuevoStock;
+  document.getElementById('pf-meta').textContent = `Stock actualizado: ${nuevoStock} ud`;
+  document.getElementById('scan-ean').value = '';
+  document.getElementById('product-found-area').style.display = 'none';
+  document.getElementById('scan-ean').focus();
+  showToast(`+${qty} ud de ${productoEnEdicion.nombre.substring(0,30)} ✅`, 'success');
+}
+
+async function crearProductoYEntrada() {
+  const nombre = document.getElementById('new-nombre').value.trim();
+  if (!nombre) { showToast('El nombre es obligatorio', 'error'); return; }
+  const qty = parseInt(document.getElementById('new-qty').value) || 1;
+  const loc = document.getElementById('new-loc').value.trim();
+
+  const { data, error } = await db.from('productos').insert({
+    nombre,
+    ean: document.getElementById('new-ean').value.trim() || null,
+    asin: document.getElementById('new-asin').value.trim() || null,
+    proveedor: document.getElementById('new-proveedor').value,
+    marca: document.getElementById('new-marca').value.trim() || null,
+    pvd: parseFloat(document.getElementById('new-pvd').value) || null,
+    stock_moloka: qty,
+    stock_minimo: parseInt(document.getElementById('new-min').value) || null,
+    ubicaciones: loc ? loc.split(',').map(s=>s.trim()).filter(Boolean) : [],
+    estado: 'OK', activo: true
+  }).select().single();
+
+  if (error) { showToast('Error: ' + error.message, 'error'); return; }
+  await db.from('movimientos').insert({ producto_id: data.id, tipo: 'entrada', cantidad: qty, ubicacion: loc || null });
+
+  sesionEntradas.push({ nombre, qty, loc });
+  renderSesion();
+  document.getElementById('scan-ean').value = '';
+  document.getElementById('product-new-area').style.display = 'none';
+  showToast(`Producto creado y ${qty} ud registradas ✅`, 'success');
+}
+
+function renderSesion() {
+  const el = document.getElementById('sesion-list');
+  document.getElementById('sesion-count').textContent = sesionEntradas.length + ' entrada' + (sesionEntradas.length!==1?'s':'');
+  el.innerHTML = sesionEntradas.map(s => `
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--gray-100)">
+      <span style="color:var(--green);font-size:16px">✅</span>
+      <div style="flex:1">
+        <div style="font-size:12px;font-weight:600;color:var(--navy)">${s.nombre.substring(0,40)}</div>
+        <div style="font-size:11px;color:var(--gray-400)">+${s.qty} ud · ${s.loc||'Sin ubicación'}</div>
+      </div>
+    </div>`).join('');
+}
+
+// ============================================================
+// ENVÍO FBA
+// ============================================================
+async function addProductoEnvio() {
+  const val = document.getElementById('envio-scan').value.trim();
+  if (!val) return;
+
+  const { data } = await db.from('productos').select('*').or(`ean.eq.${val},fnsku.eq.${val}`).limit(1);
+  if (!data || data.length === 0) { showToast('Producto no encontrado', 'error'); return; }
+
+  const p = data[0];
+  const existing = envioItems.find(e => e.id === p.id);
+  if (existing) { existing.qty++; } else { envioItems.push({...p, qty: 1}); }
+
+  document.getElementById('envio-scan').value = '';
+  renderEnvio();
+  showToast(p.nombre.substring(0,30) + ' añadido', 'success');
+}
+
+function renderEnvio() {
+  const total = envioItems.reduce((s,e)=>s+e.qty,0);
+  document.getElementById('envio-resumen').textContent = `${total} unidades · ${envioItems.length} producto${envioItems.length!==1?'s':''}`;
+  document.getElementById('envio-fecha').textContent = 'Fecha: ' + new Date().toLocaleDateString('es-ES');
+  const tbody = document.getElementById('envio-tbody');
+  if (!envioItems.length) {
+    tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">🚚</div><p>Escanea el primer producto</p></div></td></tr>';
+    return;
+  }
+  tbody.innerHTML = envioItems.map((e,i) => `
+    <tr>
+      <td><div class="td-main">${e.nombre.substring(0,40)}</div><div class="td-sub">EAN: ${e.ean||'—'}</div></td>
+      <td class="td-mono">${e.ean||'—'}</td>
+      <td>${(e.ubicaciones||[]).map(l=>`<span class="loc-tag">${l}</span>`).join('')||'—'}</td>
+      <td style="text-align:center;font-weight:600">${e.stock_moloka} ud</td>
+      <td style="text-align:center">
+        <div class="qty-control">
+          <button class="qty-btn" onclick="cambiarQtyEnvio(${i},-1)">−</button>
+          <span class="qty-num">${e.qty}</span>
+          <button class="qty-btn" onclick="cambiarQtyEnvio(${i},1)">+</button>
+        </div>
+      </td>
+      <td style="text-align:center;font-weight:700;color:${e.stock_moloka-e.qty<0?'var(--red)':'var(--green)'}">${e.stock_moloka-e.qty} ud</td>
+      <td><button onclick="quitarEnvio(${i})" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:18px">✕</button></td>
+    </tr>`).join('');
+}
+
+function cambiarQtyEnvio(i, d) { envioItems[i].qty = Math.max(1, envioItems[i].qty+d); renderEnvio(); }
+function quitarEnvio(i) { envioItems.splice(i,1); renderEnvio(); }
+function cancelarEnvio() { envioItems = []; renderEnvio(); }
+
+async function confirmarEnvioFBA() {
+  if (!envioItems.length) { showToast('No hay productos en el envío', 'error'); return; }
+  if (!confirm(`¿Confirmar envío de ${envioItems.reduce((s,e)=>s+e.qty,0)} unidades? El stock de Moloka se actualizará.`)) return;
+
+  for (const e of envioItems) {
+    await db.from('productos').update({ stock_moloka: e.stock_moloka - e.qty, updated_at: new Date().toISOString() }).eq('id', e.id);
+    await db.from('movimientos').insert({ producto_id: e.id, tipo: 'envio_fba', cantidad: -e.qty });
+  }
+  showToast('Envío confirmado. Stock actualizado ✅', 'success');
+  envioItems = [];
+  renderEnvio();
+}
+
+// ============================================================
+// FACTURAS
+// ============================================================
+async function cargarFacturas() {
+  const tbody = document.getElementById('facturas-tbody');
+  const { data, error } = await db.from('facturas').select('*').order('created_at', { ascending: false });
+  if (error || !data || data.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">📄</div><p>No hay facturas todavía. Añade la primera.</p></div></td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.map(f => `
+    <tr>
+      <td class="td-main">${f.referencia}</td>
+      <td>${f.proveedor}</td>
+      <td>${f.fecha ? new Date(f.fecha).toLocaleDateString('es-ES') : '—'}</td>
+      <td>${f.importe_total ? f.importe_total.toFixed(2)+'€' : '—'}</td>
+      <td><span class="badge badge-green">Guardada</span></td>
+    </tr>`).join('');
+}
+
+async function buscarFacturas(q) {
+  const el = document.getElementById('facturas-resultado');
+  if (!q || q.length < 3) { el.style.display = 'none'; return; }
+  const { data } = await db.from('facturas').select('*').or(`referencia.ilike.%${q}%,proveedor.ilike.%${q}%`);
+  if (!data || data.length === 0) { el.style.display = 'none'; return; }
+  document.getElementById('facturas-resultado-info').textContent = `🔍 ${data.length} factura${data.length!==1?'s':''} encontradas para "${q}"`;
+  document.getElementById('facturas-resultado-tbody').innerHTML = data.map(f => `
+    <tr>
+      <td class="td-main">${f.referencia}</td>
+      <td>${f.proveedor}</td>
+      <td>${f.fecha ? new Date(f.fecha).toLocaleDateString('es-ES') : '—'}</td>
+      <td>${f.importe_total ? f.importe_total.toFixed(2)+'€' : '—'}</td>
+      <td><span class="badge badge-green">Guardada</span></td>
+    </tr>`).join('');
+  el.style.display = 'block';
+}
+
+async function guardarFactura() {
+  const ref = document.getElementById('f-ref').value.trim();
+  if (!ref) { showToast('La referencia es obligatoria', 'error'); return; }
+  const btn = document.getElementById('btn-guardar-factura');
+  btn.innerHTML = '<span class="loader"></span>'; btn.disabled = true;
+
+  const fecha = document.getElementById('f-fecha').value;
+  const { error } = await db.from('facturas').insert({
+    referencia: ref,
+    proveedor: document.getElementById('f-proveedor').value,
+    fecha: fecha || null,
+    importe_total: parseFloat(document.getElementById('f-importe').value) || null
+  });
+
+  btn.innerHTML = 'Guardar factura'; btn.disabled = false;
+  if (error) { showToast('Error: ' + error.message, 'error'); return; }
+  showToast('Factura guardada ✅', 'success');
+  closeModal('modal-nueva-factura');
+  cargarFacturas();
+}
+
+// ============================================================
+// TAREAS
+// ============================================================
+async function cargarTareas(filtro = 'pendiente') {
+  const elP = document.getElementById('tareas-pendientes');
+  const elH = document.getElementById('tareas-hechas');
+
+  const { data: pend } = await db.from('tareas').select('*').neq('estado','hecha').order('fecha_revision');
+  const { data: hechas } = await db.from('tareas').select('*').eq('estado','hecha').order('updated_at', { ascending: false });
+
+  const hoy = new Date().toISOString().split('T')[0];
+  const badgeTareas = document.getElementById('badge-tareas');
+  const pendCount = (pend||[]).length;
+  if (pendCount > 0) { badgeTareas.textContent = pendCount; badgeTareas.style.display = 'block'; }
+
+  if (!pend || pend.length === 0) {
+    elP.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div><p>No hay tareas pendientes</p></div>';
+  } else {
+    const vencidas = pend.filter(t => t.fecha_revision && t.fecha_revision < hoy);
+    const hoyT = pend.filter(t => t.fecha_revision === hoy);
+    const proximas = pend.filter(t => !t.fecha_revision || t.fecha_revision > hoy);
+
+    let html = '';
+    if (vencidas.length) html += `<div style="font-size:11px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Vencidas</div>` + vencidas.map(t => renderTarea(t,'overdue')).join('');
+    if (hoyT.length) html += `<div style="font-size:11px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:0.5px;margin:16px 0 8px">Hoy</div>` + hoyT.map(t => renderTarea(t,'today')).join('');
+    if (proximas.length) html += `<div style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.5px;margin:16px 0 8px">Próximas</div>` + proximas.map(t => renderTarea(t,'upcoming')).join('');
+    elP.innerHTML = html;
+  }
+
+  if (!hechas || hechas.length === 0) {
+    elH.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><p>No hay tareas completadas todavía</p></div>';
+  } else {
+    elH.innerHTML = hechas.map(t => renderTarea(t,'done')).join('');
+  }
+}
+
+function renderTarea(t, cls) {
+  const isDone = cls === 'done';
+  return `
+    <div class="task-card ${cls}" id="task-${t.id}">
+      <div class="task-check ${isDone?'checked':''}" onclick="${isDone?'':''}" ${isDone?'':''}>
+        ${isDone ? '✓' : ''}
+      </div>
+      <div style="flex:1">
+        <div class="task-title">${t.titulo}</div>
+        ${t.descripcion ? `<div class="task-desc">${t.descripcion}</div>` : ''}
+        <div class="task-meta">
+          ${t.fecha_revision ? `<span class="badge badge-${cls==='overdue'?'red':cls==='today'?'amber':'blue'}">${new Date(t.fecha_revision).toLocaleDateString('es-ES')}</span>` : ''}
+          <span class="badge badge-gray">${t.tipo||'Otro'}</span>
+          ${!isDone ? `<button onclick="completarTarea('${t.id}')" style="background:none;border:none;cursor:pointer;font-size:11px;color:var(--green);font-weight:700;padding:0">✓ Completar</button>` : ''}
+        </div>
+      </div>
+    </div>`;
+}
+
+async function completarTarea(id) {
+  await db.from('tareas').update({ estado: 'hecha', updated_at: new Date().toISOString() }).eq('id', id);
+  showToast('Tarea completada ✅', 'success');
+  cargarTareas();
+}
+
+async function guardarTarea() {
+  const titulo = document.getElementById('t-titulo').value.trim();
+  if (!titulo) { showToast('El título es obligatorio', 'error'); return; }
+  const btn = document.getElementById('btn-guardar-tarea');
+  btn.innerHTML = '<span class="loader"></span>'; btn.disabled = true;
+
+  const { error } = await db.from('tareas').insert({
+    titulo,
+    descripcion: document.getElementById('t-desc').value.trim() || null,
+    tipo: document.getElementById('t-tipo').value,
+    fecha_revision: document.getElementById('t-fecha').value || null,
+    estado: 'pendiente'
+  });
+
+  btn.innerHTML = 'Guardar tarea'; btn.disabled = false;
+  if (error) { showToast('Error: ' + error.message, 'error'); return; }
+  showToast('Tarea guardada ✅', 'success');
+  closeModal('modal-nueva-tarea');
+  document.getElementById('t-titulo').value = '';
+  document.getElementById('t-desc').value = '';
+  document.getElementById('t-fecha').value = '';
+  cargarTareas();
+}
+
+function switchTabTareas(el, tab) {
+  el.parentElement.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('tareas-pendientes').style.display = tab === 'pendientes' ? 'block' : 'none';
+  document.getElementById('tareas-hechas').style.display = tab === 'hechas' ? 'block' : 'none';
+}
+
+// ============================================================
+// INIT
+// ============================================================
+async function init() {
+  try {
+    const { data, error } = await db.from('productos').select('id').limit(1);
+    if (error) throw error;
+    document.getElementById('conn-status').textContent = '✅ Conectado · moloka.es';
+    cargarAlertas();
+  } catch(e) {
+    document.getElementById('conn-status').textContent = '❌ Sin conexión';
+    console.error('Supabase error:', e);
+  }
+}
+
+// Fecha en envío
+document.getElementById('envio-fecha').textContent = 'Fecha: ' + new Date().toLocaleDateString('es-ES');
+
+// Enter en escaneo
+document.getElementById('scan-ean').addEventListener('keydown', e => { if (e.key === 'Enter') buscarProductoEscaneo(); });
+document.getElementById('envio-scan').addEventListener('keydown', e => { if (e.key === 'Enter') addProductoEnvio(); });
+
+init();
+</script>
+</body>
+</html>
