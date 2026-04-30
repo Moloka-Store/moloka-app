@@ -185,29 +185,6 @@
   .pag-btn:hover:not(.active) { background: var(--gray-50); }
   .pag-info { font-size: 12px; color: var(--gray-400); margin-right: 8px; }
 
-  /* RENTABILIDAD */
-  .rent-btn-active { background: var(--navy) !important; color: white !important; border-color: var(--navy) !important; }
-  .roi-positive { color: var(--green); font-weight: 700; }
-  .roi-negative { color: var(--red); font-weight: 700; }
-  .roi-neutral { color: var(--amber); font-weight: 700; }
-
-  /* BUY BOX CALCULADORA */
-  .buybox-panel { background: var(--navy-dark); border-radius: 12px; padding: 20px; color: white; }
-  .buybox-panel .input-label { color: rgba(255,255,255,0.6); }
-  .buybox-panel .input { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); color: white; }
-  .buybox-panel .input::placeholder { color: rgba(255,255,255,0.4); }
-  .buybox-result { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
-  .buybox-kpi { background: rgba(255,255,255,0.08); border-radius: 8px; padding: 12px; text-align: center; }
-  .buybox-kpi .label { font-size: 10px; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
-  .buybox-kpi .val { font-size: 22px; font-weight: 700; margin-top: 4px; }
-  .buybox-kpi .val.green { color: #34D399; }
-  .buybox-kpi .val.red { color: #F87171; }
-  .buybox-kpi .val.amber { color: #FCD34D; }
-  .buybox-verdict { margin-top: 14px; padding: 12px 16px; border-radius: 8px; text-align: center; font-size: 15px; font-weight: 700; }
-  .buybox-verdict.pelear { background: rgba(16,185,129,0.2); color: #34D399; border: 1px solid rgba(16,185,129,0.3); }
-  .buybox-verdict.valorar { background: rgba(245,158,11,0.2); color: #FCD34D; border: 1px solid rgba(245,158,11,0.3); }
-  .buybox-verdict.no { background: rgba(239,68,68,0.2); color: #F87171; border: 1px solid rgba(239,68,68,0.3); }
-
   ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: var(--gray-200); border-radius: 3px; }
 
   /* LOGIN */
@@ -279,9 +256,6 @@
       <span class="nav-icon">📝</span> Tareas
       <span class="nav-badge amber" id="badge-tareas" style="display:none">0</span>
     </div>
-    <div class="nav-item" data-page="sincronizacion" onclick="showPage('sincronizacion',this)">
-      <span class="nav-icon">🔄</span> Sincronización
-    </div>
     <div class="nav-item" data-page="rentabilidad" onclick="showPage('rentabilidad',this)">
       <span class="nav-icon">📊</span> Rentabilidad
     </div>
@@ -330,18 +304,16 @@
       <div class="search-bar">
         <input class="input" placeholder="🔍  Buscar producto, EAN, ASIN..." style="max-width:380px;flex:1" id="inv-search" oninput="buscarInventario()">
         <button class="btn btn-ghost btn-sm" onclick="filtrarEstado('')">Todos</button>
-        <button class="btn btn-ghost btn-sm" onclick="filtrarEnStock()">🟢 En stock</button>
         <button class="btn btn-ghost btn-sm" onclick="filtrarEstado('CRÍTICO')">🔴 Críticos</button>
         <button class="btn btn-ghost btn-sm" onclick="filtrarEstado('REVISAR')">🟡 Revisar</button>
         <button class="btn btn-ghost btn-sm" onclick="filtrarEstado('SIN_STOCK_LOCAL')">📦 Sin stock</button>
-        <button class="btn btn-ghost btn-sm" onclick="filtrarEstado('DESCATALOGADO')">⛔ Descatalogados</button>
       </div>
       <div class="table-wrap">
         <table>
           <thead><tr>
             <th>Producto</th><th>EAN</th><th>ASIN</th><th>Proveedor</th>
             <th style="text-align:center">Stock Moloka</th><th style="text-align:center">Stock FBA</th>
-            <th>Ubicación</th><th>PVD</th><th style="text-align:center">Estado</th><th></th>
+            <th>Ubicación</th><th>PVD</th><th style="text-align:center">Estado</th>
           </tr></thead>
           <tbody id="inv-tbody"><tr><td colspan="9"><div class="loading-state"><div class="big-loader"></div><p>Cargando inventario...</p></div></td></tr></tbody>
         </table>
@@ -355,11 +327,6 @@
     <div class="page-header">
       <div><div class="page-title">🔄 Entrada de Mercancía</div><div class="page-sub">Registra la mercancía que llega al almacén</div></div>
     </div>
-    <div class="tabs">
-      <div class="tab active" onclick="switchTabEntrada(this,'entrada-scanner')">📷 Escanear</div>
-      <div class="tab" onclick="switchTabEntrada(this,'entrada-factura')">📄 Subir Factura</div>
-    </div>
-    <div id="entrada-scanner">
     <div class="grid-2" style="align-items:start">
       <div>
         <div class="card" style="margin-bottom:14px">
@@ -419,71 +386,7 @@
         <div id="sesion-list"><div class="empty-state"><div class="empty-icon">📦</div><p>Escanea el primer producto para empezar</p></div></div>
       </div>
     </div>
-  </div><!-- end grid entrada-scanner -->
-    </div><!-- end entrada-scanner tab -->
-
-    <!-- TAB FACTURA -->
-    <div id="entrada-factura" style="display:none">
-      <div class="grid-2" style="align-items:start">
-        <div>
-          <div class="card" style="margin-bottom:14px">
-            <div class="section-title" style="margin-bottom:12px">Subir factura de proveedor</div>
-            <div class="upload-zone" id="factura-upload-zone" onclick="document.getElementById('factura-file-input').click()" style="cursor:pointer">
-              <div style="font-size:32px;margin-bottom:8px">📄</div>
-              <p style="font-size:13px;font-weight:600;color:var(--navy)">Arrastra la factura aquí o haz clic</p>
-              <p style="font-size:11px;color:var(--gray-400);margin-top:4px">PDF de TCG, DBLine, BEMS, Zentrada, OSMA, HEO</p>
-            </div>
-            <input type="file" id="factura-file-input" accept=".pdf" style="display:none" onchange="procesarFacturaPDF(this.files[0])">
-            <div class="form-row" style="margin-top:12px">
-              <div class="input-group">
-                <div class="input-label">Proveedor</div>
-                <select class="input" id="factura-proveedor">
-                  <option value="">Detectar automáticamente</option>
-                  <option value="TCG">TCG Factory</option>
-                  <option value="DBLine">DBLine</option>
-                  <option value="BEMS">BEMS</option>
-                  <option value="Zentrada">Zentrada</option>
-                  <option value="OSMA">OSMA</option>
-                  <option value="HEO">HEO</option>
-                </select>
-              </div>
-              <div class="input-group">
-                <div class="input-label">Referencia factura</div>
-                <input class="input" id="factura-ref" placeholder="TCG-00322...">
-              </div>
-            </div>
-          </div>
-          <div id="factura-procesando" style="display:none">
-            <div class="info-box">⏳ Procesando factura con IA... puede tardar unos segundos</div>
-          </div>
-          <div id="factura-resultado-area" style="display:none">
-            <div class="card">
-              <div class="section-header">
-                <div class="section-title" id="factura-resultado-titulo">Productos detectados</div>
-                <button class="btn btn-green btn-sm" onclick="confirmarTodasLineasFactura()">✅ Confirmar todas</button>
-              </div>
-              <div class="table-wrap">
-                <table>
-                  <thead><tr>
-                    <th>EAN</th><th>Producto</th><th style="text-align:center">Cant.</th>
-                    <th>PVD</th><th>Estado</th><th></th>
-                  </tr></thead>
-                  <tbody id="factura-lineas-tbody"></tbody>
-                </table>
-              </div>
-              <div class="warning-box" style="margin-top:12px">
-                ⚠️ Los productos en amarillo (sin EAN) no se vincularán al inventario hasta que escanees la caja física o escribas el EAN manualmente.
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="section-title" style="margin-bottom:12px">Facturas procesadas recientemente</div>
-          <div id="facturas-recientes-lista"><div class="empty-state" style="padding:20px"><p style="font-size:13px;color:var(--gray-400)">Las facturas procesadas aparecerán aquí</p></div></div>
-        </div>
-      </div>
-    </div><!-- end entrada-factura tab -->
-  </div><!-- end page-entrada -->
+  </div>
 
   <!-- ENVIO FBA -->
   <div class="page" id="page-envio">
@@ -549,140 +452,24 @@
       <div><div class="page-title">📝 Tareas Pendientes</div><div class="page-sub">Notas de seguimiento para Amazon, envíos, precios y proveedores</div></div>
       <button class="btn btn-primary btn-sm" onclick="openModal('modal-nueva-tarea')">+ Nueva tarea</button>
     </div>
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-      <div class="tabs" style="margin-bottom:0">
-        <div class="tab active" onclick="switchTabTareas(this,'pendientes')">Pendientes</div>
-        <div class="tab" onclick="switchTabTareas(this,'hechas')">Completadas</div>
-      </div>
-      <button class="btn btn-ghost btn-sm" id="btn-limpiar-completadas" style="display:none;color:var(--red);border-color:var(--red)" onclick="limpiarCompletadas()">🗑️ Limpiar completadas</button>
+    <div class="tabs">
+      <div class="tab active" onclick="switchTabTareas(this,'pendientes')">Pendientes</div>
+      <div class="tab" onclick="switchTabTareas(this,'hechas')">Completadas</div>
     </div>
     <div id="tareas-pendientes"><div class="loading-state"><div class="big-loader"></div><p>Cargando tareas...</p></div></div>
     <div id="tareas-hechas" style="display:none"><div class="loading-state"><div class="big-loader"></div></div></div>
   </div>
 
-  <!-- SINCRONIZACIÓN -->
-  <div class="page" id="page-sincronizacion">
-    <div class="page-header">
-      <div><div class="page-title">🔄 Sincronización</div><div class="page-sub">Carga los informes de Amazon para actualizar ventas y rentabilidad</div></div>
-    </div>
-
-    <!-- Estado actual -->
-    <div class="stats-row" style="grid-template-columns:repeat(3,1fr)">
-      <div class="stat-card">
-        <div class="stat-label">Último informe cargado</div>
-        <div class="stat-value" style="font-size:20px" id="sync-ultima-fecha">Cargando...</div>
-        <div class="stat-sub" id="sync-ultima-info">—</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Período cubierto</div>
-        <div class="stat-value" style="font-size:20px" id="sync-periodo">Cargando...</div>
-        <div class="stat-sub">Datos de ventas disponibles</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Informes cargados</div>
-        <div class="stat-value" id="sync-total-informes">—</div>
-        <div class="stat-sub">Total acumulado</div>
-      </div>
-    </div>
-
-    <div class="grid-2" style="align-items:start">
-      <div>
-        <div class="card">
-          <div class="section-title" style="margin-bottom:4px">📊 Informe de transacciones</div>
-          <p style="font-size:12px;color:var(--gray-400);margin-bottom:14px">Seller Central → Informes → Pagos → Informe personalizado de transacciones → selecciona el período → descargar CSV</p>
-          <div class="upload-zone" onclick="document.getElementById('sync-file-input').click()" style="cursor:pointer;margin-bottom:12px">
-            <div style="font-size:28px;margin-bottom:6px">📂</div>
-            <p style="font-size:13px;font-weight:600;color:var(--navy)">Arrastra el CSV o haz clic para seleccionar</p>
-            <p style="font-size:11px;color:var(--gray-400);margin-top:4px">Formato: 2026MayCustomTransaction.csv</p>
-          </div>
-          <input type="file" id="sync-file-input" accept=".csv,.txt" style="display:none" onchange="procesarInformeTransacciones(this.files[0])">
-          <div id="sync-procesando" style="display:none">
-            <div class="info-box">⏳ Procesando informe...</div>
-          </div>
-          <div id="sync-resultado" style="display:none"></div>
-        </div>
-
-        <div class="card" style="margin-top:0">
-          <div class="section-title" style="margin-bottom:4px">📦 Inventario FBA actual</div>
-          <p style="font-size:12px;color:var(--gray-400);margin-bottom:14px">Seller Central → Inventario → Gestionar inventario FBA → Descargar informe → activa las alertas de envío</p>
-          <div class="upload-zone" onclick="document.getElementById('sync-fba-input').click()" style="cursor:pointer">
-            <div style="font-size:28px;margin-bottom:6px">📦</div>
-            <p style="font-size:13px;font-weight:600;color:var(--navy)">CSV de inventario FBA</p>
-            <p style="font-size:11px;color:var(--gray-400);margin-top:4px">Actualiza el stock en Amazon y activa alertas inteligentes</p>
-          </div>
-          <input type="file" id="sync-fba-input" accept=".csv,.txt" style="display:none" onchange="procesarInventarioFBA(this.files[0])">
-          <div id="sync-fba-resultado" style="display:none"></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="section-title" style="margin-bottom:12px">Historial de sincronizaciones</div>
-        <div id="sync-historial"><div class="loading-state"><div class="big-loader"></div></div></div>
-      </div>
-    </div>
-  </div>
-
   <!-- RENTABILIDAD -->
   <div class="page" id="page-rentabilidad">
     <div class="page-header">
-      <div><div class="page-title">📊 Rentabilidad</div><div class="page-sub" id="rent-sub">Enero · Febrero · Marzo 2026</div></div>
+      <div><div class="page-title">📊 Rentabilidad</div><div class="page-sub">Carga el TXT de ventas de Seller Central</div></div>
     </div>
-
-    <!-- Selector de período -->
-    <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;align-items:center">
-      <span style="font-size:12px;font-weight:600;color:var(--gray-500)">VER:</span>
-      <button class="btn btn-primary btn-sm" id="btn-rent-acum" onclick="verRentabilidad('acumulado')">Acumulado 2026</button>
-      <button class="btn btn-ghost btn-sm" id="btn-rent-mar" onclick="verRentabilidad('marzo')">Marzo</button>
-      <button class="btn btn-ghost btn-sm" id="btn-rent-feb" onclick="verRentabilidad('febrero')">Febrero</button>
-      <button class="btn btn-ghost btn-sm" id="btn-rent-ene" onclick="verRentabilidad('enero')">Enero</button>
-      <button class="btn btn-ghost btn-sm" id="btn-rent-sem" onclick="verRentabilidad('semanal')">Vista semanal</button>
-    </div>
-
-    <!-- KPIs principales -->
-    <div class="stats-row" id="rent-kpis"></div>
-
-    <!-- Vista semanal -->
-    <div id="rent-semanal-view" style="display:none">
-      <div class="card">
-        <div class="section-title" style="margin-bottom:14px">Evolución semanal</div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr>
-              <th>Semana</th><th style="text-align:center">Unidades</th>
-              <th style="text-align:right">Facturación</th><th style="text-align:right">s/IVA</th>
-              <th style="text-align:center">Pedidos</th><th>Mes</th>
-            </tr></thead>
-            <tbody id="rent-semanas-tbody"></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <!-- Vista mensual detalle -->
-    <div id="rent-detalle-view">
-      <div class="grid-2" style="align-items:start">
-        <div class="card">
-          <div class="section-title" style="margin-bottom:14px">Top productos por beneficio</div>
-          <div class="table-wrap">
-            <table>
-              <thead><tr>
-                <th>Producto</th><th style="text-align:center">Ud</th>
-                <th style="text-align:right">Facturado</th><th style="text-align:right">Beneficio</th>
-                <th style="text-align:right">ROI</th><th style="text-align:right">Margen</th>
-              </tr></thead>
-              <tbody id="rent-top-tbody"></tbody>
-            </table>
-          </div>
-        </div>
-        <div class="card">
-          <div class="section-title" style="margin-bottom:14px">Desglose de costes</div>
-          <div id="rent-costes-detalle"></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="info-box" style="margin-top:16px">
-      ℹ️ Datos reales de Moloka SL — Enero a Abril 2026. Comisiones Amazon y FBA extraídas de los informes de transacciones reales. PVD del inventario.
+    <div class="info-box">📋 Módulo en construcción — disponible próximamente. Por ahora puedes cargar el TXT de ventas desde aquí cuando esté listo.</div>
+    <div class="card" style="text-align:center;padding:40px">
+      <div style="font-size:48px;margin-bottom:16px">📊</div>
+      <div style="font-size:16px;font-weight:700;color:var(--navy);margin-bottom:8px">Rentabilidad semanal y mensual</div>
+      <div style="font-size:13px;color:var(--gray-400)">Este módulo se activará en la siguiente versión.</div>
     </div>
   </div>
 
@@ -697,10 +484,6 @@
     <div class="form-row">
       <div class="input-group"><div class="input-label">ASIN</div><input class="input" id="np-asin" placeholder="B0XXXXXXXX"></div>
       <div class="input-group"><div class="input-label">FNSKU</div><input class="input" id="np-fnsku" placeholder="X00XXXXXXX"></div>
-    </div>
-    <div class="form-row">
-      <div class="input-group"><div class="input-label">SKU (Seller Central)</div><input class="input" id="np-sku" placeholder="LP-Q4SK-BUOJ"></div>
-      <div class="input-group"><div class="input-label">Estado reposición</div><select class="input" id="np-estado-repos"><option value="activo">Activo</option><option value="sin_stock_temporal">Sin stock temporal</option><option value="descatalogado">Descatalogado</option></select></div>
     </div>
     <div class="form-row">
       <div class="input-group"><div class="input-label">Proveedor</div>
@@ -762,43 +545,6 @@
   </div>
 </div>
 
-<!-- MODAL BUY BOX CALCULADORA -->
-<div class="modal-overlay" id="modal-buybox">
-  <div class="modal" style="background:var(--navy-dark);max-width:480px">
-    <div style="font-size:16px;font-weight:700;color:white;margin-bottom:4px">💰 Calculadora Buy Box</div>
-    <div style="font-size:13px;color:rgba(255,255,255,0.5);margin-bottom:20px" id="bb-nombre">—</div>
-    <div class="form-row">
-      <div class="input-group">
-        <div class="input-label" style="color:rgba(255,255,255,0.6)">PVD (€)</div>
-        <input class="input" id="bb-pvd" type="number" step="0.01" placeholder="7.83" style="background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.2);color:white" oninput="calcularBuyBox()">
-      </div>
-      <div class="input-group">
-        <div class="input-label" style="color:rgba(255,255,255,0.6)">Buy Box actual (€)</div>
-        <input class="input" id="bb-buybox" type="number" step="0.01" placeholder="Precio Amazon" style="background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.2);color:white;font-size:16px;font-weight:700" oninput="calcularBuyBox()">
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="input-group">
-        <div class="input-label" style="color:rgba(255,255,255,0.6)">% Comisión Amazon</div>
-        <input class="input" id="bb-comision-pct" type="number" step="0.1" placeholder="15.5" style="background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.2);color:white" oninput="calcularBuyBox()">
-      </div>
-      <div class="input-group">
-        <div class="input-label" style="color:rgba(255,255,255,0.6)">Comisión envío FBA (€)</div>
-        <input class="input" id="bb-envio" type="number" step="0.01" placeholder="3.74" style="background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.2);color:white" oninput="calcularBuyBox()">
-      </div>
-    </div>
-    <div class="input-group" style="max-width:200px">
-      <div class="input-label" style="color:rgba(255,255,255,0.6)">Almacén Moloka (€)</div>
-      <input class="input" id="bb-almacen" type="number" step="0.01" value="0.10" style="background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.2);color:white" oninput="calcularBuyBox()">
-    </div>
-    <div id="bb-resultado"><div style="text-align:center;color:rgba(255,255,255,0.4);font-size:13px;padding:20px">Introduce el precio de la Buy Box para calcular</div></div>
-    <div class="buybox-verdict" id="bb-verdict" style="display:none"></div>
-    <div style="display:flex;justify-content:flex-end;margin-top:20px">
-      <button onclick="closeModal('modal-buybox')" style="background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.4);color:white;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">✕ Cerrar</button>
-    </div>
-  </div>
-</div>
-
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
@@ -819,7 +565,6 @@ const POR_PAGINA = 25;
 let totalProductos = 0;
 let filtroTexto = '';
 let filtroEstadoActual = '';
-let filtroEnStock = false;
 let productoEnEdicion = null;
 let envioItems = [];
 let sesionEntradas = [];
@@ -837,8 +582,6 @@ function showPage(id, el) {
   if (id === 'inventario') { paginaActual = 1; cargarInventario(); }
   if (id === 'facturas') cargarFacturas();
   if (id === 'tareas') cargarTareas();
-  if (id === 'rentabilidad') verRentabilidad('acumulado');
-  if (id === 'sincronizacion') cargarSincronizacion();
 }
 
 // ============================================================
@@ -885,18 +628,14 @@ async function cargarAlertas() {
     // Render cr\u00edticos
     const elCrit = document.getElementById('alertas-criticas');
     if (criticos.length === 0) {
-      elCrit.innerHTML = '<div class="alert-card" style="background:var(--green-light);border-color:var(--green)"><div>[OK] No hay productos en estado cr\u00edtico</div></div>';
+      elCrit.innerHTML = '<div class="alert-card" style="background:var(--green-light);border-color:var(--green)"><div>\u2705 No hay productos en estado cr\u00edtico</div></div>';
     } else {
       elCrit.innerHTML = criticos.map(p => `
         <div class="alert-card red">
-          <div class="alert-icon">[ROJO]</div>
-          <div style="flex:1">
+          <div class="alert-icon">\u1f534</div>
+          <div>
             <div class="alert-title">${p.nombre}</div>
-            <div class="alert-detail" style="display:flex;gap:8px;align-items:center;margin-top:3px">
-              ${p.ean ? `<span style="font-family:'DM Mono',monospace;font-size:11px;background:rgba(0,0,0,0.08);padding:2px 6px;border-radius:4px;cursor:pointer" onclick="navigator.clipboard.writeText('${p.ean}');showToast('EAN copiado','success')" title="Clic para copiar">${p.ean} [CLIP]</span>` : ''}
-              <span style="font-size:11px;color:var(--gray-500)">${p.proveedor || '-'}</span>
-            </div>
-            <div class="alert-detail">Stock Moloka: <strong>${p.stock_moloka} ud</strong> \u00b7 M\u00ednimo: ${p.stock_minimo || '-'} ud</div>
+            <div class="alert-detail">Stock Moloka: <strong>${p.stock_moloka} ud</strong> \u00b7 M\u00ednimo: ${p.stock_minimo || '\u2014'} ud \u00b7 ${p.proveedor || '\u2014'}</div>
             ${p.ubicaciones?.length ? `<div class="alert-detail">Ubicaci\u00f3n: ${p.ubicaciones.join(', ')}</div>` : ''}
             <div class="alert-urgency">Stock FBA: ${p.stock_fba} ud</div>
           </div>
@@ -910,14 +649,10 @@ async function cargarAlertas() {
     } else {
       elRev.innerHTML = revisar.map(p => `
         <div class="alert-card amber">
-          <div class="alert-icon">[AMARILLO]</div>
-          <div style="flex:1">
+          <div class="alert-icon">\u1f7e1</div>
+          <div>
             <div class="alert-title">${p.nombre}</div>
-            <div class="alert-detail" style="display:flex;gap:8px;align-items:center;margin-top:3px">
-              ${p.ean ? `<span style="font-family:'DM Mono',monospace;font-size:11px;background:rgba(0,0,0,0.08);padding:2px 6px;border-radius:4px;cursor:pointer" onclick="navigator.clipboard.writeText('${p.ean}');showToast('EAN copiado','success')" title="Clic para copiar">${p.ean} [CLIP]</span>` : ''}
-              <span style="font-size:11px;color:var(--gray-500)">${p.proveedor || '-'}</span>
-            </div>
-            <div class="alert-detail">Stock Moloka: <strong>${p.stock_moloka} ud</strong> \u00b7 M\u00ednimo: ${p.stock_minimo || '-'} ud</div>
+            <div class="alert-detail">Stock Moloka: <strong>${p.stock_moloka} ud</strong> \u00b7 M\u00ednimo: ${p.stock_minimo || '\u2014'} ud \u00b7 ${p.proveedor || '\u2014'}</div>
             <div class="alert-urgency">Incluir en pr\u00f3ximo pedido</div>
           </div>
         </div>`).join('');
@@ -926,12 +661,12 @@ async function cargarAlertas() {
     // Render sin ASIN
     const elAsin = document.getElementById('sin-asin-list');
     if (sinAsin.length === 0) {
-      elAsin.innerHTML = '<div style="color:var(--gray-400);font-size:13px">Todos los productos tienen ASIN [OK]</div>';
+      elAsin.innerHTML = '<div style="color:var(--gray-400);font-size:13px">Todos los productos tienen ASIN \u2705</div>';
     } else {
       elAsin.innerHTML = `<table style="width:100%"><tbody>${sinAsin.slice(0,8).map(p => `
         <tr>
           <td style="padding:8px 0;font-size:12px;font-weight:600;color:var(--navy)">${p.nombre.substring(0,40)}${p.nombre.length>40?'...':''}</td>
-          <td style="font-size:11px;font-family:'DM Mono',monospace;color:var(--gray-400)">${p.ean || '-'}</td>
+          <td style="font-size:11px;font-family:'DM Mono',monospace;color:var(--gray-400)">${p.ean || '\u2014'}</td>
         </tr>`).join('')}</tbody></table>`;
     }
 
@@ -951,7 +686,6 @@ async function cargarInventario() {
   try {
     let query = db.from('productos').select('*', { count: 'exact' }).eq('activo', true);
     if (filtroEstadoActual) query = query.eq('estado', filtroEstadoActual);
-    if (filtroEnStock) query = query.or('stock_moloka.gt.0,stock_fba.gt.0');
     if (filtroTexto) query = query.or(`nombre.ilike.%${filtroTexto}%,ean.ilike.%${filtroTexto}%,asin.ilike.%${filtroTexto}%,proveedor.ilike.%${filtroTexto}%`);
 
     const from = (paginaActual - 1) * POR_PAGINA;
@@ -964,23 +698,19 @@ async function cargarInventario() {
     document.getElementById('inv-subtitle').textContent = `${totalProductos} productos \u00b7 Actualizado ahora`;
 
     if (!data || data.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="9"><div class="empty-state"><div class="empty-icon">[BOX]</div><p>No se encontraron productos</p></div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9"><div class="empty-state"><div class="empty-icon">\u1f4e6</div><p>No se encontraron productos</p></div></td></tr>';
     } else {
       tbody.innerHTML = data.map(p => `
         <tr>
           <td><div class="td-main" title="${p.nombre}">${p.nombre.substring(0,45)}${p.nombre.length>45?'...':''}</div><div class="td-sub">${p.marca || ''}</div></td>
-          <td class="td-mono">${p.ean || '-'}</td>
-          <td>${p.asin ? `<span class="td-asin">${p.asin}</span>` : `<span class="no-asin" style="cursor:pointer" onclick="editarCampo('${p.id}','asin','ASIN','${p.nombre.replace(/'/g,\"\\'\")}','B0XXXXXXXXX')" title="Clic para a\u00f1adir ASIN">[!] Sin ASIN \u270f\ufe0f</span>`}</td>
-          <td>${p.proveedor || '-'}</td>
+          <td class="td-mono">${p.ean || '\u2014'}</td>
+          <td>${p.asin ? `<span class="td-asin">${p.asin}</span>` : '<span class="no-asin">\u26a0\ufe0f Sin ASIN</span>'}</td>
+          <td>${p.proveedor || '\u2014'}</td>
           <td style="text-align:center;font-weight:700;font-size:14px;color:${p.stock_moloka===0?'var(--gray-400)':p.stock_minimo&&p.stock_moloka<p.stock_minimo?'var(--red)':'var(--navy)'}">${p.stock_moloka}</td>
-          <td style="text-align:center;color:var(--gray-400);font-size:12px">${p.stock_fba > 0 ? p.stock_fba : "<span title=\"Pendiente actualizar desde Seller Central\">-</span>"}</td>
-          <td>${(p.ubicaciones||[]).map(l=>`<span class="loc-tag">${l}</span>`).join('') || '-'}</td>
-          <td style="font-family:'DM Mono',monospace;font-size:12px">${p.pvd ? p.pvd.toFixed(2)+'EUR' : '-'}</td>
+          <td style="text-align:center;color:var(--gray-400);font-size:12px">${p.stock_fba > 0 ? p.stock_fba : "<span title=\"Pendiente actualizar desde Seller Central\">\u2014</span>"}</td>
+          <td>${(p.ubicaciones||[]).map(l=>`<span class="loc-tag">${l}</span>`).join('') || '\u2014'}</td>
+          <td style="font-family:'DM Mono',monospace;font-size:12px">${p.pvd ? p.pvd.toFixed(2)+'\u20ac' : '\u2014'}</td>
           <td style="text-align:center">${estadoBadge(p.estado)}</td>
-          <td style="white-space:nowrap;display:flex;gap:4px">
-            <button onclick="abrirCalculadora('${p.asin}','${p.nombre.replace(/'/g,"\\'")}.substring(0,40)}',${p.pvd||0},${p.comision_pct||0.155},${p.comision_envio||3.74})" class="btn btn-ghost btn-sm" title="Calculadora Buy Box" ${!p.asin?'disabled':''}>[MONEY]</button>
-            <button onclick="toggleDescatalogar('${p.id}','${p.estado}')" class="btn btn-ghost btn-sm" title="${p.estado==='DESCATALOGADO'?'Reactivar producto':'Marcar como descatalogado'}">${p.estado==='DESCATALOGADO'?'[RECYCLE]':'[STOP]'}</button>
-          </td>
         </tr>`).join('');
     }
 
@@ -992,10 +722,10 @@ async function cargarInventario() {
 }
 
 function estadoBadge(estado) {
-  if (estado === 'CR\u00cdTICO') return '<span class="badge badge-red">[ROJO] CR\u00cdTICO</span>';
-  if (estado === 'REVISAR') return '<span class="badge badge-amber">[AMARILLO] REVISAR</span>';
-  if (estado === 'SIN_STOCK_LOCAL') return '<span class="badge badge-gray">[BOX] Sin stock</span>';
-  return '<span class="badge badge-green">[VERDE] OK</span>';
+  if (estado === 'CR\u00cdTICO') return '<span class="badge badge-red">\u1f534 CR\u00cdTICO</span>';
+  if (estado === 'REVISAR') return '<span class="badge badge-amber">\u1f7e1 REVISAR</span>';
+  if (estado === 'SIN_STOCK_LOCAL') return '<span class="badge badge-gray">\u1f4e6 Sin stock</span>';
+  return '<span class="badge badge-green">\u1f7e2 OK</span>';
 }
 
 function renderPaginacion() {
@@ -1028,14 +758,6 @@ function buscarInventario() {
 
 function filtrarEstado(estado) {
   filtroEstadoActual = estado;
-  filtroEnStock = false;
-  paginaActual = 1;
-  cargarInventario();
-}
-
-function filtrarEnStock() {
-  filtroEstadoActual = '';
-  filtroEnStock = true;
   paginaActual = 1;
   cargarInventario();
 }
@@ -1054,8 +776,6 @@ async function guardarNuevoProducto() {
     ean: document.getElementById('np-ean').value.trim() || null,
     asin: document.getElementById('np-asin').value.trim() || null,
     fnsku: document.getElementById('np-fnsku').value.trim() || null,
-    sku: document.getElementById('np-sku').value.trim() || null,
-    estado_repos: document.getElementById('np-estado-repos').value || 'activo',
     proveedor: document.getElementById('np-proveedor').value,
     marca: document.getElementById('np-marca').value.trim() || null,
     pvd: parseFloat(document.getElementById('np-pvd').value) || null,
@@ -1067,7 +787,7 @@ async function guardarNuevoProducto() {
 
   btn.innerHTML = 'Guardar producto'; btn.disabled = false;
   if (error) { showToast('Error: ' + error.message, 'error'); return; }
-  showToast('Producto guardado [OK]', 'success');
+  showToast('Producto guardado \u2705', 'success');
   closeModal('modal-nuevo-producto');
   cargarInventario();
 }
@@ -1089,7 +809,7 @@ async function buscarProductoEscaneo() {
     const p = data[0];
     productoEnEdicion = p;
     document.getElementById('pf-name').textContent = p.nombre;
-    document.getElementById('pf-meta').textContent = `EAN: ${p.ean||'-'} \u00b7 ASIN: ${p.asin||'Sin ASIN'} \u00b7 ${p.proveedor||'-'} \u00b7 PVD: ${p.pvd?p.pvd.toFixed(2)+'EUR':'-'} \u00b7 Stock actual: ${p.stock_moloka} ud`;
+    document.getElementById('pf-meta').textContent = `EAN: ${p.ean||'\u2014'} \u00b7 ASIN: ${p.asin||'Sin ASIN'} \u00b7 ${p.proveedor||'\u2014'} \u00b7 PVD: ${p.pvd?p.pvd.toFixed(2)+'\u20ac':'\u2014'} \u00b7 Stock actual: ${p.stock_moloka} ud`;
     document.getElementById('entrada-loc').value = (p.ubicaciones||[]).join(', ');
     document.getElementById('product-found-area').style.display = 'block';
   } else {
@@ -1124,7 +844,7 @@ async function confirmarEntrada() {
     });
   }
 
-  btn.innerHTML = '[OK] Confirmar entrada'; btn.disabled = false;
+  btn.innerHTML = '\u2705 Confirmar entrada'; btn.disabled = false;
   if (error) { showToast('Error: ' + error.message, 'error'); return; }
 
   sesionEntradas.push({ nombre: productoEnEdicion.nombre, qty, loc });
@@ -1134,7 +854,7 @@ async function confirmarEntrada() {
   document.getElementById('scan-ean').value = '';
   document.getElementById('product-found-area').style.display = 'none';
   document.getElementById('scan-ean').focus();
-  showToast(`+${qty} ud de ${productoEnEdicion.nombre.substring(0,30)} [OK]`, 'success');
+  showToast(`+${qty} ud de ${productoEnEdicion.nombre.substring(0,30)} \u2705`, 'success');
 }
 
 async function crearProductoYEntrada() {
@@ -1163,7 +883,7 @@ async function crearProductoYEntrada() {
   renderSesion();
   document.getElementById('scan-ean').value = '';
   document.getElementById('product-new-area').style.display = 'none';
-  showToast(`Producto creado y ${qty} ud registradas [OK]`, 'success');
+  showToast(`Producto creado y ${qty} ud registradas \u2705`, 'success');
 }
 
 function renderSesion() {
@@ -1171,7 +891,7 @@ function renderSesion() {
   document.getElementById('sesion-count').textContent = sesionEntradas.length + ' entrada' + (sesionEntradas.length!==1?'s':'');
   el.innerHTML = sesionEntradas.map(s => `
     <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--gray-100)">
-      <span style="color:var(--green);font-size:16px">[OK]</span>
+      <span style="color:var(--green);font-size:16px">\u2705</span>
       <div style="flex:1">
         <div style="font-size:12px;font-weight:600;color:var(--navy)">${s.nombre.substring(0,40)}</div>
         <div style="font-size:11px;color:var(--gray-400)">+${s.qty} ud \u00b7 ${s.loc||'Sin ubicaci\u00f3n'}</div>
@@ -1204,14 +924,14 @@ function renderEnvio() {
   document.getElementById('envio-fecha').textContent = 'Fecha: ' + new Date().toLocaleDateString('es-ES');
   const tbody = document.getElementById('envio-tbody');
   if (!envioItems.length) {
-    tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">[TRUCK]</div><p>Escanea el primer producto</p></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">\u1f69a</div><p>Escanea el primer producto</p></div></td></tr>';
     return;
   }
   tbody.innerHTML = envioItems.map((e,i) => `
     <tr>
-      <td><div class="td-main">${e.nombre.substring(0,40)}</div><div class="td-sub">EAN: ${e.ean||'-'}</div></td>
-      <td class="td-mono">${e.ean||'-'}</td>
-      <td>${(e.ubicaciones||[]).map(l=>`<span class="loc-tag">${l}</span>`).join('')||'-'}</td>
+      <td><div class="td-main">${e.nombre.substring(0,40)}</div><div class="td-sub">EAN: ${e.ean||'\u2014'}</div></td>
+      <td class="td-mono">${e.ean||'\u2014'}</td>
+      <td>${(e.ubicaciones||[]).map(l=>`<span class="loc-tag">${l}</span>`).join('')||'\u2014'}</td>
       <td style="text-align:center;font-weight:600">${e.stock_moloka} ud</td>
       <td style="text-align:center">
         <div class="qty-control">
@@ -1237,7 +957,7 @@ async function confirmarEnvioFBA() {
     await db.from('productos').update({ stock_moloka: e.stock_moloka - e.qty, updated_at: new Date().toISOString() }).eq('id', e.id);
     await db.from('movimientos').insert({ producto_id: e.id, tipo: 'envio_fba', cantidad: -e.qty });
   }
-  showToast('Env\u00edo confirmado. Stock actualizado [OK]', 'success');
+  showToast('Env\u00edo confirmado. Stock actualizado \u2705', 'success');
   envioItems = [];
   renderEnvio();
 }
@@ -1249,15 +969,15 @@ async function cargarFacturas() {
   const tbody = document.getElementById('facturas-tbody');
   const { data, error } = await db.from('facturas').select('*').order('created_at', { ascending: false });
   if (error || !data || data.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">[DOC]</div><p>No hay facturas todav\u00eda. A\u00f1ade la primera.</p></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">\u1f4c4</div><p>No hay facturas todav\u00eda. A\u00f1ade la primera.</p></div></td></tr>';
     return;
   }
   tbody.innerHTML = data.map(f => `
     <tr>
       <td class="td-main">${f.referencia}</td>
       <td>${f.proveedor}</td>
-      <td>${f.fecha ? new Date(f.fecha).toLocaleDateString('es-ES') : '-'}</td>
-      <td>${f.importe_total ? f.importe_total.toFixed(2)+'EUR' : '-'}</td>
+      <td>${f.fecha ? new Date(f.fecha).toLocaleDateString('es-ES') : '\u2014'}</td>
+      <td>${f.importe_total ? f.importe_total.toFixed(2)+'\u20ac' : '\u2014'}</td>
       <td><span class="badge badge-green">Guardada</span></td>
     </tr>`).join('');
 }
@@ -1272,8 +992,8 @@ async function buscarFacturas(q) {
     <tr>
       <td class="td-main">${f.referencia}</td>
       <td>${f.proveedor}</td>
-      <td>${f.fecha ? new Date(f.fecha).toLocaleDateString('es-ES') : '-'}</td>
-      <td>${f.importe_total ? f.importe_total.toFixed(2)+'EUR' : '-'}</td>
+      <td>${f.fecha ? new Date(f.fecha).toLocaleDateString('es-ES') : '\u2014'}</td>
+      <td>${f.importe_total ? f.importe_total.toFixed(2)+'\u20ac' : '\u2014'}</td>
       <td><span class="badge badge-green">Guardada</span></td>
     </tr>`).join('');
   el.style.display = 'block';
@@ -1295,7 +1015,7 @@ async function guardarFactura() {
 
   btn.innerHTML = 'Guardar factura'; btn.disabled = false;
   if (error) { showToast('Error: ' + error.message, 'error'); return; }
-  showToast('Factura guardada [OK]', 'success');
+  showToast('Factura guardada \u2705', 'success');
   closeModal('modal-nueva-factura');
   cargarFacturas();
 }
@@ -1314,11 +1034,9 @@ async function cargarTareas(filtro = 'pendiente') {
   const badgeTareas = document.getElementById('badge-tareas');
   const pendCount = (pend||[]).length;
   if (pendCount > 0) { badgeTareas.textContent = pendCount; badgeTareas.style.display = 'block'; }
-  const btnLimpiar = document.getElementById('btn-limpiar-completadas');
-  if (btnLimpiar) btnLimpiar.style.display = (hechas && hechas.length > 0) ? 'inline-flex' : 'none';
 
   if (!pend || pend.length === 0) {
-    elP.innerHTML = '<div class="empty-state"><div class="empty-icon">[OK]</div><p>No hay tareas pendientes</p></div>';
+    elP.innerHTML = '<div class="empty-state"><div class="empty-icon">\u2705</div><p>No hay tareas pendientes</p></div>';
   } else {
     const vencidas = pend.filter(t => t.fecha_revision && t.fecha_revision < hoy);
     const hoyT = pend.filter(t => t.fecha_revision === hoy);
@@ -1332,7 +1050,7 @@ async function cargarTareas(filtro = 'pendiente') {
   }
 
   if (!hechas || hechas.length === 0) {
-    elH.innerHTML = '<div class="empty-state"><div class="empty-icon">[CLIP]</div><p>No hay tareas completadas todav\u00eda</p></div>';
+    elH.innerHTML = '<div class="empty-state"><div class="empty-icon">\u1f4cb</div><p>No hay tareas completadas todav\u00eda</p></div>';
   } else {
     elH.innerHTML = hechas.map(t => renderTarea(t,'done')).join('');
   }
@@ -1351,7 +1069,7 @@ function renderTarea(t, cls) {
         <div class="task-meta">
           ${t.fecha_revision ? `<span class="badge badge-${cls==='overdue'?'red':cls==='today'?'amber':'blue'}">${new Date(t.fecha_revision).toLocaleDateString('es-ES')}</span>` : ''}
           <span class="badge badge-gray">${t.tipo||'Otro'}</span>
-          ${!isDone ? `<button onclick="completarTarea('${t.id}')" style="background:none;border:none;cursor:pointer;font-size:11px;color:var(--green);font-weight:700;padding:0">\u2713 Completar</button>` : `<button onclick="borrarTarea('${t.id}')" style="background:none;border:none;cursor:pointer;font-size:11px;color:var(--red);font-weight:700;padding:0">[BIN] Borrar</button>`}
+          ${!isDone ? `<button onclick="completarTarea('${t.id}')" style="background:none;border:none;cursor:pointer;font-size:11px;color:var(--green);font-weight:700;padding:0">\u2713 Completar</button>` : ''}
         </div>
       </div>
     </div>`;
@@ -1359,21 +1077,7 @@ function renderTarea(t, cls) {
 
 async function completarTarea(id) {
   await db.from('tareas').update({ estado: 'hecha', updated_at: new Date().toISOString() }).eq('id', id);
-  showToast('Tarea completada [OK]', 'success');
-  cargarTareas();
-}
-
-async function borrarTarea(id) {
-  if (!confirm('\u00bfBorrar esta tarea? No se puede deshacer.')) return;
-  await db.from('tareas').delete().eq('id', id);
-  showToast('Tarea borrada', '');
-  cargarTareas();
-}
-
-async function limpiarCompletadas() {
-  if (!confirm('\u00bfBorrar todas las tareas completadas? No se puede deshacer.')) return;
-  await db.from('tareas').delete().eq('estado', 'hecha');
-  showToast('Tareas completadas eliminadas', '');
+  showToast('Tarea completada \u2705', 'success');
   cargarTareas();
 }
 
@@ -1393,7 +1097,7 @@ async function guardarTarea() {
 
   btn.innerHTML = 'Guardar tarea'; btn.disabled = false;
   if (error) { showToast('Error: ' + error.message, 'error'); return; }
-  showToast('Tarea guardada [OK]', 'success');
+  showToast('Tarea guardada \u2705', 'success');
   closeModal('modal-nueva-tarea');
   document.getElementById('t-titulo').value = '';
   document.getElementById('t-desc').value = '';
@@ -1450,11 +1154,10 @@ async function init() {
   try {
     const { data, error } = await db.from('productos').select('id').limit(1);
     if (error) throw error;
-    document.getElementById('conn-status').textContent = '[OK] Conectado \u00b7 moloka.es';
+    document.getElementById('conn-status').textContent = '\u2705 Conectado \u00b7 moloka.es';
     cargarAlertas();
-    cargarSincronizacion();
   } catch(e) {
-    document.getElementById('conn-status').textContent = '[NO] Sin conexi\u00f3n';
+    document.getElementById('conn-status').textContent = '\u274c Sin conexi\u00f3n';
     console.error('Supabase error:', e);
   }
 }
@@ -1466,659 +1169,8 @@ document.getElementById('envio-fecha').textContent = 'Fecha: ' + new Date().toLo
 document.getElementById('scan-ean').addEventListener('keydown', e => { if (e.key === 'Enter') buscarProductoEscaneo(); });
 document.getElementById('envio-scan').addEventListener('keydown', e => { if (e.key === 'Enter') addProductoEnvio(); });
 
-// ============================================================
-// EDITAR CAMPO INLINE (ASIN, SKU, FNSKU, ubicaci\u00f3n)
-// ============================================================
-async function editarCampo(id, campo, label, nombre, placeholder) {
-  const valor = prompt(`${label} para:\n"${nombre}"`, '');
-  if (valor === null) return;
-  const valorLimpio = valor.trim();
-  
-  // Validar ASIN
-  if (campo === 'asin' && valorLimpio && !valorLimpio.match(/^B0[A-Z0-9]{8}$/i)) {
-    showToast('Formato ASIN incorrecto. Debe ser B0 + 8 caracteres', 'error');
-    return;
-  }
-  
-  const update = {};
-  update[campo] = valorLimpio || null;
-  update['updated_at'] = new Date().toISOString();
-  
-  const { error } = await db.from('productos').update(update).eq('id', id);
-  if (error) { showToast('Error: ' + error.message, 'error'); return; }
-  showToast(`${label} actualizado [OK]`, 'success');
-  cargarInventario();
-}
-
-// ============================================================
-// SINCRONIZACI\u00d3N - Cargar informe de transacciones
-// ============================================================
-async function procesarInformeTransacciones(file) {
-  if (!file) return;
-  document.getElementById('sync-procesando').style.display = 'block';
-  document.getElementById('sync-resultado').style.display = 'none';
-
-  const SKU_ASIN = await cargarSkuAsin();
-
-  const text = await file.text();
-  const lines = text.split('\n');
-  
-  // Encontrar l\u00ednea de cabecera (skiprows=9)
-  const headerIdx = 9;
-  const headers = lines[headerIdx].split('\t').map(h => h.trim().replace(/"/g,''));
-  
-  const getIdx = (name) => headers.findIndex(h => h.toLowerCase().includes(name.toLowerCase()));
-  const tipoIdx = getIdx('tipo');
-  const skuIdx = getIdx('sku');
-  const descIdx = getIdx('descripci\u00f3n');
-  const cantIdx = getIdx('cantidad');
-  const ventasIdx = getIdx('ventas de productos');
-  const comIdx = getIdx('tarifas de venta');
-  const fbaIdx = getIdx('tarifas de Log\u00edstica de Amazon');
-  const fechaIdx = getIdx('fecha y hora');
-  const pedidoIdx = getIdx('n\u00famero de pedido');
-
-  const IVA = 1.21;
-  const ALMACEN = 0.15;
-  
-  // Fechas del per\u00edodo
-  let fechaMin = null, fechaMax = null;
-  let totalUds = 0, totalFac = 0, totalPedidos = new Set();
-  const ventas = [];
-
-  for (let i = headerIdx + 1; i < lines.length; i++) {
-    const cols = lines[i].split('\t').map(c => c.trim().replace(/"/g,'').replace(',','.'));
-    if (cols.length < 5) continue;
-    const tipo = cols[tipoIdx] || '';
-    if (tipo !== 'Pedido') continue;
-
-    const fecha = cols[fechaIdx] || '';
-    const sku = cols[skuIdx] || '';
-    const asin = SKU_ASIN[sku] || null;
-    const uds = parseFloat(cols[cantIdx]) || 0;
-    const fac = parseFloat(cols[ventasIdx]) || 0;
-    const com = Math.abs(parseFloat(cols[comIdx]) || 0) / IVA;
-    const fba = Math.abs(parseFloat(cols[fbaIdx]) || 0) / IVA;
-    const pedido = cols[pedidoIdx] || '';
-
-    if (uds <= 0 || fac <= 0) continue;
-
-    totalUds += uds;
-    totalFac += fac;
-    totalPedidos.add(pedido);
-
-    // Parsear fecha
-    try {
-      const d = new Date(fecha);
-      if (!isNaN(d)) {
-        if (!fechaMin || d < fechaMin) fechaMin = d;
-        if (!fechaMax || d > fechaMax) fechaMax = d;
-      }
-    } catch(e) {}
-
-    ventas.push({ asin, sku, uds, fac, com, fba, almacen: uds * ALMACEN });
-  }
-
-  if (ventas.length === 0) {
-    showToast('No se encontraron ventas en el archivo', 'error');
-    document.getElementById('sync-procesando').style.display = 'none';
-    return;
-  }
-
-  const fmtFecha = (d) => d ? d.toLocaleDateString('es-ES') : '-';
-  const periodoInicio = fechaMin ? fechaMin.toISOString().split('T')[0] : null;
-  const periodoFin = fechaMax ? fechaMax.toISOString().split('T')[0] : null;
-  const nombreArchivo = file.name;
-
-  // Guardar en Supabase tabla ventas
-  // Primero comprobar si ya existe este per\u00edodo
-  const { data: existente } = await db.from('sincronizaciones')
-    .select('id').eq('archivo_nombre', nombreArchivo).limit(1);
-  
-  if (existente && existente.length > 0) {
-    showToast('Este archivo ya fue cargado anteriormente', 'error');
-    document.getElementById('sync-procesando').style.display = 'none';
-    return;
-  }
-
-  // Insertar ventas por ASIN agrupadas
-  const porAsin = {};
-  for (const v of ventas) {
-    const key = v.asin || v.sku;
-    if (!porAsin[key]) porAsin[key] = { asin: v.asin, sku: v.sku, uds: 0, fac: 0, com: 0, fba: 0, alm: 0 };
-    porAsin[key].uds += v.uds;
-    porAsin[key].fac += v.fac;
-    porAsin[key].com += v.com;
-    porAsin[key].fba += v.fba;
-    porAsin[key].alm += v.almacen;
-  }
-
-  const ventasInsert = Object.values(porAsin).map(p => ({
-    periodo_inicio: periodoInicio,
-    periodo_fin: periodoFin,
-    asin: p.asin,
-    sku: p.sku,
-    nombre: p.sku,
-    unidades: Math.round(p.uds),
-    importe: Math.round(p.fac * 100) / 100,
-    devueltas: 0,
-    archivo_origen: nombreArchivo
-  }));
-
-  // Insertar en lotes de 50
-  for (let i = 0; i < ventasInsert.length; i += 50) {
-    await db.from('ventas').insert(ventasInsert.slice(i, i+50));
-  }
-
-  // Registrar sincronizaci\u00f3n
-  await db.from('sincronizaciones').insert({
-    tipo: 'ventas',
-    archivo_nombre: nombreArchivo,
-    periodo_inicio: periodoInicio,
-    periodo_fin: periodoFin,
-    registros_procesados: ventas.length
-  });
-
-  document.getElementById('sync-procesando').style.display = 'none';
-  document.getElementById('sync-resultado').style.display = 'block';
-  document.getElementById('sync-resultado').innerHTML = `
-    <div class="info-box" style="margin-top:12px">
-      [OK] <strong>Informe procesado correctamente</strong><br>
-      Per\u00edodo: ${fmtFecha(fechaMin)} \u2192 ${fmtFecha(fechaMax)}<br>
-      ${Math.round(totalUds)} unidades \u00b7 ${totalFac.toFixed(0)}EUR facturado \u00b7 ${totalPedidos.size} pedidos
-    </div>`;
-  
-  showToast('Informe cargado [OK]', 'success');
-  cargarSincronizacion();
-}
-
-// ============================================================
-// SINCRONIZACI\u00d3N - Cargar inventario FBA
-// ============================================================
-async function procesarInventarioFBA(file) {
-  if (!file) return;
-  const text = await file.text();
-  const lines = text.split('\n');
-  
-  // Buscar cabecera con ASIN y quantity
-  let headerIdx = 0;
-  for (let i = 0; i < Math.min(10, lines.length); i++) {
-    if (lines[i].toLowerCase().includes('asin') && lines[i].toLowerCase().includes('quantity')) {
-      headerIdx = i; break;
-    }
-  }
-  
-  const sep = lines[headerIdx].includes('\t') ? '\t' : ',';
-  const headers = lines[headerIdx].split(sep).map(h => h.trim().replace(/"/g,'').toLowerCase());
-  const asinIdx = headers.findIndex(h => h === 'asin');
-  const qtyIdx = headers.findIndex(h => h.includes('quantity') || h.includes('fulfillable'));
-  const skuIdx = headers.findIndex(h => h.includes('sku'));
-  
-  if (asinIdx < 0 || qtyIdx < 0) {
-    showToast('Formato de archivo no reconocido. \u00bfEs el CSV de inventario FBA?', 'error');
-    return;
-  }
-
-  let actualizados = 0;
-  for (let i = headerIdx + 1; i < lines.length; i++) {
-    const cols = lines[i].split(sep).map(c => c.trim().replace(/"/g,''));
-    if (cols.length < 3) continue;
-    const asin = cols[asinIdx];
-    const qty = parseInt(cols[qtyIdx]) || 0;
-    if (!asin || !asin.startsWith('B')) continue;
-    
-    await db.from('productos').update({ stock_fba: qty, updated_at: new Date().toISOString() }).eq('asin', asin);
-    actualizados++;
-  }
-
-  // Registrar sincronizaci\u00f3n
-  await db.from('sincronizaciones').insert({
-    tipo: 'inventario_fba',
-    archivo_nombre: file.name,
-    registros_procesados: actualizados
-  });
-
-  document.getElementById('sync-fba-resultado').style.display = 'block';
-  document.getElementById('sync-fba-resultado').innerHTML = `
-    <div class="info-box" style="margin-top:10px">[OK] ${actualizados} productos actualizados con stock FBA real</div>`;
-  showToast(`Stock FBA actualizado - ${actualizados} productos [OK]`, 'success');
-  cargarSincronizacion();
-}
-
-// ============================================================
-// SINCRONIZACI\u00d3N - Cargar estado
-// ============================================================
-async function cargarSincronizacion() {
-  const { data: sincs } = await db.from('sincronizaciones')
-    .select('*').order('created_at', { ascending: false });
-  
-  if (!sincs || sincs.length === 0) {
-    document.getElementById('sync-ultima-fecha').textContent = 'Sin datos';
-    document.getElementById('sync-ultima-info').textContent = 'Sube el primer informe';
-    document.getElementById('sync-periodo').textContent = '-';
-    document.getElementById('sync-total-informes').textContent = '0';
-    document.getElementById('sync-historial').innerHTML = '<div class="empty-state"><div class="empty-icon">[FOLDER]</div><p>No hay informes cargados todav\u00eda</p></div>';
-    return;
-  }
-
-  // \u00daltima sincronizaci\u00f3n de ventas
-  const ultima = sincs.find(s => s.tipo === 'ventas');
-  if (ultima) {
-    const fechaFin = ultima.periodo_fin ? new Date(ultima.periodo_fin).toLocaleDateString('es-ES') : '-';
-    document.getElementById('sync-ultima-fecha').textContent = fechaFin;
-    document.getElementById('sync-ultima-info').textContent = 'Datos hasta esta fecha';
-    
-    // Per\u00edodo completo cubierto
-    const ventasSincs = sincs.filter(s => s.tipo === 'ventas' && s.periodo_inicio);
-    if (ventasSincs.length > 0) {
-      const fechas = ventasSincs.map(s => s.periodo_inicio).sort();
-      const inicio = new Date(fechas[0]).toLocaleDateString('es-ES');
-      document.getElementById('sync-periodo').textContent = `${inicio} \u2192 ${fechaFin}`;
-    }
-  }
-  
-  document.getElementById('sync-total-informes').textContent = sincs.filter(s => s.tipo === 'ventas').length;
-
-  // Historial
-  document.getElementById('sync-historial').innerHTML = sincs.slice(0, 20).map(s => {
-    const tipo = s.tipo === 'ventas' ? '[CHART]' : s.tipo === 'inventario_fba' ? '[BOX]' : '[DOC]';
-    const fecha = new Date(s.created_at).toLocaleDateString('es-ES');
-    const periodo = s.periodo_inicio && s.periodo_fin 
-      ? `${new Date(s.periodo_inicio).toLocaleDateString('es-ES')} \u2192 ${new Date(s.periodo_fin).toLocaleDateString('es-ES')}`
-      : '-';
-    return `
-      <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--gray-100)">
-        <span style="font-size:18px">${tipo}</span>
-        <div style="flex:1">
-          <div style="font-size:12px;font-weight:600;color:var(--navy)">${s.archivo_nombre || s.tipo}</div>
-          <div style="font-size:11px;color:var(--gray-400)">${periodo} \u00b7 ${s.registros_procesados || 0} registros \u00b7 Cargado el ${fecha}</div>
-        </div>
-      </div>`;
-  }).join('');
-}
-
-// Helper: cargar tabla SKU\u2192ASIN desde Supabase
-async function cargarSkuAsin() {
-  const { data } = await db.from('productos').select('sku,asin').not('sku','is',null);
-  const map = {};
-  (data||[]).forEach(p => { if (p.sku && p.asin) map[p.sku] = p.asin; });
-  return map;
-}
-
-// Funci\u00f3n toggle descatalogar
-async function toggleDescatalogar(id, estadoActual) {
-  const esDesc = estadoActual === 'DESCATALOGADO';
-  const nuevoEstado = esDesc ? 'OK' : 'DESCATALOGADO';
-  const msg = esDesc ? '\u00bfReactivar este producto?' : '\u00bfMarcar como descatalogado? No aparecer\u00e1 en alertas de compra.';
-  if (!confirm(msg)) return;
-  await db.from('productos').update({ estado: nuevoEstado, updated_at: new Date().toISOString() }).eq('id', id);
-  showToast(esDesc ? 'Producto reactivado [OK]' : 'Producto descatalogado [STOP]', esDesc ? 'success' : '');
-  cargarInventario();
-}
-
-// Funci\u00f3n switch tab entrada
-function switchTabEntrada(el, tabId) {
-  el.parentElement.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  el.classList.add('active');
-  document.getElementById('entrada-scanner').style.display = tabId === 'entrada-scanner' ? 'block' : 'none';
-  document.getElementById('entrada-factura').style.display = tabId === 'entrada-factura' ? 'block' : 'none';
-}
-
-// Funci\u00f3n procesar factura PDF con IA
-async function procesarFacturaPDF(file) {
-  if (!file) return;
-  document.getElementById('factura-procesando').style.display = 'block';
-  document.getElementById('factura-resultado-area').style.display = 'none';
-
-  const proveedor = document.getElementById('factura-proveedor').value;
-  const ref = document.getElementById('factura-ref').value.trim();
-
-  // Leer PDF como base64
-  const base64 = await new Promise((res, rej) => {
-    const reader = new FileReader();
-    reader.onload = () => res(reader.result.split(',')[1]);
-    reader.onerror = rej;
-    reader.readAsDataURL(file);
-  });
-
-  try {
-    const prompt = `Eres un asistente de extracci\u00f3n de datos de facturas B2B de proveedores de Funkos y productos de consumo.
-Analiza esta factura y extrae SOLO las l\u00edneas de producto (no env\u00edos, descuentos generales ni cargos de transporte).
-Para cada producto extrae: EAN (c\u00f3digo de barras de 13 d\u00edgitos si existe), nombre del producto, cantidad, precio unitario de compra (sin IVA, despu\u00e9s de descuentos si los hay).
-Los EAN de Funko empiezan por 889698. Los de BEMS tienen un 0 extra al inicio que hay que eliminar (0889698... \u2192 889698...).
-Para OSMA y HEO no hay EAN en la factura - devuelve el c\u00f3digo interno del proveedor en el campo "codigo_proveedor" y deja ean como null.
-Responde SOLO con JSON v\u00e1lido, sin texto adicional, sin backticks:
-{"proveedor": "nombre detectado", "referencia": "n\u00famero factura", "fecha": "dd/mm/yyyy", "lineas": [{"ean": "1234567890123 o null", "codigo_proveedor": "c\u00f3digo interno o null", "nombre": "nombre producto", "cantidad": 12, "pvd": 7.83}]}`;
-
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2000,
-        messages: [{ role: 'user', content: [
-          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
-          { type: 'text', text: prompt }
-        ]}]
-      })
-    });
-
-    const data = await response.json();
-    const text = data.content[0].text;
-    const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
-
-    // Auto-rellenar proveedor y referencia si no est\u00e1n
-    if (!document.getElementById('factura-ref').value && parsed.referencia) {
-      document.getElementById('factura-ref').value = parsed.referencia;
-    }
-
-    renderLineasFactura(parsed.lineas, parsed.proveedor || proveedor);
-    document.getElementById('factura-resultado-titulo').textContent = `${parsed.lineas.length} productos detectados - ${parsed.proveedor || proveedor}`;
-    document.getElementById('factura-resultado-area').style.display = 'block';
-
-    // Guardar factura en BD
-    const { data: factData } = await db.from('facturas').insert({
-      referencia: ref || parsed.referencia || 'Sin ref',
-      proveedor: parsed.proveedor || proveedor || 'Desconocido',
-      fecha: parsed.fecha ? parsed.fecha.split('/').reverse().join('-') : null,
-      procesada: false
-    }).select().single();
-
-    window._facturaActualId = factData?.id;
-
-  } catch(e) {
-    showToast('Error procesando factura: ' + e.message, 'error');
-    console.error(e);
-  } finally {
-    document.getElementById('factura-procesando').style.display = 'none';
-  }
-}
-
-let _lineasFactura = [];
-
-function renderLineasFactura(lineas, proveedor) {
-  _lineasFactura = lineas;
-  const tbody = document.getElementById('factura-lineas-tbody');
-  tbody.innerHTML = lineas.map((l, i) => {
-    const tieneEan = l.ean && l.ean.length >= 12;
-    const bg = tieneEan ? '' : 'background:var(--amber-light)';
-    return `<tr style="${bg}">
-      <td>
-        ${tieneEan
-          ? `<span class="td-mono" style="font-size:11px">${l.ean}</span>`
-          : `<div style="display:flex;gap:4px;align-items:center">
-              <input class="input" style="width:150px;font-size:11px;padding:4px 8px;font-family:'DM Mono',monospace" 
-                placeholder="Escanea o escribe EAN" id="ean-line-${i}" value="${l.codigo_proveedor||''}">
-              <span class="badge badge-amber" style="font-size:10px">[!] Sin EAN</span>
-             </div>`}
-      </td>
-      <td style="font-size:12px;font-weight:600;color:var(--navy)">${l.nombre}</td>
-      <td style="text-align:center;font-weight:700">${l.cantidad}</td>
-      <td style="font-family:'DM Mono',monospace;font-size:12px">${l.pvd ? l.pvd.toFixed(2)+'EUR' : '-'}</td>
-      <td>${tieneEan ? '<span class="badge badge-green">[OK] OK</span>' : '<span class="badge badge-amber">[!] Necesita EAN</span>'}</td>
-      <td><button onclick="confirmarLineaFactura(${i})" class="btn btn-ghost btn-sm">[OK]</button></td>
-    </tr>`;
-  }).join('');
-}
-
-async function confirmarLineaFactura(i) {
-  const linea = _lineasFactura[i];
-  // Verificar si hay EAN en el input si no ten\u00eda
-  if (!linea.ean || linea.ean.length < 12) {
-    const inputEan = document.getElementById('ean-line-' + i);
-    if (inputEan && inputEan.value.length >= 12) {
-      linea.ean = inputEan.value.trim();
-    }
-  }
-  if (!linea.ean || linea.ean.length < 12) {
-    showToast('Escanea o introduce el EAN antes de confirmar', 'error');
-    return;
-  }
-  // Buscar producto en inventario
-  const { data } = await db.from('productos').select('*').eq('ean', linea.ean).limit(1);
-  if (data && data.length > 0) {
-    const p = data[0];
-    const nuevoStock = p.stock_moloka + linea.cantidad;
-    await db.from('productos').update({ stock_moloka: nuevoStock, updated_at: new Date().toISOString() }).eq('id', p.id);
-    await db.from('movimientos').insert({ producto_id: p.id, tipo: 'entrada', cantidad: linea.cantidad, notas: 'Factura ' + (document.getElementById('factura-ref').value || '') });
-    if (window._facturaActualId) {
-      await db.from('factura_lineas').insert({ factura_id: window._facturaActualId, producto_id: p.id, ean: linea.ean, nombre_en_factura: linea.nombre, cantidad: linea.cantidad, pvd: linea.pvd });
-    }
-    showToast(`+${linea.cantidad} ud de ${p.nombre.substring(0,30)} [OK]`, 'success');
-  } else {
-    showToast('EAN no encontrado en inventario - a\u00f1ade el producto primero', 'error');
-    return;
-  }
-  // Marcar l\u00ednea como confirmada
-  _lineasFactura[i]._confirmada = true;
-  const tbody = document.getElementById('factura-lineas-tbody');
-  const row = tbody.rows[i];
-  if (row) { row.style.opacity = '0.4'; row.style.textDecoration = 'line-through'; }
-}
-
-async function confirmarTodasLineasFactura() {
-  for (let i = 0; i < _lineasFactura.length; i++) {
-    if (!_lineasFactura[i]._confirmada) await confirmarLineaFactura(i);
-  }
-  showToast('Todas las l\u00edneas procesadas [OK]', 'success');
-  if (window._facturaActualId) {
-    await db.from('facturas').update({ procesada: true }).eq('id', window._facturaActualId);
-  }
-  cargarFacturas();
-}
-
-// Arranque - verificar login
+// Arranque \u2014 verificar login
 if (checkLogin()) init();
-
-// ============================================================
-// DATOS RENTABILIDAD (enero-marzo 2026)
-// ============================================================
-const RENT_DATA = { meses: [], semanas: [] }; // Se carga desde Supabase;
-
-let rentPeriodoActual = 'acumulado';
-
-function verRentabilidad(periodo) {
-  rentPeriodoActual = periodo;
-  // Actualizar botones
-  ['acumulado','marzo','febrero','enero','semanal'].forEach(p => {
-    const btn = document.getElementById('btn-rent-' + (p==='acumulado'?'acum':p==='semanal'?'sem':p.slice(0,3)));
-    if (btn) { btn.className = p === periodo ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'; }
-  });
-
-  const semanView = document.getElementById('rent-semanal-view');
-  const detView = document.getElementById('rent-detalle-view');
-
-  if (periodo === 'semanal') {
-    semanView.style.display = 'block';
-    detView.style.display = 'none';
-    renderSemanas();
-    renderKPIsAcumulado();
-  } else {
-    semanView.style.display = 'none';
-    detView.style.display = 'block';
-    if (periodo === 'acumulado') { renderKPIsAcumulado(); renderTopAcumulado(); }
-    else { renderKPIsMes(periodo); renderTopMes(periodo); }
-  }
-}
-
-function renderKPIsAcumulado() {
-  const total = RENT_DATA.meses.reduce((acc, m) => ({
-    fac: acc.fac + m.facturacion_iva,
-    cost: acc.cost + m.coste_total,
-    ben: acc.ben + m.beneficio_neto,
-    uds: acc.uds + m.unidades,
-  }), { fac:0, cost:0, ben:0, uds:0 });
-  const margen = total.fac > 0 ? (total.ben / total.fac * 100).toFixed(1) : 0;
-  renderKPIs(total.fac, total.cost, total.ben, parseFloat(margen), total.uds, 'Ene-Mar 2026');
-}
-
-function renderKPIsMes(mes) {
-  const m = RENT_DATA.meses.find(x => x.mes === mes);
-  if (!m) return;
-  renderKPIs(m.facturacion_iva, m.coste_total, m.beneficio_neto, m.margen_pct, m.unidades, mes.charAt(0).toUpperCase()+mes.slice(1)+' 2026');
-}
-
-function renderKPIs(fac, cost, ben, margen, uds, label) {
-  document.getElementById('rent-sub').textContent = label;
-  const benColor = ben > 0 ? 'green' : 'red';
-  document.getElementById('rent-kpis').innerHTML = `
-    <div class="stat-card"><div class="stat-label">Facturaci\u00f3n c/IVA</div><div class="stat-value">${fac.toFixed(0)}EUR</div><div class="stat-sub">${uds} unidades</div></div>
-    <div class="stat-card"><div class="stat-label">Costes totales</div><div class="stat-value">${cost.toFixed(0)}EUR</div><div class="stat-sub">PVD + comisiones + env\u00edo</div></div>
-    <div class="stat-card"><div class="stat-label">Beneficio neto</div><div class="stat-value ${benColor}">${ben.toFixed(0)}EUR</div><div class="stat-sub">${label}</div></div>
-    <div class="stat-card"><div class="stat-label">Margen</div><div class="stat-value ${margen > 10 ? 'green' : margen > 5 ? 'amber' : 'red'}">${margen}%</div><div class="stat-sub">sobre facturaci\u00f3n</div></div>
-  `;
-}
-
-function renderTopAcumulado() {
-  // Agregar todos los meses
-  const porAsin = {};
-  RENT_DATA.meses.forEach(m => {
-    m.productos.forEach(p => {
-      if (!porAsin[p.asin]) porAsin[p.asin] = {...p, unidades:0, facturado_iva:0, coste_pvd:0, comision_amazon:0, coste_envio:0, coste_almacen:0, beneficio:0};
-      porAsin[p.asin].unidades += p.unidades;
-      porAsin[p.asin].facturado_iva += p.facturado_iva;
-      porAsin[p.asin].coste_pvd += p.coste_pvd;
-      porAsin[p.asin].comision_amazon += p.comision_amazon;
-      porAsin[p.asin].coste_envio += p.coste_envio;
-      porAsin[p.asin].coste_almacen += p.coste_almacen;
-      porAsin[p.asin].beneficio += p.beneficio;
-    });
-  });
-  const lista = Object.values(porAsin).sort((a,b) => b.beneficio - a.beneficio);
-  renderTablaTop(lista);
-  renderCostes(lista);
-}
-
-function renderTopMes(mes) {
-  const m = RENT_DATA.meses.find(x => x.mes === mes);
-  if (!m) return;
-  renderTablaTop(m.productos);
-  renderCostes(m.productos);
-}
-
-function renderTablaTop(productos) {
-  const tbody = document.getElementById('rent-top-tbody');
-  // Separar p\u00e9rdidas (al final) y ordenar el resto por beneficio
-  const conBeneficio = productos.filter(p => p.beneficio >= 0).sort((a,b) => b.beneficio - a.beneficio);
-  const enPerdidas = productos.filter(p => p.beneficio < 0).sort((a,b) => a.beneficio - b.beneficio);
-  const todos = [...conBeneficio, ...enPerdidas];
-
-  tbody.innerHTML = todos.map(p => {
-    const enPerd = p.beneficio < 0;
-    const roi = p.roi !== null ? p.roi : (p.coste_pvd > 0 ? (p.beneficio/p.coste_pvd*100).toFixed(1) : '-');
-    const margen = p.margen !== null ? p.margen : '-';
-    const roiClass = roi >= 15 ? 'roi-positive' : roi >= 0 ? 'roi-neutral' : 'roi-negative';
-    const rowBg = enPerd ? 'background:var(--red-light)' : '';
-    return `<tr style="${rowBg}">
-      <td><div class="td-main" title="${p.nombre}">${enPerd?'[ROJO] ':''}${p.nombre.substring(0,38)}${p.nombre.length>38?'...':''}</div><div class="td-sub td-mono">${p.asin||p.sku||''}</div></td>
-      <td style="text-align:center;font-weight:600">${p.unidades}</td>
-      <td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px">${p.facturado_iva.toFixed(0)}EUR</td>
-      <td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;color:${p.beneficio>=0?'var(--green)':'var(--red)'}">${p.beneficio.toFixed(0)}EUR</td>
-      <td style="text-align:right"><span class="${roiClass}">${roi}%</span></td>
-      <td style="text-align:right;color:${margen>=10?'var(--green)':margen>=0?'var(--amber)':'var(--red)'};font-weight:600;font-size:12px">${margen}%</td>
-    </tr>`;
-  }).join('');
-}
-
-function renderCostes(productos) {
-  const tot = productos.reduce((a, p) => ({
-    pvd: a.pvd + p.coste_pvd,
-    com: a.com + p.comision_amazon,
-    env: a.env + p.coste_envio,
-    alm: a.alm + p.coste_almacen,
-    fac: a.fac + p.facturado_iva,
-    ben: a.ben + p.beneficio,
-  }), { pvd:0, com:0, env:0, alm:0, fac:0, ben:0 });
-
-  document.getElementById('rent-costes-detalle').innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:10px">
-      ${[
-        ['\u1f6d2 Coste de producto (PVD)', tot.pvd, ''],
-        ['[BOX] Comisi\u00f3n Amazon', tot.com, ''],
-        ['[TRUCK] Log\u00edstica FBA', tot.env, ''],
-        ['\u1f3ed Almac\u00e9n Moloka', tot.alm, ''],
-      ].map(([label, val, note]) => `
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--gray-50);border-radius:8px">
-          <span style="font-size:13px;color:var(--gray-700)">${label}</span>
-          <span style="font-size:14px;font-weight:700;color:var(--navy);font-family:'DM Mono',monospace">${val.toFixed(0)}EUR</span>
-        </div>`).join('')}
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--navy);border-radius:8px">
-        <span style="font-size:13px;color:rgba(255,255,255,0.7)">[MONEY] Beneficio neto</span>
-        <span style="font-size:16px;font-weight:700;color:${tot.ben>=0?'#34D399':'#F87171'};font-family:'DM Mono',monospace">${tot.ben.toFixed(0)}EUR</span>
-      </div>
-    </div>
-  `;
-}
-
-function renderSemanas() {
-  const tbody = document.getElementById('rent-semanas-tbody');
-  tbody.innerHTML = RENT_DATA.semanas.map((s, i) => {
-    const bg = i%2===0 ? '' : 'style="background:var(--gray-50)"';
-    return `<tr ${bg}>
-      <td style="font-family:'DM Mono',monospace;font-size:12px">Sem ${s.inicio}</td>
-      <td style="text-align:center;font-weight:700">${s.unidades}</td>
-      <td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px">${s.facturado.toFixed(0)}EUR</td>
-      <td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px;color:var(--gray-500)">${s.facturado_sin_iva.toFixed(0)}EUR</td>
-      <td style="text-align:center;color:var(--gray-400)">${s.pedidos}</td>
-      <td><span class="badge badge-gray">${s.mes}</span></td>
-    </tr>`;
-  }).join('');
-}
-
-// ============================================================
-// CALCULADORA BUY BOX
-// ============================================================
-let buyboxProducto = null;
-
-function abrirCalculadora(asin, nombre, pvd, comisionPct, envio) {
-  buyboxProducto = { asin, nombre, pvd, comisionPct: comisionPct || 0.155, envio: envio || 3.74 };
-  document.getElementById('bb-nombre').textContent = nombre;
-  document.getElementById('bb-pvd').value = pvd ? pvd.toFixed(2) : '';
-  document.getElementById('bb-comision-pct').value = ((comisionPct || 0.155) * 100).toFixed(1);
-  document.getElementById('bb-envio').value = (envio || 3.74).toFixed(2);
-  document.getElementById('bb-almacen').value = '0.10';
-  document.getElementById('bb-buybox').value = '';
-  document.getElementById('bb-resultado').innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.4);font-size:13px;padding:20px">Introduce el precio de la Buy Box para calcular</div>';
-  document.getElementById('bb-verdict').style.display = 'none';
-  openModal('modal-buybox');
-}
-
-function calcularBuyBox() {
-  const buybox = parseFloat(document.getElementById('bb-buybox').value.replace(',','.')) || 0;
-  const pvd = parseFloat(document.getElementById('bb-pvd').value.replace(',','.')) || 0;
-  const comPct = parseFloat(document.getElementById('bb-comision-pct').value.replace(',','.')) / 100 || 0.155;
-  const envio = parseFloat(document.getElementById('bb-envio').value.replace(',','.')) || 3.74;
-  const almacen = parseFloat(document.getElementById('bb-almacen').value.replace(',','.')) || 0.10;
-
-  if (!buybox || !pvd) return;
-
-  const baseImponible = buybox / 1.21;
-  const comisionAmazon = buybox * comPct;
-  const beneficio = baseImponible - pvd - comisionAmazon - envio - almacen;
-  const roi = pvd > 0 ? (beneficio / pvd * 100) : 0;
-  const margen = buybox > 0 ? (beneficio / buybox * 100) : 0;
-
-  const benColor = beneficio > 0 ? 'green' : 'red';
-  const roiColor = roi >= 15 ? 'green' : roi >= 0 ? 'amber' : 'red';
-
-  document.getElementById('bb-resultado').innerHTML = `
-    <div class="buybox-result">
-      <div class="buybox-kpi"><div class="label">Base imponible</div><div class="val">${baseImponible.toFixed(2)}EUR</div></div>
-      <div class="buybox-kpi"><div class="label">Comisi\u00f3n Amazon</div><div class="val">${comisionAmazon.toFixed(2)}EUR</div></div>
-      <div class="buybox-kpi"><div class="label">Beneficio</div><div class="val ${benColor}">${beneficio.toFixed(2)}EUR</div></div>
-      <div class="buybox-kpi"><div class="label">ROI</div><div class="val ${roiColor}">${roi.toFixed(1)}%</div></div>
-    </div>
-    <div style="margin-top:10px;padding:10px;background:rgba(255,255,255,0.05);border-radius:8px;font-size:11px;color:rgba(255,255,255,0.5)">
-      PVD: ${pvd.toFixed(2)}EUR \u00b7 Com.Amazon: ${comisionAmazon.toFixed(2)}EUR \u00b7 FBA: ${envio.toFixed(2)}EUR \u00b7 Almac\u00e9n: ${almacen.toFixed(2)}EUR
-    </div>
-  `;
-
-  const verdict = document.getElementById('bb-verdict');
-  verdict.style.display = 'block';
-  if (roi >= 15) { verdict.className = 'buybox-verdict pelear'; verdict.textContent = '[OK] PELEAR - ROI suficiente'; }
-  else if (roi >= 0) { verdict.className = 'buybox-verdict valorar'; verdict.textContent = '[AMARILLO] VALORAR - Beneficio bajo'; }
-  else { verdict.className = 'buybox-verdict no'; verdict.textContent = '[NO] NO INTERESA - P\u00e9rdidas'; }
-}
 </script>
 </body>
 </html>
