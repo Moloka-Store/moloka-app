@@ -332,6 +332,12 @@
     <div class="page-header">
       <div><div class="page-title">🔄 Entrada de Mercancía</div><div class="page-sub">Registra la mercancía que llega al almacén</div></div>
     </div>
+    <div class="tabs">
+      <div class="tab active" onclick="switchTabEntrada(this,'entrada-scan')">📷 Escanear</div>
+      <div class="tab" onclick="switchTabEntrada(this,'entrada-fact')">📄 Subir Factura</div>
+    </div>
+
+    <div id="entrada-scan">
     <div class="grid-2" style="align-items:start">
       <div>
         <div class="card" style="margin-bottom:14px">
@@ -389,6 +395,71 @@
           <span style="font-size:12px;color:var(--gray-400)" id="sesion-count">0 entradas</span>
         </div>
         <div id="sesion-list"><div class="empty-state"><div class="empty-icon">📦</div><p>Escanea el primer producto para empezar</p></div></div>
+      </div>
+    </div>
+    </div><!-- end entrada-scan -->
+
+    <div id="entrada-fact" style="display:none">
+      <div class="grid-2" style="align-items:start">
+        <div>
+          <div class="card" style="margin-bottom:14px">
+            <div class="section-title" style="margin-bottom:4px">Subir factura de proveedor</div>
+            <p style="font-size:12px;color:var(--gray-400);margin-bottom:14px">La IA extrae los productos automáticamente. Para OSMA y HEO escanea la caja al llegar para vincular el EAN.</p>
+            <div onclick="document.getElementById('fact-file-input').click()" style="cursor:pointer;border:2px dashed var(--gray-200);border-radius:12px;padding:24px;text-align:center;background:var(--gray-50)">
+              <div style="font-size:32px;margin-bottom:8px">📄</div>
+              <p style="font-size:13px;font-weight:600;color:var(--navy)">Arrastra el PDF o haz clic</p>
+              <p style="font-size:11px;color:var(--gray-400);margin-top:4px">TCG · DBLine · BEMS · Zentrada · OSMA · HEO</p>
+            </div>
+            <input type="file" id="fact-file-input" accept=".pdf" style="display:none" onchange="procesarFacturaPDF(this.files[0])">
+            <div class="form-row" style="margin-top:14px">
+              <div class="input-group">
+                <div class="input-label">Proveedor</div>
+                <select class="input" id="fact-proveedor">
+                  <option value="">Auto-detectar</option>
+                  <option value="TCG">TCG Factory</option>
+                  <option value="DBLine">DBLine</option>
+                  <option value="BEMS">BEMS</option>
+                  <option value="Zentrada">Zentrada</option>
+                  <option value="OSMA">OSMA</option>
+                  <option value="HEO">HEO</option>
+                </select>
+              </div>
+              <div class="input-group">
+                <div class="input-label">Referencia factura</div>
+                <input class="input" id="fact-ref" placeholder="TCG-00322...">
+              </div>
+            </div>
+          </div>
+          <div id="fact-procesando" style="display:none">
+            <div class="info-box">⏳ Procesando factura con IA... puede tardar hasta 30 segundos</div>
+          </div>
+          <div id="fact-resultado-area" style="display:none">
+            <div class="card">
+              <div class="section-header">
+                <div class="section-title" id="fact-resultado-titulo">Productos detectados</div>
+                <button class="btn btn-green btn-sm" onclick="confirmarTodasFactura()">✅ Confirmar todas</button>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr>
+                    <th>EAN</th><th>Producto</th><th style="text-align:center">Cant.</th>
+                    <th>PVD</th><th>Estado</th><th></th>
+                  </tr></thead>
+                  <tbody id="fact-lineas-tbody"></tbody>
+                </table>
+              </div>
+              <div class="warning-box" style="margin-top:12px">
+                ⚠️ Productos en amarillo (sin EAN) son de OSMA/HEO. Escanea la caja física al llegar la mercancía o introduce el EAN manualmente para vincularlos.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="section-title" style="margin-bottom:12px">Códigos OSMA/HEO mapeados</div>
+          <p style="font-size:12px;color:var(--gray-400);margin-bottom:12px">Cada vez que vinculas un código de OSMA o HEO con un EAN, se guarda aquí para siempre.</p>
+          <div id="fact-codigos-list"><div class="empty-state" style="padding:20px"><p style="font-size:13px;color:var(--gray-400)">Aún no hay códigos vinculados</p></div></div>
+        </div>
       </div>
     </div>
   </div>
@@ -1738,6 +1809,250 @@ async function verRentabilidad(periodo) {
       <strong style="font-family:'DM Mono',monospace;font-size:15px">${mesData.beneficio_neto.toFixed(0)}€</strong>
     </div>
   `;
+}
+
+// ============================================================
+// FACTURAS - Subir PDF y procesar con IA
+// ============================================================
+let _factLineas = [];
+let _factId = null;
+
+function switchTabEntrada(el, tabId) {
+  el.parentElement.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('entrada-scan').style.display = tabId === 'entrada-scan' ? 'block' : 'none';
+  document.getElementById('entrada-fact').style.display = tabId === 'entrada-fact' ? 'block' : 'none';
+  if (tabId === 'entrada-fact') cargarCodigosProveedor();
+}
+
+async function procesarFacturaPDF(file) {
+  if (!file) return;
+  document.getElementById('fact-procesando').style.display = 'block';
+  document.getElementById('fact-resultado-area').style.display = 'none';
+
+  try {
+    // Leer PDF como base64
+    const base64 = await new Promise((res, rej) => {
+      const reader = new FileReader();
+      reader.onload = () => res(reader.result.split(',')[1]);
+      reader.onerror = rej;
+      reader.readAsDataURL(file);
+    });
+
+    const proveedorManual = document.getElementById('fact-proveedor').value;
+    const refManual = document.getElementById('fact-ref').value.trim();
+
+    const prompt = 'Eres un asistente de extraccion de datos de facturas B2B de proveedores de Funkos y productos de consumo.\n' +
+      'Analiza esta factura y extrae SOLO las lineas de producto (no envios, descuentos generales ni cargos de transporte).\n' +
+      'Para cada producto extrae: EAN (codigo de barras de 13 digitos si existe), nombre del producto, cantidad, precio unitario de compra (sin IVA, despues de descuentos si los hay).\n' +
+      'Reglas importantes:\n' +
+      '- Los EAN de Funko empiezan por 889698.\n' +
+      '- BEMS tiene un 0 extra al inicio del EAN: 0889698... debe convertirse a 889698... (quita el 0 inicial)\n' +
+      '- TCG, DBLine, BEMS, Zentrada: el EAN aparece en la factura.\n' +
+      '- OSMA y HEO: NO hay EAN. Solo codigo interno del proveedor (ej: 1019, 1022, FK11222, FK33248). Devuelve ese codigo en "codigo_proveedor" y deja "ean" como null.\n' +
+      '- Detecta el proveedor por el formato y nombre.\n' +
+      'Responde SOLO con JSON valido, sin texto adicional, sin backticks, sin markdown:\n' +
+      '{"proveedor": "TCG/DBLine/BEMS/Zentrada/OSMA/HEO", "referencia": "numero factura", "fecha": "YYYY-MM-DD", "lineas": [{"ean": "1234567890123 o null", "codigo_proveedor": "codigo interno o null", "nombre": "nombre producto", "cantidad": 12, "pvd": 7.83}]}';
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 4000,
+        messages: [{ role: 'user', content: [
+          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
+          { type: 'text', text: prompt }
+        ]}]
+      })
+    });
+
+    if (!response.ok) throw new Error('Error API: ' + response.status);
+    const data = await response.json();
+    const textoRespuesta = data.content[0].text;
+    const limpio = textoRespuesta.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(limpio);
+
+    // Auto-rellenar campos
+    if (!refManual && parsed.referencia) {
+      document.getElementById('fact-ref').value = parsed.referencia;
+    }
+    if (!proveedorManual && parsed.proveedor) {
+      document.getElementById('fact-proveedor').value = parsed.proveedor;
+    }
+
+    const proveedor = parsed.proveedor || proveedorManual || 'Desconocido';
+    const referencia = parsed.referencia || refManual || 'Sin ref';
+
+    // Cruzar codigos OSMA/HEO con tabla de mapeos previos
+    const { data: codigos } = await db.from('codigos_proveedor').select('*').eq('proveedor', proveedor);
+    const mapaCodigos = {};
+    (codigos || []).forEach(c => { mapaCodigos[c.codigo_proveedor] = c.ean; });
+
+    // Aplicar mapeos
+    parsed.lineas.forEach(l => {
+      if (!l.ean && l.codigo_proveedor && mapaCodigos[l.codigo_proveedor]) {
+        l.ean = mapaCodigos[l.codigo_proveedor];
+        l._auto_mapeado = true;
+      }
+    });
+
+    // Crear registro de factura en BD
+    const { data: factData } = await db.from('facturas').insert({
+      referencia: referencia,
+      proveedor: proveedor,
+      fecha: parsed.fecha || null,
+      procesada: false
+    }).select().single();
+    _factId = factData ? factData.id : null;
+
+    renderLineasFactura(parsed.lineas, proveedor);
+    document.getElementById('fact-resultado-titulo').textContent = parsed.lineas.length + ' productos detectados — ' + proveedor;
+    document.getElementById('fact-resultado-area').style.display = 'block';
+
+  } catch(e) {
+    showToast('Error procesando factura: ' + e.message, 'error');
+    console.error(e);
+  } finally {
+    document.getElementById('fact-procesando').style.display = 'none';
+  }
+}
+
+function renderLineasFactura(lineas, proveedor) {
+  _factLineas = lineas.map(l => ({...l, proveedor}));
+  const tbody = document.getElementById('fact-lineas-tbody');
+  tbody.innerHTML = lineas.map((l, i) => {
+    const tieneEan = l.ean && l.ean.length >= 12;
+    const bg = tieneEan ? '' : 'background:var(--amber-light)';
+    const estado = tieneEan
+      ? (l._auto_mapeado ? '<span class="badge badge-blue">🔗 Auto</span>' : '<span class="badge badge-green">✅ OK</span>')
+      : '<span class="badge badge-amber">⚠️ Sin EAN</span>';
+    return '<tr style="' + bg + '" id="fact-row-' + i + '">' +
+      '<td>' + (tieneEan
+        ? '<span class="td-mono" style="font-size:11px">' + l.ean + '</span>' +
+          (l.codigo_proveedor ? '<div style="font-size:10px;color:var(--gray-400)">Cod: ' + l.codigo_proveedor + '</div>' : '')
+        : '<div style="display:flex;flex-direction:column;gap:4px">' +
+          '<input class="input" style="width:160px;font-size:11px;padding:4px 8px;font-family:DM Mono,monospace" placeholder="Escanea o escribe EAN" id="ean-line-' + i + '">' +
+          '<span style="font-size:10px;color:var(--gray-400)">Cod ' + (l.codigo_proveedor || '?') + '</span>' +
+          '</div>') +
+      '</td>' +
+      '<td style="font-size:12px;font-weight:600;color:var(--navy)">' + (l.nombre || '') + '</td>' +
+      '<td style="text-align:center;font-weight:700">' + l.cantidad + '</td>' +
+      '<td style="font-family:DM Mono,monospace;font-size:12px">' + (l.pvd ? l.pvd.toFixed(2) + '€' : '—') + '</td>' +
+      '<td>' + estado + '</td>' +
+      '<td><button onclick="confirmarLineaFactura(' + i + ')" class="btn btn-ghost btn-sm">✅</button></td>' +
+      '</tr>';
+  }).join('');
+}
+
+async function confirmarLineaFactura(i) {
+  const linea = _factLineas[i];
+  if (linea._confirmada) return;
+
+  // Si no tenia EAN, comprobar si lo escribio en el input
+  if (!linea.ean || linea.ean.length < 12) {
+    const inputEan = document.getElementById('ean-line-' + i);
+    if (inputEan && inputEan.value.trim().length >= 12) {
+      linea.ean = inputEan.value.trim();
+      // Guardar mapeo para futuras facturas
+      if (linea.codigo_proveedor && linea.proveedor) {
+        await db.from('codigos_proveedor').upsert({
+          proveedor: linea.proveedor,
+          codigo_proveedor: linea.codigo_proveedor,
+          ean: linea.ean,
+          nombre: linea.nombre
+        }, { onConflict: 'proveedor,codigo_proveedor' });
+        showToast('Código vinculado: ' + linea.codigo_proveedor + ' → ' + linea.ean, 'success');
+      }
+    }
+  }
+
+  if (!linea.ean || linea.ean.length < 12) {
+    showToast('Escanea o introduce el EAN antes de confirmar', 'error');
+    return;
+  }
+
+  // Buscar producto en inventario
+  const { data: prods } = await db.from('productos').select('*').eq('ean', linea.ean).limit(1);
+  if (!prods || prods.length === 0) {
+    showToast('EAN no encontrado en inventario. Añade el producto primero.', 'error');
+    return;
+  }
+
+  const p = prods[0];
+  const nuevoStock = (p.stock_moloka || 0) + linea.cantidad;
+  await db.from('productos').update({
+    stock_moloka: nuevoStock,
+    updated_at: new Date().toISOString()
+  }).eq('id', p.id);
+
+  // Actualizar PVD si la factura trae nuevo precio
+  if (linea.pvd && linea.pvd > 0) {
+    await db.from('productos').update({ pvd: linea.pvd }).eq('id', p.id);
+  }
+
+  // Registrar movimiento
+  await db.from('movimientos').insert({
+    producto_id: p.id,
+    tipo: 'entrada',
+    cantidad: linea.cantidad,
+    notas: 'Factura ' + (document.getElementById('fact-ref').value || '')
+  });
+
+  // Vincular a factura
+  if (_factId) {
+    await db.from('factura_lineas').insert({
+      factura_id: _factId,
+      producto_id: p.id,
+      ean: linea.ean,
+      nombre_en_factura: linea.nombre,
+      cantidad: linea.cantidad,
+      pvd: linea.pvd
+    });
+  }
+
+  showToast('+' + linea.cantidad + ' ud de ' + (p.nombre || '').substring(0, 30) + ' ✅', 'success');
+  linea._confirmada = true;
+  const row = document.getElementById('fact-row-' + i);
+  if (row) { row.style.opacity = '0.4'; row.style.textDecoration = 'line-through'; }
+}
+
+async function confirmarTodasFactura() {
+  let confirmadas = 0;
+  let pendientes = 0;
+  for (let i = 0; i < _factLineas.length; i++) {
+    if (_factLineas[i]._confirmada) continue;
+    if (!_factLineas[i].ean || _factLineas[i].ean.length < 12) {
+      const inputEan = document.getElementById('ean-line-' + i);
+      if (!inputEan || inputEan.value.trim().length < 12) { pendientes++; continue; }
+    }
+    await confirmarLineaFactura(i);
+    confirmadas++;
+  }
+  if (_factId && pendientes === 0) {
+    await db.from('facturas').update({ procesada: true }).eq('id', _factId);
+  }
+  showToast(confirmadas + ' líneas confirmadas' + (pendientes > 0 ? ' · ' + pendientes + ' sin EAN pendientes' : ' ✅'), pendientes > 0 ? '' : 'success');
+  cargarCodigosProveedor();
+}
+
+async function cargarCodigosProveedor() {
+  const { data } = await db.from('codigos_proveedor').select('*').order('created_at', { ascending: false }).limit(30);
+  const list = document.getElementById('fact-codigos-list');
+  if (!list) return;
+  if (!data || data.length === 0) {
+    list.innerHTML = '<div class="empty-state" style="padding:20px"><p style="font-size:13px;color:var(--gray-400)">Aún no hay códigos vinculados</p></div>';
+    return;
+  }
+  list.innerHTML = data.map(c => 
+    '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--gray-100);font-size:12px">' +
+      '<div>' +
+        '<div style="font-weight:600;color:var(--navy)">' + (c.nombre || '—').substring(0, 40) + '</div>' +
+        '<div style="font-size:11px;color:var(--gray-400)">' + c.proveedor + ' · Cod ' + c.codigo_proveedor + '</div>' +
+      '</div>' +
+      '<span class="td-mono" style="font-size:11px">' + c.ean + '</span>' +
+    '</div>'
+  ).join('');
 }
 
 // ============================================================
