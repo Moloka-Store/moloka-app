@@ -1617,33 +1617,112 @@ async function procesarInformeVentas(file) {
 async function procesarInventarioFBA(file) {
   if (!file) return;
   try {
-    const text = await file.text();
-    const lines = text.split('\n');
-    let headerIdx = 0;
-    for (let i = 0; i < Math.min(10, lines.length); i++) {
-      if (lines[i].toLowerCase().includes('asin') && lines[i].toLowerCase().includes('quantity')) {
-        headerIdx = i; break;
-      }
-    }
-    const sep = lines[headerIdx].includes('\t') ? '\t' : ',';
-    const headers = lines[headerIdx].split(sep).map(h => h.trim().replace(/"/g,'').toLowerCase());
-    const asinIdx = headers.findIndex(h => h === 'asin');
-    const qtyIdx = headers.findIndex(h => h.includes('quantity') || h.includes('fulfillable'));
+    let text = await file.text();
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
 
-    if (asinIdx < 0 || qtyIdx < 0) {
-      showToast('Formato de archivo no reconocido', 'error');
+    // Parser CSV que respeta comillas dobles. Necesario porque los nombres de
+    // producto de Amazon llevan comas y el split crudo desplazaba columnas.
+    function parseCsvLine(line, sep) {
+      const out = [];
+      let cur = '';
+      let inQ = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+          if (inQ && line[i+1] === '"') { cur += '"'; i++; }
+          else { inQ = !inQ; }
+        } else if (ch === sep && !inQ) {
+          out.push(cur); cur = '';
+        } else {
+          cur += ch;
+        }
+      }
+      out.push(cur);
+      return out.map(c => c.trim());
+    }
+
+    const lines = text.split(/\r?\n/);
+
+    // Detectar separador y cabecera. Probamos tab y coma.
+    let sep = null, headerIdx = -1, headers = null;
+    const candCol = ['available','afn-fulfillable-quantity','quantity-available','fulfillable-quantity'];
+    for (let i = 0; i < Math.min(10, lines.length); i++) {
+      for (const cs of ['\t', ',']) {
+        const cols = parseCsvLine(lines[i], cs).map(h => h.toLowerCase());
+        if (cols.includes('asin') && candCol.some(c => cols.includes(c))) {
+          sep = cs; headerIdx = i; headers = cols; break;
+        }
+      }
+      if (headerIdx >= 0) break;
+    }
+    if (headerIdx < 0) {
+      showToast('Cabecera no encontrada (necesito asin y available)', 'error');
       return;
     }
 
-    let actualizados = 0;
+    const asinIdx = headers.indexOf('asin');
+    let qtyIdx = -1;
+    for (const c of candCol) {
+      qtyIdx = headers.indexOf(c);
+      if (qtyIdx >= 0) break;
+    }
+    if (asinIdx < 0 || qtyIdx < 0) {
+      showToast('Falta columna asin o columna de stock', 'error');
+      return;
+    }
+    console.log('[FBA] Stock leido de columna:', headers[qtyIdx], 'idx', qtyIdx);
+
+    // Construir mapa { asin: qty }
+    const csvMap = new Map();
     for (let i = headerIdx + 1; i < lines.length; i++) {
-      const cols = lines[i].split(sep).map(c => c.trim().replace(/"/g,''));
-      if (cols.length < 3) continue;
+      const linea = lines[i];
+      if (!linea || !linea.trim()) continue;
+      const cols = parseCsvLine(linea, sep);
+      if (cols.length <= Math.max(asinIdx, qtyIdx)) continue;
       const asin = cols[asinIdx];
-      const qty = parseInt(cols[qtyIdx]) || 0;
-      if (!asin || !asin.startsWith('B')) continue;
-      await db.from('productos').update({ stock_fba: qty, updated_at: new Date().toISOString() }).eq('asin', asin);
-      actualizados++;
+      if (!asin || !asin.startsWith('B') || asin.length !== 10) continue;
+      const qty = parseInt(cols[qtyIdx], 10);
+      if (isNaN(qty)) continue;
+      csvMap.set(asin, (csvMap.get(asin) || 0) + qty);
+    }
+
+    const totalCsv = csvMap.size;
+    if (totalCsv === 0) {
+      showToast('El CSV no contiene ASINs validos', 'error');
+      return;
+    }
+
+    // Saber que ASINs ya existen en la base
+    const { data: prodBd, error: errSel } = await db.from('productos').select('asin').not('asin', 'is', null);
+    if (errSel) throw errSel;
+    const existentes = new Set(prodBd.map(p => p.asin));
+
+    let cruzados = 0, sinMatch = 0;
+    const updates = [];
+    for (const [asin, qty] of csvMap.entries()) {
+      if (existentes.has(asin)) { cruzados++; updates.push({ asin, qty }); }
+      else { sinMatch++; }
+    }
+
+    // Reset a 0 productos cuyo ASIN no aparece en el CSV de hoy
+    const asinsCsv = Array.from(csvMap.keys());
+    if (asinsCsv.length > 0) {
+      const inList = '(' + asinsCsv.map(a => '"' + a + '"').join(',') + ')';
+      const { error: errReset } = await db.from('productos')
+        .update({ stock_fba: 0, updated_at: new Date().toISOString() })
+        .not('asin', 'is', null)
+        .not('asin', 'in', inList);
+      if (errReset) console.warn('[FBA] Aviso reset:', errReset.message);
+    }
+
+    // Actualizar uno a uno los que si estan
+    let actualizados = 0, fallidos = 0;
+    for (const u of updates) {
+      const { error: errUpd } = await db.from('productos')
+        .update({ stock_fba: u.qty, updated_at: new Date().toISOString() })
+        .eq('asin', u.asin);
+      if (errUpd) { fallidos++; console.warn('[FBA] Fallo', u.asin, errUpd.message); }
+      else actualizados++;
     }
 
     await db.from('sincronizaciones').insert({
@@ -1652,15 +1731,26 @@ async function procesarInventarioFBA(file) {
       registros_procesados: actualizados
     });
 
+    let msg = '<div class="info-box">';
+    msg += '\u2705 <strong>' + actualizados + '</strong> productos actualizados con stock FBA real<br>';
+    msg += '<small>CSV: ' + totalCsv + ' SKUs \u00b7 Cruzados: ' + cruzados;
+    if (sinMatch > 0) msg += ' \u00b7 <span style="color:#b45309">Sin ASIN en inventario: ' + sinMatch + '</span>';
+    if (fallidos > 0) msg += ' \u00b7 <span style="color:#b91c1c">Fallidos: ' + fallidos + '</span>';
+    msg += '</small></div>';
+    if (sinMatch > 0) {
+      msg += '<div style="font-size:12px;color:var(--gray-400);margin-top:6px">';
+      msg += 'Hay ' + sinMatch + ' ASINs en el CSV que no estan en tu inventario. Anadelos manualmente si quieres su stock FBA.';
+      msg += '</div>';
+    }
     document.getElementById('sync-fba-resultado').style.display = 'block';
-    document.getElementById('sync-fba-resultado').innerHTML = '<div class="info-box">✅ ' + actualizados + ' productos actualizados con stock FBA real</div>';
-    showToast('Stock FBA actualizado · ' + actualizados + ' productos ✅', 'success');
+    document.getElementById('sync-fba-resultado').innerHTML = msg;
+    showToast('Stock FBA actualizado: ' + actualizados + ' productos', 'success');
     cargarSincronizacion();
   } catch(e) {
+    console.error('[FBA] Error:', e);
     showToast('Error: ' + e.message, 'error');
   }
 }
-
 // ============================================================
 // RENTABILIDAD (carga datos desde rentabilidad.json)
 // ============================================================
