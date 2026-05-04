@@ -80,6 +80,8 @@
   .badge-blue { background: var(--accent-light); color: #1E40AF; }
   .no-asin { background: var(--amber-light); color: #B45309; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; font-family: 'DM Mono', monospace; }
   .loc-tag { display: inline-block; background: var(--gray-100); color: var(--gray-700); font-size: 11px; font-weight: 600; font-family: 'DM Mono', monospace; padding: 2px 7px; border-radius: 4px; margin: 1px; }
+  .chase-toggle-add { opacity: 0; transition: opacity 0.15s; }
+  tr:hover .chase-toggle-add { opacity: 1; }
 
   /* BUTTONS */
   .btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all 0.15s; font-family: 'DM Sans', sans-serif; }
@@ -979,7 +981,7 @@ async function cargarInventario() {
     } else {
       tbody.innerHTML = data.map(p => `
         <tr>
-          <td><div class="td-main" title="${p.nombre}">${p.nombre.substring(0,45)}${p.nombre.length>45?'...':''}${p.es_chase?` <span onclick="event.stopPropagation();toggleChase('${p.id}',true)" style="background:var(--purple,#8b5cf6);color:white;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;margin-left:4px;letter-spacing:0.5px;cursor:pointer" title="Clic para quitar marca CHASE">CHASE</span>`:` <span onclick="event.stopPropagation();toggleChase('${p.id}',false)" style="font-size:10px;color:var(--gray-300);cursor:pointer;margin-left:4px" title="Clic para marcar como CHASE">+CHASE</span>`}</div><div class="td-sub">${p.marca || ''}</div></td>
+          <td><div class="td-main" title="${p.nombre}">${p.nombre.substring(0,45)}${p.nombre.length>45?'...':''}${p.es_chase?` <span onclick="event.stopPropagation();toggleChase('${p.id}',true)" style="background:var(--purple,#8b5cf6);color:white;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;margin-left:4px;letter-spacing:0.5px;cursor:pointer" title="Clic para quitar marca CHASE">CHASE</span>`:` <span class="chase-toggle-add" onclick="event.stopPropagation();toggleChase('${p.id}',false)" style="font-size:10px;color:var(--gray-300);cursor:pointer;margin-left:4px" title="Clic para marcar como CHASE">+CHASE</span>`}</div><div class="td-sub">${p.marca || ''}</div></td>
           <td class="td-mono" style="cursor:${p.ean?'pointer':'default'}" ${p.ean?`onclick="navigator.clipboard.writeText('${p.ean}');showToast('EAN copiado','success')" title="Clic para copiar"`:''}>${p.ean || '—'}</td>
           <td>${p.asin ? `<span class="td-asin">${p.asin}</span>` : `<span class="no-asin" style="cursor:pointer" onclick="editarASIN('${p.id}','${(p.nombre||'').replace(/'/g,'').substring(0,30)}')" title="Clic para añadir ASIN">⚠️ Sin ASIN ✏️</span>`}</td>
           <td>${p.proveedor || '—'}</td>
