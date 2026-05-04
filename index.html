@@ -985,7 +985,7 @@ async function cargarInventario() {
           <td>${p.proveedor || '—'}</td>
           <td style="text-align:center;font-weight:700;font-size:14px;color:${p.stock_moloka===0?'var(--gray-400)':p.stock_minimo&&p.stock_moloka<p.stock_minimo?'var(--red)':'var(--navy)'}">${p.stock_moloka}</td>
           <td style="text-align:center;color:var(--gray-400);font-size:12px">${p.stock_fba > 0 ? p.stock_fba : "<span title=\"Pendiente actualizar desde Seller Central\">—</span>"}</td>
-          <td>${(p.ubicaciones||[]).map(l=>`<span class="loc-tag">${l}</span>`).join('') || '—'}</td>
+          <td style="cursor:pointer" onclick="editarUbicaciones('${p.id}','${(p.nombre||'').replace(/'/g,'').substring(0,30)}',${JSON.stringify(p.ubicaciones||[]).replace(/"/g,'&quot;')})" title="Clic para editar ubicación">${(p.ubicaciones||[]).map(l=>`<span class="loc-tag">${l}</span>`).join('') || '<span style="color:var(--gray-400)">— ✏️</span>'}</td>
           <td style="font-family:'DM Mono',monospace;font-size:12px">${p.pvd ? p.pvd.toFixed(2)+'€' : '—'}</td>
           <td style="text-align:center;white-space:nowrap">
             ${estadoBadge(p.estado)}
@@ -1062,6 +1062,30 @@ async function editarASIN(id, nombre) {
   const { error } = await db.from('productos').update({ asin: limpio, updated_at: new Date().toISOString() }).eq('id', id);
   if (error) { showToast('Error: ' + error.message, 'error'); return; }
   showToast('ASIN actualizado', 'success');
+  cargarInventario();
+}
+
+async function editarUbicaciones(id, nombre, ubicacionesActuales) {
+  const actuales = (ubicacionesActuales || []).join(', ');
+  const input = prompt('Ubicaciones para "' + nombre + '":\n(Separa varias con coma. Ej: P, I-1)\n\nDejar vac\u00edo para quitar todas las ubicaciones.', actuales);
+  if (input === null) return;
+  const limpio = input.trim();
+  let nuevas = [];
+  if (limpio !== '') {
+    nuevas = limpio.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+    for (const u of nuevas) {
+      if (!u.match(/^[A-Z0-9-]{1,10}$/)) {
+        showToast('Ubicaci\u00f3n inv\u00e1lida: "' + u + '". Solo letras, n\u00fameros y guiones (max 10 car.)', 'error');
+        return;
+      }
+    }
+  }
+  if (nuevas.length === 0) {
+    if (!confirm('\u00bfSeguro que quieres dejar el producto SIN ubicaci\u00f3n?')) return;
+  }
+  const { error } = await db.from('productos').update({ ubicaciones: nuevas, updated_at: new Date().toISOString() }).eq('id', id);
+  if (error) { showToast('Error: ' + error.message, 'error'); return; }
+  showToast('Ubicaci\u00f3n actualizada', 'success');
   cargarInventario();
 }
 
