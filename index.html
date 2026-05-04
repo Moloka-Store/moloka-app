@@ -979,7 +979,7 @@ async function cargarInventario() {
     } else {
       tbody.innerHTML = data.map(p => `
         <tr>
-          <td><div class="td-main" title="${p.nombre}">${p.nombre.substring(0,45)}${p.nombre.length>45?'...':''}</div><div class="td-sub">${p.marca || ''}</div></td>
+          <td><div class="td-main" title="${p.nombre}">${p.nombre.substring(0,45)}${p.nombre.length>45?'...':''}${p.es_chase?` <span onclick="event.stopPropagation();toggleChase('${p.id}',true)" style="background:var(--purple,#8b5cf6);color:white;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;margin-left:4px;letter-spacing:0.5px;cursor:pointer" title="Clic para quitar marca CHASE">CHASE</span>`:` <span onclick="event.stopPropagation();toggleChase('${p.id}',false)" style="font-size:10px;color:var(--gray-300);cursor:pointer;margin-left:4px" title="Clic para marcar como CHASE">+CHASE</span>`}</div><div class="td-sub">${p.marca || ''}</div></td>
           <td class="td-mono" style="cursor:${p.ean?'pointer':'default'}" ${p.ean?`onclick="navigator.clipboard.writeText('${p.ean}');showToast('EAN copiado','success')" title="Clic para copiar"`:''}>${p.ean || '—'}</td>
           <td>${p.asin ? `<span class="td-asin">${p.asin}</span>` : `<span class="no-asin" style="cursor:pointer" onclick="editarASIN('${p.id}','${(p.nombre||'').replace(/'/g,'').substring(0,30)}')" title="Clic para añadir ASIN">⚠️ Sin ASIN ✏️</span>`}</td>
           <td>${p.proveedor || '—'}</td>
@@ -1062,6 +1062,16 @@ async function editarASIN(id, nombre) {
   const { error } = await db.from('productos').update({ asin: limpio, updated_at: new Date().toISOString() }).eq('id', id);
   if (error) { showToast('Error: ' + error.message, 'error'); return; }
   showToast('ASIN actualizado', 'success');
+  cargarInventario();
+}
+
+async function toggleChase(id, esChaseActual) {
+  const accion = esChaseActual ? 'quitar la marca CHASE' : 'marcar como CHASE';
+  if (!confirm('\u00bfSeguro que quieres ' + accion + '?')) return;
+  const nuevo = !esChaseActual;
+  const { error } = await db.from('productos').update({ es_chase: nuevo, updated_at: new Date().toISOString() }).eq('id', id);
+  if (error) { showToast('Error: ' + error.message, 'error'); return; }
+  showToast(nuevo ? 'Marcado como CHASE' : 'Marca CHASE quitada', 'success');
   cargarInventario();
 }
 
@@ -1288,8 +1298,8 @@ function mostrarSelectorProducto(productos, codigoBuscado, callback) {
     const pvdTxt = p.pvd ? p.pvd.toFixed(2) + '€' : '—';
     const proveedorTxt = p.proveedor || '—';
     return `
-      <div onclick="seleccionarProductoSelector(${i})" style="border:1px solid var(--gray-200);border-radius:10px;padding:14px;cursor:pointer;transition:all 0.15s;background:white" onmouseover="this.style.borderColor='var(--blue)';this.style.background='var(--gray-50)'" onmouseout="this.style.borderColor='var(--gray-200)';this.style.background='white'">
-        <div style="font-size:14px;font-weight:600;color:var(--navy);margin-bottom:6px">${(p.nombre||'(sin nombre)').substring(0,80)}</div>
+      <div onclick="seleccionarProductoSelector(${i})" style="border:1px solid ${p.es_chase?'var(--purple,#8b5cf6)':'var(--gray-200)'};border-radius:10px;padding:14px;cursor:pointer;transition:all 0.15s;background:${p.es_chase?'#faf5ff':'white'}" onmouseover="this.style.borderColor='var(--blue)';this.style.background='var(--gray-50)'" onmouseout="this.style.borderColor='${p.es_chase?'var(--purple,#8b5cf6)':'var(--gray-200)'}';this.style.background='${p.es_chase?'#faf5ff':'white'}'">
+        <div style="font-size:14px;font-weight:600;color:var(--navy);margin-bottom:6px">${(p.nombre||'(sin nombre)').substring(0,80)}${p.es_chase?' <span style="background:var(--purple,#8b5cf6);color:white;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;margin-left:4px;letter-spacing:0.5px">CHASE</span>':''}</div>
         <div style="font-size:12px;color:var(--gray-500);display:flex;flex-wrap:wrap;gap:14px">
           <span><strong>ASIN:</strong> ${p.asin||'—'}</span>
           <span><strong>EAN:</strong> ${p.ean||'—'}</span>
