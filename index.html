@@ -758,9 +758,15 @@
         <input class="input" id="bb-envio" type="number" step="0.01" style="background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.2);color:white" oninput="calcularBuyBox()">
       </div>
     </div>
-    <div class="input-group" style="max-width:200px">
-      <div class="input-label" style="color:rgba(255,255,255,0.6)">Almacén Moloka (€)</div>
-      <input class="input" id="bb-almacen" type="number" step="0.01" value="0.15" style="background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.2);color:white" oninput="calcularBuyBox()">
+    <div class="form-row">
+      <div class="input-group">
+        <div class="input-label" style="color:rgba(255,255,255,0.6)">Almacén Moloka (€)</div>
+        <input class="input" id="bb-almacen" type="number" step="0.01" value="0.15" style="background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.2);color:white" oninput="calcularBuyBox()">
+      </div>
+      <div class="input-group">
+        <div class="input-label" style="color:rgba(255,255,255,0.6)">IVA (%) <span style="color:rgba(255,255,255,0.35);font-weight:400">- se guarda al cambiar</span></div>
+        <input class="input" id="bb-iva-pct" type="number" step="0.1" style="background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.2);color:white" oninput="calcularBuyBox()" onchange="guardarIvaProducto()">
+      </div>
     </div>
     <div id="bb-resultado"><div style="text-align:center;color:rgba(255,255,255,0.4);font-size:13px;padding:20px">Introduce el precio de la Buy Box para calcular</div></div>
     <div id="bb-verdict" style="display:none;margin-top:14px;padding:12px;border-radius:8px;text-align:center;font-size:15px;font-weight:700"></div>
@@ -991,7 +997,7 @@ async function cargarInventario() {
           <td style="font-family:'DM Mono',monospace;font-size:12px">${p.pvd ? p.pvd.toFixed(2)+'€' : '—'}</td>
           <td style="text-align:center;white-space:nowrap">
             ${estadoBadge(p.estado)}
-            <button onclick="abrirCalculadora('${p.asin||''}','${(p.nombre||'').replace(/'/g,'').substring(0,40)}',${p.pvd||0},${(p.comision_pct||0.155)*100},${p.comision_envio||3.74})" class="btn btn-ghost btn-sm" title="Calculadora Buy Box" style="padding:4px 8px;margin-left:4px" ${!p.asin?'disabled':''}>💰</button>
+            <button onclick="abrirCalculadora('${p.id}','${p.asin||''}','${(p.nombre||'').replace(/'/g,'').substring(0,40)}',${p.pvd||0},${(p.comision_pct||0.155)*100},${p.comision_envio||3.74},${(p.iva_pct!=null?p.iva_pct:0.21)*100})" class="btn btn-ghost btn-sm" title="Calculadora Buy Box" style="padding:4px 8px;margin-left:4px" ${!p.asin?'disabled':''}>💰</button>
             <button onclick="toggleDescatalogar('${p.id}','${p.estado}')" class="btn btn-ghost btn-sm" title="${p.estado==='DESCATALOGADO'?'Reactivar':'Descatalogar'}" style="padding:4px 8px">${p.estado==='DESCATALOGADO'?'♻️':'⛔'}</button>
           </td>
         </tr>`).join('');
@@ -1872,16 +1878,30 @@ document.getElementById('login-user').addEventListener('keydown', e => { if (e.k
 // ============================================================
 // CALCULADORA BUY BOX
 // ============================================================
-function abrirCalculadora(asin, nombre, pvd, comisionPct, envio) {
+let _calcProductoId = null;
+
+function abrirCalculadora(id, asin, nombre, pvd, comisionPct, envio, ivaPct) {
+  _calcProductoId = id || null;
   document.getElementById('bb-nombre').textContent = nombre || asin || '';
   document.getElementById('bb-pvd').value = pvd ? pvd.toFixed(2) : '';
   document.getElementById('bb-comision-pct').value = comisionPct ? comisionPct.toFixed(1) : '15.5';
   document.getElementById('bb-envio').value = envio ? envio.toFixed(2) : '3.74';
   document.getElementById('bb-almacen').value = '0.15';
+  document.getElementById('bb-iva-pct').value = (ivaPct != null && !isNaN(ivaPct)) ? ivaPct.toFixed(1) : '21.0';
   document.getElementById('bb-buybox').value = '';
   document.getElementById('bb-resultado').innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.4);font-size:13px;padding:20px">Introduce el precio de la Buy Box para calcular</div>';
   document.getElementById('bb-verdict').style.display = 'none';
   openModal('modal-buybox');
+}
+
+async function guardarIvaProducto() {
+  if (!_calcProductoId) return;
+  const v = parseFloat(document.getElementById('bb-iva-pct').value);
+  if (isNaN(v) || v < 0 || v > 100) { showToast('IVA inv\u00e1lido', 'error'); return; }
+  const nuevo = +(v / 100).toFixed(4);
+  const { error } = await db.from('productos').update({ iva_pct: nuevo, updated_at: new Date().toISOString() }).eq('id', _calcProductoId);
+  if (error) { showToast('Error guardando IVA: ' + error.message, 'error'); return; }
+  showToast('IVA guardado: ' + v.toFixed(1) + '%', 'success');
 }
 
 function calcularBuyBox() {
@@ -1890,6 +1910,7 @@ function calcularBuyBox() {
   const comisionPct = (parseFloat(document.getElementById('bb-comision-pct').value) || 0) / 100;
   const envio = parseFloat(document.getElementById('bb-envio').value) || 0;
   const almacen = parseFloat(document.getElementById('bb-almacen').value) || 0;
+  const ivaPct = (parseFloat(document.getElementById('bb-iva-pct').value) || 21) / 100;
 
   if (buybox <= 0) {
     document.getElementById('bb-resultado').innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.4);font-size:13px;padding:20px">Introduce el precio de la Buy Box para calcular</div>';
@@ -1897,8 +1918,9 @@ function calcularBuyBox() {
     return;
   }
 
-  const baseImponible = buybox / 1.21;
+  const baseImponible = buybox / (1 + ivaPct);
   const comisionAmazon = buybox * comisionPct;
+  const tarifasTotales = comisionAmazon + envio;
   const beneficio = baseImponible - pvd - comisionAmazon - envio - almacen;
   const roi = pvd > 0 ? (beneficio / pvd * 100) : 0;
   const margen = (beneficio / buybox * 100);
@@ -1908,15 +1930,19 @@ function calcularBuyBox() {
     <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:16px">
       <div style="background:rgba(255,255,255,0.05);padding:10px;border-radius:8px">
         <div style="font-size:10px;color:rgba(255,255,255,0.5);text-transform:uppercase">Base Imponible</div>
-        <div style="font-size:16px;font-weight:700;color:white">${baseImponible.toFixed(2)}€</div>
+        <div style="font-size:16px;font-weight:700;color:white">${baseImponible.toFixed(2)}\u20ac</div>
       </div>
       <div style="background:rgba(255,255,255,0.05);padding:10px;border-radius:8px">
-        <div style="font-size:10px;color:rgba(255,255,255,0.5);text-transform:uppercase">Comisión Amazon</div>
-        <div style="font-size:16px;font-weight:700;color:white">${comisionAmazon.toFixed(2)}€</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.5);text-transform:uppercase">Comisi\u00f3n Amazon</div>
+        <div style="font-size:16px;font-weight:700;color:white">${comisionAmazon.toFixed(2)}\u20ac</div>
+      </div>
+      <div style="background:rgba(255,255,255,0.08);padding:10px;border-radius:8px;grid-column:1/-1;border:1px dashed rgba(255,255,255,0.25)">
+        <div style="font-size:10px;color:rgba(255,255,255,0.6);text-transform:uppercase">Tarifas totales (Comisi\u00f3n + Env\u00edo) <span style="color:rgba(255,255,255,0.35);font-weight:400;text-transform:none">- compara con Seller</span></div>
+        <div style="font-size:16px;font-weight:700;color:white">${tarifasTotales.toFixed(2)}\u20ac</div>
       </div>
       <div style="background:rgba(255,255,255,0.05);padding:10px;border-radius:8px">
         <div style="font-size:10px;color:rgba(255,255,255,0.5);text-transform:uppercase">Beneficio</div>
-        <div style="font-size:18px;font-weight:700;color:${benColor}">${beneficio.toFixed(2)}€</div>
+        <div style="font-size:18px;font-weight:700;color:${benColor}">${beneficio.toFixed(2)}\u20ac</div>
       </div>
       <div style="background:rgba(255,255,255,0.05);padding:10px;border-radius:8px">
         <div style="font-size:10px;color:rgba(255,255,255,0.5);text-transform:uppercase">ROI / Margen</div>
