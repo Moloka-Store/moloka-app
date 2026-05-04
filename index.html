@@ -797,6 +797,18 @@
   </div>
 </div>
 
+<!-- MODAL SELECTOR PRODUCTO (varias coincidencias por EAN/ASIN/FNSKU) -->
+<div class="modal-overlay" id="modal-selector-producto">
+  <div class="modal" style="max-width:680px">
+    <div class="modal-title">⚠️ Hay varios productos con ese código</div>
+    <div style="font-size:13px;color:var(--gray-500);margin-bottom:16px" id="selector-subtitulo">Selecciona el producto correcto:</div>
+    <div id="selector-lista" style="display:flex;flex-direction:column;gap:10px;max-height:60vh;overflow-y:auto"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="cancelarSelector()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
@@ -1104,19 +1116,24 @@ async function buscarProductoEscaneo() {
   document.getElementById('product-new-area').style.display = 'none';
 
   const { data } = await db.from('productos').select('*')
-    .or(`ean.eq.${val},fnsku.eq.${val},asin.eq.${val}`).limit(1);
+    .or(`ean.eq.${val},fnsku.eq.${val},asin.eq.${val}`);
 
-  if (data && data.length > 0) {
-    const p = data[0];
-    productoEnEdicion = p;
-    document.getElementById('pf-name').textContent = p.nombre;
-    document.getElementById('pf-meta').textContent = `EAN: ${p.ean||'—'} · ASIN: ${p.asin||'Sin ASIN'} · ${p.proveedor||'—'} · PVD: ${p.pvd?p.pvd.toFixed(2)+'€':'—'} · Stock actual: ${p.stock_moloka} ud`;
-    document.getElementById('entrada-loc').value = (p.ubicaciones||[]).join(', ');
-    document.getElementById('product-found-area').style.display = 'block';
+  if (data && data.length === 1) {
+    aplicarProductoEntrada(data[0]);
+  } else if (data && data.length > 1) {
+    mostrarSelectorProducto(data, val, aplicarProductoEntrada);
   } else {
     document.getElementById('new-ean').value = val;
     document.getElementById('product-new-area').style.display = 'block';
   }
+}
+
+function aplicarProductoEntrada(p) {
+  productoEnEdicion = p;
+  document.getElementById('pf-name').textContent = p.nombre;
+  document.getElementById('pf-meta').textContent = `EAN: ${p.ean||'—'} · ASIN: ${p.asin||'Sin ASIN'} · ${p.proveedor||'—'} · PVD: ${p.pvd?p.pvd.toFixed(2)+'€':'—'} · Stock actual: ${p.stock_moloka} ud`;
+  document.getElementById('entrada-loc').value = (p.ubicaciones||[]).join(', ');
+  document.getElementById('product-found-area').style.display = 'block';
 }
 
 async function confirmarEntrada() {
@@ -1207,16 +1224,77 @@ async function addProductoEnvio() {
   const val = document.getElementById('envio-scan').value.trim();
   if (!val) return;
 
-  const { data } = await db.from('productos').select('*').or(`ean.eq.${val},fnsku.eq.${val}`).limit(1);
-  if (!data || data.length === 0) { showToast('Producto no encontrado', 'error'); return; }
+  const { data } = await db.from('productos').select('*')
+    .or(`ean.eq.${val},fnsku.eq.${val},asin.eq.${val}`);
 
-  const p = data[0];
+  if (!data || data.length === 0) {
+    showToast('Producto no encontrado', 'error');
+    return;
+  }
+
+  if (data.length === 1) {
+    aplicarProductoEnvio(data[0]);
+  } else {
+    mostrarSelectorProducto(data, val, aplicarProductoEnvio);
+  }
+}
+
+function aplicarProductoEnvio(p) {
   const existing = envioItems.find(e => e.id === p.id);
   if (existing) { existing.qty++; } else { envioItems.push({...p, qty: 1}); }
-
   document.getElementById('envio-scan').value = '';
   renderEnvio();
   showToast(p.nombre.substring(0,30) + ' añadido', 'success');
+}
+
+// ============================================================
+// MODAL SELECTOR DE PRODUCTO (cuando hay múltiples coincidencias)
+// ============================================================
+let selectorCallback = null;
+
+function mostrarSelectorProducto(productos, codigoBuscado, callback) {
+  selectorCallback = callback;
+  document.getElementById('selector-subtitulo').textContent =
+    `Hay ${productos.length} productos con el código "${codigoBuscado}". Selecciona el correcto:`;
+
+  const lista = document.getElementById('selector-lista');
+  lista.innerHTML = productos.map((p, i) => {
+    const stockColor = p.stock_moloka > 0 ? 'var(--green)' : 'var(--gray-400)';
+    const fbaColor = p.stock_fba > 0 ? 'var(--green)' : 'var(--gray-400)';
+    const pvdTxt = p.pvd ? p.pvd.toFixed(2) + '€' : '—';
+    const proveedorTxt = p.proveedor || '—';
+    return `
+      <div onclick="seleccionarProductoSelector(${i})" style="border:1px solid var(--gray-200);border-radius:10px;padding:14px;cursor:pointer;transition:all 0.15s;background:white" onmouseover="this.style.borderColor='var(--blue)';this.style.background='var(--gray-50)'" onmouseout="this.style.borderColor='var(--gray-200)';this.style.background='white'">
+        <div style="font-size:14px;font-weight:600;color:var(--navy);margin-bottom:6px">${(p.nombre||'(sin nombre)').substring(0,80)}</div>
+        <div style="font-size:12px;color:var(--gray-500);display:flex;flex-wrap:wrap;gap:14px">
+          <span><strong>ASIN:</strong> ${p.asin||'—'}</span>
+          <span><strong>EAN:</strong> ${p.ean||'—'}</span>
+          <span><strong>Proveedor:</strong> ${proveedorTxt}</span>
+          <span><strong>PVD:</strong> ${pvdTxt}</span>
+        </div>
+        <div style="font-size:12px;margin-top:6px;display:flex;gap:14px">
+          <span style="color:${stockColor}"><strong>Stock M:</strong> ${p.stock_moloka||0} ud</span>
+          <span style="color:${fbaColor}"><strong>Stock FBA:</strong> ${p.stock_fba||0} ud</span>
+        </div>
+      </div>`;
+  }).join('');
+
+  window._selectorProductos = productos;
+  openModal('modal-selector-producto');
+}
+
+function seleccionarProductoSelector(i) {
+  const p = window._selectorProductos[i];
+  closeModal('modal-selector-producto');
+  if (selectorCallback) selectorCallback(p);
+  selectorCallback = null;
+  window._selectorProductos = null;
+}
+
+function cancelarSelector() {
+  closeModal('modal-selector-producto');
+  selectorCallback = null;
+  window._selectorProductos = null;
 }
 
 function renderEnvio() {
