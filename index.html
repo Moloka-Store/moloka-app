@@ -2399,14 +2399,6 @@ async function verRentabilidad(periodo) {
 // ============================================================
 // FACTURAS - Modulo completo (parser BEMS + revision + guardado)
 // ============================================================
-
-// switchTabEntrada: solo queda un tab (Escanear) tras eliminar Subir Factura.
-// Mantenemos la funcion como no-op porque el HTML aun la llama en onclick.
-function switchTabEntrada(el, tabId) {
-  if (!el || !el.parentElement) return;
-  el.parentElement.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  el.classList.add('active');
-}
 // Sustituye al modulo viejo "FACTURAS - Subir PDF y procesar con IA"
 // que estaba roto (usaba tabla factura_lineas inexistente).
 // Esquema nuevo: facturas, compras, codigos_proveedor + bucket Storage facturas-pdfs
@@ -2898,61 +2890,131 @@ async function procesarLineaFactura(linea, facturaId, fecha) {
     console.warn('Linea sin producto_id, saltando:', linea);
     return resultado;
   }
-  // Actualizar stock_moloka y PVD ponderado
-  const stockAntes = productoActual.stock_moloka || 0;
-  const pvdAntes = productoActual.pvd || 0;
-  const unidadesNuevas = linea.cantidad_editada;
-  const precioNuevo = linea.precio_editado;
-  const stockDespues = stockAntes + unidadesNuevas;
-  let pvdDespues;
-  if (stockAntes <= 0) {
-    pvdDespues = precioNuevo; // No habia stock, el PVD es el del nuevo lote
-  } else {
-    pvdDespues = (stockAntes * pvdAntes + unidadesNuevas * precioNuevo) / stockDespues;
-  }
-  pvdDespues = Math.round(pvdDespues * 10000) / 10000;
-  const unidadesCompradasAntes = productoActual.unidades_compradas || 0;
-  await db.from('productos').update({
-    stock_moloka: stockDespues,
-    pvd: pvdDespues,
-    proveedor: _facturaActual.proveedor,
-    unidades_compradas: unidadesCompradasAntes + unidadesNuevas,
-    activo: true,
-    estado: 'OK',
-    updated_at: new Date().toISOString()
-  }).eq('id', productoId);
-  resultado.actualizado = true;
-  // Crear compra(s)
+
+  // ============================================================
+  // PROCESAR UNIDADES REGULAR (al producto regular)
+  // ============================================================
   if (linea.chase_unidades_regular > 0) {
+    const stockAntes = productoActual.stock_moloka || 0;
+    const pvdAntes = productoActual.pvd || 0;
+    const unidades = linea.chase_unidades_regular;
+    const stockDespues = stockAntes + unidades;
+    let pvdDespues;
+    if (stockAntes <= 0) {
+      pvdDespues = linea.precio_editado;
+    } else {
+      pvdDespues = (stockAntes * pvdAntes + unidades * linea.precio_editado) / stockDespues;
+    }
+    pvdDespues = Math.round(pvdDespues * 10000) / 10000;
+    const ucAntes = productoActual.unidades_compradas || 0;
+    await db.from('productos').update({
+      stock_moloka: stockDespues,
+      pvd: pvdDespues,
+      proveedor: _facturaActual.proveedor,
+      unidades_compradas: ucAntes + unidades,
+      activo: true,
+      estado: 'OK',
+      updated_at: new Date().toISOString()
+    }).eq('id', productoId);
+    resultado.actualizado = true;
+    // Compra regular
     await db.from('compras').insert({
       factura_id: facturaId,
       producto_id: productoId,
       fecha: fecha,
-      unidades: linea.chase_unidades_regular,
-      precio_unitario: precioNuevo,
+      unidades: unidades,
+      precio_unitario: linea.precio_editado,
       es_chase: false
     });
     resultado.creadas++;
   }
+
+  // ============================================================
+  // PROCESAR UNIDADES CHASE (al producto CHASE separado)
+  // ============================================================
   if (linea.chase_unidades_chase > 0) {
-    // Si hay reparto CHASE, marcar el producto como es_chase=true tambien
-    // pero solo si TODA la linea es chase (todo_chase). Si es 5+1 mantenemos
-    // el producto regular y solo creamos compra con es_chase=true.
+    let productoChaseId = null;
+    let productoChaseActual = null;
+
+    // Caso 1: si reparto es 'todo_chase' Y el producto identificado YA es CHASE
+    //   -> usar el mismo producto
+    if (linea.chase_reparto === 'todo_chase' && productoActual.es_chase === true) {
+      productoChaseId = productoId;
+      productoChaseActual = productoActual;
+    } else {
+      // Caso 2: buscar si ya existe un producto CHASE con el mismo EAN
+      const eanRef = productoActual.ean || linea.ean_editado;
+      const { data: chasesExistentes } = await db.from('productos')
+        .select('id, ean, asin, nombre, proveedor, pvd, stock_moloka, unidades_compradas, es_chase, activo')
+        .eq('ean', eanRef)
+        .eq('es_chase', true)
+        .eq('activo', true);
+      if (chasesExistentes && chasesExistentes.length > 0) {
+        productoChaseActual = chasesExistentes[0];
+        productoChaseId = productoChaseActual.id;
+      } else {
+        // Caso 3: crear producto CHASE nuevo
+        const nombreChase = (productoActual.nombre || linea.descripcion || 'Producto').replace(/\s*\bCHASE\b\s*/gi, ' ').replace(/\s+/g, ' ').trim() + ' CHASE';
+        const { data: nuevoChase, error: errChase } = await db.from('productos').insert({
+          ean: eanRef,
+          asin: productoActual.asin || null,
+          nombre: nombreChase.substring(0, 200),
+          marca: productoActual.marca || null,
+          proveedor: _facturaActual.proveedor,
+          pvd: linea.precio_editado,
+          stock_moloka: 0,
+          stock_fba: 0,
+          stock_miravia: 0,
+          unidades_compradas: 0,
+          activo: true,
+          estado: 'OK',
+          es_chase: true,
+          iva_pct: 0.21
+        }).select().single();
+        if (errChase) {
+          console.error('Error creando producto CHASE:', errChase);
+          throw new Error('Creando CHASE: ' + errChase.message);
+        }
+        productoChaseActual = nuevoChase;
+        productoChaseId = nuevoChase.id;
+      }
+    }
+
+    // Actualizar producto CHASE con stock + PVD ponderado
+    const stockAntesC = productoChaseActual.stock_moloka || 0;
+    const pvdAntesC = productoChaseActual.pvd || 0;
+    const unidadesC = linea.chase_unidades_chase;
+    const stockDespuesC = stockAntesC + unidadesC;
+    let pvdDespuesC;
+    if (stockAntesC <= 0) {
+      pvdDespuesC = linea.precio_editado;
+    } else {
+      pvdDespuesC = (stockAntesC * pvdAntesC + unidadesC * linea.precio_editado) / stockDespuesC;
+    }
+    pvdDespuesC = Math.round(pvdDespuesC * 10000) / 10000;
+    const ucAntesC = productoChaseActual.unidades_compradas || 0;
+    await db.from('productos').update({
+      stock_moloka: stockDespuesC,
+      pvd: pvdDespuesC,
+      proveedor: _facturaActual.proveedor,
+      unidades_compradas: ucAntesC + unidadesC,
+      activo: true,
+      estado: 'OK',
+      updated_at: new Date().toISOString()
+    }).eq('id', productoChaseId);
+    // Compra CHASE
     await db.from('compras').insert({
       factura_id: facturaId,
-      producto_id: productoId,
+      producto_id: productoChaseId,
       fecha: fecha,
-      unidades: linea.chase_unidades_chase,
-      precio_unitario: precioNuevo,
+      unidades: unidadesC,
+      precio_unitario: linea.precio_editado,
       es_chase: true
     });
     resultado.creadas++;
-    // Si es todo_chase, marcar producto como CHASE permanente
-    if (linea.chase_reparto === 'todo_chase' && !productoActual.es_chase) {
-      await db.from('productos').update({ es_chase: true }).eq('id', productoId);
-    }
   }
-  // Si la linea tenia codigo de proveedor, guardarlo en mapeo
+
+  // Mapeo codigo_proveedor (al producto regular siempre)
   if (linea.ref_proveedor && _facturaActual.proveedor) {
     await db.from('codigos_proveedor').upsert({
       proveedor: _facturaActual.proveedor,
@@ -3013,7 +3075,7 @@ async function crearProductoNuevo(linea) {
     activo: true,
     estado: 'OK',
     iva_pct: 0.21
-    // ASIN se deja NULL: aparecera con ⚠ Sin ASIN en inventario para asignar
+    // ASIN se deja NULL: aparecera como sin ASIN en inventario para asignar
   }).select().single();
   if (error) {
     console.error('Error creando producto nuevo:', error, linea);
@@ -3071,7 +3133,6 @@ async function descargarPDFFactura(pdfPath, fileName) {
   }
   window.open(data.signedUrl, '_blank');
 }
-
 
 
 // ============================================================
