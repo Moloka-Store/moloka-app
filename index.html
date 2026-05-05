@@ -7,6 +7,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
@@ -341,7 +342,6 @@
     </div>
     <div class="tabs">
       <div class="tab active" onclick="switchTabEntrada(this,'entrada-scan')">📷 Escanear</div>
-      <div class="tab" onclick="switchTabEntrada(this,'entrada-fact')">📄 Subir Factura</div>
     </div>
 
     <div id="entrada-scan">
@@ -406,69 +406,6 @@
     </div>
     </div><!-- end entrada-scan -->
 
-    <div id="entrada-fact" style="display:none">
-      <div class="grid-2" style="align-items:start">
-        <div>
-          <div class="card" style="margin-bottom:14px">
-            <div class="section-title" style="margin-bottom:4px">Subir factura de proveedor</div>
-            <p style="font-size:12px;color:var(--gray-400);margin-bottom:14px">La IA extrae los productos automáticamente. Para OSMA y HEO escanea la caja al llegar para vincular el EAN.</p>
-            <div onclick="document.getElementById('fact-file-input').click()" style="cursor:pointer;border:2px dashed var(--gray-200);border-radius:12px;padding:24px;text-align:center;background:var(--gray-50)">
-              <div style="font-size:32px;margin-bottom:8px">📄</div>
-              <p style="font-size:13px;font-weight:600;color:var(--navy)">Arrastra el PDF o haz clic</p>
-              <p style="font-size:11px;color:var(--gray-400);margin-top:4px">TCG · DBLine · BEMS · Zentrada · OSMA · HEO</p>
-            </div>
-            <input type="file" id="fact-file-input" accept=".pdf" style="display:none" onchange="procesarFacturaPDF(this.files[0])">
-            <div class="form-row" style="margin-top:14px">
-              <div class="input-group">
-                <div class="input-label">Proveedor</div>
-                <select class="input" id="fact-proveedor">
-                  <option value="">Auto-detectar</option>
-                  <option value="TCG">TCG Factory</option>
-                  <option value="DBLine">DBLine</option>
-                  <option value="BEMS">BEMS</option>
-                  <option value="Zentrada">Zentrada</option>
-                  <option value="OSMA">OSMA</option>
-                  <option value="HEO">HEO</option>
-                </select>
-              </div>
-              <div class="input-group">
-                <div class="input-label">Referencia factura</div>
-                <input class="input" id="fact-ref" placeholder="TCG-00322...">
-              </div>
-            </div>
-          </div>
-          <div id="fact-procesando" style="display:none">
-            <div class="info-box">⏳ Procesando factura con IA... puede tardar hasta 30 segundos</div>
-          </div>
-          <div id="fact-resultado-area" style="display:none">
-            <div class="card">
-              <div class="section-header">
-                <div class="section-title" id="fact-resultado-titulo">Productos detectados</div>
-                <button class="btn btn-green btn-sm" onclick="confirmarTodasFactura()">✅ Confirmar todas</button>
-              </div>
-              <div class="table-wrap">
-                <table>
-                  <thead><tr>
-                    <th>EAN</th><th>Producto</th><th style="text-align:center">Cant.</th>
-                    <th>PVD</th><th>Estado</th><th></th>
-                  </tr></thead>
-                  <tbody id="fact-lineas-tbody"></tbody>
-                </table>
-              </div>
-              <div class="warning-box" style="margin-top:12px">
-                ⚠️ Productos en amarillo (sin EAN) son de OSMA/HEO. Escanea la caja física al llegar la mercancía o introduce el EAN manualmente para vincularlos.
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="section-title" style="margin-bottom:12px">Códigos OSMA/HEO mapeados</div>
-          <p style="font-size:12px;color:var(--gray-400);margin-bottom:12px">Cada vez que vinculas un código de OSMA o HEO con un EAN, se guarda aquí para siempre.</p>
-          <div id="fact-codigos-list"><div class="empty-state" style="padding:20px"><p style="font-size:13px;color:var(--gray-400)">Aún no hay códigos vinculados</p></div></div>
-        </div>
-      </div>
-    </div>
   </div>
 
   <!-- ENVIO FBA -->
@@ -524,7 +461,7 @@
   <div class="page" id="page-facturas">
     <div class="page-header">
       <div><div class="page-title">📄 Archivo de Facturas</div><div class="page-sub">Busca por EAN o producto para reclamaciones Amazon</div></div>
-      <button class="btn btn-primary btn-sm" onclick="openModal('modal-nueva-factura')">+ Nueva factura</button>
+      <button class="btn btn-primary btn-sm" onclick="abrirSubirFactura()">📄 Subir factura PDF</button>
     </div>
     <div class="card" style="margin-bottom:16px">
       <div class="input-label" style="margin-bottom:8px">Buscar facturas por EAN, producto o proveedor</div>
@@ -533,14 +470,14 @@
     <div id="facturas-resultado" style="display:none;margin-bottom:16px">
       <div class="info-box" id="facturas-resultado-info">—</div>
       <div class="table-wrap" style="margin-bottom:10px">
-        <table><thead><tr><th>Factura</th><th>Proveedor</th><th>Fecha</th><th>Importe</th><th>Estado</th></tr></thead>
+        <table><thead><tr><th>Nº factura</th><th>Proveedor</th><th>Fecha</th><th>Total</th><th>Estado</th></tr></thead>
         <tbody id="facturas-resultado-tbody"></tbody></table>
       </div>
     </div>
     <div class="section-header"><div class="section-title">Todas las facturas</div></div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Referencia</th><th>Proveedor</th><th>Fecha</th><th>Importe</th><th>Estado</th></tr></thead>
+        <thead><tr><th>Nº factura</th><th>Proveedor</th><th>Fecha</th><th>Total</th><th>Estado</th></tr></thead>
         <tbody id="facturas-tbody"><tr><td colspan="5"><div class="loading-state"><div class="big-loader"></div></div></td></tr></tbody>
       </table>
     </div>
@@ -715,24 +652,6 @@
   </div>
 </div>
 
-<div class="modal-overlay" id="modal-nueva-factura">
-  <div class="modal">
-    <div class="modal-title">📄 Nueva factura</div>
-    <div class="input-group"><div class="input-label">Referencia / Nº factura</div><input class="input" id="f-ref" placeholder="DBL-2026-XXXXX"></div>
-    <div class="form-row">
-      <div class="input-group"><div class="input-label">Proveedor</div>
-        <select class="input" id="f-proveedor"><option>DBLine</option><option>OSMA</option><option>Zentrada</option><option>TCG</option><option>BEMS</option><option>HEO</option><option>Otro</option></select>
-      </div>
-      <div class="input-group"><div class="input-label">Fecha factura</div><input class="input" type="date" id="f-fecha"></div>
-    </div>
-    <div class="input-group"><div class="input-label">Importe total (€)</div><input class="input" type="number" id="f-importe" placeholder="0.00" step="0.01"></div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('modal-nueva-factura')">Cancelar</button>
-      <button class="btn btn-primary" id="btn-guardar-factura" onclick="guardarFactura()">Guardar factura</button>
-    </div>
-  </div>
-</div>
-
 <!-- MODAL CALCULADORA BUY BOX -->
 <div class="modal-overlay" id="modal-buybox">
   <div class="modal" style="background:var(--navy-dark);max-width:480px">
@@ -819,6 +738,81 @@
 
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
+
+<!-- INPUT INVISIBLE PARA SUBIR FACTURA -->
+<input type="file" id="input-subir-factura-pdf" accept="application/pdf" style="display:none" onchange="onSeleccionarFacturaPDF(this.files[0])">
+
+<!-- MODAL REVISION FACTURA (cuadro intermedio bloqueante) -->
+<div class="modal-overlay" id="modal-revision-factura">
+  <div class="modal" style="max-width:1100px;max-height:92vh;overflow-y:auto">
+    <div id="rev-loading" style="padding:40px;text-align:center;display:none">
+      <div class="loader" style="width:40px;height:40px;margin:0 auto 12px"></div>
+      <div style="font-size:13px;color:var(--gray-500)">Procesando PDF...</div>
+    </div>
+
+    <div id="rev-contenido" style="display:none">
+      <div class="modal-title">📄 Revisar factura antes de guardar</div>
+
+      <!-- Cabecera factura -->
+      <div style="background:var(--gray-50);border-radius:8px;padding:12px;margin-bottom:14px">
+        <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:12px;font-size:13px">
+          <div><div style="font-size:11px;color:var(--gray-500);text-transform:uppercase">Proveedor</div><div style="font-weight:600" id="rev-proveedor">—</div></div>
+          <div><div style="font-size:11px;color:var(--gray-500);text-transform:uppercase">Nº Factura</div><div style="font-weight:600" id="rev-numero">—</div></div>
+          <div><div style="font-size:11px;color:var(--gray-500);text-transform:uppercase">Fecha</div><div style="font-weight:600" id="rev-fecha">—</div></div>
+          <div><div style="font-size:11px;color:var(--gray-500);text-transform:uppercase">Total factura</div><div style="font-weight:600" id="rev-total">—</div></div>
+        </div>
+      </div>
+
+      <!-- Lineas (tabla con cards editables) -->
+      <div style="margin-bottom:14px">
+        <div style="font-size:12px;color:var(--gray-600);margin-bottom:8px;text-transform:uppercase;font-weight:600">Líneas detectadas</div>
+        <table style="width:100%">
+          <tbody id="rev-lineas-tbody"></tbody>
+        </table>
+      </div>
+
+      <!-- Validaciones al pie -->
+      <div style="background:var(--gray-50);border-radius:8px;padding:12px;margin-bottom:14px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;font-size:13px">
+          <div><div style="font-size:11px;color:var(--gray-500);text-transform:uppercase">Total unidades</div><div style="font-weight:600" id="rev-suma-unidades">0</div></div>
+          <div><div style="font-size:11px;color:var(--gray-500);text-transform:uppercase">Suma líneas</div><div style="font-weight:600" id="rev-suma-total">0,00 €</div></div>
+          <div><div style="font-size:11px;color:var(--gray-500);text-transform:uppercase">Validación</div><div id="rev-cuadra-total"></div></div>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeModal('modal-revision-factura')">Cancelar</button>
+        <button class="btn btn-primary" id="btn-confirmar-factura" onclick="confirmarFactura()">✅ Confirmar y guardar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL DETALLE FACTURA (al click en el listado) -->
+<div class="modal-overlay" id="modal-detalle-factura">
+  <div class="modal" style="max-width:900px;max-height:92vh;overflow-y:auto">
+    <div class="modal-title">📄 Detalle factura</div>
+    <div style="background:var(--gray-50);border-radius:8px;padding:12px;margin-bottom:14px">
+      <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:12px;font-size:13px">
+        <div><div style="font-size:11px;color:var(--gray-500);text-transform:uppercase">Proveedor</div><div style="font-weight:600" id="det-proveedor">—</div></div>
+        <div><div style="font-size:11px;color:var(--gray-500);text-transform:uppercase">Nº Factura</div><div style="font-weight:600" id="det-numero">—</div></div>
+        <div><div style="font-size:11px;color:var(--gray-500);text-transform:uppercase">Fecha</div><div style="font-weight:600" id="det-fecha">—</div></div>
+        <div><div style="font-size:11px;color:var(--gray-500);text-transform:uppercase">Total</div><div style="font-weight:600" id="det-total">—</div></div>
+      </div>
+    </div>
+    <div class="table-wrap" style="margin-bottom:14px">
+      <table>
+        <thead><tr><th>EAN</th><th>Producto</th><th style="text-align:center">Unidades</th><th style="text-align:right">Precio</th><th style="text-align:right">Total</th></tr></thead>
+        <tbody id="det-lineas-tbody"></tbody>
+      </table>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modal-detalle-factura')">Cerrar</button>
+      <button class="btn btn-primary" id="btn-det-descargar-pdf">📄 Descargar PDF</button>
+    </div>
+  </div>
+</div>
+
 
 <script>
 // ============================================================
@@ -1677,62 +1671,78 @@ function buscarEnvios(q) {
 }
 
 // ============================================================
-// FACTURAS
+// FACTURAS - reescrito 05/05/2026 (esquema nuevo: facturas, compras, codigos_proveedor)
+// Las funciones reales estan mas abajo en el bloque "FACTURAS - Modulo completo".
+// Aqui solo cargarFacturas y buscarFacturas que se llaman desde otros sitios.
 // ============================================================
 async function cargarFacturas() {
   const tbody = document.getElementById('facturas-tbody');
-  const { data, error } = await db.from('facturas').select('*').order('created_at', { ascending: false });
+  if (!tbody) return;
+  const { data, error } = await db.from('facturas').select('*').order('fecha', { ascending: false });
   if (error || !data || data.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">📄</div><p>No hay facturas todavía. Añade la primera.</p></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">\ud83d\udcc4</div><p>No hay facturas todav\u00eda. A\u00f1ade la primera.</p></div></td></tr>';
     return;
   }
-  tbody.innerHTML = data.map(f => `
-    <tr>
-      <td class="td-main">${f.referencia}</td>
-      <td>${f.proveedor}</td>
-      <td>${f.fecha ? new Date(f.fecha).toLocaleDateString('es-ES') : '—'}</td>
-      <td>${f.importe_total ? f.importe_total.toFixed(2)+'€' : '—'}</td>
-      <td><span class="badge badge-green">Guardada</span></td>
-    </tr>`).join('');
+  tbody.innerHTML = data.map(f => {
+    const fecha = f.fecha ? new Date(f.fecha + 'T00:00:00').toLocaleDateString('es-ES') : '\u2014';
+    const total = f.total_con_iva != null ? f.total_con_iva.toFixed(2) + '\u20ac' : (f.total_sin_iva != null ? f.total_sin_iva.toFixed(2) + '\u20ac' : '\u2014');
+    return '<tr style="cursor:pointer" onclick="verDetalleFactura(\'' + f.id + '\')">'
+      + '<td class="td-main">' + (f.numero || '\u2014') + '</td>'
+      + '<td>' + (f.proveedor || '\u2014') + '</td>'
+      + '<td>' + fecha + '</td>'
+      + '<td>' + total + '</td>'
+      + '<td><span class="badge badge-green">Guardada</span></td>'
+      + '</tr>';
+  }).join('');
 }
 
 async function buscarFacturas(q) {
   const el = document.getElementById('facturas-resultado');
+  if (!el) return;
   if (!q || q.length < 3) { el.style.display = 'none'; return; }
-  const { data } = await db.from('facturas').select('*').or(`referencia.ilike.%${q}%,proveedor.ilike.%${q}%`);
-  if (!data || data.length === 0) { el.style.display = 'none'; return; }
-  document.getElementById('facturas-resultado-info').textContent = `🔍 ${data.length} factura${data.length!==1?'s':''} encontradas para "${q}"`;
-  document.getElementById('facturas-resultado-tbody').innerHTML = data.map(f => `
-    <tr>
-      <td class="td-main">${f.referencia}</td>
-      <td>${f.proveedor}</td>
-      <td>${f.fecha ? new Date(f.fecha).toLocaleDateString('es-ES') : '—'}</td>
-      <td>${f.importe_total ? f.importe_total.toFixed(2)+'€' : '—'}</td>
-      <td><span class="badge badge-green">Guardada</span></td>
-    </tr>`).join('');
+  // Buscar por: numero factura, proveedor o EAN del producto
+  // Primero busca por numero/proveedor
+  const { data: porTexto } = await db.from('facturas').select('*')
+    .or('numero.ilike.%' + q + '%,proveedor.ilike.%' + q + '%')
+    .order('fecha', { ascending: false });
+  // Luego busca por EAN (atraves de compras -> productos)
+  let porEan = [];
+  if (/^\d{8,14}$/.test(q)) {
+    // Es un EAN: buscar productos con ese EAN o variantes
+    const { data: prods } = await db.from('productos').select('id').or('ean.eq.' + q + ',ean.eq.0' + q + ',ean.eq.' + q.replace(/^0/, ''));
+    if (prods && prods.length > 0) {
+      const ids = prods.map(p => p.id);
+      const { data: comps } = await db.from('compras').select('factura_id').in('producto_id', ids);
+      if (comps && comps.length > 0) {
+        const factIds = [...new Set(comps.map(c => c.factura_id))];
+        const { data: facts } = await db.from('facturas').select('*').in('id', factIds).order('fecha', { ascending: false });
+        if (facts) porEan = facts;
+      }
+    }
+  }
+  // Combinar resultados sin duplicados
+  const map = new Map();
+  (porTexto || []).forEach(f => map.set(f.id, f));
+  porEan.forEach(f => map.set(f.id, f));
+  const data = Array.from(map.values());
+  if (data.length === 0) { el.style.display = 'none'; return; }
+  document.getElementById('facturas-resultado-info').textContent = '\ud83d\udd0d ' + data.length + ' factura' + (data.length !== 1 ? 's' : '') + ' encontradas para "' + q + '"';
+  document.getElementById('facturas-resultado-tbody').innerHTML = data.map(f => {
+    const fecha = f.fecha ? new Date(f.fecha + 'T00:00:00').toLocaleDateString('es-ES') : '\u2014';
+    const total = f.total_con_iva != null ? f.total_con_iva.toFixed(2) + '\u20ac' : (f.total_sin_iva != null ? f.total_sin_iva.toFixed(2) + '\u20ac' : '\u2014');
+    return '<tr style="cursor:pointer" onclick="verDetalleFactura(\'' + f.id + '\')">'
+      + '<td class="td-main">' + (f.numero || '\u2014') + '</td>'
+      + '<td>' + (f.proveedor || '\u2014') + '</td>'
+      + '<td>' + fecha + '</td>'
+      + '<td>' + total + '</td>'
+      + '<td><span class="badge badge-green">Guardada</span></td>'
+      + '</tr>';
+  }).join('');
   el.style.display = 'block';
 }
 
-async function guardarFactura() {
-  const ref = document.getElementById('f-ref').value.trim();
-  if (!ref) { showToast('La referencia es obligatoria', 'error'); return; }
-  const btn = document.getElementById('btn-guardar-factura');
-  btn.innerHTML = '<span class="loader"></span>'; btn.disabled = true;
-
-  const fecha = document.getElementById('f-fecha').value;
-  const { error } = await db.from('facturas').insert({
-    referencia: ref,
-    proveedor: document.getElementById('f-proveedor').value,
-    fecha: fecha || null,
-    importe_total: parseFloat(document.getElementById('f-importe').value) || null
-  });
-
-  btn.innerHTML = 'Guardar factura'; btn.disabled = false;
-  if (error) { showToast('Error: ' + error.message, 'error'); return; }
-  showToast('Factura guardada ✅', 'success');
-  closeModal('modal-nueva-factura');
-  cargarFacturas();
-}
+// guardarFactura ya no existe: el modal viejo "Nueva factura" fue eliminado.
+// Para crear una factura ahora se usa el modal "Subir factura PDF" que llama a parseAndReview().
 
 // ============================================================
 // TAREAS
@@ -2387,248 +2397,682 @@ async function verRentabilidad(periodo) {
 }
 
 // ============================================================
-// FACTURAS - Subir PDF y procesar con IA
+// FACTURAS - Modulo completo (parser BEMS + revision + guardado)
 // ============================================================
-let _factLineas = [];
-let _factId = null;
 
+// switchTabEntrada: solo queda un tab (Escanear) tras eliminar Subir Factura.
+// Mantenemos la funcion como no-op porque el HTML aun la llama en onclick.
 function switchTabEntrada(el, tabId) {
+  if (!el || !el.parentElement) return;
   el.parentElement.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
-  document.getElementById('entrada-scan').style.display = tabId === 'entrada-scan' ? 'block' : 'none';
-  document.getElementById('entrada-fact').style.display = tabId === 'entrada-fact' ? 'block' : 'none';
-  if (tabId === 'entrada-fact') cargarCodigosProveedor();
+}
+// Sustituye al modulo viejo "FACTURAS - Subir PDF y procesar con IA"
+// que estaba roto (usaba tabla factura_lineas inexistente).
+// Esquema nuevo: facturas, compras, codigos_proveedor + bucket Storage facturas-pdfs
+
+// Configurar pdf.js worker
+if (window.pdfjsLib) {
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 }
 
-async function procesarFacturaPDF(file) {
+// Estado del flujo de subida (se mantiene mientras Elena revisa el cuadro)
+let _facturaActual = null;        // Datos parseados del PDF
+let _facturaLineas = [];          // Lineas con su estado de matching/edicion
+let _facturaPDFFile = null;       // Archivo PDF para subir al final a Storage
+let _facturaTextoCrudo = '';      // Para debug
+
+// ----------------------------------------------------------------
+// 1. PARSER BEMS (mismo que validamos en el HTML aislado)
+// ----------------------------------------------------------------
+function parseBems(rawText) {
+  const result = {
+    proveedor: 'BEMS',
+    numero: null,
+    fecha: null,
+    total_con_iva: null,
+    total_sin_iva: null,
+    iva_pct: 0,
+    lineas: []
+  };
+  if (!rawText.match(/BEM'S\s*SA|probems\.be|BE0450159578/i)) {
+    return null; // No es BEMS
+  }
+  const matchFacture = rawText.match(/Facture\s+(\d{6,})/i);
+  if (matchFacture) {
+    result.numero = matchFacture[1];
+  } else {
+    const matchInv = rawText.match(/Invoice\s*n[\u00b0\s]*\s*(\d{6,})/i);
+    if (matchInv) result.numero = matchInv[1];
+  }
+  const matchFecha = rawText.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (matchFecha) {
+    result.fecha = matchFecha[3] + '-' + matchFecha[2] + '-' + matchFecha[1];
+  }
+  const matchTotalIncl = rawText.match(/Total\s*VATincl\s*([\d.,]+)\s*EUR/i);
+  if (matchTotalIncl) result.total_con_iva = parseFloat(matchTotalIncl[1].replace(',', '.'));
+  const matchTotalExcl = rawText.match(/Total\s*VATexcl\s*([\d.,]+)\s*EUR/i);
+  if (matchTotalExcl) result.total_sin_iva = parseFloat(matchTotalExcl[1].replace(',', '.'));
+
+  const lineaRegex = /(\d{13})\s+(\d+)\s+(\d+[.,]\d+)\s+([\d.,]+%?\.?\u2026?)\s+(\d+[.,]\d+)\s+CEE/g;
+  let prevEnd = 0;
+  let m;
+  while ((m = lineaRegex.exec(rawText)) !== null) {
+    const eanRaw = m[1];
+    const cantidad = parseInt(m[2]);
+    const precioBruto = parseFloat(m[3].replace(',', '.'));
+    const descuentoStr = m[4];
+    const totalLinea = parseFloat(m[5].replace(',', '.'));
+    const contexto = rawText.substring(prevEnd, m.index);
+    let ref = null;
+    let descripcion = null;
+    const refRegex = /(?<!\d)(\d{6})(?!\d)\s*:\s*([A-Z][^:]*?)(?=\s+\d{13}|\s*$)/g;
+    let lastRefMatch = null;
+    let refM;
+    while ((refM = refRegex.exec(contexto)) !== null) {
+      lastRefMatch = refM;
+    }
+    if (lastRefMatch) {
+      ref = lastRefMatch[1];
+      descripcion = lastRefMatch[2].replace(/\s+/g, ' ').trim();
+    }
+    const ean12 = eanRaw.startsWith('0') ? eanRaw.substring(1) : null;
+    const precioEfectivo = +(totalLinea / cantidad).toFixed(4);
+    const mencionaChase = descripcion && /\bchase\b/i.test(descripcion);
+    result.lineas.push({
+      ean_raw: eanRaw,
+      ean_alt_12: ean12,
+      ref_proveedor: ref,
+      descripcion: descripcion,
+      cantidad: cantidad,
+      precio_bruto: precioBruto,
+      descuento: descuentoStr,
+      total_linea: totalLinea,
+      precio_efectivo: precioEfectivo,
+      menciona_chase: mencionaChase
+    });
+    prevEnd = m.index + m[0].length;
+  }
+  return result;
+}
+
+// ----------------------------------------------------------------
+// 2. EXTRACCION DE TEXTO DE PDF (con pdf.js)
+// ----------------------------------------------------------------
+async function extraerTextoPDF(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let textoCompleto = '';
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    let prevY = null;
+    let pageText = '';
+    for (const item of content.items) {
+      const y = item.transform ? item.transform[5] : null;
+      if (prevY !== null && y !== null && Math.abs(y - prevY) > 2) {
+        pageText += '\n';
+      }
+      pageText += item.str + ' ';
+      prevY = y;
+    }
+    textoCompleto += pageText + '\n';
+  }
+  return textoCompleto;
+}
+
+// ----------------------------------------------------------------
+// 3. ABRIR FLUJO SUBIDA (boton de la pestana Facturas)
+// ----------------------------------------------------------------
+function abrirSubirFactura() {
+  // Reset estado
+  _facturaActual = null;
+  _facturaLineas = [];
+  _facturaPDFFile = null;
+  _facturaTextoCrudo = '';
+  // Disparar selector de archivo
+  const inp = document.getElementById('input-subir-factura-pdf');
+  if (inp) inp.value = '';
+  inp.click();
+}
+
+// ----------------------------------------------------------------
+// 4. CALLBACK CUANDO SE SELECCIONA PDF
+// ----------------------------------------------------------------
+async function onSeleccionarFacturaPDF(file) {
   if (!file) return;
-  document.getElementById('fact-procesando').style.display = 'block';
-  document.getElementById('fact-resultado-area').style.display = 'none';
-
+  if (file.type !== 'application/pdf') {
+    showToast('Solo se admiten PDF', 'error');
+    return;
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    showToast('PDF demasiado grande (max 10MB)', 'error');
+    return;
+  }
+  _facturaPDFFile = file;
+  // Mostrar modal de carga
+  openModal('modal-revision-factura');
+  document.getElementById('rev-loading').style.display = 'block';
+  document.getElementById('rev-contenido').style.display = 'none';
   try {
-    // Leer PDF como base64
-    const base64 = await new Promise((res, rej) => {
-      const reader = new FileReader();
-      reader.onload = () => res(reader.result.split(',')[1]);
-      reader.onerror = rej;
-      reader.readAsDataURL(file);
-    });
-
-    const proveedorManual = document.getElementById('fact-proveedor').value;
-    const refManual = document.getElementById('fact-ref').value.trim();
-
-    const prompt = 'Eres un asistente de extraccion de datos de facturas B2B de proveedores de Funkos y productos de consumo.\n' +
-      'Analiza esta factura y extrae SOLO las lineas de producto (no envios, descuentos generales ni cargos de transporte).\n' +
-      'Para cada producto extrae: EAN (codigo de barras de 13 digitos si existe), nombre del producto, cantidad, precio unitario de compra (sin IVA, despues de descuentos si los hay).\n' +
-      'Reglas importantes:\n' +
-      '- Los EAN de Funko empiezan por 889698.\n' +
-      '- BEMS tiene un 0 extra al inicio del EAN: 0889698... debe convertirse a 889698... (quita el 0 inicial)\n' +
-      '- TCG, DBLine, BEMS, Zentrada: el EAN aparece en la factura.\n' +
-      '- OSMA y HEO: NO hay EAN. Solo codigo interno del proveedor (ej: 1019, 1022, FK11222, FK33248). Devuelve ese codigo en "codigo_proveedor" y deja "ean" como null.\n' +
-      '- Detecta el proveedor por el formato y nombre.\n' +
-      'Responde SOLO con JSON valido, sin texto adicional, sin backticks, sin markdown:\n' +
-      '{"proveedor": "TCG/DBLine/BEMS/Zentrada/OSMA/HEO", "referencia": "numero factura", "fecha": "YYYY-MM-DD", "lineas": [{"ean": "1234567890123 o null", "codigo_proveedor": "codigo interno o null", "nombre": "nombre producto", "cantidad": 12, "pvd": 7.83}]}';
-
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 4000,
-        messages: [{ role: 'user', content: [
-          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
-          { type: 'text', text: prompt }
-        ]}]
-      })
-    });
-
-    if (!response.ok) throw new Error('Error API: ' + response.status);
-    const data = await response.json();
-    const textoRespuesta = data.content[0].text;
-    const limpio = textoRespuesta.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(limpio);
-
-    // Auto-rellenar campos
-    if (!refManual && parsed.referencia) {
-      document.getElementById('fact-ref').value = parsed.referencia;
+    const texto = await extraerTextoPDF(file);
+    _facturaTextoCrudo = texto;
+    // Detectar proveedor y parsear
+    const parsed = parseBems(texto);
+    if (!parsed) {
+      showToast('Solo se admiten facturas BEM\'S por ahora', 'error');
+      closeModal('modal-revision-factura');
+      return;
     }
-    if (!proveedorManual && parsed.proveedor) {
-      document.getElementById('fact-proveedor').value = parsed.proveedor;
+    _facturaActual = parsed;
+    // Verificar duplicado en BD
+    const { data: existente } = await db.from('facturas')
+      .select('id, numero, proveedor, fecha').eq('numero', parsed.numero).eq('proveedor', parsed.proveedor).maybeSingle();
+    if (existente) {
+      const fechaExist = existente.fecha ? new Date(existente.fecha + 'T00:00:00').toLocaleDateString('es-ES') : '?';
+      showToast('Esta factura ya esta cargada (' + existente.numero + ', ' + fechaExist + ')', 'error');
+      closeModal('modal-revision-factura');
+      return;
     }
-
-    const proveedor = parsed.proveedor || proveedorManual || 'Desconocido';
-    const referencia = parsed.referencia || refManual || 'Sin ref';
-
-    // Cruzar codigos OSMA/HEO con tabla de mapeos previos
-    const { data: codigos } = await db.from('codigos_proveedor').select('*').eq('proveedor', proveedor);
-    const mapaCodigos = {};
-    (codigos || []).forEach(c => { mapaCodigos[c.codigo_proveedor] = c.ean; });
-
-    // Aplicar mapeos
-    parsed.lineas.forEach(l => {
-      if (!l.ean && l.codigo_proveedor && mapaCodigos[l.codigo_proveedor]) {
-        l.ean = mapaCodigos[l.codigo_proveedor];
-        l._auto_mapeado = true;
-      }
-    });
-
-    // Crear registro de factura en BD
-    const { data: factData } = await db.from('facturas').insert({
-      referencia: referencia,
-      proveedor: proveedor,
-      fecha: parsed.fecha || null,
-      procesada: false
-    }).select().single();
-    _factId = factData ? factData.id : null;
-
-    renderLineasFactura(parsed.lineas, proveedor);
-    document.getElementById('fact-resultado-titulo').textContent = parsed.lineas.length + ' productos detectados — ' + proveedor;
-    document.getElementById('fact-resultado-area').style.display = 'block';
-
-  } catch(e) {
-    showToast('Error procesando factura: ' + e.message, 'error');
-    console.error(e);
-  } finally {
-    document.getElementById('fact-procesando').style.display = 'none';
+    // Para cada linea, intentar matching contra BD
+    _facturaLineas = [];
+    for (const l of parsed.lineas) {
+      const match = await matchProductoPorEAN(l.ean_raw, l.ean_alt_12);
+      _facturaLineas.push({
+        ...l,
+        ean_editado: l.ean_raw, // EAN editable
+        cantidad_editada: l.cantidad,
+        precio_editado: l.precio_efectivo,
+        match_estado: match.estado, // 'unico' | 'duplicados' | 'no_encontrado'
+        match_productos: match.productos, // array de productos coincidentes
+        producto_id_seleccionado: match.estado === 'unico' ? match.productos[0].id : null,
+        chase_reparto: 'sin_chase', // 'sin_chase' | 'reparto_5_1' | 'todo_chase' | 'custom'
+        chase_unidades_regular: l.cantidad,
+        chase_unidades_chase: 0
+      });
+    }
+    document.getElementById('rev-loading').style.display = 'none';
+    document.getElementById('rev-contenido').style.display = 'block';
+    renderRevision();
+  } catch (err) {
+    console.error('Error procesando PDF:', err);
+    showToast('Error procesando PDF: ' + err.message, 'error');
+    closeModal('modal-revision-factura');
   }
 }
 
-function renderLineasFactura(lineas, proveedor) {
-  _factLineas = lineas.map(l => ({...l, proveedor}));
-  const tbody = document.getElementById('fact-lineas-tbody');
-  tbody.innerHTML = lineas.map((l, i) => {
-    const tieneEan = l.ean && l.ean.length >= 12;
-    const bg = tieneEan ? '' : 'background:var(--amber-light)';
-    const estado = tieneEan
-      ? (l._auto_mapeado ? '<span class="badge badge-blue">🔗 Auto</span>' : '<span class="badge badge-green">✅ OK</span>')
-      : '<span class="badge badge-amber">⚠️ Sin EAN</span>';
-    return '<tr style="' + bg + '" id="fact-row-' + i + '">' +
-      '<td>' + (tieneEan
-        ? '<span class="td-mono" style="font-size:11px">' + l.ean + '</span>' +
-          (l.codigo_proveedor ? '<div style="font-size:10px;color:var(--gray-400)">Cod: ' + l.codigo_proveedor + '</div>' : '')
-        : '<div style="display:flex;flex-direction:column;gap:4px">' +
-          '<input class="input" style="width:160px;font-size:11px;padding:4px 8px;font-family:DM Mono,monospace" placeholder="Escanea o escribe EAN" id="ean-line-' + i + '">' +
-          '<span style="font-size:10px;color:var(--gray-400)">Cod ' + (l.codigo_proveedor || '?') + '</span>' +
-          '</div>') +
-      '</td>' +
-      '<td style="font-size:12px;font-weight:600;color:var(--navy)">' + (l.nombre || '') + '</td>' +
-      '<td style="text-align:center;font-weight:700">' + l.cantidad + '</td>' +
-      '<td style="font-family:DM Mono,monospace;font-size:12px">' + (l.pvd ? l.pvd.toFixed(2) + '€' : '—') + '</td>' +
-      '<td>' + estado + '</td>' +
-      '<td><button onclick="confirmarLineaFactura(' + i + ')" class="btn btn-ghost btn-sm">✅</button></td>' +
-      '</tr>';
-  }).join('');
-}
-
-async function confirmarLineaFactura(i) {
-  const linea = _factLineas[i];
-  if (linea._confirmada) return;
-
-  // Si no tenia EAN, comprobar si lo escribio en el input
-  if (!linea.ean || linea.ean.length < 12) {
-    const inputEan = document.getElementById('ean-line-' + i);
-    if (inputEan && inputEan.value.trim().length >= 12) {
-      linea.ean = inputEan.value.trim();
-      // Guardar mapeo para futuras facturas
-      if (linea.codigo_proveedor && linea.proveedor) {
-        await db.from('codigos_proveedor').upsert({
-          proveedor: linea.proveedor,
-          codigo_proveedor: linea.codigo_proveedor,
-          ean: linea.ean,
-          nombre: linea.nombre
-        }, { onConflict: 'proveedor,codigo_proveedor' });
-        showToast('Código vinculado: ' + linea.codigo_proveedor + ' → ' + linea.ean, 'success');
-      }
+// ----------------------------------------------------------------
+// 5. MATCHING PRODUCTO POR EAN (probando 13d, 12d, 11d)
+// ----------------------------------------------------------------
+async function matchProductoPorEAN(eanRaw, ean12) {
+  // Probar varias longitudes
+  const candidatos = [];
+  if (eanRaw && /^\d{13}$/.test(eanRaw)) candidatos.push(eanRaw);
+  if (ean12 && /^\d{12}$/.test(ean12)) candidatos.push(ean12);
+  // Si EAN12 empieza por 0, probar tb 11 digitos
+  if (ean12 && ean12.startsWith('0') && /^\d{12}$/.test(ean12)) {
+    candidatos.push(ean12.substring(1));
+  }
+  for (const cand of candidatos) {
+    const { data } = await db.from('productos').select('id, ean, asin, nombre, marca, proveedor, pvd, stock_moloka, stock_fba, unidades_compradas, activo, estado, es_chase').eq('ean', cand);
+    if (data && data.length > 0) {
+      if (data.length === 1) return { estado: 'unico', productos: data, ean_match: cand };
+      // Hay duplicados (mismo EAN, varias filas)
+      // Filtrar solo activos
+      const activos = data.filter(p => p.activo);
+      if (activos.length === 1) return { estado: 'unico', productos: activos, ean_match: cand };
+      if (activos.length > 1) return { estado: 'duplicados', productos: activos, ean_match: cand };
+      return { estado: 'duplicados', productos: data, ean_match: cand };
     }
   }
+  return { estado: 'no_encontrado', productos: [], ean_match: null };
+}
 
-  if (!linea.ean || linea.ean.length < 12) {
-    showToast('Escanea o introduce el EAN antes de confirmar', 'error');
-    return;
-  }
+// ----------------------------------------------------------------
+// 6. RENDER DEL CUADRO DE REVISION
+// ----------------------------------------------------------------
+function renderRevision() {
+  const f = _facturaActual;
+  // Cabecera
+  const fechaFmt = f.fecha ? new Date(f.fecha + 'T00:00:00').toLocaleDateString('es-ES') : '\u2014';
+  document.getElementById('rev-numero').textContent = f.numero || '?';
+  document.getElementById('rev-proveedor').textContent = f.proveedor;
+  document.getElementById('rev-fecha').textContent = fechaFmt;
+  document.getElementById('rev-total').textContent = f.total_con_iva != null ? f.total_con_iva.toFixed(2) + ' \u20ac' : '?';
 
-  // Buscar producto en inventario
-  const { data: prods } = await db.from('productos').select('*').eq('ean', linea.ean).limit(1);
-  if (!prods || prods.length === 0) {
-    showToast('EAN no encontrado en inventario. Añade el producto primero.', 'error');
-    return;
-  }
-
-  const p = prods[0];
-  const nuevoStock = (p.stock_moloka || 0) + linea.cantidad;
-  await db.from('productos').update({
-    stock_moloka: nuevoStock,
-    updated_at: new Date().toISOString()
-  }).eq('id', p.id);
-
-  // Actualizar PVD si la factura trae nuevo precio
-  if (linea.pvd && linea.pvd > 0) {
-    await db.from('productos').update({ pvd: linea.pvd }).eq('id', p.id);
-  }
-
-  // Registrar movimiento
-  await db.from('movimientos').insert({
-    producto_id: p.id,
-    tipo: 'entrada',
-    cantidad: linea.cantidad,
-    notas: 'Factura ' + (document.getElementById('fact-ref').value || '')
+  // Lineas
+  const tbody = document.getElementById('rev-lineas-tbody');
+  tbody.innerHTML = '';
+  _facturaLineas.forEach((l, idx) => {
+    const tr = document.createElement('tr');
+    tr.style.borderBottom = '1px solid var(--gray-200)';
+    tr.innerHTML = renderLinea(l, idx);
+    tbody.appendChild(tr);
   });
 
-  // Vincular a factura
-  if (_factId) {
-    await db.from('factura_lineas').insert({
-      factura_id: _factId,
-      producto_id: p.id,
-      ean: linea.ean,
-      nombre_en_factura: linea.nombre,
-      cantidad: linea.cantidad,
-      pvd: linea.pvd
-    });
-  }
-
-  showToast('+' + linea.cantidad + ' ud de ' + (p.nombre || '').substring(0, 30) + ' ✅', 'success');
-  linea._confirmada = true;
-  const row = document.getElementById('fact-row-' + i);
-  if (row) { row.style.opacity = '0.4'; row.style.textDecoration = 'line-through'; }
+  actualizarValidaciones();
 }
 
-async function confirmarTodasFactura() {
-  let confirmadas = 0;
-  let pendientes = 0;
-  for (let i = 0; i < _factLineas.length; i++) {
-    if (_factLineas[i]._confirmada) continue;
-    if (!_factLineas[i].ean || _factLineas[i].ean.length < 12) {
-      const inputEan = document.getElementById('ean-line-' + i);
-      if (!inputEan || inputEan.value.trim().length < 12) { pendientes++; continue; }
-    }
-    await confirmarLineaFactura(i);
-    confirmadas++;
+function renderLinea(l, idx) {
+  let estadoBadge = '';
+  let productoTexto = '';
+  if (l.match_estado === 'unico') {
+    const p = l.match_productos[0];
+    estadoBadge = '<span class="badge badge-green">\u2705 Match</span>';
+    productoTexto = '<div style="font-size:11px;color:var(--gray-500)">' + (p.nombre || '?').substring(0, 40) + '<br>ASIN ' + (p.asin || '?') + ' \u00b7 PVD ' + (p.pvd != null ? p.pvd.toFixed(2) : '?') + '\u20ac</div>';
+  } else if (l.match_estado === 'duplicados') {
+    estadoBadge = '<span class="badge badge-yellow">\u26a0\ufe0f ' + l.match_productos.length + ' filas, consolidar</span>';
+    productoTexto = '<div style="font-size:11px;color:var(--gray-500)">' + l.match_productos.map(p => p.proveedor + ' (' + (p.pvd != null ? p.pvd.toFixed(2) : '?') + '\u20ac)').join(', ') + '</div>';
+  } else {
+    estadoBadge = '<span class="badge badge-orange">\u2728 Producto nuevo</span>';
+    productoTexto = '<div style="font-size:11px;color:var(--gray-400)">Se creara con asin_pendiente</div>';
   }
-  if (_factId && pendientes === 0) {
-    await db.from('facturas').update({ procesada: true }).eq('id', _factId);
-  }
-  showToast(confirmadas + ' líneas confirmadas' + (pendientes > 0 ? ' · ' + pendientes + ' sin EAN pendientes' : ' ✅'), pendientes > 0 ? '' : 'success');
-  cargarCodigosProveedor();
+  const chaseDetectada = l.menciona_chase ? '<span style="font-size:11px;color:#b06800">\u26a0\ufe0f "Chase" en descripcion</span>' : '';
+  const sumaChase = l.chase_unidades_regular + l.chase_unidades_chase;
+  const chaseError = sumaChase !== l.cantidad_editada ? '<span style="color:#c01616;font-size:11px">\u26a0\ufe0f Suma ' + sumaChase + ' \u2260 ' + l.cantidad_editada + '</span>' : '';
+
+  return ''
+    + '<td style="padding:10px;vertical-align:top">'
+      + '<div style="font-weight:600;font-size:13px;margin-bottom:4px">' + (idx + 1) + '. ' + (l.descripcion || '?').substring(0, 75) + (l.descripcion && l.descripcion.length > 75 ? '...' : '') + '</div>'
+      + (l.ref_proveedor ? '<div style="font-size:11px;color:var(--gray-500);margin-bottom:6px">Ref BEMS: ' + l.ref_proveedor + '</div>' : '')
+      + '<div style="display:grid;grid-template-columns:140px 80px 100px;gap:8px;margin-bottom:8px">'
+        + '<div><div style="font-size:10px;color:var(--gray-500);text-transform:uppercase">EAN</div><input class="input" style="font-family:monospace;font-size:12px;padding:4px 8px" value="' + (l.ean_editado || '') + '" oninput="actualizarLineaEAN(' + idx + ', this.value)"></div>'
+        + '<div><div style="font-size:10px;color:var(--gray-500);text-transform:uppercase">Cant</div><input class="input" type="number" style="font-size:12px;padding:4px 8px" value="' + l.cantidad_editada + '" oninput="actualizarLineaCantidad(' + idx + ', this.value)"></div>'
+        + '<div><div style="font-size:10px;color:var(--gray-500);text-transform:uppercase">Precio efect.</div><input class="input" type="number" step="0.0001" style="font-size:12px;padding:4px 8px" value="' + l.precio_editado + '" oninput="actualizarLineaPrecio(' + idx + ', this.value)"></div>'
+      + '</div>'
+      + '<div style="margin-bottom:6px">' + estadoBadge + ' ' + chaseDetectada + '</div>'
+      + productoTexto
+      + (l.match_estado === 'no_encontrado' ? '<button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="buscarProductoManual(' + idx + ')">\ud83d\udd0d Buscar producto en BD</button>' : '')
+      + '<div style="margin-top:8px;padding:8px;background:var(--gray-50);border-radius:6px">'
+        + '<div style="font-size:11px;color:var(--gray-600);margin-bottom:4px">Asignacion CHASE:</div>'
+        + '<select class="input" style="font-size:12px;padding:4px" onchange="cambiarChaseReparto(' + idx + ', this.value)">'
+          + '<option value="sin_chase"' + (l.chase_reparto === 'sin_chase' ? ' selected' : '') + '>Sin CHASE \u2014 ' + l.cantidad_editada + ' regular</option>'
+          + '<option value="reparto_5_1"' + (l.chase_reparto === 'reparto_5_1' ? ' selected' : '') + '>Reparto 5+1 (5 regular + 1 CHASE)</option>'
+          + '<option value="todo_chase"' + (l.chase_reparto === 'todo_chase' ? ' selected' : '') + '>Todo CHASE</option>'
+          + '<option value="custom"' + (l.chase_reparto === 'custom' ? ' selected' : '') + '>Personalizado</option>'
+        + '</select>'
+        + (l.chase_reparto === 'custom' ? '<div style="display:flex;gap:8px;margin-top:6px"><input class="input" type="number" style="font-size:12px;padding:4px;width:80px" placeholder="regular" value="' + l.chase_unidades_regular + '" oninput="actualizarChaseRegular(' + idx + ', this.value)"><input class="input" type="number" style="font-size:12px;padding:4px;width:80px" placeholder="CHASE" value="' + l.chase_unidades_chase + '" oninput="actualizarChaseChase(' + idx + ', this.value)"></div>' : '')
+        + (chaseError ? '<div style="margin-top:4px">' + chaseError + '</div>' : '')
+      + '</div>'
+    + '</td>';
 }
 
-async function cargarCodigosProveedor() {
-  const { data } = await db.from('codigos_proveedor').select('*').order('created_at', { ascending: false }).limit(30);
-  const list = document.getElementById('fact-codigos-list');
-  if (!list) return;
+// ----------------------------------------------------------------
+// 7. EVENTOS DE EDICION DE LINEAS
+// ----------------------------------------------------------------
+async function actualizarLineaEAN(idx, valor) {
+  _facturaLineas[idx].ean_editado = valor.trim();
+  // Si tiene 13/12/11 digitos numericos, intentar match
+  if (/^\d{11,13}$/.test(valor.trim())) {
+    const ean = valor.trim();
+    const ean12 = ean.length === 13 && ean.startsWith('0') ? ean.substring(1) : null;
+    const match = await matchProductoPorEAN(ean, ean12);
+    _facturaLineas[idx].match_estado = match.estado;
+    _facturaLineas[idx].match_productos = match.productos;
+    _facturaLineas[idx].producto_id_seleccionado = match.estado === 'unico' ? match.productos[0].id : null;
+    renderRevision();
+  }
+}
+
+function actualizarLineaCantidad(idx, valor) {
+  const n = parseInt(valor) || 0;
+  _facturaLineas[idx].cantidad_editada = n;
+  // Reset reparto chase si la cantidad cambia
+  if (_facturaLineas[idx].chase_reparto === 'sin_chase') {
+    _facturaLineas[idx].chase_unidades_regular = n;
+    _facturaLineas[idx].chase_unidades_chase = 0;
+  } else if (_facturaLineas[idx].chase_reparto === 'todo_chase') {
+    _facturaLineas[idx].chase_unidades_regular = 0;
+    _facturaLineas[idx].chase_unidades_chase = n;
+  }
+  actualizarValidaciones();
+}
+
+function actualizarLineaPrecio(idx, valor) {
+  _facturaLineas[idx].precio_editado = parseFloat(valor) || 0;
+  actualizarValidaciones();
+}
+
+function cambiarChaseReparto(idx, valor) {
+  const l = _facturaLineas[idx];
+  l.chase_reparto = valor;
+  if (valor === 'sin_chase') {
+    l.chase_unidades_regular = l.cantidad_editada;
+    l.chase_unidades_chase = 0;
+  } else if (valor === 'reparto_5_1') {
+    l.chase_unidades_regular = Math.max(0, l.cantidad_editada - 1);
+    l.chase_unidades_chase = l.cantidad_editada > 0 ? 1 : 0;
+  } else if (valor === 'todo_chase') {
+    l.chase_unidades_regular = 0;
+    l.chase_unidades_chase = l.cantidad_editada;
+  }
+  renderRevision();
+}
+
+function actualizarChaseRegular(idx, valor) {
+  _facturaLineas[idx].chase_unidades_regular = parseInt(valor) || 0;
+  actualizarValidaciones();
+}
+
+function actualizarChaseChase(idx, valor) {
+  _facturaLineas[idx].chase_unidades_chase = parseInt(valor) || 0;
+  actualizarValidaciones();
+}
+
+// ----------------------------------------------------------------
+// 8. VALIDACIONES en pie del cuadro
+// ----------------------------------------------------------------
+function actualizarValidaciones() {
+  const f = _facturaActual;
+  const sumaUnidades = _facturaLineas.reduce((s, l) => s + l.cantidad_editada, 0);
+  const sumaTotalLineas = _facturaLineas.reduce((s, l) => s + (l.cantidad_editada * l.precio_editado), 0);
+  const totalFactura = f.total_con_iva || f.total_sin_iva || 0;
+  const cuadraTotal = Math.abs(sumaTotalLineas - totalFactura) < 0.10; // tolerancia 10 cts
+  const sumaChaseOk = _facturaLineas.every(l => (l.chase_unidades_regular + l.chase_unidades_chase) === l.cantidad_editada);
+
+  document.getElementById('rev-suma-unidades').textContent = sumaUnidades;
+  document.getElementById('rev-suma-total').textContent = sumaTotalLineas.toFixed(2) + ' \u20ac';
+  const cuadraEl = document.getElementById('rev-cuadra-total');
+  if (cuadraTotal) {
+    cuadraEl.innerHTML = '<span class="badge badge-green">\u2705 Cuadra</span>';
+  } else {
+    const diff = (sumaTotalLineas - totalFactura).toFixed(2);
+    cuadraEl.innerHTML = '<span class="badge badge-yellow">\u26a0\ufe0f Diferencia ' + diff + '\u20ac</span>';
+  }
+
+  const btnConfirmar = document.getElementById('btn-confirmar-factura');
+  if (btnConfirmar) {
+    btnConfirmar.disabled = !sumaChaseOk;
+    btnConfirmar.style.opacity = sumaChaseOk ? '1' : '0.5';
+  }
+}
+
+// ----------------------------------------------------------------
+// 9. BUSCAR PRODUCTO MANUAL (cuando EAN no encuentra match)
+// ----------------------------------------------------------------
+async function buscarProductoManual(idx) {
+  const q = prompt('Buscar producto por nombre (al menos 3 caracteres):');
+  if (!q || q.length < 3) return;
+  const { data } = await db.from('productos').select('id, ean, asin, nombre, proveedor, pvd, activo')
+    .ilike('nombre', '%' + q + '%').eq('activo', true).limit(20);
   if (!data || data.length === 0) {
-    list.innerHTML = '<div class="empty-state" style="padding:20px"><p style="font-size:13px;color:var(--gray-400)">Aún no hay códigos vinculados</p></div>';
+    alert('No se encontro ningun producto con "' + q + '"');
     return;
   }
-  list.innerHTML = data.map(c => 
-    '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--gray-100);font-size:12px">' +
-      '<div>' +
-        '<div style="font-weight:600;color:var(--navy)">' + (c.nombre || '—').substring(0, 40) + '</div>' +
-        '<div style="font-size:11px;color:var(--gray-400)">' + c.proveedor + ' · Cod ' + c.codigo_proveedor + '</div>' +
-      '</div>' +
-      '<span class="td-mono" style="font-size:11px">' + c.ean + '</span>' +
-    '</div>'
-  ).join('');
+  // Mostrar lista simple en prompt
+  let texto = 'Selecciona un producto (escribe el numero):\n\n';
+  data.forEach((p, i) => {
+    texto += (i + 1) + '. ' + (p.nombre || '?').substring(0, 50) + ' \u2014 EAN ' + (p.ean || '?') + ' \u2014 PVD ' + (p.pvd != null ? p.pvd.toFixed(2) : '?') + '\u20ac\n';
+  });
+  texto += '\n0. Cancelar';
+  const sel = prompt(texto);
+  const n = parseInt(sel);
+  if (!n || n < 1 || n > data.length) return;
+  const seleccionado = data[n - 1];
+  _facturaLineas[idx].match_estado = 'unico';
+  _facturaLineas[idx].match_productos = [seleccionado];
+  _facturaLineas[idx].producto_id_seleccionado = seleccionado.id;
+  _facturaLineas[idx].ean_editado = seleccionado.ean || _facturaLineas[idx].ean_editado;
+  renderRevision();
 }
+
+// ----------------------------------------------------------------
+// 10. CONFIRMAR Y GUARDAR FACTURA
+// ----------------------------------------------------------------
+async function confirmarFactura() {
+  const f = _facturaActual;
+  if (!f) return;
+  // Validacion final
+  const sumaChaseOk = _facturaLineas.every(l => (l.chase_unidades_regular + l.chase_unidades_chase) === l.cantidad_editada);
+  if (!sumaChaseOk) {
+    showToast('Hay lineas con asignacion CHASE incorrecta', 'error');
+    return;
+  }
+  const btn = document.getElementById('btn-confirmar-factura');
+  btn.disabled = true;
+  btn.textContent = 'Guardando...';
+  try {
+    // 1. Subir PDF a Storage
+    const fechaParts = f.fecha ? f.fecha.split('-') : [String(new Date().getFullYear()), String(new Date().getMonth() + 1).padStart(2, '0')];
+    const pdfPath = fechaParts[0] + '/' + fechaParts[1] + '/' + f.proveedor + '_' + f.numero + '.pdf';
+    const { error: upError } = await db.storage.from('facturas-pdfs').upload(pdfPath, _facturaPDFFile, { upsert: true, contentType: 'application/pdf' });
+    if (upError) throw new Error('Subiendo PDF: ' + upError.message);
+    // 2. Crear registro de factura
+    const { data: factCreada, error: factError } = await db.from('facturas').insert({
+      numero: f.numero,
+      proveedor: f.proveedor,
+      fecha: f.fecha,
+      total_con_iva: f.total_con_iva,
+      total_sin_iva: f.total_sin_iva,
+      iva_pct: f.iva_pct || 0,
+      pdf_path: pdfPath
+    }).select().single();
+    if (factError) throw new Error('Creando factura: ' + factError.message);
+    // 3. Por cada linea, procesar
+    let creadas = 0, actualizados = 0, nuevos = 0, consolidados = 0;
+    for (const l of _facturaLineas) {
+      const r = await procesarLineaFactura(l, factCreada.id, f.fecha);
+      if (r.creadas) creadas += r.creadas;
+      if (r.actualizado) actualizados++;
+      if (r.nuevo) nuevos++;
+      if (r.consolidado) consolidados++;
+    }
+    showToast('Factura guardada \u2705 (' + creadas + ' compras, ' + actualizados + ' productos actualizados, ' + nuevos + ' nuevos, ' + consolidados + ' consolidados)', 'success');
+    closeModal('modal-revision-factura');
+    cargarFacturas();
+  } catch (err) {
+    console.error('Error guardando factura:', err);
+    showToast('Error: ' + err.message, 'error');
+    btn.disabled = false;
+    btn.textContent = 'Confirmar y guardar';
+  }
+}
+
+// ----------------------------------------------------------------
+// 11. PROCESAR UNA LINEA: actualizar producto + crear compras
+// ----------------------------------------------------------------
+async function procesarLineaFactura(linea, facturaId, fecha) {
+  const resultado = { creadas: 0, actualizado: false, nuevo: false, consolidado: false };
+  let productoId = linea.producto_id_seleccionado;
+  let productoActual = null;
+  // Caso A: producto identificado (unico match)
+  if (linea.match_estado === 'unico') {
+    productoActual = linea.match_productos[0];
+    productoId = productoActual.id;
+  }
+  // Caso B: hay duplicados, consolidar
+  else if (linea.match_estado === 'duplicados') {
+    const principalId = await consolidarDuplicados(linea.match_productos);
+    productoId = principalId;
+    productoActual = linea.match_productos.find(p => p.id === principalId);
+    resultado.consolidado = true;
+  }
+  // Caso C: producto nuevo
+  else if (linea.match_estado === 'no_encontrado') {
+    const nuevoProducto = await crearProductoNuevo(linea);
+    productoId = nuevoProducto.id;
+    productoActual = nuevoProducto;
+    resultado.nuevo = true;
+  }
+  if (!productoId) {
+    console.warn('Linea sin producto_id, saltando:', linea);
+    return resultado;
+  }
+  // Actualizar stock_moloka y PVD ponderado
+  const stockAntes = productoActual.stock_moloka || 0;
+  const pvdAntes = productoActual.pvd || 0;
+  const unidadesNuevas = linea.cantidad_editada;
+  const precioNuevo = linea.precio_editado;
+  const stockDespues = stockAntes + unidadesNuevas;
+  let pvdDespues;
+  if (stockAntes <= 0) {
+    pvdDespues = precioNuevo; // No habia stock, el PVD es el del nuevo lote
+  } else {
+    pvdDespues = (stockAntes * pvdAntes + unidadesNuevas * precioNuevo) / stockDespues;
+  }
+  pvdDespues = Math.round(pvdDespues * 10000) / 10000;
+  const unidadesCompradasAntes = productoActual.unidades_compradas || 0;
+  await db.from('productos').update({
+    stock_moloka: stockDespues,
+    pvd: pvdDespues,
+    proveedor: _facturaActual.proveedor,
+    unidades_compradas: unidadesCompradasAntes + unidadesNuevas,
+    activo: true,
+    estado: 'OK',
+    updated_at: new Date().toISOString()
+  }).eq('id', productoId);
+  resultado.actualizado = true;
+  // Crear compra(s)
+  if (linea.chase_unidades_regular > 0) {
+    await db.from('compras').insert({
+      factura_id: facturaId,
+      producto_id: productoId,
+      fecha: fecha,
+      unidades: linea.chase_unidades_regular,
+      precio_unitario: precioNuevo,
+      es_chase: false
+    });
+    resultado.creadas++;
+  }
+  if (linea.chase_unidades_chase > 0) {
+    // Si hay reparto CHASE, marcar el producto como es_chase=true tambien
+    // pero solo si TODA la linea es chase (todo_chase). Si es 5+1 mantenemos
+    // el producto regular y solo creamos compra con es_chase=true.
+    await db.from('compras').insert({
+      factura_id: facturaId,
+      producto_id: productoId,
+      fecha: fecha,
+      unidades: linea.chase_unidades_chase,
+      precio_unitario: precioNuevo,
+      es_chase: true
+    });
+    resultado.creadas++;
+    // Si es todo_chase, marcar producto como CHASE permanente
+    if (linea.chase_reparto === 'todo_chase' && !productoActual.es_chase) {
+      await db.from('productos').update({ es_chase: true }).eq('id', productoId);
+    }
+  }
+  // Si la linea tenia codigo de proveedor, guardarlo en mapeo
+  if (linea.ref_proveedor && _facturaActual.proveedor) {
+    await db.from('codigos_proveedor').upsert({
+      proveedor: _facturaActual.proveedor,
+      codigo_proveedor: linea.ref_proveedor,
+      producto_id: productoId
+    }, { onConflict: 'proveedor,codigo_proveedor', ignoreDuplicates: true });
+  }
+  return resultado;
+}
+
+// ----------------------------------------------------------------
+// 12. CONSOLIDAR DUPLICADOS: mantener fila principal, desactivar resto
+// ----------------------------------------------------------------
+async function consolidarDuplicados(productos) {
+  // Principal: la que tiene mas unidades_compradas historicas
+  productos.sort((a, b) => (b.unidades_compradas || 0) - (a.unidades_compradas || 0));
+  const principal = productos[0];
+  const secundarios = productos.slice(1);
+  // Sumar a principal: stock_moloka, stock_miravia, unidades_compradas, enviado_fba
+  let stockMolokaTotal = principal.stock_moloka || 0;
+  let unidadesCompradasTotal = principal.unidades_compradas || 0;
+  for (const sec of secundarios) {
+    stockMolokaTotal += sec.stock_moloka || 0;
+    unidadesCompradasTotal += sec.unidades_compradas || 0;
+    // Desactivar
+    await db.from('productos').update({
+      activo: false,
+      estado: 'DESCATALOGADO',
+      stock_moloka: 0,
+      stock_fba: 0,
+      updated_at: new Date().toISOString()
+    }).eq('id', sec.id);
+  }
+  // Actualizar principal con totales (el resto del update lo hace procesarLineaFactura)
+  await db.from('productos').update({
+    stock_moloka: stockMolokaTotal,
+    unidades_compradas: unidadesCompradasTotal
+  }).eq('id', principal.id);
+  // Devolver el principal con datos actualizados para que el caller use stock correcto
+  principal.stock_moloka = stockMolokaTotal;
+  principal.unidades_compradas = unidadesCompradasTotal;
+  return principal.id;
+}
+
+// ----------------------------------------------------------------
+// 13. CREAR PRODUCTO NUEVO (asin_pendiente)
+// ----------------------------------------------------------------
+async function crearProductoNuevo(linea) {
+  const { data, error } = await db.from('productos').insert({
+    ean: linea.ean_editado,
+    nombre: (linea.descripcion || 'Sin descripcion').substring(0, 200),
+    proveedor: _facturaActual.proveedor,
+    pvd: linea.precio_editado,
+    stock_moloka: 0, // El stock real lo aplica procesarLineaFactura sumando
+    stock_fba: 0,
+    stock_miravia: 0,
+    unidades_compradas: 0,
+    activo: true,
+    estado: 'OK',
+    iva_pct: 0.21
+    // ASIN se deja NULL: aparecera con ⚠ Sin ASIN en inventario para asignar
+  }).select().single();
+  if (error) {
+    console.error('Error creando producto nuevo:', error, linea);
+    throw new Error('Creando producto nuevo: ' + error.message);
+  }
+  return data;
+}
+
+// ----------------------------------------------------------------
+// 14. VER DETALLE FACTURA (al hacer click en el listado)
+// ----------------------------------------------------------------
+async function verDetalleFactura(facturaId) {
+  // Cargar factura
+  const { data: f } = await db.from('facturas').select('*').eq('id', facturaId).single();
+  if (!f) { showToast('Factura no encontrada', 'error'); return; }
+  // Cargar compras
+  const { data: comps } = await db.from('compras').select('*, productos(nombre, ean, asin)').eq('factura_id', facturaId);
+  const fechaFmt = f.fecha ? new Date(f.fecha + 'T00:00:00').toLocaleDateString('es-ES') : '?';
+  document.getElementById('det-numero').textContent = f.numero || '?';
+  document.getElementById('det-proveedor').textContent = f.proveedor;
+  document.getElementById('det-fecha').textContent = fechaFmt;
+  document.getElementById('det-total').textContent = f.total_con_iva != null ? f.total_con_iva.toFixed(2) + '\u20ac' : (f.total_sin_iva != null ? f.total_sin_iva.toFixed(2) + '\u20ac' : '?');
+  const tbody = document.getElementById('det-lineas-tbody');
+  if (!comps || comps.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--gray-400);padding:20px">Sin compras registradas</td></tr>';
+  } else {
+    tbody.innerHTML = comps.map(c => {
+      const p = c.productos || {};
+      const totalLinea = (c.unidades * c.precio_unitario).toFixed(2);
+      return '<tr>'
+        + '<td style="font-family:monospace;font-size:11px">' + (p.ean || '?') + '</td>'
+        + '<td>' + (p.nombre || '?').substring(0, 60) + (c.es_chase ? ' <span class="badge badge-purple">CHASE</span>' : '') + '</td>'
+        + '<td style="text-align:center">' + c.unidades + '</td>'
+        + '<td style="text-align:right">' + c.precio_unitario.toFixed(4) + '\u20ac</td>'
+        + '<td style="text-align:right">' + totalLinea + '\u20ac</td>'
+        + '</tr>';
+    }).join('');
+  }
+  // Boton descargar PDF
+  const btnPdf = document.getElementById('btn-det-descargar-pdf');
+  if (f.pdf_path) {
+    btnPdf.style.display = 'inline-block';
+    btnPdf.onclick = () => descargarPDFFactura(f.pdf_path, f.proveedor + '_' + f.numero + '.pdf');
+  } else {
+    btnPdf.style.display = 'none';
+  }
+  openModal('modal-detalle-factura');
+}
+
+async function descargarPDFFactura(pdfPath, fileName) {
+  const { data, error } = await db.storage.from('facturas-pdfs').createSignedUrl(pdfPath, 60);
+  if (error) {
+    showToast('Error obteniendo PDF: ' + error.message, 'error');
+    return;
+  }
+  window.open(data.signedUrl, '_blank');
+}
+
+
 
 // ============================================================
 // INIT
