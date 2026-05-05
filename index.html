@@ -763,6 +763,20 @@
         </div>
       </div>
 
+      <!-- Bloque gastos de envio (visible solo si hay gastos detectados) -->
+      <div id="rev-envio-bloque" style="display:none;background:#fff8e1;border:1px solid #ffc107;border-radius:8px;padding:12px;margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+          <div style="font-size:13px">
+            <div style="font-weight:600;color:#7a4f00">🚚 Esta factura incluye gastos de envío: <span id="rev-envio-importe">—</span></div>
+            <div id="rev-envio-detalle" style="font-size:12px;color:#7a4f00;margin-top:2px">—</div>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;background:white;padding:6px 12px;border-radius:6px;border:1px solid #ffc107">
+            <input type="checkbox" id="rev-envio-checkbox" checked onchange="toggleRepartoEnvio()" style="width:16px;height:16px;cursor:pointer">
+            <span style="font-weight:600">Repartir en precio unitario</span>
+          </label>
+        </div>
+      </div>
+
       <!-- Lineas (tabla con cards editables) -->
       <div style="margin-bottom:14px">
         <div style="font-size:12px;color:var(--gray-600);margin-bottom:8px;text-transform:uppercase;font-weight:600">Líneas detectadas</div>
@@ -2413,6 +2427,40 @@ let _facturaActual = null;        // Datos parseados del PDF
 let _facturaLineas = [];          // Lineas con su estado de matching/edicion
 let _facturaPDFFile = null;       // Archivo PDF para subir al final a Storage
 let _facturaTextoCrudo = '';      // Para debug
+let _facturaAplicarEnvio = true;  // Si true, los gastos de envio se reparten en el precio efectivo
+
+// ----------------------------------------------------------------
+// HELPER GENERICO: Reparto LINEAL de gastos de envio sobre las lineas
+// Cualquier parser puede setear result.gastos_envio y esta funcion lo aplica.
+// Al desactivar (aplicarEnvio=false), restaura el precio sin envio.
+// ----------------------------------------------------------------
+function aplicarRepartoEnvio(parsedFactura, aplicar) {
+  if (!parsedFactura || !parsedFactura.lineas || parsedFactura.lineas.length === 0) return;
+  const gastos = parsedFactura.gastos_envio || 0;
+  const totalUnidades = parsedFactura.lineas.reduce((s, l) => s + (l.cantidad || 0), 0);
+
+  // Restaurar precio original sin envio (por si ya se habia aplicado antes)
+  for (const l of parsedFactura.lineas) {
+    if (l.precio_efectivo_sin_envio != null) {
+      l.precio_efectivo = l.precio_efectivo_sin_envio;
+      l.envio_repercutido = 0;
+    } else {
+      l.precio_efectivo_sin_envio = l.precio_efectivo;
+    }
+  }
+
+  if (!aplicar || gastos <= 0 || totalUnidades <= 0) {
+    parsedFactura.envio_por_unidad = 0;
+    return;
+  }
+
+  const envioPorUnidad = +(gastos / totalUnidades).toFixed(4);
+  parsedFactura.envio_por_unidad = envioPorUnidad;
+  for (const l of parsedFactura.lineas) {
+    l.envio_repercutido = envioPorUnidad;
+    l.precio_efectivo = +(l.precio_efectivo_sin_envio + envioPorUnidad).toFixed(4);
+  }
+}
 
 // ----------------------------------------------------------------
 // 1. PARSER BEMS (mismo que validamos en el HTML aislado)
@@ -2489,6 +2537,532 @@ function parseBems(rawText) {
 }
 
 // ----------------------------------------------------------------
+// 1b. PARSER DBLINE (validado contra factura Z3-00073801, 32 lineas, 4911.79 EUR)
+// ----------------------------------------------------------------
+function parseDBLine(rawText) {
+  const result = {
+    proveedor: 'DBLine',
+    numero: null,
+    fecha: null,
+    total_con_iva: null,
+    total_sin_iva: null,
+    iva_pct: 0,
+    lineas: []
+  };
+  if (!rawText.match(/Db-Line|DBLine|dbline\.it|IT02254780121/i)) {
+    return null;
+  }
+  // Numero factura: aparece como "Z3-00073801" en una linea propia (es el campo "Numero")
+  // Tambien aparece como "DB2026900700" en codigo de barras y como "700" en el campo Numero
+  // Vamos a usar el patron Z3-NNNNNNNN como referencia humana
+  const matchNum = rawText.match(/Z3-(\d{8})/);
+  if (matchNum) {
+    result.numero = 'Z3-' + matchNum[1];
+  } else {
+    // Fallback: codigo de barras DB-AAAA-NNNNNN
+    const matchAlt = rawText.match(/DB(\d{4})(\d{6})/);
+    if (matchAlt) result.numero = 'DB' + matchAlt[1] + matchAlt[2];
+  }
+  // Fecha: formato DD-MM-YY (ej: 19-01-26) en la cabecera "FATTURA ACCOMPAGNATORIA"
+  // Aparece como "FATTURA ACCOMPAGNATORIA\n19-01-26"
+  const matchFecha = rawText.match(/FATTURA\s+ACCOMPAGNATORIA[\s\S]{0,30}?(\d{2})-(\d{2})-(\d{2})/);
+  if (matchFecha) {
+    // ano de 2 digitos -> 20XX
+    result.fecha = '20' + matchFecha[3] + '-' + matchFecha[2] + '-' + matchFecha[1];
+  }
+  // Total: aparece dos veces en la zona de totales al final
+  // "41E-NON IMPONIBILE ART.41 LEGGE 427/29-10-93 4.911,79"
+  // Despues vienen 3 lineas mas con el mismo numero (Totale Lordo, Totale IVA, Totale Documento)
+  // Cogemos el primero que aparece
+  const matchTotal = rawText.match(/41E-NON\s+IMPONIBILE[^\n]*?([\d.]+,\d{2})/);
+  if (matchTotal) {
+    // Italian format: 4.911,79 (punto miles, coma decimal)
+    const totalStr = matchTotal[1].replace(/\./g, '').replace(',', '.');
+    const total = parseFloat(totalStr);
+    result.total_con_iva = total;
+    result.total_sin_iva = total; // Intracomunitario, IVA 0%
+  }
+
+  // Lineas de productos
+  // Patron observado: CODIGO PZ. CANT PRECIO_BRUTO DTO1 TOTAL [espacio] EAN13 HSCODE DTO2 DESCRIPCION
+  // El TOTAL puede estar PEGADO al EAN (pypdf) o SEPARADO por espacio (pdf.js navegador).
+  // Forzamos TOTAL con 2 decimales y EAN de 12-13 digitos.
+  const lineaRegex = /([A-Z]{4}\d{4})\s+PZ\.\s+(\d+)\s+(\d+,\d{2})\s+(\d+,\d{2})\s+(\d+,\d{2})\s*(\d{12,13})\s+(\d{8})\s+(\d+,\d{2})\s+(.+?)(?=\n|$|Vs\.Rif|[A-Z]{4}\d{4}|Totale)/gs;
+
+  let m;
+  while ((m = lineaRegex.exec(rawText)) !== null) {
+    const codigoProveedor = m[1];
+    const cantidad = parseInt(m[2]);
+    const precioBruto = parseFloat(m[3].replace(',', '.'));
+    const dto1 = parseFloat(m[4].replace(',', '.'));
+    const totalLinea = parseFloat(m[5].replace(',', '.'));
+    const ean = m[6];
+    const dto2 = parseFloat(m[8].replace(',', '.'));
+    let descripcion = m[9].replace(/\s+/g, ' ').trim();
+    // Limpiar descripcion: quitar coletillas tipo "Vs.Rif." si aparece al final
+    descripcion = descripcion.replace(/\s*Vs\.Rif.*/i, '').trim();
+    const precioEfectivo = +(totalLinea / cantidad).toFixed(4);
+    const mencionaChase = /w\/?\s*chase|with\s*chase|\bchase\b/i.test(descripcion);
+    const descuentoStr = dto1.toFixed(0) + '%+' + dto2.toFixed(0) + '%';
+    result.lineas.push({
+      ean_raw: ean,
+      ean_alt_12: ean.length === 13 && ean.startsWith('0') ? ean.substring(1) : null,
+      ref_proveedor: codigoProveedor,
+      descripcion: descripcion,
+      cantidad: cantidad,
+      precio_bruto: precioBruto,
+      descuento: descuentoStr,
+      total_linea: totalLinea,
+      precio_efectivo: precioEfectivo,
+      menciona_chase: mencionaChase
+    });
+  }
+  return result;
+}
+
+// ----------------------------------------------------------------
+// 1d. PARSER TCG (validado contra TCG-97747, 16 lineas, descuento -5%)
+// ----------------------------------------------------------------
+function parseTCG(rawText) {
+  const result = {
+    proveedor: 'TCG',
+    numero: null,
+    fecha: null,
+    total_con_iva: null,
+    total_sin_iva: null,
+    base_imponible: null,
+    subtotal: null,
+    descuento_eur: null,
+    descuento_pct: 0,
+    iva_pct: 0.21,
+    lineas: []
+  };
+  if (!rawText.match(/TCG\s*FACTORY|TCG\s*-\s*\d+|ESB99486292/i)) {
+    return null;
+  }
+  const matchNum = rawText.match(/N[\u00ba\u00b0]\s*Factura:\s*(TCG\s*-\s*\d+)/i);
+  if (matchNum) result.numero = matchNum[1].replace(/\s+/g, ' ').trim();
+
+  const matchFecha = rawText.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (matchFecha) {
+    result.fecha = matchFecha[3] + '-' + matchFecha[2] + '-' + matchFecha[1];
+  }
+  const matchSub = rawText.match(/Subtotal\s*:\s*([\d.]+,\d{2})/);
+  if (matchSub) {
+    result.subtotal = parseFloat(matchSub[1].replace(/\./g, '').replace(',', '.'));
+  }
+  const matchDto = rawText.match(/Descuento\s*:\s*-([\d.]+,\d{2})/);
+  if (matchDto) {
+    result.descuento_eur = parseFloat(matchDto[1].replace(/\./g, '').replace(',', '.'));
+    if (result.subtotal) {
+      result.descuento_pct = (result.descuento_eur / result.subtotal) * 100;
+    }
+  }
+  const matchTotal = rawText.match(/Total\s+([\d.]+,\d{2})\s*EUR/);
+  if (matchTotal) {
+    result.total_con_iva = parseFloat(matchTotal[1].replace(/\./g, '').replace(',', '.'));
+  }
+  // Base imponible: subtotal - descuento (descuento puede ser 0)
+  if (result.subtotal != null) {
+    result.base_imponible = result.subtotal - (result.descuento_eur || 0);
+    result.total_sin_iva = result.base_imponible;
+  }
+
+  // Lineas: " {CANT} {PRECIO} {NUM_LINEA} {EAN}{C?} {TOTAL} {IVA}{DESCRIPCION}"
+  const lineaRegex = /\s+(\d+)\s+(\d+,\d{2})\s+(\d+)\s+(\d{12,13})(C?)\s+(\d+,\d{2})\s+(\d+,\d{2})(.+?)(?=\s+\d+\s+\d+,\d{2}\s+\d+\s+\d{12}|Subtotal|P\u00e1gina|$)/gs;
+
+  let m;
+  while ((m = lineaRegex.exec(rawText)) !== null) {
+    const cantFacturada = parseInt(m[1]);
+    const precioFacturado = parseFloat(m[2].replace(',', '.'));
+    const numLinea = parseInt(m[3]);
+    const ean = m[4];
+    const sufijoC = m[5];
+    const totalLinea = parseFloat(m[6].replace(',', '.'));
+    let descripcion = m[8].replace(/\s+/g, ' ').trim();
+
+    const esCaseChase = (sufijoC === 'C') && /case\s*5\s*\+\s*1/i.test(descripcion);
+    let cantReal, precioEfectBruto, mencionaChase;
+    if (esCaseChase) {
+      cantReal = cantFacturada * 6;
+      precioEfectBruto = totalLinea / cantReal;
+      mencionaChase = true;
+    } else {
+      cantReal = cantFacturada;
+      precioEfectBruto = precioFacturado;
+      mencionaChase = sufijoC === 'C' || /\bchase\b/i.test(descripcion);
+    }
+    const precioEfectivoFinal = +(precioEfectBruto * (1 - result.descuento_pct / 100)).toFixed(4);
+
+    result.lineas.push({
+      ean_raw: ean,
+      ean_alt_12: ean.length === 13 && ean.startsWith('0') ? ean.substring(1) : null,
+      ref_proveedor: String(numLinea),
+      descripcion: descripcion,
+      cantidad: cantReal,
+      cantidad_facturada: cantFacturada,
+      precio_bruto: precioFacturado,
+      descuento: result.descuento_pct.toFixed(2) + '%',
+      total_linea: totalLinea,
+      precio_efectivo: precioEfectivoFinal,
+      menciona_chase: mencionaChase,
+      es_case_chase: esCaseChase
+    });
+  }
+  return result;
+}
+
+function parseZentrada(rawText) {
+  const result = {
+    proveedor: 'Zentrada',
+    numero: null,
+    fecha: null,
+    total_con_iva: null,
+    total_sin_iva: null,
+    iva_pct: 0,
+    lineas: [],
+    lineas_excluidas: 0
+  };
+  if (!rawText.match(/zentrada|DE813805341|Delpstra/i)) {
+    return null;
+  }
+  // Numero factura
+  const matchNum = rawText.match(/Invoice\s+(\d+)/i);
+  if (matchNum) {
+    result.numero = matchNum[1];
+  } else {
+    const matchAlt = rawText.match(/N[\u00famero]*\s+del\s+Documento:\s*(\d+)/i);
+    if (matchAlt) result.numero = matchAlt[1];
+  }
+  // Fecha
+  const matchFecha = rawText.match(/fecha\s+de\s+recepci[\u00f3o]n:\s*(\d{2})\.(\d{2})\.(\d{4})/i);
+  if (matchFecha) {
+    result.fecha = matchFecha[3] + '-' + matchFecha[2] + '-' + matchFecha[1];
+  }
+  // Totales
+  const matchTotalSinIVA = rawText.match(/Total\s+sin\s+IVA\s+([\d.]+,\d{2})\s*EUR/i);
+  if (matchTotalSinIVA) {
+    result.total_sin_iva = parseFloat(matchTotalSinIVA[1].replace(/\./g, '').replace(',', '.'));
+  }
+  const matchTotalIncl = rawText.match(/Total\s+IVA\s+incluido\s+([\d.]+,\d{2})\s*EUR/i);
+  if (matchTotalIncl) {
+    result.total_con_iva = parseFloat(matchTotalIncl[1].replace(/\./g, '').replace(',', '.'));
+  }
+  if (result.total_sin_iva == null && result.total_con_iva != null) result.total_sin_iva = result.total_con_iva;
+  if (result.total_con_iva == null && result.total_sin_iva != null) result.total_con_iva = result.total_sin_iva;
+
+  // Lineas: cifras (cant precio EUR iva% total EUR) + EAN siguiente
+  const lineaRegex = /(\d+)\s+(\d+,\d{2})\s+EUR\s+\d+,\d{2}\s*%\s+(\d+[.,]?\d*,\d{2})\s+EUR\s*[\s\S]{0,500}?Codigo\s+EAN:\s*(\d{12,14})\s*\|\s*#\s*(\S+)/g;
+
+  let m;
+  let prevEnd = 0;
+  while ((m = lineaRegex.exec(rawText)) !== null) {
+    const cantidad = parseInt(m[1]);
+    const precio = parseFloat(m[2].replace(',', '.'));
+    const totalLinea = parseFloat(m[3].replace(/\./g, '').replace(',', '.'));
+    const ean = m[4];
+    const codProv = m[5];
+
+    // Excluir lineas con cantidad 0 (productos pedidos pero no enviados)
+    if (cantidad === 0) {
+      result.lineas_excluidas++;
+      prevEnd = m.index + m[0].length;
+      continue;
+    }
+
+    // Descripcion: bloque entre el match anterior y el inicio de este match
+    const contexto = rawText.substring(prevEnd, m.index);
+    let descLines = contexto.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+    descLines = descLines.filter(line => {
+      // Lineas del producto anterior:
+      if (/^Weight\s+in\s+Kg/i.test(line)) return false;
+      if (/^:\s*\d+[,.]?\d*\s*$/.test(line)) return false;
+      if (/^entregado\s+en:/i.test(line)) return false;
+      if (/^Marca:/i.test(line)) return false;
+      // Cabeceras / pies de pagina:
+      if (/^p[\u00e1a]gina\s+\d+/i.test(line)) return false;
+      if (/^zentrada\s+Europe/i.test(line)) return false;
+      if (/^Sitz\s+der/i.test(line)) return false;
+      if (/^Komplement/i.test(line)) return false;
+      if (/^Gesch/i.test(line)) return false;
+      if (/^EORI/i.test(line)) return false;
+      if (/^D\s*[\u2013-]\s*\d{5}/.test(line)) return false;
+      if (/^MOLOKA\s+STORE/i.test(line)) return false;
+      if (/^Elena\s+Rubio/i.test(line)) return false;
+      if (/^Av\.?\s+Venecia/i.test(line)) return false;
+      if (/^POL[\u00cd\u00ddI]GONO/i.test(line)) return false;
+      if (/^\d{5}\s+Cartagena/i.test(line)) return false;
+      if (/^Spain\s*$/i.test(line)) return false;
+      if (/^Tel[\u00e9e]fono/i.test(line)) return false;
+      if (/^eMail/i.test(line)) return false;
+      if (/^Homepage/i.test(line)) return false;
+      if (/^IVA\s+de\s+zentrada/i.test(line)) return false;
+      if (/^Invoice/i.test(line)) return false;
+      if (/^N[\u00fau]mero\s+del/i.test(line)) return false;
+      if (/^fecha\s+de\s+recepci/i.test(line)) return false;
+      if (/^N[\u00ba\u00b0]\s+fiscal/i.test(line)) return false;
+      if (/^N[\u00fau]mero\s+de\s+cliente/i.test(line)) return false;
+      if (/^No\.\s+de\s+IVA/i.test(line)) return false;
+      if (/^Your\s+order/i.test(line)) return false;
+      if (/^Pos\.\s+/i.test(line)) return false;
+      // Totales colandose:
+      if (/^\d+%\s*IVA\s*$/i.test(line)) return false;
+      if (/^Art[\u00ed]culos\s+sin\s+IVA/i.test(line)) return false;
+      if (/^Total\s+sin\s+IVA/i.test(line)) return false;
+      if (/^Total\s+IVA\s+incluido/i.test(line)) return false;
+      if (/^IVA\s+\d/i.test(line)) return false;
+      return true;
+    });
+    // Quitar la primera linea si es solo un numero (posicion)
+    if (descLines.length > 0 && /^\d+$/.test(descLines[0])) {
+      descLines = descLines.slice(1);
+    }
+    let descripcion = descLines.join(' ').replace(/\s+/g, ' ').trim();
+    // Caso especial Goliat Ztringz: "90 Goliat Ztringz" donde 90 es la posicion
+    descripcion = descripcion.replace(/^\d{1,3}0\s+(?=[A-Za-z\u00c0-\u017f])/, '');
+
+    const precioEfectivo = +(totalLinea / cantidad).toFixed(4);
+    const mencionaChase = /\bchase\b/i.test(descripcion);
+
+    result.lineas.push({
+      ean_raw: ean,
+      ean_alt_12: ean.length === 13 && ean.startsWith('0') ? ean.substring(1) : (ean.length === 14 && ean.startsWith('0') ? ean.substring(1, 13) : null),
+      ref_proveedor: codProv,
+      descripcion: descripcion,
+      cantidad: cantidad,
+      precio_bruto: precio,
+      descuento: '0%',
+      total_linea: totalLinea,
+      precio_efectivo: precioEfectivo,
+      menciona_chase: mencionaChase
+    });
+
+    prevEnd = m.index + m[0].length;
+  }
+  return result;
+}
+
+// ----------------------------------------------------------------
+// 1f. PARSER HEO (validado contra factura 1307286, 20 lineas, 1.756,23 EUR)
+// IMPORTANTE: HEO no incluye EAN en factura. Solo codigo proveedor (FK...).
+// La primera vez se asocia codigo->producto manualmente, despues autocompleta via codigos_proveedor.
+// ----------------------------------------------------------------
+function parseHEO(rawText) {
+  const result = {
+    proveedor: 'HEO',
+    numero: null,
+    fecha: null,
+    total_con_iva: null,
+    total_sin_iva: null,
+    iva_pct: 0,
+    lineas: []
+  };
+  if (!rawText.match(/heo\s+GmbH|DE813027049|West\s+Campus.*Herxheim/i)) {
+    return null;
+  }
+  // Numero factura: aparece tras "F A C T U R A" + "Numero" + "Fecha pedido" + numero + fecha
+  const matchNum = rawText.match(/F\s*A\s*C\s*T\s*U\s*R\s*A[\s\S]*?(\d{6,})\s*\n\s*(\d{2})\.(\d{2})\.(\d{4})/);
+  if (matchNum) {
+    result.numero = matchNum[1];
+    result.fecha = matchNum[4] + '-' + matchNum[3] + '-' + matchNum[2];
+  } else {
+    const matchFecha = rawText.match(/Fecha\s+de\s+emisi[\u00f3o]n\s*\n?\s*(\d{2})\.(\d{2})\.(\d{4})/i);
+    if (matchFecha) {
+      result.fecha = matchFecha[3] + '-' + matchFecha[2] + '-' + matchFecha[1];
+    }
+  }
+  // Total
+  const matchTotal = rawText.match(/Total\s+([\d.]+,\d{2})\s*\u20ac/);
+  if (matchTotal) {
+    const total = parseFloat(matchTotal[1].replace(/\./g, '').replace(',', '.'));
+    result.total_sin_iva = total;
+    result.total_con_iva = total; // Intracomunitario IVA 0%
+  }
+
+  // Lineas: cifras del final + retroceder hasta ultimo FK
+  const lineaRegex = /(\d+)\s+(\d+,\d{3})\s+kg\s+(\d+,\d{2})\s*\u20ac\s+(\d+,\d{2})\s*%\s+(\d+,\d{2})\s*\u20ac\s+([\d.]+,\d{2})\s*\u20ac/g;
+
+  let m;
+  let prevEnd = 0;
+  while ((m = lineaRegex.exec(rawText)) !== null) {
+    const cantFacturada = parseInt(m[1]);
+    const precioBruto = parseFloat(m[3].replace(',', '.'));
+    const dto = parseFloat(m[4].replace(',', '.'));
+    const precioNeto = parseFloat(m[5].replace(',', '.'));
+    const totalLinea = parseFloat(m[6].replace(/\./g, '').replace(',', '.'));
+
+    // Buscar codigo FK + descripcion en el contexto previo
+    const contexto = rawText.substring(prevEnd, m.index);
+    const fkMatches = [...contexto.matchAll(/FK\d+/g)];
+    let codigo = null;
+    let descripcion = '';
+    if (fkMatches.length > 0) {
+      const ultimoFK = fkMatches[fkMatches.length - 1];
+      codigo = ultimoFK[0];
+      const descStart = ultimoFK.index + codigo.length;
+      let descRaw = contexto.substring(descStart);
+      descripcion = descRaw.replace(/\s+/g, ' ').trim();
+      descripcion = descripcion.replace(/Pa[\u00ed]s\s+de\s+origen.*$/i, '').trim();
+      descripcion = descripcion.replace(/HS-Code.*$/i, '').trim();
+      descripcion = descripcion.replace(/Continuaci[\u00f3o]n\s+en\s+p[\u00e1a]gina.*$/i, '').trim();
+      descripcion = descripcion.replace(/Suma\s+y\s+sigue\s+p[\u00e1a]gina.*$/i, '').trim();
+      descripcion = descripcion.replace(/SubTotal.*$/i, '').trim();
+      descripcion = descripcion.replace(/heo\s+GmbH.*$/i, '').trim();
+    }
+
+    // Detectar Surtido (Case): "Surtido (N)" en la descripcion
+    const surtidoMatch = descripcion.match(/Surtido\s*\((\d+)\)/i);
+    const esSurtido = !!surtidoMatch;
+    const nSurtido = esSurtido ? parseInt(surtidoMatch[1]) : 1;
+
+    let cantReal, precioEfectivoUnitario;
+    if (esSurtido) {
+      cantReal = cantFacturada * nSurtido;
+      precioEfectivoUnitario = +(totalLinea / cantReal).toFixed(4);
+    } else {
+      cantReal = cantFacturada;
+      precioEfectivoUnitario = precioNeto;
+    }
+
+    const mencionaChase = /\bw\/?\s*chase\b|\bwith\s*chase\b|\bchase\b/i.test(descripcion);
+
+    result.lineas.push({
+      ean_raw: null, // HEO no incluye EAN en factura
+      ean_alt_12: null,
+      ref_proveedor: codigo,
+      descripcion: descripcion,
+      cantidad: cantReal,
+      cantidad_facturada: cantFacturada,
+      precio_bruto: precioBruto,
+      descuento: dto.toFixed(2) + '%',
+      total_linea: totalLinea,
+      precio_efectivo: precioEfectivoUnitario,
+      menciona_chase: mencionaChase,
+      es_surtido: esSurtido,
+      n_surtido: nSurtido
+    });
+
+    prevEnd = m.index + m[0].length;
+  }
+  return result;
+}
+
+// ----------------------------------------------------------------
+// 1g. PARSER OSMA (validado contra factura 1464713)
+// IMPORTANTE: OSMA no incluye EAN. Solo codigo proveedor numerico.
+// Tambien cobra gastos de envio que se reparten en el precio efectivo (helper).
+// ----------------------------------------------------------------
+function parseOSMA(rawText) {
+  const result = {
+    proveedor: 'OSMA',
+    numero: null,
+    fecha: null,
+    total_con_iva: null,
+    total_sin_iva: null,
+    iva_pct: 0,
+    lineas: [],
+    gastos_envio: null
+  };
+  if (!rawText.match(/OSMA-Werm|osma-werm\.com|DE\s*114\s*195\s*897/i)) {
+    return null;
+  }
+  const matchNum = rawText.match(/Invoice\s+no\.\s*:\s*(\d+)/i);
+  if (matchNum) result.numero = matchNum[1];
+  const matchFecha = rawText.match(/Date\s*:\s*(\d{2})\.(\d{2})\.(\d{4})/);
+  if (matchFecha) {
+    result.fecha = matchFecha[3] + '-' + matchFecha[2] + '-' + matchFecha[1];
+  }
+  const matchTotal = rawText.match(/Total\s+amount\s+([\d.]+,\d{2})/);
+  if (matchTotal) {
+    const total = parseFloat(matchTotal[1].replace(/\./g, '').replace(',', '.'));
+    result.total_sin_iva = total;
+    result.total_con_iva = total;
+  }
+
+  // Aislar zona de lineas (entre "Price EUR" y "Total amount")
+  let zona = '';
+  const matchZona1 = rawText.match(/Price\s*EUR([\s\S]+?)Total\s+amount/);
+  if (matchZona1) {
+    zona = matchZona1[1];
+  } else {
+    const matchZona2 = rawText.match(/Pos\s+Article([\s\S]+?)Total\s+amount/);
+    if (matchZona2) zona = matchZona2[1];
+    else return result;
+  }
+
+  // Patron flexible: cifras (cantidad pcs * precio total)
+  const lineaRegex = /([\d.]+)\s*(pcs|pc|unit|szt|kg)\s*\*?\s*(\d+,\d{3,4})\s*(\d{1,3}(?:\.\d{3})*,\d{2})/g;
+
+  let m;
+  let prevEnd = 0;
+  while ((m = lineaRegex.exec(zona)) !== null) {
+    const cantidad = parseInt(m[1].replace(/\./g, ''));
+    const precio = parseFloat(m[3].replace(',', '.'));
+    const totalLinea = parseFloat(m[4].replace(/\./g, '').replace(',', '.'));
+
+    // Buscar codigo + descripcion en el contexto previo
+    const contexto = zona.substring(prevEnd, m.index).trim();
+    let codigo = null;
+    let descripcion = '';
+    const matchCtx = contexto.match(/(\d{1,3})\s+(\d{2,5})\s+([A-Z][\s\S]+?)\s*$/);
+    if (matchCtx) {
+      codigo = matchCtx[2];
+      descripcion = matchCtx[3].replace(/\s+/g, ' ').trim();
+    }
+
+    const precioEfectivo = +(totalLinea / cantidad).toFixed(4);
+
+    result.lineas.push({
+      ean_raw: null, // OSMA no incluye EAN
+      ean_alt_12: null,
+      ref_proveedor: codigo,
+      descripcion: descripcion,
+      cantidad: cantidad,
+      precio_bruto: precio,
+      descuento: '0%',
+      total_linea: totalLinea,
+      precio_efectivo: precioEfectivo,
+      menciona_chase: false
+    });
+
+    prevEnd = m.index + m[0].length;
+  }
+
+  // Detectar gastos de envio
+  const matchEnvio = zona.match(/(\d+)\s+(\d+)\s+share\s+of\s+freight\s+costs\s+([\d.]+,\d{2})/i);
+  if (matchEnvio) {
+    result.gastos_envio = parseFloat(matchEnvio[3].replace(/\./g, '').replace(',', '.'));
+  }
+
+  return result;
+}
+
+// ----------------------------------------------------------------
+// 1c. ROUTER DE PARSERS: detecta el proveedor y aplica el parser correcto
+// ----------------------------------------------------------------
+function parseFacturaPDF(rawText) {
+  // Probar todos los parsers; el primero que retorne resultado valido gana.
+  const parsers = [
+    { nombre: 'BEMS', fn: parseBems },
+    { nombre: 'DBLine', fn: parseDBLine },
+    { nombre: 'TCG', fn: parseTCG },
+    { nombre: 'Zentrada', fn: parseZentrada },
+    { nombre: 'HEO', fn: parseHEO },
+    { nombre: 'OSMA', fn: parseOSMA }
+  ];
+  for (const p of parsers) {
+    const result = p.fn(rawText);
+    if (result && result.lineas && result.lineas.length > 0) {
+      // Aplicar reparto de envio si el parser detecto gastos
+      // (por defecto siempre se aplica, el usuario puede desactivarlo en revision)
+      aplicarRepartoEnvio(result, _facturaAplicarEnvio);
+      return result;
+    }
+  }
+  return null;
+}
+
+// ----------------------------------------------------------------
 // 2. EXTRACCION DE TEXTO DE PDF (con pdf.js)
 // ----------------------------------------------------------------
 async function extraerTextoPDF(file) {
@@ -2549,10 +3123,10 @@ async function onSeleccionarFacturaPDF(file) {
   try {
     const texto = await extraerTextoPDF(file);
     _facturaTextoCrudo = texto;
-    // Detectar proveedor y parsear
-    const parsed = parseBems(texto);
+    // Detectar proveedor y parsear (router probara BEMS, DBLine, etc.)
+    const parsed = parseFacturaPDF(texto);
     if (!parsed) {
-      showToast('Solo se admiten facturas BEM\'S por ahora', 'error');
+      showToast('Proveedor no reconocido. Soportado: BEMS, DBLine', 'error');
       closeModal('modal-revision-factura');
       return;
     }
@@ -2569,16 +3143,24 @@ async function onSeleccionarFacturaPDF(file) {
     // Para cada linea, intentar matching contra BD
     _facturaLineas = [];
     for (const l of parsed.lineas) {
-      const match = await matchProductoPorEAN(l.ean_raw, l.ean_alt_12);
+      // Match por EAN si lo tiene; si no, por codigo_proveedor (HEO/OSMA)
+      let match;
+      if (l.ean_raw) {
+        match = await matchProductoPorEAN(l.ean_raw, l.ean_alt_12);
+      } else if (l.ref_proveedor) {
+        match = await matchProductoPorCodigoProveedor(parsed.proveedor, l.ref_proveedor);
+      } else {
+        match = { estado: 'no_encontrado', productos: [], ean_match: null };
+      }
       _facturaLineas.push({
         ...l,
-        ean_editado: l.ean_raw, // EAN editable
+        ean_editado: l.ean_raw || '',
         cantidad_editada: l.cantidad,
         precio_editado: l.precio_efectivo,
-        match_estado: match.estado, // 'unico' | 'duplicados' | 'no_encontrado'
-        match_productos: match.productos, // array de productos coincidentes
+        match_estado: match.estado,
+        match_productos: match.productos,
         producto_id_seleccionado: match.estado === 'unico' ? match.productos[0].id : null,
-        chase_reparto: 'sin_chase', // 'sin_chase' | 'reparto_5_1' | 'todo_chase' | 'custom'
+        chase_reparto: 'sin_chase',
         chase_unidades_regular: l.cantidad,
         chase_unidades_chase: 0
       });
@@ -2621,6 +3203,27 @@ async function matchProductoPorEAN(eanRaw, ean12) {
 }
 
 // ----------------------------------------------------------------
+// 5b. MATCHING POR CODIGO DE PROVEEDOR (HEO, OSMA y otros sin EAN)
+// Busca en tabla codigos_proveedor por (proveedor, codigo) y devuelve el
+// producto vinculado. Esto permite autocompletar a partir de la 2a factura.
+// ----------------------------------------------------------------
+async function matchProductoPorCodigoProveedor(proveedor, codigo) {
+  if (!proveedor || !codigo) return { estado: 'no_encontrado', productos: [], ean_match: null };
+  const { data, error } = await db.from('codigos_proveedor')
+    .select('producto_id, codigo_proveedor, productos(id, ean, asin, nombre, marca, proveedor, pvd, stock_moloka, stock_fba, unidades_compradas, activo, estado, es_chase)')
+    .eq('proveedor', proveedor).eq('codigo_proveedor', codigo);
+  if (error) {
+    console.error('Error buscando codigo_proveedor:', error);
+    return { estado: 'no_encontrado', productos: [], ean_match: null };
+  }
+  if (!data || data.length === 0) return { estado: 'no_encontrado', productos: [], ean_match: null };
+  const productos = data.map(r => r.productos).filter(p => p && p.activo);
+  if (productos.length === 1) return { estado: 'unico', productos: productos, ean_match: null };
+  if (productos.length > 1) return { estado: 'duplicados', productos: productos, ean_match: null };
+  return { estado: 'no_encontrado', productos: [], ean_match: null };
+}
+
+// ----------------------------------------------------------------
 // 6. RENDER DEL CUADRO DE REVISION
 // ----------------------------------------------------------------
 function renderRevision() {
@@ -2631,6 +3234,24 @@ function renderRevision() {
   document.getElementById('rev-proveedor').textContent = f.proveedor;
   document.getElementById('rev-fecha').textContent = fechaFmt;
   document.getElementById('rev-total').textContent = f.total_con_iva != null ? f.total_con_iva.toFixed(2) + ' \u20ac' : '?';
+
+  // Bloque de gastos de envio (visible solo si hay gastos detectados)
+  const bloqueEnvio = document.getElementById('rev-envio-bloque');
+  if (f.gastos_envio && f.gastos_envio > 0) {
+    bloqueEnvio.style.display = 'block';
+    document.getElementById('rev-envio-importe').textContent = f.gastos_envio.toFixed(2) + ' \u20ac';
+    const totalUnidades = _facturaLineas.reduce((s, l) => s + (l.cantidad_editada || 0), 0);
+    const checkbox = document.getElementById('rev-envio-checkbox');
+    checkbox.checked = _facturaAplicarEnvio;
+    if (_facturaAplicarEnvio && totalUnidades > 0) {
+      const porUnidad = (f.gastos_envio / totalUnidades).toFixed(4);
+      document.getElementById('rev-envio-detalle').textContent = 'Repartiendo lineal: +' + porUnidad + ' \u20ac/unidad sobre ' + totalUnidades + ' unidades';
+    } else {
+      document.getElementById('rev-envio-detalle').textContent = 'No se reparte: el precio efectivo NO incluye los gastos de envio';
+    }
+  } else {
+    bloqueEnvio.style.display = 'none';
+  }
 
   // Lineas
   const tbody = document.getElementById('rev-lineas-tbody');
@@ -2645,6 +3266,22 @@ function renderRevision() {
   actualizarValidaciones();
 }
 
+// Toggle del checkbox de reparto de envio
+function toggleRepartoEnvio() {
+  const checkbox = document.getElementById('rev-envio-checkbox');
+  _facturaAplicarEnvio = checkbox.checked;
+  // Aplicar/desaplicar al objeto factura y propagar a las lineas editables
+  aplicarRepartoEnvio(_facturaActual, _facturaAplicarEnvio);
+  // Actualizar precio_editado de cada linea para que refleje el nuevo precio efectivo
+  _facturaActual.lineas.forEach((lOrig, i) => {
+    if (_facturaLineas[i]) {
+      _facturaLineas[i].precio_editado = lOrig.precio_efectivo;
+      _facturaLineas[i].precio_efectivo = lOrig.precio_efectivo;
+    }
+  });
+  renderRevision();
+}
+
 function renderLinea(l, idx) {
   let estadoBadge = '';
   let productoTexto = '';
@@ -2657,29 +3294,52 @@ function renderLinea(l, idx) {
     productoTexto = '<div style="font-size:11px;color:var(--gray-500)">' + l.match_productos.map(p => p.proveedor + ' (' + (p.pvd != null ? p.pvd.toFixed(2) : '?') + '\u20ac)').join(', ') + '</div>';
   } else {
     estadoBadge = '<span class="badge badge-orange">\u2728 Producto nuevo</span>';
-    productoTexto = '<div style="font-size:11px;color:var(--gray-400)">Se creara con asin_pendiente</div>';
+    productoTexto = '<div style="font-size:11px;color:var(--gray-400)">Se crear\u00e1 con asin_pendiente</div>';
   }
-  const chaseDetectada = l.menciona_chase ? '<span style="font-size:11px;color:#b06800">\u26a0\ufe0f "Chase" en descripcion</span>' : '';
+  const chaseDetectada = l.menciona_chase ? '<span style="font-size:11px;color:#b06800;margin-left:6px">\u26a0\ufe0f "Chase" en descripci\u00f3n</span>' : '';
   const sumaChase = l.chase_unidades_regular + l.chase_unidades_chase;
   const chaseError = sumaChase !== l.cantidad_editada ? '<span style="color:#c01616;font-size:11px">\u26a0\ufe0f Suma ' + sumaChase + ' \u2260 ' + l.cantidad_editada + '</span>' : '';
+
+  // Etiqueta del codigo proveedor (generica) - usa nombre del proveedor como prefijo
+  const proveedor = (_facturaActual && _facturaActual.proveedor) || '';
+  const refProvLabel = l.ref_proveedor ? '<div style="font-size:11px;color:var(--gray-500);margin-bottom:6px">Ref ' + proveedor + ': <strong>' + l.ref_proveedor + '</strong></div>' : '';
+
+  // Aviso de Case/Surtido (TCG, HEO)
+  let casoEspecial = '';
+  if (l.es_case_chase) {
+    casoEspecial = '<div style="font-size:11px;color:#7a4f00;background:#fff8e1;padding:4px 8px;border-radius:4px;margin-bottom:6px;display:inline-block">\ud83d\udce6 Case 5+1 detectado: ' + l.cantidad_facturada + ' cases \u2192 ' + l.cantidad + ' figuras (5 reg + 1 chase) \u00d7 ' + (l.cantidad / 6) + '</div>';
+  } else if (l.es_surtido && l.n_surtido > 1) {
+    casoEspecial = '<div style="font-size:11px;color:#7a4f00;background:#fff8e1;padding:4px 8px;border-radius:4px;margin-bottom:6px;display:inline-block">\ud83d\udce6 Surtido x' + l.n_surtido + ': ' + l.cantidad_facturada + ' cases \u2192 ' + l.cantidad + ' figuras</div>';
+  }
+
+  // Reparto de envio aplicado a esta linea
+  let envioInfo = '';
+  if (l.envio_repercutido && l.envio_repercutido > 0) {
+    envioInfo = '<div style="font-size:11px;color:var(--gray-500);margin-top:2px">Sin envio: ' + (l.precio_efectivo_sin_envio || 0).toFixed(4) + ' \u20ac \u00b7 +Env\u00edo: ' + l.envio_repercutido.toFixed(4) + ' \u20ac</div>';
+  }
+
+  // Input EAN: si la linea ya trae EAN, mostrar editable; si no, mostrar opcional
+  const eanLabel = l.ean_raw ? 'EAN' : 'EAN (opcional, si lo conoces)';
+  const eanPlaceholder = l.ean_raw ? '' : 'Dejar vac\u00edo si no aplica';
 
   return ''
     + '<td style="padding:10px;vertical-align:top">'
       + '<div style="font-weight:600;font-size:13px;margin-bottom:4px">' + (idx + 1) + '. ' + (l.descripcion || '?').substring(0, 75) + (l.descripcion && l.descripcion.length > 75 ? '...' : '') + '</div>'
-      + (l.ref_proveedor ? '<div style="font-size:11px;color:var(--gray-500);margin-bottom:6px">Ref BEMS: ' + l.ref_proveedor + '</div>' : '')
-      + '<div style="display:grid;grid-template-columns:140px 80px 100px;gap:8px;margin-bottom:8px">'
-        + '<div><div style="font-size:10px;color:var(--gray-500);text-transform:uppercase">EAN</div><input class="input" style="font-family:monospace;font-size:12px;padding:4px 8px" value="' + (l.ean_editado || '') + '" oninput="actualizarLineaEAN(' + idx + ', this.value)"></div>'
+      + refProvLabel
+      + casoEspecial
+      + '<div style="display:grid;grid-template-columns:160px 80px 110px;gap:8px;margin-bottom:8px">'
+        + '<div><div style="font-size:10px;color:var(--gray-500);text-transform:uppercase">' + eanLabel + '</div><input class="input" style="font-family:monospace;font-size:12px;padding:4px 8px" value="' + (l.ean_editado || '') + '" placeholder="' + eanPlaceholder + '" oninput="actualizarLineaEAN(' + idx + ', this.value)"></div>'
         + '<div><div style="font-size:10px;color:var(--gray-500);text-transform:uppercase">Cant</div><input class="input" type="number" style="font-size:12px;padding:4px 8px" value="' + l.cantidad_editada + '" oninput="actualizarLineaCantidad(' + idx + ', this.value)"></div>'
-        + '<div><div style="font-size:10px;color:var(--gray-500);text-transform:uppercase">Precio efect.</div><input class="input" type="number" step="0.0001" style="font-size:12px;padding:4px 8px" value="' + l.precio_editado + '" oninput="actualizarLineaPrecio(' + idx + ', this.value)"></div>'
+        + '<div><div style="font-size:10px;color:var(--gray-500);text-transform:uppercase">Precio efect.</div><input class="input" type="number" step="0.0001" style="font-size:12px;padding:4px 8px" value="' + l.precio_editado + '" oninput="actualizarLineaPrecio(' + idx + ', this.value)">' + envioInfo + '</div>'
       + '</div>'
-      + '<div style="margin-bottom:6px">' + estadoBadge + ' ' + chaseDetectada + '</div>'
+      + '<div style="margin-bottom:6px">' + estadoBadge + chaseDetectada + '</div>'
       + productoTexto
       + (l.match_estado === 'no_encontrado' ? '<button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="buscarProductoManual(' + idx + ')">\ud83d\udd0d Buscar producto en BD</button>' : '')
       + '<div style="margin-top:8px;padding:8px;background:var(--gray-50);border-radius:6px">'
-        + '<div style="font-size:11px;color:var(--gray-600);margin-bottom:4px">Asignacion CHASE:</div>'
+        + '<div style="font-size:11px;color:var(--gray-600);margin-bottom:4px">Asignaci\u00f3n CHASE:</div>'
         + '<select class="input" style="font-size:12px;padding:4px" onchange="cambiarChaseReparto(' + idx + ', this.value)">'
           + '<option value="sin_chase"' + (l.chase_reparto === 'sin_chase' ? ' selected' : '') + '>Sin CHASE \u2014 ' + l.cantidad_editada + ' regular</option>'
-          + '<option value="reparto_5_1"' + (l.chase_reparto === 'reparto_5_1' ? ' selected' : '') + '>Reparto 5+1 (5 regular + 1 CHASE)</option>'
+          + '<option value="reparto_5_1"' + (l.chase_reparto === 'reparto_5_1' ? ' selected' : '') + '>Reparto 5+1 (5 regular + 1 CHASE) \u00d7 ' + Math.floor(l.cantidad_editada / 6) + '</option>'
           + '<option value="todo_chase"' + (l.chase_reparto === 'todo_chase' ? ' selected' : '') + '>Todo CHASE</option>'
           + '<option value="custom"' + (l.chase_reparto === 'custom' ? ' selected' : '') + '>Personalizado</option>'
         + '</select>'
@@ -3063,19 +3723,19 @@ async function consolidarDuplicados(productos) {
 // 13. CREAR PRODUCTO NUEVO (asin_pendiente)
 // ----------------------------------------------------------------
 async function crearProductoNuevo(linea) {
+  const eanLimpio = (linea.ean_editado || '').trim();
   const { data, error } = await db.from('productos').insert({
-    ean: linea.ean_editado,
+    ean: eanLimpio || null, // NULL si vacio (HEO, OSMA y otros sin EAN)
     nombre: (linea.descripcion || 'Sin descripcion').substring(0, 200),
     proveedor: _facturaActual.proveedor,
     pvd: linea.precio_editado,
-    stock_moloka: 0, // El stock real lo aplica procesarLineaFactura sumando
+    stock_moloka: 0,
     stock_fba: 0,
     stock_miravia: 0,
     unidades_compradas: 0,
     activo: true,
     estado: 'OK',
     iva_pct: 0.21
-    // ASIN se deja NULL: aparecera como sin ASIN en inventario para asignar
   }).select().single();
   if (error) {
     console.error('Error creando producto nuevo:', error, linea);
