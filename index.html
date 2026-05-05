@@ -3179,20 +3179,24 @@ async function onSeleccionarFacturaPDF(file) {
 // 5. MATCHING PRODUCTO POR EAN (probando 13d, 12d, 11d)
 // ----------------------------------------------------------------
 async function matchProductoPorEAN(eanRaw, ean12) {
-  // Probar varias longitudes
+  // Probar varias longitudes (11, 12, 13 digitos directamente desde eanRaw)
   const candidatos = [];
-  if (eanRaw && /^\d{13}$/.test(eanRaw)) candidatos.push(eanRaw);
-  if (ean12 && /^\d{12}$/.test(ean12)) candidatos.push(ean12);
-  // Si EAN12 empieza por 0, probar tb 11 digitos
+  if (eanRaw && /^\d{11,13}$/.test(eanRaw)) {
+    candidatos.push(eanRaw);
+    // Si tiene 13 digitos y empieza por 0, probar tb sin el 0 inicial (BEMS)
+    if (eanRaw.length === 13 && eanRaw.startsWith('0')) candidatos.push(eanRaw.substring(1));
+    // Si tiene 12 digitos y empieza por 0, probar tb sin el 0 inicial
+    if (eanRaw.length === 12 && eanRaw.startsWith('0')) candidatos.push(eanRaw.substring(1));
+  }
+  if (ean12 && /^\d{12}$/.test(ean12) && !candidatos.includes(ean12)) candidatos.push(ean12);
   if (ean12 && ean12.startsWith('0') && /^\d{12}$/.test(ean12)) {
-    candidatos.push(ean12.substring(1));
+    const ean11 = ean12.substring(1);
+    if (!candidatos.includes(ean11)) candidatos.push(ean11);
   }
   for (const cand of candidatos) {
     const { data } = await db.from('productos').select('id, ean, asin, nombre, marca, proveedor, pvd, stock_moloka, stock_fba, unidades_compradas, activo, estado, es_chase').eq('ean', cand);
     if (data && data.length > 0) {
       if (data.length === 1) return { estado: 'unico', productos: data, ean_match: cand };
-      // Hay duplicados (mismo EAN, varias filas)
-      // Filtrar solo activos
       const activos = data.filter(p => p.activo);
       if (activos.length === 1) return { estado: 'unico', productos: activos, ean_match: cand };
       if (activos.length > 1) return { estado: 'duplicados', productos: activos, ean_match: cand };
