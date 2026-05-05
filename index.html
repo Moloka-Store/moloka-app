@@ -557,6 +557,20 @@
     <div class="page-header">
       <div><div class="page-title">📊 Rentabilidad</div><div class="page-sub" id="rent-sub">Cargando...</div></div>
     </div>
+    <!-- Valor de existencias actuales (a coste/PVD) -->
+    <div class="stats-row" style="margin-bottom:18px">
+      <div class="stat-card">
+        <div class="stat-label">📦 Valor stock Amazon (FBA)</div>
+        <div class="stat-value" id="rent-valor-fba">—</div>
+        <div class="stat-sub" id="rent-valor-fba-sub">Valorado a coste de compra</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">🏪 Valor stock Almacén Moloka</div>
+        <div class="stat-value" id="rent-valor-moloka">—</div>
+        <div class="stat-sub" id="rent-valor-moloka-sub">Valorado a coste de compra</div>
+      </div>
+    </div>
+
     <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;align-items:center">
       <span style="font-size:12px;font-weight:600;color:var(--gray-500)">VER:</span>
       <button class="btn btn-primary btn-sm" id="btn-rent-acum" onclick="verRentabilidad('acumulado')">Acumulado</button>
@@ -2278,7 +2292,61 @@ async function cargarRentData() {
   }
 }
 
+async function cargarValorExistencias() {
+  // Sumar stock_fba * pvd y stock_moloka * pvd para todos los productos activos con pvd > 0
+  // Paginamos porque pueden ser muchos productos (Supabase devuelve max 1000 por defecto)
+  let valorFBA = 0;
+  let valorMoloka = 0;
+  let unidadesFBA = 0;
+  let unidadesMoloka = 0;
+  let sinValorar = 0;
+  let pagina = 0;
+  const PAGE_SIZE = 1000;
+  while (true) {
+    const desde = pagina * PAGE_SIZE;
+    const hasta = desde + PAGE_SIZE - 1;
+    const { data, error } = await db.from('productos')
+      .select('pvd, stock_fba, stock_moloka, activo')
+      .eq('activo', true)
+      .range(desde, hasta);
+    if (error) {
+      console.error('Error cargando valor existencias:', error);
+      break;
+    }
+    if (!data || data.length === 0) break;
+    for (const p of data) {
+      const fba = p.stock_fba || 0;
+      const moloka = p.stock_moloka || 0;
+      if (p.pvd && p.pvd > 0) {
+        valorFBA += fba * p.pvd;
+        valorMoloka += moloka * p.pvd;
+      } else if (fba > 0 || moloka > 0) {
+        sinValorar++;
+      }
+      unidadesFBA += fba;
+      unidadesMoloka += moloka;
+    }
+    if (data.length < PAGE_SIZE) break;
+    pagina++;
+  }
+  // Render
+  const elFBA = document.getElementById('rent-valor-fba');
+  const elMoloka = document.getElementById('rent-valor-moloka');
+  const elFBASub = document.getElementById('rent-valor-fba-sub');
+  const elMolokaSub = document.getElementById('rent-valor-moloka-sub');
+  if (elFBA) elFBA.textContent = valorFBA.toLocaleString('es-ES', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' \u20ac';
+  if (elMoloka) elMoloka.textContent = valorMoloka.toLocaleString('es-ES', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' \u20ac';
+  if (elFBASub) elFBASub.textContent = unidadesFBA.toLocaleString('es-ES') + ' unidades \u00b7 a coste de compra';
+  if (elMolokaSub) {
+    const sufijo = sinValorar > 0 ? ' \u00b7 ' + sinValorar + ' sin valorar' : '';
+    elMolokaSub.textContent = unidadesMoloka.toLocaleString('es-ES') + ' unidades \u00b7 a coste' + sufijo;
+  }
+}
+
 async function verRentabilidad(periodo) {
+  // Refrescar valor de existencias cada vez que entras en la pestana
+  cargarValorExistencias();
+
   const data = await cargarRentData();
   if (!data) {
     document.getElementById('rent-sub').textContent = 'Datos no disponibles todavía';
