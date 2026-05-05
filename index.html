@@ -25,9 +25,10 @@
 
   /* SIDEBAR */
   .sidebar { width: var(--sidebar-w); background: var(--navy-dark); height: 100vh; display: flex; flex-direction: column; flex-shrink: 0; }
-  .sidebar-logo { padding: 24px 20px 20px; border-bottom: 1px solid rgba(255,255,255,0.07); }
+  .sidebar-logo { padding: 24px 20px 20px; border-bottom: 1px solid rgba(255,255,255,0.07); display: flex; flex-direction: column; align-items: center; }
+  .sidebar-logo img { max-width: 140px; max-height: 90px; height: auto; width: auto; display: block; margin-bottom: 8px; filter: invert(1) hue-rotate(180deg); }
   .sidebar-logo .logo-name { font-size: 18px; font-weight: 700; color: white; }
-  .sidebar-logo .logo-sub { font-size: 11px; color: var(--navy-light); margin-top: 2px; }
+  .sidebar-logo .logo-sub { font-size: 11px; color: var(--navy-light); margin-top: 2px; text-align: center; }
   .sidebar-nav { padding: 12px 10px; flex: 1; display: flex; flex-direction: column; gap: 2px; }
   .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; cursor: pointer; transition: all 0.15s; color: var(--navy-light); font-size: 13.5px; font-weight: 500; }
   .nav-item:hover { background: rgba(255,255,255,0.06); color: white; }
@@ -209,7 +210,8 @@
     box-shadow: 0 24px 80px rgba(0,0,0,0.4);
     text-align: center;
   }
-  .login-logo { font-size: 40px; margin-bottom: 8px; }
+  .login-logo { margin-bottom: 12px; min-height: 80px; display: flex; align-items: center; justify-content: center; }
+  .login-logo img { max-width: 200px; max-height: 100px; height: auto; width: auto; display: block; }
   .login-title { font-size: 22px; font-weight: 700; color: var(--navy); margin-bottom: 4px; }
   .login-sub { font-size: 13px; color: var(--gray-400); margin-bottom: 28px; }
   .login-error { background: var(--red-light); color: #991B1B; font-size: 12px; font-weight: 600; padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; display: none; }
@@ -223,8 +225,7 @@
 <!-- LOGIN -->
 <div class="login-screen" id="login-screen">
   <div class="login-box">
-    <div class="login-logo">🏪</div>
-    <div class="login-title">Moloka Store</div>
+    <div class="login-logo" id="login-logo-container"></div>
     <div class="login-sub">Panel de Control · Acceso privado</div>
     <div class="login-error" id="login-error">Usuario o contraseña incorrectos</div>
     <input class="input" type="text" id="login-user" placeholder="Usuario" autocomplete="username">
@@ -236,8 +237,7 @@
 
 <!-- SIDEBAR -->
 <aside class="sidebar">
-  <div class="sidebar-logo">
-    <div class="logo-name">🏪 Moloka Store</div>
+  <div class="sidebar-logo" id="sidebar-logo-container">
     <div class="logo-sub">Panel de Control</div>
   </div>
   <nav class="sidebar-nav">
@@ -3888,6 +3888,19 @@ document.getElementById('envio-fecha').textContent = 'Fecha: ' + new Date().toLo
 // Enter en escaneo
 document.getElementById('scan-ean').addEventListener('keydown', e => { if (e.key === 'Enter') buscarProductoEscaneo(); });
 document.getElementById('envio-scan').addEventListener('keydown', e => { if (e.key === 'Enter') addProductoEnvio(); });
+
+// Inyectar logo Moloka en login y sidebar (usa la constante MOLOKA_LOGO_B64)
+(function inyectarLogos() {
+  if (typeof MOLOKA_LOGO_B64 === 'undefined') return;
+  const loginEl = document.getElementById('login-logo-container');
+  if (loginEl) {
+    loginEl.innerHTML = '<img src="' + MOLOKA_LOGO_B64 + '" alt="Moloka Store">';
+  }
+  const sidebarEl = document.getElementById('sidebar-logo-container');
+  if (sidebarEl) {
+    sidebarEl.innerHTML = '<img src="' + MOLOKA_LOGO_B64 + '" alt="Moloka Store"><div class="logo-sub">Panel de Control</div>';
+  }
+})();
 
 // Arranque — verificar login
 if (checkLogin()) init();
