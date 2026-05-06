@@ -371,6 +371,9 @@
               <div class="input-group"><div class="input-label">Ubicación</div><input class="input" id="entrada-loc" placeholder="D-1, A-3..."></div>
             </div>
             <button class="btn btn-green" style="width:100%" id="btn-confirmar-entrada" onclick="confirmarEntrada()">✅ Confirmar entrada</button>
+            <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--gray-200)">
+              <button class="btn btn-ghost btn-sm" style="width:100%" onclick="confirmarEntradaChase()" title="Las unidades van a la ficha CHASE de este producto (mismo EAN). Si la ficha no existe, se crea.">✨ Estas unidades son CHASE</button>
+            </div>
           </div>
         </div>
 
@@ -1551,6 +1554,97 @@ async function confirmarEntrada() {
   showToast(`+${qty} ud de ${productoEnEdicion.nombre.substring(0,30)} ✅`, 'success');
 }
 
+// Entrada como CHASE: las unidades van a la ficha es_chase=true del mismo EAN.
+// Si la ficha CHASE no existe, se crea automaticamente (mismo EAN, sin ASIN,
+// nombre = nombre regular + " (CHASE)", proveedor heredado, pvd heredado).
+async function confirmarEntradaChase() {
+  if (!productoEnEdicion) return;
+  if (productoEnEdicion.es_chase) {
+    showToast('Este producto YA es CHASE. Usa el boton verde de "Confirmar entrada" en su lugar.', 'error');
+    return;
+  }
+  if (!productoEnEdicion.ean) {
+    showToast('No se puede crear ficha CHASE: el producto regular no tiene EAN', 'error');
+    return;
+  }
+  const qty = parseInt(document.getElementById('entrada-qty').value) || 1;
+  const loc = document.getElementById('entrada-loc').value.trim();
+
+  try {
+    // 1. Buscar ficha CHASE existente con mismo EAN
+    const { data: existentes, error: e1 } = await db.from('productos')
+      .select('*')
+      .eq('ean', productoEnEdicion.ean)
+      .eq('es_chase', true);
+    if (e1) throw e1;
+
+    let chaseProd;
+    let creada = false;
+    if (existentes && existentes.length > 0) {
+      const activas = existentes.filter(p => p.activo);
+      chaseProd = activas[0] || existentes[0];
+    } else {
+      const nuevoNombre = (productoEnEdicion.nombre || 'Producto') + ' (CHASE)';
+      const { data: nueva, error: e2 } = await db.from('productos').insert({
+        ean: productoEnEdicion.ean,
+        asin: null,
+        nombre: nuevoNombre.substring(0, 200),
+        proveedor: productoEnEdicion.proveedor || null,
+        marca: productoEnEdicion.marca || null,
+        pvd: productoEnEdicion.pvd || null,
+        precio_venta: productoEnEdicion.precio_venta || null,
+        comision_pct: productoEnEdicion.comision_pct || null,
+        comision_envio: productoEnEdicion.comision_envio || null,
+        iva_pct: productoEnEdicion.iva_pct != null ? productoEnEdicion.iva_pct : 0.21,
+        stock_moloka: 0,
+        stock_fba: 0,
+        stock_miravia: 0,
+        unidades_compradas: 0,
+        es_chase: true,
+        activo: true,
+        estado: 'OK'
+      }).select().single();
+      if (e2) throw e2;
+      chaseProd = nueva;
+      creada = true;
+    }
+
+    // 2. Sumar unidades a la ficha CHASE
+    const nuevoStock = (chaseProd.stock_moloka || 0) + qty;
+    const nuevasUbicaciones = loc
+      ? [...new Set([...(chaseProd.ubicaciones || []), ...loc.split(',').map(s => s.trim()).filter(Boolean)])]
+      : (chaseProd.ubicaciones || []);
+    const { error: e3 } = await db.from('productos').update({
+      stock_moloka: nuevoStock,
+      ubicaciones: nuevasUbicaciones,
+      updated_at: new Date().toISOString()
+    }).eq('id', chaseProd.id);
+    if (e3) throw e3;
+
+    // 3. Registrar movimiento
+    await db.from('movimientos').insert({
+      producto_id: chaseProd.id,
+      tipo: 'entrada',
+      cantidad: qty,
+      ubicacion: loc || null
+    });
+
+    // 4. UI
+    sesionEntradas.push({ nombre: chaseProd.nombre, qty, loc });
+    renderSesion();
+    document.getElementById('scan-ean').value = '';
+    document.getElementById('product-found-area').style.display = 'none';
+    document.getElementById('scan-ean').focus();
+    const msg = creada
+      ? `+${qty} ud (CHASE) \u2728 ficha CHASE creada`
+      : `+${qty} ud (CHASE) sumadas a ficha existente`;
+    showToast(msg, 'success');
+  } catch (e) {
+    console.error(e);
+    showToast('Error: ' + (e.message || e), 'error');
+  }
+}
+
 async function crearProductoYEntrada() {
   const nombre = document.getElementById('new-nombre').value.trim();
   if (!nombre) { showToast('El nombre es obligatorio', 'error'); return; }
@@ -1927,7 +2021,16 @@ async function cargarEnviosHistorial() {
       const estado = e.estado || 'preparado';
       const estadoColor = estado === 'recibido' ? 'var(--green)' : estado === 'enviado' ? 'var(--accent)' : 'var(--gray-400)';
       const estadoTxt = estado === 'preparado' ? 'Preparado' : estado === 'enviado' ? 'Enviado' : estado === 'recibido' ? 'Recibido en Amazon' : estado;
-      return `<tr>
+      // Construir cadena de busqueda con EANs, ASINs y nombres de los productos del envio
+      let blobBusqueda = '';
+      if (Array.isArray(e.productos)) {
+        blobBusqueda = e.productos.map(p =>
+          (p.ean || '') + ' ' + (p.asin || '') + ' ' + (p.nombre || '')
+        ).join(' ').toLowerCase();
+      }
+      // Escapar comillas en el atributo HTML
+      const blobEsc = blobBusqueda.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+      return `<tr data-search="${blobEsc}">
         <td><strong>${e.referencia}</strong></td>
         <td>${fechaStr}</td>
         <td style="text-align:center;font-weight:600">${e.total_unidades}</td>
@@ -2005,8 +2108,9 @@ function buscarEnvios(q) {
     return;
   }
   filas.forEach(r => {
-    const txt = r.textContent.toLowerCase();
-    r.style.display = txt.includes(q) ? '' : 'none';
+    const txt = (r.textContent || '').toLowerCase();
+    const search = (r.getAttribute('data-search') || '').toLowerCase();
+    r.style.display = (txt.includes(q) || search.includes(q)) ? '' : 'none';
   });
 }
 
