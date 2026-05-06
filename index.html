@@ -283,28 +283,27 @@
   <!-- ALERTAS -->
   <div class="page active" id="page-alertas">
     <div class="page-header">
-      <div><div class="page-title">⚠️ Alertas de Stock</div><div class="page-sub">Productos que necesitan atención</div></div>
+      <div><div class="page-title">⚠️ Alertas de Stock</div><div class="page-sub" id="alertas-sub">Productos que necesitan atención</div></div>
     </div>
     <div class="stats-row">
-      <div class="stat-card"><div class="stat-label">Críticos</div><div class="stat-value red" id="stat-criticos">—</div><div class="stat-sub">Ruptura inminente</div></div>
-      <div class="stat-card"><div class="stat-label">A revisar</div><div class="stat-value amber" id="stat-revisar">—</div><div class="stat-sub">Próximo pedido</div></div>
-      <div class="stat-card"><div class="stat-label">Sin ASIN</div><div class="stat-value amber" id="stat-sin-asin">—</div><div class="stat-sub">Datos incompletos</div></div>
-      <div class="stat-card"><div class="stat-label">Productos OK</div><div class="stat-value green" id="stat-ok">—</div><div class="stat-sub">Stock suficiente</div></div>
+      <div class="stat-card"><div class="stat-label">📦 Manda a FBA</div><div class="stat-value red" id="stat-manda-fba">—</div><div class="stat-sub">Cobertura FBA &lt; 7 días</div></div>
+      <div class="stat-card"><div class="stat-label">🛒 Pide al proveedor</div><div class="stat-value amber" id="stat-pide-prov">—</div><div class="stat-sub">Cobertura total &lt; 44 días</div></div>
+      <div class="stat-card"><div class="stat-label">💤 Sin movimiento</div><div class="stat-value amber" id="stat-sin-mov">—</div><div class="stat-sub">0 ventas en 30 días</div></div>
+      <div class="stat-card"><div class="stat-label">✅ Productos OK</div><div class="stat-value green" id="stat-ok">—</div><div class="stat-sub">Stock suficiente</div></div>
     </div>
     <div class="grid-2" style="gap:20px;align-items:start">
       <div>
-        <div class="section-header"><div class="section-title">🔴 Críticos — Reponer ya</div></div>
-        <div id="alertas-criticas"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></div>
-        <div class="section-header" style="margin-top:20px"><div class="section-title">🟡 Revisar — Próximo pedido</div></div>
-        <div id="alertas-revisar"><div class="loading-state"><div class="big-loader"></div></div></div>
+        <div class="section-header"><div class="section-title">📦 Manda a FBA — Reposición urgente</div></div>
+        <div id="alertas-manda-fba"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></div>
       </div>
       <div>
-        <div class="section-header"><div class="section-title">⚠️ Productos sin ASIN</div></div>
-        <div class="card" style="padding:16px">
-          <p style="font-size:12px;color:var(--gray-400);margin-bottom:12px">Sin ASIN no se puede conectar el producto con Amazon.</p>
-          <div id="sin-asin-list"><div class="loading-state"><div class="big-loader"></div></div></div>
-        </div>
+        <div class="section-header"><div class="section-title">🛒 Pide al proveedor — Stock total bajo</div></div>
+        <div id="alertas-pide-proveedor"><div class="loading-state"><div class="big-loader"></div></div></div>
       </div>
+    </div>
+    <div style="margin-top:24px">
+      <div class="section-header"><div class="section-title">💤 Sin movimiento — Capital inmovilizado</div></div>
+      <div id="alertas-sin-movimiento"><div class="loading-state"><div class="big-loader"></div></div></div>
     </div>
   </div>
 
@@ -967,81 +966,251 @@ document.querySelectorAll('.modal-overlay').forEach(m => {
 // ============================================================
 // ALERTAS
 // ============================================================
+// ============================================================
+// ALERTAS - Logica basada en velocidades T30 + cobertura FBA/total
+// ============================================================
+const ALERT_LEAD_TIME_FBA = 7;        // dias desde envio a Amazon hasta disponible
+const ALERT_COBERTURA_OBJETIVO = 14;  // mantener 2 semanas de stock en FBA
+const ALERT_COBERTURA_MINIMA = 7;     // alerta MANDA si cobertura FBA < 7 dias
+const ALERT_LEAD_PROVEEDOR = 30 + 7 + 7;  // 1 mes proveedor + 1 sem FBA + 1 sem margen = 44 dias
+
+let VELOCIDADES_DATA = null;
+
+async function cargarVelocidades() {
+  if (VELOCIDADES_DATA) return VELOCIDADES_DATA;
+  try {
+    const r = await fetch('velocidades.json');
+    if (!r.ok) throw new Error('No se pudo cargar velocidades.json');
+    VELOCIDADES_DATA = await r.json();
+    return VELOCIDADES_DATA;
+  } catch(e) {
+    console.error('Error cargando velocidades:', e);
+    return null;
+  }
+}
+
 async function cargarAlertas() {
   try {
-    const { data, error } = await db.from('productos').select('*').eq('activo', true);
-    if (error) throw error;
+    // Cargar datos en paralelo
+    const [vel, prodResult] = await Promise.all([
+      cargarVelocidades(),
+      db.from('productos').select('*').eq('activo', true)
+    ]);
+    if (prodResult.error) throw prodResult.error;
+    const productos = prodResult.data;
 
-    const criticos = data.filter(p => p.estado === 'CRÍTICO');
-    const revisar = data.filter(p => p.estado === 'REVISAR');
-    const sinAsin = data.filter(p => !p.asin && p.stock_moloka > 0);
-    const ok = data.filter(p => p.estado === 'OK' || p.estado === 'SIN_STOCK_LOCAL');
+    // Mapa de velocidades por SKU
+    const velMap = {};
+    if (vel && vel.productos) {
+      vel.productos.forEach(p => { velMap[p.sku] = p; });
+    }
 
-    document.getElementById('stat-criticos').textContent = criticos.length;
-    document.getElementById('stat-revisar').textContent = revisar.length;
-    document.getElementById('stat-sin-asin').textContent = sinAsin.length;
-    document.getElementById('stat-ok').textContent = ok.length;
+    // Texto de cabecera con fecha
+    const subEl = document.getElementById('alertas-sub');
+    if (subEl && vel && vel.fecha_calculo) {
+      const partes = String(vel.fecha_calculo).split('-');
+      const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+      let fechaTxt = vel.fecha_calculo;
+      if (partes.length === 3) {
+        fechaTxt = parseInt(partes[2],10) + ' de ' + (meses[parseInt(partes[1],10)-1] || '') + ' de ' + partes[0];
+      }
+      subEl.textContent = 'Velocidades de venta calculadas hasta el ' + fechaTxt;
+    } else if (subEl) {
+      subEl.textContent = 'Velocidades de venta no disponibles - sube velocidades.json';
+    }
 
+    // Clasificar productos
+    const mandaFba = [];
+    const pideProveedor = [];
+    const sinMovimiento = [];
+    let okCount = 0;
+
+    for (const p of productos) {
+      // Productos sin SKU no se pueden cruzar con velocidades
+      const v = p.sku ? velMap[p.sku] : null;
+      const velDiaria = v ? v.vel_diaria_30d : 0;
+      const uds30d = v ? v.uds_30d : 0;
+      const stockFba = p.stock_fba || 0;
+      const stockMoloka = p.stock_moloka || 0;
+      const stockTotal = stockFba + stockMoloka;
+
+      // Cobertura
+      const cobFba = velDiaria > 0 ? stockFba / velDiaria : 999;
+      const cobTotal = velDiaria > 0 ? stockTotal / velDiaria : 999;
+
+      // Logica acordada
+      if (velDiaria === 0) {
+        // Sin movimiento: solo si tiene stock acumulado (problema de capital parado)
+        if (stockFba + stockMoloka >= 4) {
+          sinMovimiento.push({
+            ...p,
+            uds_30d: uds30d,
+            stock_total: stockTotal,
+            valor_inmovilizado: (p.pvd || 0) * stockTotal
+          });
+        } else {
+          okCount++;
+        }
+        continue;
+      }
+
+      // 1) Manda a FBA si cobertura FBA < 7 dias y hay stock en Moloka
+      let alertaManda = false;
+      if (cobFba < ALERT_COBERTURA_MINIMA && stockMoloka > 0) {
+        const objetivoUds = Math.round(ALERT_COBERTURA_OBJETIVO * velDiaria);
+        const necesitoEnviar = Math.max(1, objetivoUds - stockFba);
+        const enviarReal = Math.min(necesitoEnviar, stockMoloka);
+        mandaFba.push({
+          ...p,
+          vel_diaria: velDiaria,
+          uds_30d: uds30d,
+          tendencia: v ? v.tendencia : 'estable',
+          cobertura_fba_dias: cobFba,
+          enviar_uds: enviarReal,
+          stock_moloka_insuficiente: necesitoEnviar > stockMoloka
+        });
+        alertaManda = true;
+      }
+
+      // 2) Pide al proveedor si cobertura TOTAL < 44 dias
+      if (cobTotal < ALERT_LEAD_PROVEEDOR) {
+        const cantidadSugerida = Math.round(velDiaria * 30); // pedir al menos para 1 mes
+        pideProveedor.push({
+          ...p,
+          vel_diaria: velDiaria,
+          uds_30d: uds30d,
+          tendencia: v ? v.tendencia : 'estable',
+          cobertura_total_dias: cobTotal,
+          pedir_uds: Math.max(1, cantidadSugerida)
+        });
+      } else if (!alertaManda) {
+        okCount++;
+      }
+    }
+
+    // Ordenar por urgencia
+    mandaFba.sort((a, b) => a.cobertura_fba_dias - b.cobertura_fba_dias);
+    pideProveedor.sort((a, b) => a.cobertura_total_dias - b.cobertura_total_dias);
+    sinMovimiento.sort((a, b) => b.valor_inmovilizado - a.valor_inmovilizado);
+
+    // KPIs
+    document.getElementById('stat-manda-fba').textContent = mandaFba.length;
+    document.getElementById('stat-pide-prov').textContent = pideProveedor.length;
+    document.getElementById('stat-sin-mov').textContent = sinMovimiento.length;
+    document.getElementById('stat-ok').textContent = okCount;
+
+    // Badge sidebar (solo manda + pide, no sin movimiento porque no es urgente)
     const badge = document.getElementById('badge-alertas');
-    const total = criticos.length + revisar.length;
-    if (total > 0) { badge.textContent = total; badge.style.display = 'block'; }
-
-    // Render críticos
-    const elCrit = document.getElementById('alertas-criticas');
-    if (criticos.length === 0) {
-      elCrit.innerHTML = '<div class="alert-card" style="background:var(--green-light);border-color:var(--green)"><div>✅ No hay productos en estado crítico</div></div>';
+    const totalUrgentes = mandaFba.length + pideProveedor.length;
+    if (totalUrgentes > 0) {
+      badge.textContent = totalUrgentes;
+      badge.style.display = 'block';
     } else {
-      elCrit.innerHTML = criticos.map(p => `
-        <div class="alert-card red">
-          <div class="alert-icon">🔴</div>
-          <div style="flex:1">
-            <div class="alert-title">${p.nombre}</div>
-            <div class="alert-detail" style="display:flex;gap:8px;align-items:center;margin-top:3px;flex-wrap:wrap">
-              ${p.ean ? `<span style="font-family:'DM Mono',monospace;font-size:11px;background:rgba(0,0,0,0.08);padding:2px 6px;border-radius:4px;cursor:pointer" onclick="navigator.clipboard.writeText('${p.ean}');showToast('EAN copiado','success')" title="Clic para copiar">${p.ean} 📋</span>` : ''}
-              <span style="font-size:11px;color:var(--gray-500)">${p.proveedor || '—'}</span>
-            </div>
-            <div class="alert-detail">Stock Moloka: <strong>${p.stock_moloka} ud</strong> · Mínimo: ${p.stock_minimo || '—'} ud</div>
-            ${p.ubicaciones?.length ? `<div class="alert-detail">Ubicación: ${p.ubicaciones.join(', ')}</div>` : ''}
-            <div class="alert-urgency">Stock FBA: ${p.stock_fba} ud</div>
-          </div>
-        </div>`).join('');
+      badge.style.display = 'none';
     }
 
-    // Render revisar
-    const elRev = document.getElementById('alertas-revisar');
-    if (revisar.length === 0) {
-      elRev.innerHTML = '<div style="color:var(--gray-400);font-size:13px;padding:8px 0">No hay productos a revisar</div>';
+    // ----- Render MANDA A FBA -----
+    const elManda = document.getElementById('alertas-manda-fba');
+    if (mandaFba.length === 0) {
+      elManda.innerHTML = '<div class="alert-card" style="background:var(--green-light);border-color:var(--green)"><div>\u2705 No hay productos en rotura urgente</div></div>';
     } else {
-      elRev.innerHTML = revisar.map(p => `
-        <div class="alert-card amber">
-          <div class="alert-icon">🟡</div>
-          <div style="flex:1">
-            <div class="alert-title">${p.nombre}</div>
-            <div class="alert-detail" style="display:flex;gap:8px;align-items:center;margin-top:3px;flex-wrap:wrap">
-              ${p.ean ? `<span style="font-family:'DM Mono',monospace;font-size:11px;background:rgba(0,0,0,0.08);padding:2px 6px;border-radius:4px;cursor:pointer" onclick="navigator.clipboard.writeText('${p.ean}');showToast('EAN copiado','success')" title="Clic para copiar">${p.ean} 📋</span>` : ''}
-              <span style="font-size:11px;color:var(--gray-500)">${p.proveedor || '—'}</span>
-            </div>
-            <div class="alert-detail">Stock Moloka: <strong>${p.stock_moloka} ud</strong> · Mínimo: ${p.stock_minimo || '—'} ud</div>
-            <div class="alert-urgency">Incluir en próximo pedido</div>
-          </div>
-        </div>`).join('');
+      elManda.innerHTML = mandaFba.map(p => {
+        const tendIcon = p.tendencia === 'subiendo' ? '\ud83d\udcc8' : (p.tendencia === 'bajando' ? '\ud83d\udcc9' : '\u27a1\ufe0f');
+        const cobTxt = p.cobertura_fba_dias < 1 ? '\u26a0\ufe0f Sin stock FBA' : p.cobertura_fba_dias.toFixed(1) + ' dias';
+        const aviso = p.stock_moloka_insuficiente
+          ? '<div class="alert-detail" style="color:var(--red);font-weight:600;margin-top:4px">\u26a0\ufe0f Stock Moloka insuficiente - falta pedir al proveedor</div>'
+          : '';
+        return '<div class="alert-card red">' +
+          '<div class="alert-icon">\ud83d\udce6</div>' +
+          '<div style="flex:1">' +
+            '<div class="alert-title">' + (p.nombre || '') + '</div>' +
+            '<div class="alert-detail" style="display:flex;gap:8px;align-items:center;margin-top:3px;flex-wrap:wrap">' +
+              (p.ean ? '<span style="font-family:\'DM Mono\',monospace;font-size:11px;background:rgba(0,0,0,0.08);padding:2px 6px;border-radius:4px;cursor:pointer" onclick="navigator.clipboard.writeText(\'' + p.ean + '\');showToast(\'EAN copiado\',\'success\')" title="Clic para copiar">' + p.ean + ' \ud83d\udccb</span>' : '') +
+              (p.asin ? '<span style="font-family:\'DM Mono\',monospace;font-size:11px;color:var(--accent)">' + p.asin + '</span>' : '') +
+              '<span style="font-size:11px;color:var(--gray-500)">' + (p.proveedor || '\u2014') + '</span>' +
+            '</div>' +
+            '<div class="alert-detail">FBA: <strong>' + (p.stock_fba||0) + 'u</strong> \u00b7 Moloka: <strong>' + (p.stock_moloka||0) + 'u</strong> \u00b7 Vel: ' + p.vel_diaria.toFixed(2) + '/dia ' + tendIcon + '</div>' +
+            '<div class="alert-detail">Cobertura FBA: <strong>' + cobTxt + '</strong> \u00b7 Vendidas T30: ' + p.uds_30d + 'u</div>' +
+            aviso +
+            '<div class="alert-urgency">\u27a1\ufe0f Manda <strong>' + p.enviar_uds + 'u</strong> a FBA (objetivo 14 dias cobertura)</div>' +
+          '</div>' +
+        '</div>';
+      }).join('');
     }
 
-    // Render sin ASIN
-    const elAsin = document.getElementById('sin-asin-list');
-    if (sinAsin.length === 0) {
-      elAsin.innerHTML = '<div style="color:var(--gray-400);font-size:13px">Todos los productos tienen ASIN ✅</div>';
+    // ----- Render PIDE AL PROVEEDOR -----
+    const elPide = document.getElementById('alertas-pide-proveedor');
+    if (pideProveedor.length === 0) {
+      elPide.innerHTML = '<div class="alert-card" style="background:var(--green-light);border-color:var(--green)"><div>\u2705 Stock total suficiente para todos los productos</div></div>';
     } else {
-      elAsin.innerHTML = `<table style="width:100%"><tbody>${sinAsin.slice(0,8).map(p => `
-        <tr>
-          <td style="padding:8px 0;font-size:12px;font-weight:600;color:var(--navy)">${p.nombre.substring(0,40)}${p.nombre.length>40?'...':''}</td>
-          <td style="font-size:11px;font-family:'DM Mono',monospace;color:var(--gray-400)">${p.ean || '—'}</td>
-        </tr>`).join('')}</tbody></table>`;
+      // Agrupar por proveedor para hacer pedidos conjuntos
+      const porProv = {};
+      pideProveedor.forEach(p => {
+        const prov = p.proveedor || 'Sin proveedor';
+        if (!porProv[prov]) porProv[prov] = [];
+        porProv[prov].push(p);
+      });
+      const gruposOrdenados = Object.entries(porProv).sort((a,b) => b[1].length - a[1].length);
+      elPide.innerHTML = gruposOrdenados.map(([prov, items]) => {
+        const totalUds = items.reduce((s,p) => s + p.pedir_uds, 0);
+        const totalEur = items.reduce((s,p) => s + (p.pvd||0) * p.pedir_uds, 0);
+        const filas = items.map(p => {
+          const tendIcon = p.tendencia === 'subiendo' ? '\ud83d\udcc8' : (p.tendencia === 'bajando' ? '\ud83d\udcc9' : '\u27a1\ufe0f');
+          return '<div style="padding:8px 12px;border-bottom:1px solid var(--gray-100);font-size:12px">' +
+            '<div style="font-weight:600;color:var(--navy)">' + (p.nombre||'').substring(0,55) + ((p.nombre||'').length>55?'...':'') + '</div>' +
+            '<div style="color:var(--gray-500);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap">' +
+              (p.ean ? '<span style="font-family:\'DM Mono\',monospace">' + p.ean + '</span>' : '') +
+              '<span>FBA:' + (p.stock_fba||0) + ' Moloka:' + (p.stock_moloka||0) + '</span>' +
+              '<span>Vel ' + p.vel_diaria.toFixed(2) + '/d ' + tendIcon + '</span>' +
+              '<span style="color:var(--amber);font-weight:600">Cobertura ' + p.cobertura_total_dias.toFixed(0) + 'd</span>' +
+            '</div>' +
+            '<div style="color:var(--navy);font-weight:600;margin-top:3px">\u27a1\ufe0f Pedir ' + p.pedir_uds + 'u</div>' +
+          '</div>';
+        }).join('');
+        return '<div class="card" style="padding:0;margin-bottom:14px;overflow:hidden">' +
+          '<div style="background:var(--amber-light);padding:10px 14px;border-bottom:1px solid var(--gray-200)">' +
+            '<div style="font-weight:700;color:var(--navy);font-size:14px">\ud83d\udecd\ufe0f ' + prov + '</div>' +
+            '<div style="font-size:11px;color:var(--gray-500);margin-top:2px">' + items.length + ' productos \u00b7 ' + totalUds + ' uds totales \u00b7 ~' + totalEur.toFixed(0) + '\u20ac inversion</div>' +
+          '</div>' +
+          filas +
+        '</div>';
+      }).join('');
+    }
+
+    // ----- Render SIN MOVIMIENTO (tabla compacta full-width) -----
+    const elSinMov = document.getElementById('alertas-sin-movimiento');
+    if (sinMovimiento.length === 0) {
+      elSinMov.innerHTML = '<div class="card" style="padding:16px;color:var(--gray-400);font-size:13px">Todos los productos con stock estan vendiendo \u2705</div>';
+    } else {
+      const totalCapital = sinMovimiento.reduce((s,p) => s + p.valor_inmovilizado, 0);
+      const filas = sinMovimiento.map(p => {
+        return '<tr>' +
+          '<td><div class="td-main">' + (p.nombre||'').substring(0,55) + ((p.nombre||'').length>55?'...':'') + '</div>' +
+            '<div class="td-sub td-mono">' + (p.asin || '\u2014') + ' \u00b7 ' + (p.proveedor || '\u2014') + '</div></td>' +
+          '<td style="text-align:center;font-weight:600">' + (p.stock_fba||0) + '</td>' +
+          '<td style="text-align:center;font-weight:600">' + (p.stock_moloka||0) + '</td>' +
+          '<td style="text-align:right;font-family:\'DM Mono\',monospace;color:var(--amber);font-weight:700">' + p.valor_inmovilizado.toFixed(0) + '\u20ac</td>' +
+        '</tr>';
+      }).join('');
+      elSinMov.innerHTML = '<div class="card" style="padding:0;overflow:hidden">' +
+        '<div style="padding:10px 14px;background:var(--amber-light);font-size:12px;color:var(--gray-700);border-bottom:1px solid var(--gray-200)">' +
+          '<strong>' + sinMovimiento.length + '</strong> productos con stock pero 0 ventas en 30 dias \u00b7 ' +
+          'Capital inmovilizado total: <strong>~' + totalCapital.toFixed(0) + '\u20ac</strong> \u00b7 ' +
+          '<span style="color:var(--gray-500)">Considera bajar precio o descatalogar</span>' +
+        '</div>' +
+        '<div class="table-wrap" style="max-height:400px;overflow-y:auto">' +
+          '<table>' +
+            '<thead><tr><th>Producto</th><th style="text-align:center">FBA</th><th style="text-align:center">Moloka</th><th style="text-align:right">Capital</th></tr></thead>' +
+            '<tbody>' + filas + '</tbody>' +
+          '</table>' +
+        '</div>' +
+      '</div>';
     }
 
   } catch(e) {
     console.error(e);
-    document.getElementById('alertas-criticas').innerHTML = '<div style="color:var(--red);font-size:13px">Error cargando alertas: ' + e.message + '</div>';
+    const el = document.getElementById('alertas-manda-fba');
+    if (el) el.innerHTML = '<div style="color:var(--red);font-size:13px">Error cargando alertas: ' + e.message + '</div>';
   }
 }
 
