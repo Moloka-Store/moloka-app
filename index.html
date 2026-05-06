@@ -563,41 +563,12 @@
     <div class="page-header">
       <div><div class="page-title">📊 Rentabilidad</div><div class="page-sub" id="rent-sub">Cargando...</div></div>
     </div>
-    <!-- Valor de existencias actuales (a coste/PVD) -->
-    <div class="stats-row" style="margin-bottom:18px">
-      <div class="stat-card">
-        <div class="stat-label">📦 Valor stock Amazon (FBA)</div>
-        <div class="stat-value" id="rent-valor-fba">—</div>
-        <div class="stat-sub" id="rent-valor-fba-sub">Valorado a coste de compra</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">🏪 Valor stock Almacén Moloka</div>
-        <div class="stat-value" id="rent-valor-moloka">—</div>
-        <div class="stat-sub" id="rent-valor-moloka-sub">Valorado a coste de compra</div>
-      </div>
-    </div>
 
     <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;align-items:center">
       <span style="font-size:12px;font-weight:600;color:var(--gray-500)">VER:</span>
-      <button class="btn btn-primary btn-sm" id="btn-rent-acum" onclick="verRentabilidad('acumulado')">Acumulado</button>
-      <button class="btn btn-ghost btn-sm" id="btn-rent-abr" onclick="verRentabilidad('abril')">Abril</button>
-      <button class="btn btn-ghost btn-sm" id="btn-rent-mar" onclick="verRentabilidad('marzo')">Marzo</button>
-      <button class="btn btn-ghost btn-sm" id="btn-rent-feb" onclick="verRentabilidad('febrero')">Febrero</button>
-      <button class="btn btn-ghost btn-sm" id="btn-rent-ene" onclick="verRentabilidad('enero')">Enero</button>
-      <button class="btn btn-ghost btn-sm" id="btn-rent-sem" onclick="verRentabilidad('semanal')">Vista semanal</button>
+      <div id="rent-meses-botones" style="display:flex;gap:8px;flex-wrap:wrap"></div>
     </div>
     <div class="stats-row" id="rent-kpis"></div>
-    <div id="rent-semanal-view" style="display:none">
-      <div class="card">
-        <div class="section-title" style="margin-bottom:14px">Evolución semanal</div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Semana</th><th style="text-align:center">Unidades</th><th style="text-align:right">Facturación</th><th style="text-align:right">s/IVA</th><th style="text-align:center">Pedidos</th><th>Mes</th></tr></thead>
-            <tbody id="rent-semanas-tbody"></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
     <div id="rent-detalle-view">
       <div class="grid-2" style="align-items:start">
         <div class="card">
@@ -609,13 +580,25 @@
             </table>
           </div>
         </div>
-        <div class="card">
-          <div class="section-title" style="margin-bottom:14px">Desglose de costes</div>
-          <div id="rent-costes-detalle"></div>
+        <div>
+          <div class="card" style="margin-bottom:14px">
+            <div class="section-title" style="margin-bottom:14px">Desglose de costes</div>
+            <div id="rent-costes-detalle"></div>
+          </div>
+          <div class="card" style="margin-bottom:14px">
+            <div style="font-size:11px;font-weight:600;color:var(--gray-400);text-transform:uppercase;letter-spacing:0.5px">📦 Valor stock Amazon (FBA)</div>
+            <div style="font-size:24px;font-weight:700;color:var(--navy);margin-top:4px;letter-spacing:-1px" id="rent-valor-fba">—</div>
+            <div style="font-size:11px;color:var(--gray-400);margin-top:2px" id="rent-valor-fba-sub">Valorado a coste de compra</div>
+          </div>
+          <div class="card">
+            <div style="font-size:11px;font-weight:600;color:var(--gray-400);text-transform:uppercase;letter-spacing:0.5px">🏪 Valor stock Almacén Moloka</div>
+            <div style="font-size:24px;font-weight:700;color:var(--navy);margin-top:4px;letter-spacing:-1px" id="rent-valor-moloka">—</div>
+            <div style="font-size:11px;color:var(--gray-400);margin-top:2px" id="rent-valor-moloka-sub">Valorado a coste de compra</div>
+          </div>
         </div>
       </div>
     </div>
-    <div class="info-box" style="margin-top:16px">ℹ️ Datos reales de Moloka SL desde enero. Comisiones Amazon y FBA extraídas de los informes de transacciones.</div>
+    <div class="info-box" style="margin-top:16px" id="rent-info-actualizacion">ℹ️ Datos reales de Moloka SL desde enero. Comisiones Amazon y FBA extraídas de los informes de transacciones.</div>
   </div>
 
 </main>
@@ -2769,34 +2752,50 @@ async function verRentabilidad(periodo) {
     return;
   }
 
-  // Activar botón seleccionado
-  ['acum','abr','mar','feb','ene','sem'].forEach(k => {
-    const btn = document.getElementById('btn-rent-' + k);
-    if (btn) { btn.classList.remove('btn-primary'); btn.classList.add('btn-ghost'); }
-  });
-  const map = {'acumulado':'acum','abril':'abr','marzo':'mar','febrero':'feb','enero':'ene','semanal':'sem'};
-  const btnActiva = document.getElementById('btn-rent-' + map[periodo]);
-  if (btnActiva) { btnActiva.classList.remove('btn-ghost'); btnActiva.classList.add('btn-primary'); }
+  // ---- Construir botones de meses dinamicamente segun los datos ----
+  // Acumulado siempre + un boton por cada mes presente en el JSON, en orden
+  const ORDEN_MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const mesesDisponibles = data.meses.map(m => m.mes).sort((a,b) => ORDEN_MESES.indexOf(a) - ORDEN_MESES.indexOf(b));
+  // Si el periodo solicitado no existe, caer a acumulado
+  if (periodo !== 'acumulado' && !mesesDisponibles.includes(periodo)) {
+    periodo = 'acumulado';
+  }
+  const cont = document.getElementById('rent-meses-botones');
+  if (cont) {
+    const botones = [{key:'acumulado', label:'Acumulado'}].concat(
+      mesesDisponibles.map(m => ({key:m, label: m.charAt(0).toUpperCase() + m.slice(1)}))
+    );
+    cont.innerHTML = botones.map(b => {
+      const cls = (b.key === periodo) ? 'btn-primary' : 'btn-ghost';
+      return '<button class="btn ' + cls + ' btn-sm" onclick="verRentabilidad(\'' + b.key + '\')">' + b.label + '</button>';
+    }).join('');
+  }
+
+  // ---- Texto "Datos actualizados hasta ..." ----
+  // Calcular el ultimo dia con datos: leemos data.fecha_hasta si existe, o lo derivamos del ultimo mes
+  const infoEl = document.getElementById('rent-info-actualizacion');
+  if (infoEl) {
+    let fechaTxt = '';
+    if (data.fecha_hasta) {
+      // Esperamos formato YYYY-MM-DD
+      const partes = String(data.fecha_hasta).split('-');
+      if (partes.length === 3) {
+        const dd = partes[2], mm = partes[1], yyyy = partes[0];
+        const nombreMes = ORDEN_MESES[parseInt(mm,10)-1] || '';
+        fechaTxt = parseInt(dd,10) + ' de ' + nombreMes + ' de ' + yyyy;
+      } else {
+        fechaTxt = data.fecha_hasta;
+      }
+    }
+    infoEl.innerHTML = 'ℹ️ Datos reales de Moloka SL' + (fechaTxt ? ' actualizados hasta el <strong>' + fechaTxt + '</strong>' : '') + '. Comisiones Amazon y FBA extraídas de los informes de transacciones.';
+  }
 
   if (periodo === 'semanal') {
-    document.getElementById('rent-detalle-view').style.display = 'none';
-    document.getElementById('rent-semanal-view').style.display = 'block';
-    document.getElementById('rent-sub').textContent = 'Vista semanal';
-    document.getElementById('rent-kpis').innerHTML = '';
-    const tbody = document.getElementById('rent-semanas-tbody');
-    tbody.innerHTML = data.semanas.map(s => `<tr>
-      <td>${s.inicio}</td>
-      <td style="text-align:center;font-weight:600">${s.unidades}</td>
-      <td style="text-align:right;font-family:'DM Mono',monospace">${s.facturado.toFixed(0)}€</td>
-      <td style="text-align:right;font-family:'DM Mono',monospace;color:var(--gray-400)">${s.facturado_sin_iva.toFixed(0)}€</td>
-      <td style="text-align:center">${s.pedidos}</td>
-      <td><span class="badge badge-gray">${s.mes}</span></td>
-    </tr>`).join('');
-    return;
+    // Vista semanal eliminada: caer a acumulado
+    periodo = 'acumulado';
   }
 
   document.getElementById('rent-detalle-view').style.display = 'block';
-  document.getElementById('rent-semanal-view').style.display = 'none';
 
   let mesData;
   if (periodo === 'acumulado') {
