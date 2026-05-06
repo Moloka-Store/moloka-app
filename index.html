@@ -82,6 +82,9 @@
   .badge-blue { background: var(--accent-light); color: #1E40AF; }
   .no-asin { background: var(--amber-light); color: #B45309; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; font-family: 'DM Mono', monospace; }
   .loc-tag { display: inline-block; background: var(--gray-100); color: var(--gray-700); font-size: 11px; font-weight: 600; font-family: 'DM Mono', monospace; padding: 2px 7px; border-radius: 4px; margin: 1px; }
+  .inv-field-label { font-size: 10px; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 3px; font-weight: 600; }
+  .inv-row:hover { background: var(--gray-50); }
+  .inv-detalle-row td { border-top: 2px solid var(--gray-200); }
   .chase-toggle-add { opacity: 0; transition: opacity 0.15s; }
   tr:hover .chase-toggle-add { opacity: 1; }
 
@@ -326,9 +329,9 @@
           <thead><tr>
             <th>Producto</th><th>EAN</th><th>ASIN</th><th>Proveedor</th>
             <th style="text-align:center">Stock Moloka</th><th style="text-align:center">Stock FBA</th>
-            <th>Ubicación</th><th>PVD</th><th style="text-align:center">Estado</th>
+            <th>Ubicación</th><th>PVD</th><th>PVP</th><th style="text-align:center">Estado</th>
           </tr></thead>
-          <tbody id="inv-tbody"><tr><td colspan="9"><div class="loading-state"><div class="big-loader"></div><p>Cargando inventario...</p></div></td></tr></tbody>
+          <tbody id="inv-tbody"><tr><td colspan="10"><div class="loading-state"><div class="big-loader"></div><p>Cargando inventario...</p></div></td></tr></tbody>
         </table>
       </div>
       <div class="pagination" id="inv-pagination"></div>
@@ -816,6 +819,80 @@
   </div>
 </div>
 
+<!-- MODAL AJUSTAR STOCK -->
+<div class="modal-overlay" id="modal-ajuste-stock">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-title">📦 Ajustar stock</div>
+    <div style="font-size:13px;color:var(--gray-600);margin-bottom:14px;font-weight:600" id="ajst-prod-nombre">—</div>
+    <input type="hidden" id="ajst-prod-id">
+    <div style="display:flex;gap:14px;background:var(--gray-50);border-radius:6px;padding:10px;margin-bottom:14px;font-size:12px">
+      <div>Stock Moloka actual: <strong id="ajst-stock-moloka-actual">0</strong></div>
+      <div>Stock FBA actual: <strong id="ajst-stock-fba-actual">0</strong></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <div>
+        <div class="inv-field-label">Aplicar a</div>
+        <select class="input" id="ajst-campo" onchange="actualizarPreviewAjuste()">
+          <option value="stock_moloka">Stock Almacén Moloka</option>
+          <option value="stock_fba">Stock Amazon FBA</option>
+          <option value="stock_miravia">Stock Miravia</option>
+        </select>
+      </div>
+      <div>
+        <div class="inv-field-label">Nueva cantidad</div>
+        <input class="input" id="ajst-cantidad-nueva" type="number" min="0" oninput="actualizarPreviewAjuste()">
+      </div>
+    </div>
+    <div style="font-size:13px;margin-bottom:14px"><strong>Cambio:</strong> <span id="ajst-preview">—</span></div>
+    <div style="margin-bottom:12px">
+      <div class="inv-field-label">Motivo</div>
+      <select class="input" id="ajst-motivo">
+        <option value="rotura">Rotura (producto dañado)</option>
+        <option value="devolucion_cliente">Devolución cliente</option>
+        <option value="perdida">Pérdida</option>
+        <option value="error_conteo">Error de conteo</option>
+        <option value="reclamacion_proveedor">Reclamación proveedor</option>
+        <option value="venta_fuera_amazon">Venta fuera de Amazon</option>
+        <option value="otro">Otro</option>
+      </select>
+    </div>
+    <div style="margin-bottom:14px">
+      <div class="inv-field-label">Notas (opcional)</div>
+      <textarea class="input" id="ajst-notas" rows="2" style="resize:vertical;font-family:inherit;font-size:13px" placeholder="Detalle adicional..."></textarea>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal('modal-ajuste-stock')">Cancelar</button>
+      <button class="btn btn-primary" onclick="confirmarAjusteStock()">✅ Confirmar ajuste</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL HISTORIAL DE AJUSTES -->
+<div class="modal-overlay" id="modal-historial-ajustes">
+  <div class="modal" style="max-width:780px;max-height:85vh;overflow-y:auto">
+    <div class="modal-title">📋 Historial de ajustes de stock</div>
+    <div style="font-size:13px;color:var(--gray-600);margin-bottom:14px;font-weight:600" id="hist-prod-nombre">—</div>
+    <div style="overflow-x:auto;border:1px solid var(--gray-200);border-radius:6px">
+      <table style="width:100%">
+        <thead>
+          <tr style="background:var(--gray-50)">
+            <th style="padding:8px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--gray-500)">Fecha</th>
+            <th style="padding:8px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--gray-500)">Stock</th>
+            <th style="padding:8px;text-align:center;font-size:11px;text-transform:uppercase;color:var(--gray-500)">Antes → Después</th>
+            <th style="padding:8px;text-align:center;font-size:11px;text-transform:uppercase;color:var(--gray-500)">Diferencia</th>
+            <th style="padding:8px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--gray-500)">Motivo</th>
+            <th style="padding:8px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--gray-500)">Notas</th>
+          </tr>
+        </thead>
+        <tbody id="hist-tbody"></tbody>
+      </table>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-ghost" onclick="closeModal('modal-historial-ajustes')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL DETALLE FACTURA (al click en el listado) -->
 <div class="modal-overlay" id="modal-detalle-factura">
   <div class="modal" style="max-width:900px;max-height:92vh;overflow-y:auto">
@@ -987,7 +1064,7 @@ async function cargarAlertas() {
 // ============================================================
 async function cargarInventario() {
   const tbody = document.getElementById('inv-tbody');
-  tbody.innerHTML = '<tr><td colspan="9"><div class="loading-state"><div class="big-loader"></div><p>Cargando inventario...</p></div></td></tr>';
+  tbody.innerHTML = '<tr><td colspan="10"><div class="loading-state"><div class="big-loader"></div><p>Cargando inventario...</p></div></td></tr>';
 
   try {
     let query = db.from('productos').select('*', { count: 'exact' }).eq('activo', true);
@@ -1005,30 +1082,265 @@ async function cargarInventario() {
     document.getElementById('inv-subtitle').textContent = `${totalProductos} productos · Actualizado ahora`;
 
     if (!data || data.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="9"><div class="empty-state"><div class="empty-icon">📦</div><p>No se encontraron productos</p></div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="10"><div class="empty-state"><div class="empty-icon">📦</div><p>No se encontraron productos</p></div></td></tr>';
     } else {
-      tbody.innerHTML = data.map(p => `
-        <tr>
-          <td><div class="td-main" title="${p.nombre}">${p.nombre.substring(0,45)}${p.nombre.length>45?'...':''}${p.es_chase?` <span onclick="event.stopPropagation();toggleChase('${p.id}',true)" style="background:var(--purple,#8b5cf6);color:white;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;margin-left:4px;letter-spacing:0.5px;cursor:pointer" title="Clic para quitar marca CHASE">CHASE</span>`:` <span class="chase-toggle-add" onclick="event.stopPropagation();toggleChase('${p.id}',false)" style="font-size:10px;color:var(--gray-300);cursor:pointer;margin-left:4px" title="Clic para marcar como CHASE">+CHASE</span>`}</div><div class="td-sub">${p.marca || ''}</div></td>
-          <td class="td-mono" style="cursor:${p.ean?'pointer':'default'}" ${p.ean?`onclick="navigator.clipboard.writeText('${p.ean}');showToast('EAN copiado','success')" title="Clic para copiar"`:''}>${p.ean || '—'}</td>
-          <td>${p.asin ? `<span class="td-asin">${p.asin}</span>` : `<span class="no-asin" style="cursor:pointer" onclick="editarASIN('${p.id}','${(p.nombre||'').replace(/'/g,'').substring(0,30)}')" title="Clic para añadir ASIN">⚠️ Sin ASIN ✏️</span>`}</td>
-          <td>${p.proveedor || '—'}</td>
-          <td style="text-align:center;font-weight:700;font-size:14px;color:${p.stock_moloka===0?'var(--gray-400)':p.stock_minimo&&p.stock_moloka<p.stock_minimo?'var(--red)':'var(--navy)'}">${p.stock_moloka}</td>
-          <td style="text-align:center;color:var(--gray-400);font-size:12px">${p.stock_fba > 0 ? p.stock_fba : "<span title=\"Pendiente actualizar desde Seller Central\">—</span>"}</td>
-          <td style="cursor:pointer" onclick="editarUbicaciones('${p.id}','${(p.nombre||'').replace(/'/g,'').substring(0,30)}',${JSON.stringify(p.ubicaciones||[]).replace(/"/g,'&quot;')})" title="Clic para editar ubicación">${(p.ubicaciones||[]).map(l=>`<span class="loc-tag">${l}</span>`).join('') || '<span style="color:var(--gray-400)">— ✏️</span>'}</td>
-          <td style="font-family:'DM Mono',monospace;font-size:12px">${p.pvd ? p.pvd.toFixed(2)+'€' : '—'}</td>
-          <td style="text-align:center;white-space:nowrap">
-            ${estadoBadge(p.estado)}
-            <button onclick="abrirCalculadora('${p.id}','${p.asin||''}','${(p.nombre||'').replace(/'/g,'').substring(0,40)}',${p.pvd||0},${(p.comision_pct||0.155)*100},${p.comision_envio||3.74},${(p.iva_pct!=null?p.iva_pct:0.21)*100})" class="btn btn-ghost btn-sm" title="Calculadora Buy Box" style="padding:4px 8px;margin-left:4px" ${!p.asin?'disabled':''}>💰</button>
-            <button onclick="toggleDescatalogar('${p.id}','${p.estado}')" class="btn btn-ghost btn-sm" title="${p.estado==='DESCATALOGADO'?'Reactivar':'Descatalogar'}" style="padding:4px 8px">${p.estado==='DESCATALOGADO'?'♻️':'⛔'}</button>
-          </td>
-        </tr>`).join('');
+      // Guardar productos en cache para acceso rapido al desplegar
+      window._invCache = {};
+      tbody.innerHTML = data.map(p => {
+        window._invCache[p.id] = p;
+        return renderInvFila(p);
+      }).join('');
     }
 
     renderPaginacion();
   } catch(e) {
     console.error(e);
-    tbody.innerHTML = `<tr><td colspan="9" style="padding:20px;color:var(--red);text-align:center">Error: ${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" style="padding:20px;color:var(--red);text-align:center">Error: ${e.message}</td></tr>`;
+  }
+}
+
+// Render de una fila del inventario (tabla limpia, sin botones inline)
+function renderInvFila(p) {
+  const stockTotal = (p.stock_moloka || 0) + (p.stock_fba || 0);
+  const ubics = (p.ubicaciones || []).map(l => `<span class="loc-tag">${l}</span>`).join('') || '<span style="color:var(--gray-300)">—</span>';
+  const asinHtml = p.asin
+    ? `<span class="td-asin">${p.asin}</span>`
+    : `<span style="font-size:11px;color:var(--gray-400);font-style:italic">sin asin</span>`;
+  const chaseTag = p.es_chase ? ` <span style="background:#8b5cf6;color:white;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;letter-spacing:0.3px;margin-left:4px">CHASE</span>` : '';
+  const estadoLabel = estadoBadge(p.estado);
+  return `
+    <tr class="inv-row" data-id="${p.id}" onclick="toggleInvDetalle('${p.id}')" style="cursor:pointer">
+      <td><div class="td-main" title="${p.nombre}">${p.nombre.substring(0,55)}${p.nombre.length>55?'...':''}${chaseTag}</div><div class="td-sub">${p.marca || ''}</div></td>
+      <td class="td-mono">${p.ean || '<span style="color:var(--gray-300)">—</span>'}</td>
+      <td>${asinHtml}</td>
+      <td style="font-size:12px">${p.proveedor || '—'}</td>
+      <td style="text-align:center;font-weight:600;font-size:13px;color:${p.stock_moloka===0?'var(--gray-400)':p.stock_minimo&&p.stock_moloka<p.stock_minimo?'var(--red)':'var(--navy)'}">${p.stock_moloka || 0}</td>
+      <td style="text-align:center;color:var(--gray-500);font-size:12px">${p.stock_fba > 0 ? p.stock_fba : '—'}</td>
+      <td style="font-size:12px">${ubics}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:12px">${p.pvd ? p.pvd.toFixed(2)+'€' : '—'}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:12px">${p.precio_venta ? p.precio_venta.toFixed(2)+'€' : '—'}</td>
+      <td style="text-align:center;white-space:nowrap">${estadoLabel}<span style="margin-left:6px;color:var(--gray-400);font-size:14px" id="caret-${p.id}">▸</span></td>
+    </tr>
+    <tr class="inv-detalle-row" id="detalle-${p.id}" style="display:none">
+      <td colspan="10" style="padding:0;background:var(--gray-50)"><div id="detalle-content-${p.id}" style="padding:16px 20px"></div></td>
+    </tr>`;
+}
+
+// Toggle del desplegable de detalle
+function toggleInvDetalle(productoId) {
+  const detRow = document.getElementById('detalle-' + productoId);
+  const caret = document.getElementById('caret-' + productoId);
+  if (!detRow) return;
+  if (detRow.style.display === 'none') {
+    // Cerrar otros abiertos
+    document.querySelectorAll('.inv-detalle-row').forEach(r => { if (r.id !== 'detalle-' + productoId) r.style.display = 'none'; });
+    document.querySelectorAll('[id^="caret-"]').forEach(c => { if (c.id !== 'caret-' + productoId) c.textContent = '\u25B8'; });
+    // Abrir este
+    detRow.style.display = '';
+    caret.textContent = '\u25BE';
+    renderInvDetalle(productoId);
+  } else {
+    detRow.style.display = 'none';
+    caret.textContent = '\u25B8';
+  }
+}
+
+// Render del contenido del desplegable de un producto
+function renderInvDetalle(productoId) {
+  const p = window._invCache[productoId];
+  if (!p) return;
+  const cont = document.getElementById('detalle-content-' + productoId);
+  cont.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:16px 24px;margin-bottom:16px" onclick="event.stopPropagation()">
+      <div>
+        <div class="inv-field-label">Nombre</div>
+        <input class="input" id="ed-nombre-${p.id}" value="${(p.nombre||'').replace(/"/g,'&quot;')}" style="font-size:13px">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><div class="inv-field-label">EAN</div><input class="input" id="ed-ean-${p.id}" value="${p.ean||''}" style="font-family:'DM Mono',monospace;font-size:12px"></div>
+        <div><div class="inv-field-label">ASIN</div><input class="input" id="ed-asin-${p.id}" value="${p.asin||''}" style="font-family:'DM Mono',monospace;font-size:12px"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><div class="inv-field-label">Proveedor</div><input class="input" id="ed-prov-${p.id}" value="${p.proveedor||''}" style="font-size:13px"></div>
+        <div><div class="inv-field-label">Marca</div><input class="input" id="ed-marca-${p.id}" value="${p.marca||''}" style="font-size:13px"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><div class="inv-field-label">FNSKU</div><input class="input" id="ed-fnsku-${p.id}" value="${p.fnsku||''}" style="font-family:'DM Mono',monospace;font-size:12px"></div>
+        <div><div class="inv-field-label">Ubicación (separadas por coma)</div><input class="input" id="ed-ubics-${p.id}" value="${(p.ubicaciones||[]).join(', ')}" style="font-size:13px"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+        <div><div class="inv-field-label">PVD (€)</div><input class="input" id="ed-pvd-${p.id}" type="number" step="0.0001" value="${p.pvd||''}" style="font-family:'DM Mono',monospace;font-size:12px"></div>
+        <div><div class="inv-field-label">PVP (€)</div><input class="input" id="ed-pvp-${p.id}" type="number" step="0.01" value="${p.precio_venta||''}" style="font-family:'DM Mono',monospace;font-size:12px"></div>
+        <div><div class="inv-field-label">Stock mínimo</div><input class="input" id="ed-smin-${p.id}" type="number" value="${p.stock_minimo||''}" style="font-size:13px"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><div class="inv-field-label">IVA (%)</div><input class="input" id="ed-iva-${p.id}" type="number" step="0.1" value="${p.iva_pct!=null?(p.iva_pct*100).toFixed(1):'21'}" style="font-size:13px"></div>
+        <div><div class="inv-field-label">Comisión Amazon (%)</div><input class="input" id="ed-com-${p.id}" type="number" step="0.1" value="${p.comision_pct!=null?(p.comision_pct*100).toFixed(1):'15.5'}" style="font-size:13px"></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--gray-200);padding-top:12px" onclick="event.stopPropagation()">
+      <div style="display:flex;gap:14px;align-items:center;font-size:12px;color:var(--gray-500);margin-right:auto">
+        <span>Stock Moloka: <strong style="color:var(--navy)">${p.stock_moloka || 0}</strong></span>
+        <span>Stock FBA: <strong style="color:var(--navy)">${p.stock_fba || 0}</strong></span>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="guardarEdicionProducto('${p.id}')">💾 Guardar cambios</button>
+      <button class="btn btn-ghost btn-sm" onclick="abrirAjusteStock('${p.id}')">📦 Ajustar stock</button>
+      <button class="btn btn-ghost btn-sm" onclick="abrirHistorialAjustes('${p.id}')">📋 Historial</button>
+      <button class="btn btn-ghost btn-sm" onclick="abrirCalculadora('${p.id}','${p.asin||''}','${(p.nombre||'').replace(/'/g,'').substring(0,40)}',${p.pvd||0},${(p.comision_pct||0.155)*100},${p.comision_envio||3.74},${(p.iva_pct!=null?p.iva_pct:0.21)*100})" ${!p.asin?'disabled':''}>💰 Buy Box</button>
+      <button class="btn btn-ghost btn-sm" onclick="toggleChase('${p.id}',${!!p.es_chase})">${p.es_chase?'❌ Quitar CHASE':'+ Marcar CHASE'}</button>
+      <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="toggleDescatalogar('${p.id}','${p.estado}')">${p.estado==='DESCATALOGADO'?'♻️ Reactivar':'⛔ Descatalogar'}</button>
+    </div>`;
+}
+
+// Guardar edicion de los campos directos (no stock)
+async function guardarEdicionProducto(productoId) {
+  try {
+    const p = window._invCache[productoId];
+    const ubicsRaw = document.getElementById('ed-ubics-' + productoId).value;
+    const ubicsArr = ubicsRaw.split(',').map(s => s.trim()).filter(s => s.length > 0);
+    const ivaRaw = parseFloat(document.getElementById('ed-iva-' + productoId).value);
+    const comRaw = parseFloat(document.getElementById('ed-com-' + productoId).value);
+    const updates = {
+      nombre: document.getElementById('ed-nombre-' + productoId).value.trim(),
+      ean: document.getElementById('ed-ean-' + productoId).value.trim() || null,
+      asin: document.getElementById('ed-asin-' + productoId).value.trim() || null,
+      proveedor: document.getElementById('ed-prov-' + productoId).value.trim() || null,
+      marca: document.getElementById('ed-marca-' + productoId).value.trim() || null,
+      fnsku: document.getElementById('ed-fnsku-' + productoId).value.trim() || null,
+      ubicaciones: ubicsArr,
+      pvd: parseFloat(document.getElementById('ed-pvd-' + productoId).value) || null,
+      precio_venta: parseFloat(document.getElementById('ed-pvp-' + productoId).value) || null,
+      stock_minimo: parseInt(document.getElementById('ed-smin-' + productoId).value) || null,
+      iva_pct: isNaN(ivaRaw) ? null : ivaRaw / 100,
+      comision_pct: isNaN(comRaw) ? null : comRaw / 100,
+      updated_at: new Date().toISOString()
+    };
+    const { error } = await db.from('productos').update(updates).eq('id', productoId);
+    if (error) throw error;
+    showToast('Cambios guardados', 'success');
+    cargarInventario();
+  } catch(e) {
+    console.error(e);
+    showToast('Error guardando: ' + e.message, 'error');
+  }
+}
+
+// Abrir modal de ajuste de stock
+function abrirAjusteStock(productoId) {
+  const p = window._invCache[productoId];
+  if (!p) return;
+  document.getElementById('ajst-prod-id').value = productoId;
+  document.getElementById('ajst-prod-nombre').textContent = p.nombre;
+  document.getElementById('ajst-stock-moloka-actual').textContent = p.stock_moloka || 0;
+  document.getElementById('ajst-stock-fba-actual').textContent = p.stock_fba || 0;
+  document.getElementById('ajst-campo').value = 'stock_moloka';
+  document.getElementById('ajst-cantidad-nueva').value = p.stock_moloka || 0;
+  document.getElementById('ajst-motivo').value = 'rotura';
+  document.getElementById('ajst-notas').value = '';
+  actualizarPreviewAjuste();
+  openModal('modal-ajuste-stock');
+}
+
+// Cuando cambia el campo o cantidad, actualizar el preview de la diferencia
+function actualizarPreviewAjuste() {
+  const productoId = document.getElementById('ajst-prod-id').value;
+  const p = window._invCache[productoId];
+  if (!p) return;
+  const campo = document.getElementById('ajst-campo').value;
+  const actual = (campo === 'stock_moloka') ? (p.stock_moloka || 0) : ((campo === 'stock_fba') ? (p.stock_fba || 0) : (p.stock_miravia || 0));
+  const nueva = parseInt(document.getElementById('ajst-cantidad-nueva').value) || 0;
+  const diff = nueva - actual;
+  const elPrev = document.getElementById('ajst-preview');
+  if (diff === 0) {
+    elPrev.innerHTML = '<span style="color:var(--gray-400)">Sin cambios</span>';
+  } else if (diff > 0) {
+    elPrev.innerHTML = `<span style="color:var(--green)">+${diff} unidades (entrada)</span>`;
+  } else {
+    elPrev.innerHTML = `<span style="color:var(--red)">${diff} unidades (salida)</span>`;
+  }
+}
+
+// Confirmar ajuste de stock: actualiza producto + crea registro en ajustes_stock
+async function confirmarAjusteStock() {
+  try {
+    const productoId = document.getElementById('ajst-prod-id').value;
+    const p = window._invCache[productoId];
+    if (!p) return;
+    const campo = document.getElementById('ajst-campo').value;
+    const cantidadNueva = parseInt(document.getElementById('ajst-cantidad-nueva').value);
+    if (isNaN(cantidadNueva) || cantidadNueva < 0) { showToast('Cantidad no valida', 'error'); return; }
+    const cantidadAntes = (campo === 'stock_moloka') ? (p.stock_moloka || 0) : ((campo === 'stock_fba') ? (p.stock_fba || 0) : (p.stock_miravia || 0));
+    if (cantidadAntes === cantidadNueva) { showToast('Sin cambios que aplicar', 'error'); return; }
+    const motivo = document.getElementById('ajst-motivo').value;
+    const notas = document.getElementById('ajst-notas').value.trim() || null;
+
+    // Actualizar producto
+    const updProd = { updated_at: new Date().toISOString() };
+    updProd[campo] = cantidadNueva;
+    const { error: e1 } = await db.from('productos').update(updProd).eq('id', productoId);
+    if (e1) throw e1;
+
+    // Registrar en ajustes_stock
+    const { error: e2 } = await db.from('ajustes_stock').insert({
+      producto_id: productoId,
+      campo_ajustado: campo,
+      cantidad_antes: cantidadAntes,
+      cantidad_despues: cantidadNueva,
+      motivo: motivo,
+      notas: notas,
+      usuario: localStorage.getItem('moloka_usuario') || 'desconocido'
+    });
+    if (e2) throw e2;
+
+    showToast('Ajuste registrado', 'success');
+    closeModal('modal-ajuste-stock');
+    cargarInventario();
+  } catch(e) {
+    console.error(e);
+    showToast('Error: ' + e.message, 'error');
+  }
+}
+
+// Abrir modal con historial de ajustes de un producto
+async function abrirHistorialAjustes(productoId) {
+  const p = window._invCache[productoId];
+  if (!p) return;
+  document.getElementById('hist-prod-nombre').textContent = p.nombre;
+  document.getElementById('hist-tbody').innerHTML = '<tr><td colspan="6" style="padding:20px;text-align:center"><div class="big-loader"></div></td></tr>';
+  openModal('modal-historial-ajustes');
+  try {
+    const { data, error } = await db.from('ajustes_stock').select('*').eq('producto_id', productoId).order('fecha', { ascending: false }).limit(50);
+    if (error) throw error;
+    const tbody = document.getElementById('hist-tbody');
+    if (!data || data.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--gray-400)">Sin ajustes registrados</td></tr>';
+      return;
+    }
+    const motivosNombre = {
+      rotura: 'Rotura',
+      devolucion_cliente: 'Devolución cliente',
+      perdida: 'Pérdida',
+      error_conteo: 'Error de conteo',
+      reclamacion_proveedor: 'Reclamación proveedor',
+      venta_fuera_amazon: 'Venta fuera de Amazon',
+      otro: 'Otro'
+    };
+    const camposNombre = { stock_moloka: 'Moloka', stock_fba: 'FBA', stock_miravia: 'Miravia' };
+    tbody.innerHTML = data.map(a => {
+      const fecha = new Date(a.fecha).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
+      const diffColor = a.diferencia > 0 ? 'var(--green)' : 'var(--red)';
+      const diffSign = a.diferencia > 0 ? '+' : '';
+      return `<tr>
+        <td style="font-size:11px">${fecha}</td>
+        <td style="font-size:12px">${camposNombre[a.campo_ajustado] || a.campo_ajustado}</td>
+        <td style="font-family:'DM Mono',monospace;font-size:12px;text-align:center">${a.cantidad_antes} → ${a.cantidad_despues}</td>
+        <td style="font-family:'DM Mono',monospace;font-size:12px;color:${diffColor};font-weight:600;text-align:center">${diffSign}${a.diferencia}</td>
+        <td style="font-size:12px">${motivosNombre[a.motivo] || a.motivo}</td>
+        <td style="font-size:11px;color:var(--gray-500)">${a.notas || ''}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    document.getElementById('hist-tbody').innerHTML = `<tr><td colspan="6" style="padding:20px;color:var(--red);text-align:center">Error: ${e.message}</td></tr>`;
   }
 }
 
