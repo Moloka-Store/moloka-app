@@ -994,7 +994,7 @@ async function cargarAlertas() {
     // Cargar datos en paralelo
     const [vel, prodResult] = await Promise.all([
       cargarVelocidades(),
-      db.from('productos').select('*').eq('activo', true)
+      db.from('productos').select('*').eq('activo', true).neq('estado', 'DESCATALOGADO')
     ]);
     if (prodResult.error) throw prodResult.error;
     const productos = prodResult.data;
