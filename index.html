@@ -4240,8 +4240,13 @@ function cambiarChaseReparto(idx, valor) {
     l.chase_unidades_regular = l.cantidad_editada;
     l.chase_unidades_chase = 0;
   } else if (valor === 'reparto_5_1') {
-    l.chase_unidades_regular = Math.max(0, l.cantidad_editada - 1);
-    l.chase_unidades_chase = l.cantidad_editada > 0 ? 1 : 0;
+    // Reparto 5+1: cada pack son 6 figuras (5 regular + 1 CHASE)
+    // Para 12 figuras: 2 packs = 10 regular + 2 CHASE
+    // Para 6 figuras: 1 pack = 5 regular + 1 CHASE
+    const packs = Math.floor(l.cantidad_editada / 6);
+    const sobrante = l.cantidad_editada - (packs * 6);
+    l.chase_unidades_regular = (packs * 5) + sobrante;
+    l.chase_unidades_chase = packs;
   } else if (valor === 'todo_chase') {
     l.chase_unidades_regular = 0;
     l.chase_unidades_chase = l.cantidad_editada;
