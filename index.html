@@ -1424,8 +1424,8 @@ async function cargarInventario() {
       // Solo descatalogados (mantienen activo=true para histórico)
       query = query.eq('estado', 'DESCATALOGADO');
     } else {
-      // 'Todos' = activos (no descatalogados)
-      query = query.eq('activo', true).neq('estado', 'DESCATALOGADO');
+      // 'Todos' = todos los activos (incluyendo descatalogados)
+      query = query.eq('activo', true);
     }
 
     if (filtroTexto) query = query.or(`nombre.ilike.%${filtroTexto}%,ean.ilike.%${filtroTexto}%,asin.ilike.%${filtroTexto}%,proveedor.ilike.%${filtroTexto}%`);
