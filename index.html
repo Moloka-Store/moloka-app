@@ -319,12 +319,10 @@
     <div class="card">
       <div class="search-bar">
         <input class="input" placeholder="🔍  Buscar producto, EAN, ASIN..." style="max-width:380px;flex:1" id="inv-search" oninput="buscarInventario()">
-        <button class="btn btn-ghost btn-sm" onclick="filtrarEstado('')">Todos</button>
-        <button class="btn btn-ghost btn-sm" onclick="filtrarEnStock()">🟢 En stock</button>
-        <button class="btn btn-ghost btn-sm" onclick="filtrarEstado('CRÍTICO')">🔴 Críticos</button>
-        <button class="btn btn-ghost btn-sm" onclick="filtrarEstado('REVISAR')">🟡 Revisar</button>
-        <button class="btn btn-ghost btn-sm" onclick="filtrarEstado('SIN_STOCK_LOCAL')">📦 Sin stock</button>
-        <button class="btn btn-ghost btn-sm" onclick="filtrarEstado('DESCATALOGADO')">⛔ Descatalogados</button>
+        <button class="btn btn-ghost btn-sm" onclick="filtrarTipo('')">Todos</button>
+        <button class="btn btn-ghost btn-sm" onclick="filtrarTipo('en_stock')">🟢 En stock</button>
+        <button class="btn btn-ghost btn-sm" onclick="filtrarTipo('sin_stock')">📦 Sin stock</button>
+        <button class="btn btn-ghost btn-sm" onclick="filtrarTipo('descatalogado')">⛔ Descatalogados</button>
       </div>
       <div class="table-wrap">
         <table>
@@ -954,8 +952,7 @@ let paginaActual = 1;
 const POR_PAGINA = 25;
 let totalProductos = 0;
 let filtroTexto = '';
-let filtroEstadoActual = '';
-let filtroEnStock = false;
+let filtroTipo = ''; // '' | 'en_stock' | 'sin_stock' | 'descatalogado'
 let productoEnEdicion = null;
 let envioItems = [];
 let sesionEntradas = [];
@@ -1408,9 +1405,29 @@ async function cargarInventario() {
   tbody.innerHTML = '<tr><td colspan="10"><div class="loading-state"><div class="big-loader"></div><p>Cargando inventario...</p></div></td></tr>';
 
   try {
-    let query = db.from('productos').select('*', { count: 'exact' }).eq('activo', true);
-    if (filtroEstadoActual) query = query.eq('estado', filtroEstadoActual);
-    if (filtroEnStock) query = query.or('stock_moloka.gt.0,stock_fba.gt.0');
+    let query = db.from('productos').select('*', { count: 'exact' });
+
+    // Filtros por tipo (reemplazan los antiguos filtroEstadoActual / filtroEnStock)
+    if (filtroTipo === 'en_stock') {
+      // Activos con algo de stock (Moloka o FBA o Inbound)
+      query = query.eq('activo', true).or('stock_moloka.gt.0,stock_fba.gt.0,stock_inbound.gt.0');
+      // Excluir descatalogados aunque tengan stock residual
+      query = query.neq('estado', 'DESCATALOGADO');
+    } else if (filtroTipo === 'sin_stock') {
+      // Activos sin stock en ningun sitio (incluyendo inbound)
+      query = query.eq('activo', true)
+        .eq('stock_moloka', 0)
+        .eq('stock_fba', 0)
+        .or('stock_inbound.is.null,stock_inbound.eq.0')
+        .neq('estado', 'DESCATALOGADO');
+    } else if (filtroTipo === 'descatalogado') {
+      // Solo descatalogados (mantienen activo=true para histórico)
+      query = query.eq('estado', 'DESCATALOGADO');
+    } else {
+      // 'Todos' = activos (no descatalogados)
+      query = query.eq('activo', true).neq('estado', 'DESCATALOGADO');
+    }
+
     if (filtroTexto) query = query.or(`nombre.ilike.%${filtroTexto}%,ean.ilike.%${filtroTexto}%,asin.ilike.%${filtroTexto}%,proveedor.ilike.%${filtroTexto}%`);
 
     const from = (paginaActual - 1) * POR_PAGINA;
@@ -1448,7 +1465,7 @@ function renderInvFila(p) {
     ? `<span class="td-asin">${p.asin}</span>`
     : `<span style="font-size:11px;color:var(--gray-400);font-style:italic">sin asin</span>`;
   const chaseTag = p.es_chase ? ` <span style="background:#8b5cf6;color:white;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;letter-spacing:0.3px;margin-left:4px">CHASE</span>` : '';
-  const estadoLabel = estadoBadge(p.estado);
+  const estadoLabel = estadoBadge(p);
   return `
     <tr class="inv-row" data-id="${p.id}" onclick="toggleInvDetalle('${p.id}')" style="cursor:pointer">
       <td><div class="td-main" title="${p.nombre}">${p.nombre.substring(0,55)}${p.nombre.length>55?'...':''}${chaseTag}</div><div class="td-sub">${p.marca || ''}</div></td>
@@ -1685,11 +1702,17 @@ async function abrirHistorialAjustes(productoId) {
   }
 }
 
-function estadoBadge(estado) {
-  if (estado === 'CRÍTICO') return '<span class="badge badge-red">🔴 CRÍTICO</span>';
-  if (estado === 'REVISAR') return '<span class="badge badge-amber">🟡 REVISAR</span>';
-  if (estado === 'SIN_STOCK_LOCAL') return '<span class="badge badge-gray">📦 Sin stock</span>';
-  return '<span class="badge badge-green">🟢 OK</span>';
+function estadoBadge(p) {
+  // Calculo dinamico basado en stocks reales (NO en el campo 'estado' obsoleto)
+  // Excepcion: los descatalogados se respetan desde el campo (mantienen activo=true para historico)
+  if (p && p.estado === 'DESCATALOGADO') {
+    return '<span class="badge badge-gray">⛔ Descatalogado</span>';
+  }
+  const stockTotal = (p.stock_moloka || 0) + (p.stock_fba || 0) + (p.stock_inbound || 0);
+  if (stockTotal === 0) {
+    return '<span class="badge badge-gray">📦 Sin stock</span>';
+  }
+  return '<span class="badge badge-green">🟢 En stock</span>';
 }
 
 function renderPaginacion() {
@@ -1720,16 +1743,9 @@ function buscarInventario() {
   searchTimeout = setTimeout(cargarInventario, 400);
 }
 
-function filtrarEstado(estado) {
-  filtroEstadoActual = estado;
-  filtroEnStock = false;
-  paginaActual = 1;
-  cargarInventario();
-}
-
-function filtrarEnStock() {
-  filtroEstadoActual = '';
-  filtroEnStock = true;
+function filtrarTipo(tipo) {
+  // tipo = '' | 'en_stock' | 'sin_stock' | 'descatalogado'
+  filtroTipo = tipo;
   paginaActual = 1;
   cargarInventario();
 }
@@ -1832,8 +1848,22 @@ async function buscarProductoEscaneo() {
   document.getElementById('product-found-area').style.display = 'none';
   document.getElementById('product-new-area').style.display = 'none';
 
-  const { data } = await db.from('productos').select('*')
+  let { data } = await db.from('productos').select('*')
     .or(`ean.eq.${val},fnsku.eq.${val},asin.eq.${val}`);
+
+  // Tolerancia EAN-13 con 0 inicial vs UPC-12 (para Funkos)
+  if ((!data || data.length === 0) && val.length === 13 && val.startsWith('0')) {
+    const valSinCero = val.substring(1);
+    const r = await db.from('productos').select('*')
+      .or(`ean.eq.${valSinCero},fnsku.eq.${valSinCero},asin.eq.${valSinCero}`);
+    data = r.data;
+  }
+  if ((!data || data.length === 0) && val.length === 12 && /^\d{12}$/.test(val)) {
+    const valConCero = '0' + val;
+    const r = await db.from('productos').select('*')
+      .or(`ean.eq.${valConCero},fnsku.eq.${valConCero},asin.eq.${valConCero}`);
+    data = r.data;
+  }
 
   if (data && data.length === 1) {
     aplicarProductoEntrada(data[0]);
@@ -2031,8 +2061,26 @@ async function addProductoEnvio() {
   const val = document.getElementById('envio-scan').value.trim();
   if (!val) return;
 
-  const { data } = await db.from('productos').select('*')
+  // Buscar tal cual
+  let { data } = await db.from('productos').select('*')
     .or(`ean.eq.${val},fnsku.eq.${val},asin.eq.${val}`);
+
+  // Si no encuentra y es un EAN-13 que empieza por 0, reintentar sin el 0
+  // (algunos productos Funko se guardan como UPC-12 en BD pero el código de
+  // barras o etiqueta puede leerse como EAN-13 con 0 delante)
+  if ((!data || data.length === 0) && val.length === 13 && val.startsWith('0')) {
+    const valSinCero = val.substring(1);
+    const r = await db.from('productos').select('*')
+      .or(`ean.eq.${valSinCero},fnsku.eq.${valSinCero},asin.eq.${valSinCero}`);
+    data = r.data;
+  }
+  // Y al revés: si el código tiene 12 digitos y no encuentra, probar añadiendo 0
+  if ((!data || data.length === 0) && val.length === 12 && /^\d{12}$/.test(val)) {
+    const valConCero = '0' + val;
+    const r = await db.from('productos').select('*')
+      .or(`ean.eq.${valConCero},fnsku.eq.${valConCero},asin.eq.${valConCero}`);
+    data = r.data;
+  }
 
   if (!data || data.length === 0) {
     showToast('Producto no encontrado', 'error');
@@ -4576,7 +4624,13 @@ async function consolidarDuplicados(productos) {
 // 13. CREAR PRODUCTO NUEVO (asin_pendiente)
 // ----------------------------------------------------------------
 async function crearProductoNuevo(linea) {
-  const eanLimpio = (linea.ean_editado || '').trim();
+  let eanLimpio = (linea.ean_editado || '').trim();
+  // Normalizar EAN: si es EAN-13 que empieza por 0 (Funkos USA),
+  // guardarlo en formato UPC-12 (sin el 0 inicial).
+  // Esto mantiene consistencia con el resto de la BD que usa UPC para Funkos.
+  if (eanLimpio.length === 13 && eanLimpio.startsWith('0')) {
+    eanLimpio = eanLimpio.substring(1);
+  }
   const { data, error } = await db.from('productos').insert({
     ean: eanLimpio || null, // NULL si vacio (HEO, OSMA y otros sin EAN)
     nombre: (linea.descripcion || 'Sin descripcion').substring(0, 200),
