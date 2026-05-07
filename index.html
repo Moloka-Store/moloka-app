@@ -267,6 +267,9 @@
       <span class="nav-icon">📝</span> Tareas
       <span class="nav-badge amber" id="badge-tareas" style="display:none">0</span>
     </div>
+    <div class="nav-item" data-page="rotacion" onclick="showPage('rotacion',this)">
+      <span class="nav-icon">🔄</span> Rotación de ventas
+    </div>
     <div class="nav-item" data-page="sincronizacion" onclick="showPage('sincronizacion',this)">
       <span class="nav-icon">🔄</span> Sincronización
     </div>
@@ -500,6 +503,37 @@
     </div>
     <div id="tareas-pendientes"><div class="loading-state"><div class="big-loader"></div><p>Cargando tareas...</p></div></div>
     <div id="tareas-hechas" style="display:none"><div class="loading-state"><div class="big-loader"></div></div></div>
+  </div>
+
+  <!-- ROTACION DE VENTAS -->
+  <div class="page" id="page-rotacion">
+    <div class="page-header">
+      <div><div class="page-title">🔄 Rotación de ventas</div><div class="page-sub" id="rot-sub">Catálogo completo con stock, ventas y rentabilidad</div></div>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <div style="padding:14px 16px;border-bottom:1px solid var(--gray-200);display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <input type="text" id="rot-buscar" placeholder="🔍 Buscar producto, EAN o ASIN..." oninput="renderRotacion()" style="flex:1;min-width:240px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">
+        <span style="font-size:12px;color:var(--gray-500)" id="rot-contador">—</span>
+      </div>
+      <div class="table-wrap" style="max-height:75vh;overflow:auto">
+        <table id="rot-tabla">
+          <thead style="position:sticky;top:0;background:white;z-index:10">
+            <tr>
+              <th>Producto</th>
+              <th style="text-align:center">EAN</th>
+              <th style="text-align:center">Moloka</th>
+              <th style="text-align:center">FBA</th>
+              <th style="text-align:center">Tránsito</th>
+              <th style="text-align:right">T7</th>
+              <th style="text-align:right">T30</th>
+              <th style="text-align:right">T90</th>
+              <th style="text-align:right">Margen abril</th>
+            </tr>
+          </thead>
+          <tbody id="rot-tbody"><tr><td colspan="9"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
   <!-- SINCRONIZACIÓN -->
@@ -939,6 +973,7 @@ function showPage(id, el) {
   if (id === 'inventario') { paginaActual = 1; cargarInventario(); }
   if (id === 'facturas') cargarFacturas();
   if (id === 'tareas') cargarTareas();
+  if (id === 'rotacion') cargarRotacion();
   if (id === 'sincronizacion') cargarSincronizacion();
   if (id === 'rentabilidad') verRentabilidad('acumulado');
   if (id === 'envios-historial') cargarEnviosHistorial();
@@ -1032,10 +1067,12 @@ async function cargarAlertas() {
       const uds30d = v ? v.uds_30d : 0;
       const stockFba = p.stock_fba || 0;
       const stockMoloka = p.stock_moloka || 0;
-      const stockTotal = stockFba + stockMoloka;
+      const stockInbound = p.stock_inbound || 0;
+      const stockFbaEfectivo = stockFba + stockInbound;  // FBA + en camino
+      const stockTotal = stockFbaEfectivo + stockMoloka;
 
       // Cobertura
-      const cobFba = velDiaria > 0 ? stockFba / velDiaria : 999;
+      const cobFba = velDiaria > 0 ? stockFbaEfectivo / velDiaria : 999;
       const cobTotal = velDiaria > 0 ? stockTotal / velDiaria : 999;
 
       // Logica acordada
@@ -1058,7 +1095,7 @@ async function cargarAlertas() {
       let alertaManda = false;
       if (cobFba < ALERT_COBERTURA_MINIMA && stockMoloka > 0) {
         const objetivoUds = Math.round(ALERT_COBERTURA_OBJETIVO * velDiaria);
-        const necesitoEnviar = Math.max(1, objetivoUds - stockFba);
+        const necesitoEnviar = Math.max(1, objetivoUds - stockFbaEfectivo);
         const enviarReal = Math.min(necesitoEnviar, stockMoloka);
         mandaFba.push({
           ...p,
@@ -1066,6 +1103,7 @@ async function cargarAlertas() {
           uds_30d: uds30d,
           tendencia: v ? v.tendencia : 'estable',
           cobertura_fba_dias: cobFba,
+          stock_inbound: stockInbound,
           enviar_uds: enviarReal,
           stock_moloka_insuficiente: necesitoEnviar > stockMoloka
         });
@@ -1081,6 +1119,7 @@ async function cargarAlertas() {
           uds_30d: uds30d,
           tendencia: v ? v.tendencia : 'estable',
           cobertura_total_dias: cobTotal,
+          stock_inbound: stockInbound,
           pedir_uds: Math.max(1, cantidadSugerida)
         });
       } else if (!alertaManda) {
@@ -1120,6 +1159,7 @@ async function cargarAlertas() {
         const aviso = p.stock_moloka_insuficiente
           ? '<div class="alert-detail" style="color:var(--red);font-weight:600;margin-top:4px">\u26a0\ufe0f Stock Moloka insuficiente - falta pedir al proveedor</div>'
           : '';
+        const inboundTxt = p.stock_inbound > 0 ? ' + <strong style="color:var(--accent)">' + p.stock_inbound + 'u en camino</strong>' : '';
         return '<div class="alert-card red">' +
           '<div class="alert-icon">\ud83d\udce6</div>' +
           '<div style="flex:1">' +
@@ -1129,7 +1169,7 @@ async function cargarAlertas() {
               (p.asin ? '<span style="font-family:\'DM Mono\',monospace;font-size:11px;color:var(--accent)">' + p.asin + '</span>' : '') +
               '<span style="font-size:11px;color:var(--gray-500)">' + (p.proveedor || '\u2014') + '</span>' +
             '</div>' +
-            '<div class="alert-detail">FBA: <strong>' + (p.stock_fba||0) + 'u</strong> \u00b7 Moloka: <strong>' + (p.stock_moloka||0) + 'u</strong> \u00b7 Vel: ' + p.vel_diaria.toFixed(2) + '/dia ' + tendIcon + '</div>' +
+            '<div class="alert-detail">FBA: <strong>' + (p.stock_fba||0) + 'u</strong>' + inboundTxt + ' \u00b7 Moloka: <strong>' + (p.stock_moloka||0) + 'u</strong> \u00b7 Vel: ' + p.vel_diaria.toFixed(2) + '/dia ' + tendIcon + '</div>' +
             '<div class="alert-detail">Cobertura FBA: <strong>' + cobTxt + '</strong> \u00b7 Vendidas T30: ' + p.uds_30d + 'u</div>' +
             aviso +
             '<div class="alert-urgency">\u27a1\ufe0f Manda <strong>' + p.enviar_uds + 'u</strong> a FBA (objetivo 14 dias cobertura)</div>' +
@@ -1156,11 +1196,12 @@ async function cargarAlertas() {
         const totalEur = items.reduce((s,p) => s + (p.pvd||0) * p.pedir_uds, 0);
         const filas = items.map(p => {
           const tendIcon = p.tendencia === 'subiendo' ? '\ud83d\udcc8' : (p.tendencia === 'bajando' ? '\ud83d\udcc9' : '\u27a1\ufe0f');
+          const inboundTxt = p.stock_inbound > 0 ? ' Camino:' + p.stock_inbound : '';
           return '<div style="padding:8px 12px;border-bottom:1px solid var(--gray-100);font-size:12px">' +
             '<div style="font-weight:600;color:var(--navy)">' + (p.nombre||'').substring(0,55) + ((p.nombre||'').length>55?'...':'') + '</div>' +
             '<div style="color:var(--gray-500);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap">' +
               (p.ean ? '<span style="font-family:\'DM Mono\',monospace">' + p.ean + '</span>' : '') +
-              '<span>FBA:' + (p.stock_fba||0) + ' Moloka:' + (p.stock_moloka||0) + '</span>' +
+              '<span>FBA:' + (p.stock_fba||0) + inboundTxt + ' Moloka:' + (p.stock_moloka||0) + '</span>' +
               '<span>Vel ' + p.vel_diaria.toFixed(2) + '/d ' + tendIcon + '</span>' +
               '<span style="color:var(--amber);font-weight:600">Cobertura ' + p.cobertura_total_dias.toFixed(0) + 'd</span>' +
             '</div>' +
@@ -1212,6 +1253,151 @@ async function cargarAlertas() {
     const el = document.getElementById('alertas-manda-fba');
     if (el) el.innerHTML = '<div style="color:var(--red);font-size:13px">Error cargando alertas: ' + e.message + '</div>';
   }
+}
+
+// ============================================================
+// ROTACION DE VENTAS
+// ============================================================
+let ROTACION_DATOS = null;
+
+async function cargarRotacion() {
+  try {
+    // Cargar en paralelo: productos activos + velocidades + rentabilidad
+    const [prodResult, vel, rent] = await Promise.all([
+      db.from('productos').select('id, sku, asin, ean, nombre, stock_moloka, stock_fba, stock_inbound, proveedor, es_chase').eq('activo', true).neq('estado', 'DESCATALOGADO'),
+      cargarVelocidades(),
+      cargarRentData()
+    ]);
+    if (prodResult.error) throw prodResult.error;
+    const productos = prodResult.data;
+
+    // Mapas auxiliares
+    const velMap = {};
+    if (vel && vel.productos) {
+      vel.productos.forEach(p => { velMap[p.sku] = p; });
+    }
+
+    // Margen de abril por ASIN (mes cerrado mas reciente)
+    const margenAbril = {};
+    if (rent && rent.meses) {
+      const mesAbril = rent.meses.find(m => m.mes === 'abril');
+      if (mesAbril && mesAbril.productos) {
+        mesAbril.productos.forEach(p => {
+          if (p.asin && p.facturado_iva > 0) {
+            margenAbril[p.asin] = {
+              beneficio: p.beneficio,
+              margen_pct: p.margen,
+              uds: p.unidades
+            };
+          }
+        });
+      }
+    }
+
+    // Construir filas
+    const filas = productos.map(p => {
+      const v = p.sku ? velMap[p.sku] : null;
+      const margen = p.asin ? margenAbril[p.asin] : null;
+      return {
+        id: p.id,
+        nombre: p.nombre || '',
+        ean: p.ean,
+        asin: p.asin,
+        sku: p.sku,
+        es_chase: p.es_chase,
+        proveedor: p.proveedor,
+        stock_moloka: p.stock_moloka || 0,
+        stock_fba: p.stock_fba || 0,
+        stock_inbound: p.stock_inbound || 0,
+        uds_7d: v ? v.uds_7d : 0,
+        uds_30d: v ? v.uds_30d : 0,
+        uds_90d: v ? v.uds_90d : 0,
+        tendencia: v ? v.tendencia : 'sin_ventas',
+        margen_pct: margen ? margen.margen_pct : null,
+        beneficio_abr: margen ? margen.beneficio : null,
+        uds_abr: margen ? margen.uds : 0
+      };
+    });
+
+    // Ordenar por defecto por T7 desc
+    filas.sort((a, b) => b.uds_7d - a.uds_7d);
+
+    ROTACION_DATOS = filas;
+
+    // Sub con fecha
+    if (vel && vel.fecha_calculo) {
+      const partes = vel.fecha_calculo.split('-');
+      const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+      const fechaTxt = partes.length === 3 ? parseInt(partes[2],10) + ' de ' + (meses[parseInt(partes[1],10)-1] || '') + ' de ' + partes[0] : vel.fecha_calculo;
+      const sub = document.getElementById('rot-sub');
+      if (sub) sub.textContent = filas.length + ' productos activos \u00b7 Ventas hasta ' + fechaTxt + ' \u00b7 Margen del ultimo mes cerrado (abril)';
+    }
+
+    renderRotacion();
+  } catch(e) {
+    console.error(e);
+    const tb = document.getElementById('rot-tbody');
+    if (tb) tb.innerHTML = '<tr><td colspan="9" style="color:var(--red);padding:20px;text-align:center">Error cargando: ' + e.message + '</td></tr>';
+  }
+}
+
+function renderRotacion() {
+  if (!ROTACION_DATOS) return;
+  const buscar = (document.getElementById('rot-buscar').value || '').toLowerCase().trim();
+  let filas = ROTACION_DATOS;
+  if (buscar) {
+    filas = filas.filter(f =>
+      (f.nombre || '').toLowerCase().includes(buscar) ||
+      (f.ean || '').toLowerCase().includes(buscar) ||
+      (f.asin || '').toLowerCase().includes(buscar)
+    );
+  }
+
+  const cont = document.getElementById('rot-contador');
+  if (cont) cont.textContent = filas.length + ' / ' + ROTACION_DATOS.length + ' productos';
+
+  const tbody = document.getElementById('rot-tbody');
+  if (filas.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="9" style="color:var(--gray-400);padding:20px;text-align:center">Sin resultados</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = filas.map(f => {
+    // Color margen
+    let margenHtml = '<span style="color:var(--gray-300)">\u2014</span>';
+    if (f.margen_pct !== null && f.margen_pct !== undefined) {
+      const m = f.margen_pct;
+      const color = m >= 12 ? 'var(--green)' : (m >= 6 ? 'var(--amber)' : 'var(--red)');
+      const benTxt = f.beneficio_abr !== null ? ' <span style="font-size:10px;color:var(--gray-400)">(' + f.beneficio_abr.toFixed(0) + '\u20ac)</span>' : '';
+      margenHtml = '<strong style="color:' + color + '">' + m.toFixed(1) + '%</strong>' + benTxt;
+    }
+
+    // Tendencia icono al lado de T7
+    const tendIcon = f.tendencia === 'subiendo' ? ' <span title="Subiendo">\ud83d\udcc8</span>' : (f.tendencia === 'bajando' ? ' <span title="Bajando">\ud83d\udcc9</span>' : '');
+
+    // Inbound destacado
+    const inboundHtml = f.stock_inbound > 0
+      ? '<span style="color:var(--accent);font-weight:600">\ud83d\ude9a ' + f.stock_inbound + '</span>'
+      : '<span style="color:var(--gray-300)">\u2014</span>';
+
+    const eanHtml = f.ean
+      ? '<span style="font-family:\'DM Mono\',monospace;font-size:11px;background:rgba(0,0,0,0.05);padding:2px 6px;border-radius:4px;cursor:pointer" onclick="event.stopPropagation();navigator.clipboard.writeText(\'' + f.ean + '\');showToast(\'EAN copiado\',\'success\')" title="Clic para copiar">' + f.ean + '</span>'
+      : '<span style="color:var(--gray-300)">\u2014</span>';
+
+    const chaseTag = f.es_chase ? ' <span style="background:#8b5cf6;color:white;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:4px">CHASE</span>' : '';
+
+    return '<tr>' +
+      '<td><div class="td-main">' + (f.nombre.substring(0,55)) + (f.nombre.length>55?'...':'') + chaseTag + '</div><div class="td-sub" style="font-family:\'DM Mono\',monospace;font-size:11px">' + (f.asin || 'sin asin') + '</div></td>' +
+      '<td style="text-align:center">' + eanHtml + '</td>' +
+      '<td style="text-align:center;font-weight:' + (f.stock_moloka > 0 ? '700' : '400') + ';color:' + (f.stock_moloka > 0 ? 'var(--navy)' : 'var(--gray-400)') + '">' + f.stock_moloka + '</td>' +
+      '<td style="text-align:center;font-weight:' + (f.stock_fba > 0 ? '700' : '400') + ';color:' + (f.stock_fba > 0 ? 'var(--navy)' : 'var(--gray-400)') + '">' + f.stock_fba + '</td>' +
+      '<td style="text-align:center">' + inboundHtml + '</td>' +
+      '<td style="text-align:right;font-weight:600;color:' + (f.uds_7d > 0 ? 'var(--navy)' : 'var(--gray-400)') + '">' + f.uds_7d + tendIcon + '</td>' +
+      '<td style="text-align:right;color:' + (f.uds_30d > 0 ? 'var(--gray-700)' : 'var(--gray-400)') + '">' + f.uds_30d + '</td>' +
+      '<td style="text-align:right;color:' + (f.uds_90d > 0 ? 'var(--gray-700)' : 'var(--gray-400)') + '">' + f.uds_90d + '</td>' +
+      '<td style="text-align:right">' + margenHtml + '</td>' +
+    '</tr>';
+  }).join('');
 }
 
 // ============================================================
@@ -1270,7 +1456,7 @@ function renderInvFila(p) {
       <td>${asinHtml}</td>
       <td style="font-size:12px">${p.proveedor || '—'}</td>
       <td style="text-align:center;font-weight:600;font-size:13px;color:${p.stock_moloka===0?'var(--gray-400)':p.stock_minimo&&p.stock_moloka<p.stock_minimo?'var(--red)':'var(--navy)'}">${p.stock_moloka || 0}</td>
-      <td style="text-align:center;color:var(--gray-500);font-size:12px">${p.stock_fba > 0 ? p.stock_fba : '—'}</td>
+      <td style="text-align:center;color:var(--gray-500);font-size:12px">${p.stock_fba > 0 ? p.stock_fba : '—'}${p.stock_inbound > 0 ? `<div style="font-size:10px;color:var(--accent);font-weight:600;margin-top:1px">+${p.stock_inbound} 🚚</div>` : ''}</td>
       <td style="font-size:12px">${ubics}</td>
       <td style="font-family:'DM Mono',monospace;font-size:12px">${p.pvd ? p.pvd.toFixed(2)+'€' : '—'}</td>
       <td style="font-family:'DM Mono',monospace;font-size:12px">${p.precio_venta ? p.precio_venta.toFixed(2)+'€' : '—'}</td>
@@ -1893,9 +2079,10 @@ function mostrarSelectorProducto(productos, codigoBuscado, callback) {
           <span><strong>Proveedor:</strong> ${proveedorTxt}</span>
           <span><strong>PVD:</strong> ${pvdTxt}</span>
         </div>
-        <div style="font-size:12px;margin-top:6px;display:flex;gap:14px">
+        <div style="font-size:12px;margin-top:6px;display:flex;gap:14px;flex-wrap:wrap">
           <span style="color:${stockColor}"><strong>Stock M:</strong> ${p.stock_moloka||0} ud</span>
           <span style="color:${fbaColor}"><strong>Stock FBA:</strong> ${p.stock_fba||0} ud</span>
+          ${p.stock_inbound > 0 ? `<span style="color:var(--accent)"><strong>🚚 En camino:</strong> ${p.stock_inbound} ud</span>` : ''}
         </div>
       </div>`;
   }).join('');
