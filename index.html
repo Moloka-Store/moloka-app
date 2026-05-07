@@ -3332,19 +3332,25 @@ function parseBems(rawText) {
   const matchTotalExcl = rawText.match(/Total\s*VATexcl\s*([\d.,]+)\s*EUR/i);
   if (matchTotalExcl) result.total_sin_iva = parseFloat(matchTotalExcl[1].replace(',', '.'));
 
-  const lineaRegex = /(\d{13})\s+(\d+)\s+(\d+[.,]\d+)\s+([\d.,]+%?\.?\u2026?)\s+(\d+[.,]\d+)\s+CEE/g;
+  // Regex que acepta:
+  //   - Líneas con descuento:    EAN  Q  Price  X.X%  Total  CEE
+  //   - Líneas sin descuento:    EAN  Q  Price         Total  CEE
+  // El grupo 4 (descuento) es opcional. Si no aparece, se rellena con cadena vacía.
+  const lineaRegex = /(\d{13})\s+(\d+)\s+(\d+[.,]\d+)\s+(?:([\d.,]+%)\s+)?(\d+[.,]\d+)\s+CEE/g;
   let prevEnd = 0;
   let m;
   while ((m = lineaRegex.exec(rawText)) !== null) {
     const eanRaw = m[1];
     const cantidad = parseInt(m[2]);
     const precioBruto = parseFloat(m[3].replace(',', '.'));
-    const descuentoStr = m[4];
+    const descuentoStr = m[4] || '';
     const totalLinea = parseFloat(m[5].replace(',', '.'));
     const contexto = rawText.substring(prevEnd, m.index);
     let ref = null;
     let descripcion = null;
-    const refRegex = /(?<!\d)(\d{6})(?!\d)\s*:\s*([A-Z][^:]*?)(?=\s+\d{13}|\s*$)/g;
+    // El regex permite ':' dentro de la descripción (como en "Toy Story : Slinky Dog")
+    // y se ancla por: siguiente EAN de 13 dígitos, palabra Intrastat, o fin de cadena.
+    const refRegex = /(\d{6})\s*:\s*([A-Z].*?)(?=\s*\d{13}|\s*Intrastat|\s*$)/g;
     let lastRefMatch = null;
     let refM;
     while ((refM = refRegex.exec(contexto)) !== null) {
