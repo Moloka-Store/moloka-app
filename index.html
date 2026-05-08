@@ -1493,7 +1493,7 @@ function renderRotacion() {
     let margenHtml = '<span style="color:var(--gray-300)">\u2014</span>';
     if (f.margen_pct !== null && f.margen_pct !== undefined) {
       const m = f.margen_pct;
-      const color = m >= 12 ? 'var(--green)' : (m >= 6 ? 'var(--amber)' : 'var(--red)');
+      const color = m >= 10 ? 'var(--green)' : (m >= 0 ? 'var(--amber)' : 'var(--red)');
       const benTxt = f.beneficio_abr !== null ? ' <span style="font-size:10px;color:var(--gray-400)">(' + f.beneficio_abr.toFixed(0) + '\u20ac)</span>' : '';
       margenHtml = '<strong style="color:' + color + '">' + m.toFixed(1) + '%</strong>' + benTxt;
     }
