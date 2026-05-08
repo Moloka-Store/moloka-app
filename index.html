@@ -285,6 +285,8 @@
     <div class="page-header">
       <div><div class="page-title">⚠️ Alertas de Stock</div><div class="page-sub" id="alertas-sub">Productos que necesitan atención</div></div>
     </div>
+    <div id="alertas-silenciadas-contador" style="margin-bottom:12px"></div>
+    <div id="alertas-silenciadas-lista" style="display:none;margin-bottom:14px"></div>
     <div class="stats-row">
       <div class="stat-card"><div class="stat-label">📦 Manda a FBA</div><div class="stat-value red" id="stat-manda-fba">—</div><div class="stat-sub">Cobertura FBA &lt; 7 días</div></div>
       <div class="stat-card"><div class="stat-label">🛒 Pide al proveedor</div><div class="stat-value amber" id="stat-pide-prov">—</div><div class="stat-sub">Cobertura total &lt; 44 días</div></div>
@@ -937,6 +939,7 @@ document.querySelectorAll('.modal-overlay').forEach(m => {
 });
 
 // ============================================================
+// ============================================================
 // ALERTAS
 // ============================================================
 // ============================================================
@@ -946,6 +949,28 @@ const ALERT_LEAD_TIME_FBA = 7;        // dias desde envio a Amazon hasta disponi
 const ALERT_COBERTURA_OBJETIVO = 14;  // mantener 2 semanas de stock en FBA
 const ALERT_COBERTURA_MINIMA = 7;     // alerta MANDA si cobertura FBA < 7 dias
 const ALERT_LEAD_PROVEEDOR = 30 + 7 + 7;  // 1 mes proveedor + 1 sem FBA + 1 sem margen = 44 dias
+
+// Lead times por proveedor (en dias) para silenciar alerta tras "He pedido"
+const LEAD_TIMES_PROVEEDOR = {
+  'TCG': 7,
+  'BEMS': 7,
+  'HEO': 15,
+  'DBLINE': 30,
+  'ZENTRADA': 30,
+  'OSMA': 30,
+  '_DEFAULT': 21
+};
+
+function obtenerLeadTimeProveedor(proveedor) {
+  if (!proveedor) return LEAD_TIMES_PROVEEDOR._DEFAULT;
+  const provUpper = String(proveedor).toUpperCase();
+  // Match por contains (aguanta variantes: "TCG Factory" -> "TCG", "DB-Line" no, "DBLine" si)
+  const claves = ['TCG', 'BEMS', 'HEO', 'DBLINE', 'ZENTRADA', 'OSMA'];
+  for (const k of claves) {
+    if (provUpper.indexOf(k) !== -1) return LEAD_TIMES_PROVEEDOR[k];
+  }
+  return LEAD_TIMES_PROVEEDOR._DEFAULT;
+}
 
 let VELOCIDADES_DATA = null;
 
@@ -962,15 +987,32 @@ async function cargarVelocidades() {
   }
 }
 
+// Estado global de silenciadas (para que el desplegable las pueda renderizar)
+let SILENCIADAS_ACTIVAS = [];
+
 async function cargarAlertas() {
   try {
-    // Cargar datos en paralelo
-    const [vel, prodResult] = await Promise.all([
+    // Cargar datos en paralelo (productos + velocidades + silenciadas vivas)
+    const ahoraIso = new Date().toISOString();
+    const [vel, prodResult, silResult] = await Promise.all([
       cargarVelocidades(),
-      db.from('productos').select('*').eq('activo', true).neq('estado', 'DESCATALOGADO')
+      db.from('productos').select('*').eq('activo', true).neq('estado', 'DESCATALOGADO'),
+      db.from('alertas_silenciadas').select('*').gt('silenciado_hasta', ahoraIso)
     ]);
     if (prodResult.error) throw prodResult.error;
+    if (silResult.error) throw silResult.error;
     const productos = prodResult.data;
+    const silenciadasRaw = silResult.data || [];
+
+    // Mapa de silenciadas por (producto_id + tipo_alerta)
+    const silenciadasMap = {};
+    silenciadasRaw.forEach(s => {
+      const k = s.producto_id + '|' + s.tipo_alerta;
+      // si hay varias filas para el mismo par, nos quedamos con la mas lejana
+      if (!silenciadasMap[k] || new Date(s.silenciado_hasta) > new Date(silenciadasMap[k].silenciado_hasta)) {
+        silenciadasMap[k] = s;
+      }
+    });
 
     // Mapa de velocidades por SKU
     const velMap = {};
@@ -996,6 +1038,7 @@ async function cargarAlertas() {
     const mandaFba = [];
     const pideProveedor = [];
     const sinMovimiento = [];
+    const silenciadasVisibles = [];  // para el desplegable
     let okCount = 0;
 
     for (const p of productos) {
@@ -1035,7 +1078,7 @@ async function cargarAlertas() {
         const objetivoUds = Math.round(ALERT_COBERTURA_OBJETIVO * velDiaria);
         const necesitoEnviar = Math.max(1, objetivoUds - stockFbaEfectivo);
         const enviarReal = Math.min(necesitoEnviar, stockMoloka);
-        mandaFba.push({
+        const itemFba = {
           ...p,
           vel_diaria: velDiaria,
           uds_30d: uds30d,
@@ -1044,14 +1087,26 @@ async function cargarAlertas() {
           stock_inbound: stockInbound,
           enviar_uds: enviarReal,
           stock_moloka_insuficiente: necesitoEnviar > stockMoloka
-        });
-        alertaManda = true;
+        };
+        const silFba = silenciadasMap[p.id + '|mandar_fba'];
+        if (silFba) {
+          silenciadasVisibles.push({
+            tipo_alerta: 'mandar_fba',
+            silenciado_id: silFba.id,
+            silenciado_hasta: silFba.silenciado_hasta,
+            motivo: silFba.motivo || '',
+            producto: itemFba
+          });
+        } else {
+          mandaFba.push(itemFba);
+          alertaManda = true;
+        }
       }
 
       // 2) Pide al proveedor si cobertura TOTAL < 44 dias
       if (cobTotal < ALERT_LEAD_PROVEEDOR) {
         const cantidadSugerida = Math.round(velDiaria * 30); // pedir al menos para 1 mes
-        pideProveedor.push({
+        const itemProv = {
           ...p,
           vel_diaria: velDiaria,
           uds_30d: uds30d,
@@ -1059,11 +1114,26 @@ async function cargarAlertas() {
           cobertura_total_dias: cobTotal,
           stock_inbound: stockInbound,
           pedir_uds: Math.max(1, cantidadSugerida)
-        });
+        };
+        const silProv = silenciadasMap[p.id + '|pedir_proveedor'];
+        if (silProv) {
+          silenciadasVisibles.push({
+            tipo_alerta: 'pedir_proveedor',
+            silenciado_id: silProv.id,
+            silenciado_hasta: silProv.silenciado_hasta,
+            motivo: silProv.motivo || '',
+            producto: itemProv
+          });
+        } else {
+          pideProveedor.push(itemProv);
+        }
       } else if (!alertaManda) {
         okCount++;
       }
     }
+
+    // Guardar silenciadas en estado global para que el desplegable acceda
+    SILENCIADAS_ACTIVAS = silenciadasVisibles;
 
     // Ordenar por urgencia
     mandaFba.sort((a, b) => a.cobertura_fba_dias - b.cobertura_fba_dias);
@@ -1085,6 +1155,9 @@ async function cargarAlertas() {
     } else {
       badge.style.display = 'none';
     }
+
+    // ----- Render CONTADOR DE SILENCIADAS -----
+    renderContadorSilenciadas(totalUrgentes, silenciadasVisibles.length);
 
     // ----- Render MANDA A FBA -----
     const elManda = document.getElementById('alertas-manda-fba');
@@ -1132,9 +1205,13 @@ async function cargarAlertas() {
       elPide.innerHTML = gruposOrdenados.map(([prov, items]) => {
         const totalUds = items.reduce((s,p) => s + p.pedir_uds, 0);
         const totalEur = items.reduce((s,p) => s + (p.pvd||0) * p.pedir_uds, 0);
+        const leadProv = obtenerLeadTimeProveedor(prov);
         const filas = items.map(p => {
           const tendIcon = p.tendencia === 'subiendo' ? '\ud83d\udcc8' : (p.tendencia === 'bajando' ? '\ud83d\udcc9' : '\u27a1\ufe0f');
           const inboundTxt = p.stock_inbound > 0 ? ' Camino:' + p.stock_inbound : '';
+          // Escape de comillas simples en nombre y proveedor para el onclick
+          const nombreSeguro = (p.nombre || '').replace(/'/g, "\\'");
+          const provSeguro = (p.proveedor || '').replace(/'/g, "\\'");
           return '<div style="padding:8px 12px;border-bottom:1px solid var(--gray-100);font-size:12px">' +
             '<div style="font-weight:600;color:var(--navy)">' + (p.nombre||'').substring(0,55) + ((p.nombre||'').length>55?'...':'') + '</div>' +
             '<div style="color:var(--gray-500);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap">' +
@@ -1143,12 +1220,15 @@ async function cargarAlertas() {
               '<span>Vel ' + p.vel_diaria.toFixed(2) + '/d ' + tendIcon + '</span>' +
               '<span style="color:var(--amber);font-weight:600">Cobertura ' + p.cobertura_total_dias.toFixed(0) + 'd</span>' +
             '</div>' +
-            '<div style="color:var(--navy);font-weight:600;margin-top:3px">\u27a1\ufe0f Pedir ' + p.pedir_uds + 'u</div>' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;gap:8px;flex-wrap:wrap">' +
+              '<div style="color:var(--navy);font-weight:600">\u27a1\ufe0f Pedir ' + p.pedir_uds + 'u</div>' +
+              '<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px;background:var(--green-light);color:#065F46;border:1px solid var(--green)" onclick="marcarComoPedido(\'' + p.id + '\', \'' + provSeguro + '\', \'' + nombreSeguro + '\')" title="Silencia la alerta durante ' + leadProv + ' dias">\u2713 He pedido</button>' +
+            '</div>' +
           '</div>';
         }).join('');
         return '<div class="card" style="padding:0;margin-bottom:14px;overflow:hidden">' +
           '<div style="background:var(--amber-light);padding:10px 14px;border-bottom:1px solid var(--gray-200)">' +
-            '<div style="font-weight:700;color:var(--navy);font-size:14px">\ud83d\udecd\ufe0f ' + prov + '</div>' +
+            '<div style="font-weight:700;color:var(--navy);font-size:14px">\ud83d\udecd\ufe0f ' + prov + ' <span style="font-size:10px;font-weight:500;color:var(--gray-500);margin-left:6px">lead time ' + leadProv + 'd</span></div>' +
             '<div style="font-size:11px;color:var(--gray-500);margin-top:2px">' + items.length + ' productos \u00b7 ' + totalUds + ' uds totales \u00b7 ~' + totalEur.toFixed(0) + '\u20ac inversion</div>' +
           '</div>' +
           filas +
@@ -1190,6 +1270,114 @@ async function cargarAlertas() {
     console.error(e);
     const el = document.getElementById('alertas-manda-fba');
     if (el) el.innerHTML = '<div style="color:var(--red);font-size:13px">Error cargando alertas: ' + e.message + '</div>';
+  }
+}
+
+// ============================================================
+// ALERTAS SILENCIADAS - Contador, lista colapsable y acciones
+// ============================================================
+
+function renderContadorSilenciadas(totalActivas, totalSilenciadas) {
+  const cont = document.getElementById('alertas-silenciadas-contador');
+  if (!cont) return;
+  if (totalSilenciadas === 0) {
+    cont.innerHTML = '<div style="font-size:12px;color:var(--gray-500)">\ud83d\udd14 Alertas activas: <strong style="color:var(--navy)">' + totalActivas + '</strong></div>';
+    const lista = document.getElementById('alertas-silenciadas-lista');
+    if (lista) lista.style.display = 'none';
+    return;
+  }
+  cont.innerHTML =
+    '<div style="font-size:12px;color:var(--gray-500);display:flex;gap:14px;flex-wrap:wrap;align-items:center">' +
+      '<span>\ud83d\udd14 Alertas activas: <strong style="color:var(--navy)">' + totalActivas + '</strong></span>' +
+      '<span>\ud83e\udd2b Silenciadas: <strong style="color:var(--navy)">' + totalSilenciadas + '</strong></span>' +
+      '<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 10px" onclick="toggleSilenciadas()" id="btn-toggle-silenciadas">Ver silenciadas</button>' +
+    '</div>';
+}
+
+function toggleSilenciadas() {
+  const lista = document.getElementById('alertas-silenciadas-lista');
+  const btn = document.getElementById('btn-toggle-silenciadas');
+  if (!lista) return;
+  if (lista.style.display === 'none' || lista.style.display === '') {
+    renderListaSilenciadas();
+    lista.style.display = 'block';
+    if (btn) btn.textContent = 'Ocultar silenciadas';
+  } else {
+    lista.style.display = 'none';
+    if (btn) btn.textContent = 'Ver silenciadas';
+  }
+}
+
+function renderListaSilenciadas() {
+  const lista = document.getElementById('alertas-silenciadas-lista');
+  if (!lista) return;
+  if (!SILENCIADAS_ACTIVAS || SILENCIADAS_ACTIVAS.length === 0) {
+    lista.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--gray-500)">No hay alertas silenciadas.</div>';
+    return;
+  }
+  // Ordenar por fecha de expiracion (las que expiran antes primero)
+  const ordenadas = [...SILENCIADAS_ACTIVAS].sort((a,b) =>
+    new Date(a.silenciado_hasta) - new Date(b.silenciado_hasta)
+  );
+  const filas = ordenadas.map(s => {
+    const p = s.producto;
+    const hasta = new Date(s.silenciado_hasta);
+    const ahora = new Date();
+    const diasRest = Math.max(0, Math.ceil((hasta - ahora) / (1000 * 60 * 60 * 24)));
+    const fechaTxt = hasta.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const tipoTxt = s.tipo_alerta === 'mandar_fba' ? '\ud83d\udce6 Manda a FBA' : '\ud83d\uded2 Pide al proveedor';
+    const tipoColor = s.tipo_alerta === 'mandar_fba' ? 'var(--red)' : 'var(--amber)';
+    return '<div style="padding:10px 12px;border-bottom:1px solid var(--gray-100);font-size:12px;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap">' +
+      '<div style="flex:1;min-width:200px">' +
+        '<div style="font-weight:600;color:var(--navy)">' + (p.nombre||'').substring(0,60) + ((p.nombre||'').length>60?'...':'') + '</div>' +
+        '<div style="color:var(--gray-500);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap">' +
+          '<span style="color:' + tipoColor + ';font-weight:600">' + tipoTxt + '</span>' +
+          '<span>' + (p.proveedor || '\u2014') + '</span>' +
+          '<span>Vuelve el ' + fechaTxt + ' (' + diasRest + 'd)</span>' +
+        '</div>' +
+        (s.motivo ? '<div style="color:var(--gray-400);margin-top:2px;font-style:italic">' + s.motivo + '</div>' : '') +
+      '</div>' +
+      '<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px" onclick="desSilenciar(\'' + s.silenciado_id + '\')">\u21a9\ufe0f Des-silenciar</button>' +
+    '</div>';
+  }).join('');
+  lista.innerHTML = '<div class="card" style="padding:0;margin-top:10px;overflow:hidden;background:#FAFAFA">' +
+    '<div style="padding:8px 12px;background:var(--gray-100);font-size:11px;color:var(--gray-500);font-weight:600">ALERTAS SILENCIADAS</div>' +
+    filas +
+  '</div>';
+}
+
+async function marcarComoPedido(productoId, proveedor, nombreProducto) {
+  const dias = obtenerLeadTimeProveedor(proveedor);
+  const provTxt = proveedor || 'sin proveedor';
+  if (!confirm('Confirmas que has pedido "' + (nombreProducto || 'este producto') + '" al proveedor ' + provTxt + '?\n\nLa alerta se silenciara durante ' + dias + ' dias.')) return;
+  try {
+    const silenciadoHasta = new Date();
+    silenciadoHasta.setDate(silenciadoHasta.getDate() + dias);
+    const { error } = await db.from('alertas_silenciadas').insert({
+      producto_id: productoId,
+      tipo_alerta: 'pedir_proveedor',
+      silenciado_hasta: silenciadoHasta.toISOString(),
+      motivo: 'Pedido a ' + provTxt + ' (' + dias + 'd)'
+    });
+    if (error) throw error;
+    showToast('Alerta silenciada ' + dias + ' dias', 'success');
+    cargarAlertas();
+  } catch(e) {
+    console.error('[marcarComoPedido]', e);
+    showToast('Error: ' + (e.message || 'no se pudo silenciar'), 'error');
+  }
+}
+
+async function desSilenciar(silenciadoId) {
+  if (!confirm('Quitar el silencio de esta alerta? Volvera a aparecer en la lista de alertas activas.')) return;
+  try {
+    const { error } = await db.from('alertas_silenciadas').delete().eq('id', silenciadoId);
+    if (error) throw error;
+    showToast('Silencio retirado', 'success');
+    cargarAlertas();
+  } catch(e) {
+    console.error('[desSilenciar]', e);
+    showToast('Error: ' + (e.message || 'no se pudo des-silenciar'), 'error');
   }
 }
 
@@ -2200,6 +2388,25 @@ async function confirmarEnvioFBA() {
         tipo: 'envio_fba',
         cantidad: -e.qty
       });
+    }
+
+    // 4b. Silenciar alertas "mandar_fba" 7 dias para los productos enviados
+    try {
+      const silenciadoHasta = new Date();
+      silenciadoHasta.setDate(silenciadoHasta.getDate() + 7);
+      const filasSilencio = envioItems.map(e => ({
+        producto_id: e.id,
+        tipo_alerta: 'mandar_fba',
+        silenciado_hasta: silenciadoHasta.toISOString(),
+        motivo: 'Envio FBA ' + referencia
+      }));
+      if (filasSilencio.length > 0) {
+        const { error: errSil } = await db.from('alertas_silenciadas').insert(filasSilencio);
+        if (errSil) console.error('[confirmarEnvioFBA] Silencio FBA:', errSil);
+      }
+    } catch (errSilCatch) {
+      console.error('[confirmarEnvioFBA] Silencio FBA catch:', errSilCatch);
+      // No bloquear el envio si falla el silencio - es accesorio
     }
 
     // 5. Generar y descargar PDF
