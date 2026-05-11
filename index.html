@@ -322,6 +322,7 @@
         <button class="btn btn-ghost btn-sm" onclick="filtrarTipo('en_stock')">🟢 En stock</button>
         <button class="btn btn-ghost btn-sm" onclick="filtrarTipo('sin_stock')">📦 Sin stock</button>
         <button class="btn btn-ghost btn-sm" onclick="filtrarTipo('descatalogado')">⛔ Descatalogados</button>
+        <button class="btn btn-ghost btn-sm" onclick="filtrarTipo('consolidado')">🔗 Consolidados</button>
       </div>
       <div class="table-wrap">
         <table>
@@ -896,7 +897,7 @@ let paginaActual = 1;
 const POR_PAGINA = 25;
 let totalProductos = 0;
 let filtroTexto = '';
-let filtroTipo = ''; // '' | 'en_stock' | 'sin_stock' | 'descatalogado'
+let filtroTipo = ''; // '' | 'en_stock' | 'sin_stock' | 'descatalogado' | 'consolidado'
 let productoEnEdicion = null;
 let envioItems = [];
 let sesionEntradas = [];
@@ -1552,6 +1553,9 @@ async function cargarInventario() {
     } else if (filtroTipo === 'descatalogado') {
       // Solo descatalogados (mantienen activo=true para histórico)
       query = query.eq('estado', 'DESCATALOGADO');
+    } else if (filtroTipo === 'consolidado') {
+      // Solo consolidados (fichas fusionadas en otra, activo=false)
+      query = query.eq('estado', 'CONSOLIDADO');
     } else {
       // 'Todos' = todos los activos (incluyendo descatalogados)
       query = query.eq('activo', true);
@@ -1873,7 +1877,7 @@ function buscarInventario() {
 }
 
 function filtrarTipo(tipo) {
-  // tipo = '' | 'en_stock' | 'sin_stock' | 'descatalogado'
+  // tipo = '' | 'en_stock' | 'sin_stock' | 'descatalogado' | 'consolidado'
   filtroTipo = tipo;
   paginaActual = 1;
   cargarInventario();
@@ -1932,7 +1936,13 @@ async function toggleDescatalogar(id, estadoActual) {
   const nuevoEstado = esDesc ? 'OK' : 'DESCATALOGADO';
   const msg = esDesc ? '¿Reactivar este producto?' : '¿Marcar como descatalogado? No aparecerá en alertas de compra.';
   if (!confirm(msg)) return;
-  await db.from('productos').update({ estado: nuevoEstado, updated_at: new Date().toISOString() }).eq('id', id);
+  // Al reactivar, asegurar activo=true (las fichas pueden venir de consolidaciones con activo=false).
+  // Al descatalogar manualmente, tambien mantenemos activo=true para que aparezcan en filtro 'Descatalogados'.
+  await db.from('productos').update({
+    estado: nuevoEstado,
+    activo: true,
+    updated_at: new Date().toISOString()
+  }).eq('id', id);
   showToast(esDesc ? 'Producto reactivado' : 'Producto descatalogado', esDesc ? 'success' : '');
   cargarInventario();
 }
@@ -4479,10 +4489,10 @@ async function consolidarDuplicados(productos) {
   for (const sec of secundarios) {
     stockMolokaTotal += sec.stock_moloka || 0;
     unidadesCompradasTotal += sec.unidades_compradas || 0;
-    // Desactivar
+    // Desactivar: marcar como CONSOLIDADO (no DESCATALOGADO) para distinguir de descatalogadas reales
     await db.from('productos').update({
       activo: false,
-      estado: 'DESCATALOGADO',
+      estado: 'CONSOLIDADO',
       stock_moloka: 0,
       stock_fba: 0,
       updated_at: new Date().toISOString()
