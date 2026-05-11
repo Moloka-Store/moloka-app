@@ -648,12 +648,13 @@
     </div>
     <div class="form-row">
       <div class="input-group">
-        <div class="input-label" style="color:rgba(255,255,255,0.6)">% Comisión Amazon</div>
-        <input class="input" id="bb-comision-pct" type="number" step="0.1" style="background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.2);color:white" oninput="calcularBuyBox()">
+        <div class="input-label" style="color:rgba(255,255,255,0.6)">% Comisión Amazon <span style="color:rgba(255,255,255,0.35);font-weight:400">- se guarda al cambiar</span></div>
+        <input class="input" id="bb-comision-pct" type="number" step="0.1" style="background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.2);color:white" oninput="calcularBuyBox()" onchange="guardarComisionProducto()">
       </div>
       <div class="input-group">
-        <div class="input-label" style="color:rgba(255,255,255,0.6)">Comisión envío FBA (€)</div>
-        <input class="input" id="bb-envio" type="number" step="0.01" style="background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.2);color:white" oninput="calcularBuyBox()">
+        <div class="input-label" style="color:rgba(255,255,255,0.6)">Comisión envío FBA (€) <span style="color:rgba(255,255,255,0.35);font-weight:400">- se guarda al cambiar</span></div>
+        <input class="input" id="bb-envio" type="number" step="0.01" style="background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.2);color:white" oninput="calcularBuyBox()" onchange="guardarEnvioProducto()">
+        <div id="bb-envio-fuente" style="font-size:10px;color:rgba(255,255,255,0.45);margin-top:3px;min-height:13px"></div>
       </div>
     </div>
     <div class="form-row">
@@ -2877,13 +2878,58 @@ document.getElementById('login-user').addEventListener('keydown', e => { if (e.k
 // CALCULADORA BUY BOX
 // ============================================================
 let _calcProductoId = null;
+let _calcAsin = null;
 
-function abrirCalculadora(id, asin, nombre, pvd, comisionPct, envio, ivaPct) {
+// Devuelve {tarifa, unidades, mes} con la logistica_fba/ud del ULTIMO mes con datos
+// para ese ASIN en rentabilidad.json. Null si no hay datos.
+function obtenerTarifaEnvioReal(asin) {
+  if (!asin || !RENT_DATA || !RENT_DATA.meses) return null;
+  for (let i = RENT_DATA.meses.length - 1; i >= 0; i--) {
+    const mes = RENT_DATA.meses[i];
+    if (!mes || !mes.productos) continue;
+    const prod = mes.productos.find(function(p) { return p.asin === asin; });
+    if (prod && prod.unidades > 0 && prod.logistica_fba != null) {
+      return {
+        tarifa: prod.logistica_fba / prod.unidades,
+        unidades: prod.unidades,
+        mes: mes.mes
+      };
+    }
+  }
+  return null;
+}
+
+async function abrirCalculadora(id, asin, nombre, pvd, comisionPct, envio, ivaPct) {
   _calcProductoId = id || null;
+  _calcAsin = asin || null;
   document.getElementById('bb-nombre').textContent = nombre || asin || '';
   document.getElementById('bb-pvd').value = pvd ? pvd.toFixed(2) : '';
   document.getElementById('bb-comision-pct').value = comisionPct ? comisionPct.toFixed(1) : '15.5';
-  document.getElementById('bb-envio').value = envio ? envio.toFixed(2) : '3.74';
+  // Para el envio: si el producto tiene comision_envio guardada, usarla.
+  // Si no, intentar obtener del ultimo mes con datos en rentabilidad.json.
+  // Si tampoco, fallback al valor pasado o 3.74.
+  let envioFinal = envio;
+  let fuenteTxt = '';
+  // Asegurar que RENT_DATA esta cargado
+  await cargarRentData();
+  if (asin) {
+    const real = obtenerTarifaEnvioReal(asin);
+    if (real) {
+      // Si el producto NO tiene comision_envio guardada manualmente, usamos la real
+      // Si SI la tiene (envio != null && envio != 3.74 default), respetamos la guardada
+      // Aqui 'envio' viene del producto.comision_envio || 3.74 (ver llamada en renderInvFila)
+      // Heuristica: si envio coincide exactamente con 3.74 lo consideramos default (no guardado)
+      const esDefault = Math.abs(envio - 3.74) < 0.001;
+      if (esDefault) {
+        envioFinal = real.tarifa;
+        fuenteTxt = '\ud83d\udcca ' + real.mes.charAt(0).toUpperCase() + real.mes.slice(1) + ' (' + real.unidades + 'u)';
+      } else {
+        fuenteTxt = '\ud83d\udcbe Guardado en ficha';
+      }
+    }
+  }
+  document.getElementById('bb-envio').value = envioFinal ? envioFinal.toFixed(2) : '3.74';
+  document.getElementById('bb-envio-fuente').textContent = fuenteTxt;
   document.getElementById('bb-almacen').value = '0.15';
   document.getElementById('bb-iva-pct').value = (ivaPct != null && !isNaN(ivaPct)) ? ivaPct.toFixed(1) : '21.0';
   document.getElementById('bb-buybox').value = '';
@@ -2900,6 +2946,27 @@ async function guardarIvaProducto() {
   const { error } = await db.from('productos').update({ iva_pct: nuevo, updated_at: new Date().toISOString() }).eq('id', _calcProductoId);
   if (error) { showToast('Error guardando IVA: ' + error.message, 'error'); return; }
   showToast('IVA guardado: ' + v.toFixed(1) + '%', 'success');
+}
+
+async function guardarComisionProducto() {
+  if (!_calcProductoId) return;
+  const v = parseFloat(document.getElementById('bb-comision-pct').value);
+  if (isNaN(v) || v < 0 || v > 100) { showToast('Comisi\u00f3n inv\u00e1lida', 'error'); return; }
+  const nuevo = +(v / 100).toFixed(4);
+  const { error } = await db.from('productos').update({ comision_pct: nuevo, updated_at: new Date().toISOString() }).eq('id', _calcProductoId);
+  if (error) { showToast('Error guardando comisi\u00f3n: ' + error.message, 'error'); return; }
+  showToast('Comisi\u00f3n guardada: ' + v.toFixed(1) + '%', 'success');
+}
+
+async function guardarEnvioProducto() {
+  if (!_calcProductoId) return;
+  const v = parseFloat(document.getElementById('bb-envio').value);
+  if (isNaN(v) || v < 0 || v > 100) { showToast('Env\u00edo inv\u00e1lido', 'error'); return; }
+  const nuevo = +v.toFixed(4);
+  const { error } = await db.from('productos').update({ comision_envio: nuevo, updated_at: new Date().toISOString() }).eq('id', _calcProductoId);
+  if (error) { showToast('Error guardando env\u00edo: ' + error.message, 'error'); return; }
+  document.getElementById('bb-envio-fuente').textContent = '\ud83d\udcbe Guardado en ficha';
+  showToast('Env\u00edo guardado: ' + v.toFixed(2) + '\u20ac', 'success');
 }
 
 function calcularBuyBox() {
