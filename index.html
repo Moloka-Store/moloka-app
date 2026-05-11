@@ -4076,7 +4076,22 @@ function renderLinea(l, idx) {
     productoTexto = '<div style="font-size:11px;color:var(--gray-500)">' + (p.nombre || '?').substring(0, 40) + '<br>ASIN ' + (p.asin || '?') + ' \u00b7 PVD ' + (p.pvd != null ? p.pvd.toFixed(2) : '?') + '\u20ac</div>';
   } else if (l.match_estado === 'duplicados') {
     estadoBadge = '<span class="badge badge-yellow">\u26a0\ufe0f ' + l.match_productos.length + ' filas, consolidar</span>';
-    productoTexto = '<div style="font-size:11px;color:var(--gray-500)">' + l.match_productos.map(p => p.proveedor + ' (' + (p.pvd != null ? p.pvd.toFixed(2) : '?') + '\u20ac)').join(', ') + '</div>';
+    // Selector: elegir una ficha concreta o consolidar todas
+    let opciones = '<option value="">-- Elige c\u00f3mo asignar --</option>';
+    l.match_productos.forEach(function(p) {
+      const etiqueta = (p.nombre || '?').substring(0, 35)
+        + ' | PVD ' + (p.pvd != null ? p.pvd.toFixed(2) : '?') + '\u20ac'
+        + ' | ASIN ' + (p.asin || 'sin asin');
+      opciones += '<option value="ficha_' + p.id + '">Asignar todo a: ' + etiqueta + '</option>';
+    });
+    opciones += '<option value="consolidar">\ud83d\udd17 Consolidar las ' + l.match_productos.length + ' fichas en una</option>';
+    productoTexto = ''
+      + '<div style="font-size:11px;color:var(--gray-500);margin-bottom:4px">Fichas con este EAN: '
+        + l.match_productos.map(function(p) { return (p.proveedor || '?') + ' (' + (p.pvd != null ? p.pvd.toFixed(2) : '?') + '\u20ac)'; }).join(', ')
+      + '</div>'
+      + '<select class="input" style="font-size:12px;padding:4px;width:100%;max-width:480px" onchange="resolverDuplicados(' + idx + ', this.value)">'
+      + opciones
+      + '</select>';
   } else {
     estadoBadge = '<span class="badge badge-orange">\u2728 Producto nuevo</span>';
     productoTexto = '<div style="font-size:11px;color:var(--gray-400)">Se crear\u00e1 con asin_pendiente</div>';
@@ -4259,6 +4274,39 @@ async function buscarProductoManual(idx) {
 }
 
 // ----------------------------------------------------------------
+// 9b. RESOLVER LINEAS CON DUPLICADOS (EAN compartido entre varias fichas)
+// Opciones: asignar todo a una ficha concreta, o consolidar todas.
+// ----------------------------------------------------------------
+function resolverDuplicados(idx, valor) {
+  const linea = _facturaLineas[idx];
+  if (!linea) return;
+  if (!valor) {
+    // Volver al estado "duplicados" sin seleccion
+    return;
+  }
+  if (valor === 'consolidar') {
+    // Mantener match_estado='duplicados' (lo procesara consolidarDuplicados al confirmar)
+    // Pero guardamos preferencia explicita para que el confirmar sepa que el usuario eligio consolidar
+    linea.duplicados_resuelto = 'consolidar';
+    renderRevision();
+    return;
+  }
+  if (valor.startsWith('ficha_')) {
+    const fichaId = valor.substring(6);
+    const fichaElegida = linea.match_productos.find(function(p) { return p.id === fichaId; });
+    if (!fichaElegida) return;
+    // Convertir la linea a 'unico' apuntando a la ficha elegida.
+    // Guardamos las fichas originales por si el usuario quiere deshacer.
+    linea.match_productos_originales = linea.match_productos;
+    linea.match_estado = 'unico';
+    linea.match_productos = [fichaElegida];
+    linea.producto_id_seleccionado = fichaElegida.id;
+    linea.duplicados_resuelto = 'ficha_concreta';
+    renderRevision();
+  }
+}
+
+// ----------------------------------------------------------------
 // 10. CONFIRMAR Y GUARDAR FACTURA
 // ----------------------------------------------------------------
 async function confirmarFactura() {
@@ -4268,6 +4316,14 @@ async function confirmarFactura() {
   const sumaChaseOk = _facturaLineas.every(l => (l.chase_unidades_regular + l.chase_unidades_chase) === l.cantidad_editada);
   if (!sumaChaseOk) {
     showToast('Hay lineas con asignacion CHASE incorrecta', 'error');
+    return;
+  }
+  // Validacion: lineas con EAN duplicado deben tener resolucion explicita del usuario
+  const duplicadosSinResolver = _facturaLineas.filter(function(l) {
+    return l.match_estado === 'duplicados' && l.duplicados_resuelto !== 'consolidar';
+  });
+  if (duplicadosSinResolver.length > 0) {
+    showToast('Hay ' + duplicadosSinResolver.length + ' linea(s) con EAN compartido sin resolver. Elige una opcion en el desplegable.', 'error');
     return;
   }
   const btn = document.getElementById('btn-confirmar-factura');
