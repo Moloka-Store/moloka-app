@@ -1678,7 +1678,7 @@ function renderInvDetalle(productoId) {
       <button class="btn btn-primary btn-sm" onclick="guardarEdicionProducto('${p.id}')">💾 Guardar cambios</button>
       <button class="btn btn-ghost btn-sm" onclick="abrirAjusteStock('${p.id}')">📦 Ajustar stock</button>
       <button class="btn btn-ghost btn-sm" onclick="abrirHistorialAjustes('${p.id}')">📋 Historial</button>
-      <button class="btn btn-ghost btn-sm" onclick="abrirCalculadora('${p.id}','${p.asin||''}','${(p.nombre||'').replace(/'/g,'').substring(0,40)}',${p.pvd||0},${(p.comision_pct||0.155)*100},${p.comision_envio||3.74},${(p.iva_pct!=null?p.iva_pct:0.21)*100})" ${!p.asin?'disabled':''}>💰 Buy Box</button>
+      <button class="btn btn-ghost btn-sm" onclick="abrirCalculadora('${p.id}')" ${!p.asin?'disabled':''}>💰 Buy Box</button>
       <button class="btn btn-ghost btn-sm" onclick="toggleChase('${p.id}',${!!p.es_chase})">${p.es_chase?'❌ Quitar CHASE':'+ Marcar CHASE'}</button>
       <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="toggleDescatalogar('${p.id}','${p.estado}')">${p.estado==='DESCATALOGADO'?'♻️ Reactivar':'⛔ Descatalogar'}</button>
     </div>`;
@@ -2899,39 +2899,45 @@ function obtenerTarifaEnvioReal(asin) {
   return null;
 }
 
-async function abrirCalculadora(id, asin, nombre, pvd, comisionPct, envio, ivaPct) {
+async function abrirCalculadora(id) {
   _calcProductoId = id || null;
-  _calcAsin = asin || null;
-  document.getElementById('bb-nombre').textContent = nombre || asin || '';
+  if (!id) return;
+  // Leer producto FRESCO de la BD (no de cache) para reflejar siempre el ultimo valor guardado
+  const { data: p, error } = await db.from('productos').select('*').eq('id', id).single();
+  if (error || !p) {
+    showToast('Error cargando producto: ' + (error ? error.message : 'no encontrado'), 'error');
+    return;
+  }
+  // Refrescar tambien la cache de inventario para consistencia
+  if (window._invCache) window._invCache[id] = p;
+  _calcAsin = p.asin || null;
+  const nombre = (p.nombre || p.asin || '').substring(0, 50);
+  const pvd = p.pvd || 0;
+  const comisionPct = (p.comision_pct != null) ? p.comision_pct * 100 : 15.5;
+  const envioGuardado = (p.comision_envio != null) ? p.comision_envio : null;
+  const ivaPct = (p.iva_pct != null) ? p.iva_pct * 100 : 21.0;
+
+  document.getElementById('bb-nombre').textContent = nombre;
   document.getElementById('bb-pvd').value = pvd ? pvd.toFixed(2) : '';
-  document.getElementById('bb-comision-pct').value = comisionPct ? comisionPct.toFixed(1) : '15.5';
-  // Para el envio: si el producto tiene comision_envio guardada, usarla.
-  // Si no, intentar obtener del ultimo mes con datos en rentabilidad.json.
-  // Si tampoco, fallback al valor pasado o 3.74.
-  let envioFinal = envio;
+  document.getElementById('bb-comision-pct').value = comisionPct.toFixed(1);
+  // Para el envio: si esta guardado en ficha -> usarlo. Si no -> tarifa real del JSON. Si tampoco -> 3.74.
+  let envioFinal = 3.74;
   let fuenteTxt = '';
-  // Asegurar que RENT_DATA esta cargado
   await cargarRentData();
-  if (asin) {
-    const real = obtenerTarifaEnvioReal(asin);
+  if (envioGuardado != null) {
+    envioFinal = envioGuardado;
+    fuenteTxt = '\ud83d\udcbe Guardado en ficha';
+  } else if (p.asin) {
+    const real = obtenerTarifaEnvioReal(p.asin);
     if (real) {
-      // Si el producto NO tiene comision_envio guardada manualmente, usamos la real
-      // Si SI la tiene (envio != null && envio != 3.74 default), respetamos la guardada
-      // Aqui 'envio' viene del producto.comision_envio || 3.74 (ver llamada en renderInvFila)
-      // Heuristica: si envio coincide exactamente con 3.74 lo consideramos default (no guardado)
-      const esDefault = Math.abs(envio - 3.74) < 0.001;
-      if (esDefault) {
-        envioFinal = real.tarifa;
-        fuenteTxt = '\ud83d\udcca ' + real.mes.charAt(0).toUpperCase() + real.mes.slice(1) + ' (' + real.unidades + 'u)';
-      } else {
-        fuenteTxt = '\ud83d\udcbe Guardado en ficha';
-      }
+      envioFinal = real.tarifa;
+      fuenteTxt = '\ud83d\udcca ' + real.mes.charAt(0).toUpperCase() + real.mes.slice(1) + ' (' + real.unidades + 'u)';
     }
   }
-  document.getElementById('bb-envio').value = envioFinal ? envioFinal.toFixed(2) : '3.74';
+  document.getElementById('bb-envio').value = envioFinal.toFixed(2);
   document.getElementById('bb-envio-fuente').textContent = fuenteTxt;
   document.getElementById('bb-almacen').value = '0.15';
-  document.getElementById('bb-iva-pct').value = (ivaPct != null && !isNaN(ivaPct)) ? ivaPct.toFixed(1) : '21.0';
+  document.getElementById('bb-iva-pct').value = ivaPct.toFixed(1);
   document.getElementById('bb-buybox').value = '';
   document.getElementById('bb-resultado').innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.4);font-size:13px;padding:20px">Introduce el precio de la Buy Box para calcular</div>';
   document.getElementById('bb-verdict').style.display = 'none';
@@ -2945,6 +2951,10 @@ async function guardarIvaProducto() {
   const nuevo = +(v / 100).toFixed(4);
   const { error } = await db.from('productos').update({ iva_pct: nuevo, updated_at: new Date().toISOString() }).eq('id', _calcProductoId);
   if (error) { showToast('Error guardando IVA: ' + error.message, 'error'); return; }
+  // Sincronizar cache
+  if (window._invCache && window._invCache[_calcProductoId]) {
+    window._invCache[_calcProductoId].iva_pct = nuevo;
+  }
   showToast('IVA guardado: ' + v.toFixed(1) + '%', 'success');
 }
 
@@ -2955,6 +2965,10 @@ async function guardarComisionProducto() {
   const nuevo = +(v / 100).toFixed(4);
   const { error } = await db.from('productos').update({ comision_pct: nuevo, updated_at: new Date().toISOString() }).eq('id', _calcProductoId);
   if (error) { showToast('Error guardando comisi\u00f3n: ' + error.message, 'error'); return; }
+  // Sincronizar cache para que reapertura inmediata vea el nuevo valor
+  if (window._invCache && window._invCache[_calcProductoId]) {
+    window._invCache[_calcProductoId].comision_pct = nuevo;
+  }
   showToast('Comisi\u00f3n guardada: ' + v.toFixed(1) + '%', 'success');
 }
 
@@ -2965,6 +2979,10 @@ async function guardarEnvioProducto() {
   const nuevo = +v.toFixed(4);
   const { error } = await db.from('productos').update({ comision_envio: nuevo, updated_at: new Date().toISOString() }).eq('id', _calcProductoId);
   if (error) { showToast('Error guardando env\u00edo: ' + error.message, 'error'); return; }
+  // Sincronizar cache
+  if (window._invCache && window._invCache[_calcProductoId]) {
+    window._invCache[_calcProductoId].comision_envio = nuevo;
+  }
   document.getElementById('bb-envio-fuente').textContent = '\ud83d\udcbe Guardado en ficha';
   showToast('Env\u00edo guardado: ' + v.toFixed(2) + '\u20ac', 'success');
 }
