@@ -3193,7 +3193,7 @@ async function verRentabilidad(periodo) {
     mesData = {
       facturacion_iva: data.meses.reduce((s,m) => s + m.facturacion_iva, 0),
       coste_total: data.meses.reduce((s,m) => s + m.coste_total, 0),
-      beneficio_neto: data.meses.reduce((s,m) => s + m.beneficio_neto, 0),
+      beneficio_neto: data.meses.reduce((s,m) => s + (m.beneficio_neto_real ?? m.beneficio_neto), 0),
       unidades: data.meses.reduce((s,m) => s + m.unidades, 0),
       coste_pvd: data.meses.reduce((s,m) => s + m.coste_pvd, 0),
       comision_amazon: data.meses.reduce((s,m) => s + m.comision_amazon, 0),
@@ -3225,6 +3225,13 @@ async function verRentabilidad(periodo) {
   } else {
     mesData = data.meses.find(m => m.mes === periodo);
     if (!mesData) return;
+    // Usar cifras reales con devoluciones aplicadas si estan disponibles
+    if (mesData.beneficio_neto_real !== undefined) {
+      mesData = {...mesData,
+        beneficio_neto: mesData.beneficio_neto_real,
+        margen_pct: mesData.margen_real_pct ?? mesData.margen_pct
+      };
+    }
     document.getElementById('rent-sub').textContent = periodo.charAt(0).toUpperCase() + periodo.slice(1) + ' 2026';
   }
 
