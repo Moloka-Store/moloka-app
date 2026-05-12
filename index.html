@@ -983,22 +983,30 @@ function obtenerLeadTotal(proveedor) {
   return LEAD_TIMES_TOTAL._DEFAULT;
 }
 
-// Lead times por proveedor (en dias) para silenciar alerta tras "He pedido"
+// Lead times del PROVEEDOR (dias que tarda en servir el pedido).
+// Usado para silenciar la alerta tras pulsar "He pedido": pasa esos dias y la alerta
+// vuelve a aparecer para recordarte que el pedido ya deberia haber llegado.
+//
+// NOTA: Los proveedores de Funkos son intercambiables (TCG, BEMS, HEO, DBLine, Dinotoys).
+// Asumimos que todos pueden servir en ~7d. Si alguno tarda mas, la alerta volvera
+// a aparecer al cabo de 7d y entonces decides si seguir esperando o cambiar de proveedor.
 const LEAD_TIMES_PROVEEDOR = {
-  'TCG': 7,
-  'BEMS': 7,
-  'HEO': 15,
-  'DBLINE': 30,
-  'ZENTRADA': 30,
-  'OSMA': 30,
-  '_DEFAULT': 21
+  'TCG': 7,         // Funkos
+  'BEMS': 7,        // Funkos
+  'HEO': 7,         // Funkos (antes 15d, unificado)
+  'DBLINE': 7,      // Funkos (antes 30d, unificado)
+  'DINOTOYS': 7,    // Funkos
+  'DEVIR': 7,       // Juegos de mesa - similar
+  'ZENTRADA': 30,   // Primera necesidad (palets)
+  'OSMA': 30,       // Primera necesidad (palets)
+  '_DEFAULT': 7     // Proveedor desconocido: asumimos rapido
 };
 
 function obtenerLeadTimeProveedor(proveedor) {
   if (!proveedor) return LEAD_TIMES_PROVEEDOR._DEFAULT;
   const provUpper = String(proveedor).toUpperCase();
   // Match por contains (aguanta variantes: "TCG Factory" -> "TCG", "DB-Line" no, "DBLine" si)
-  const claves = ['TCG', 'BEMS', 'HEO', 'DBLINE', 'ZENTRADA', 'OSMA'];
+  const claves = ['TCG', 'BEMS', 'HEO', 'DBLINE', 'DINOTOYS', 'DEVIR', 'ZENTRADA', 'OSMA'];
   for (const k of claves) {
     if (provUpper.indexOf(k) !== -1) return LEAD_TIMES_PROVEEDOR[k];
   }
@@ -1240,7 +1248,7 @@ async function cargarAlertas() {
       elPide.innerHTML = gruposOrdenados.map(([prov, items]) => {
         const totalUds = items.reduce((s,p) => s + p.pedir_uds, 0);
         const totalEur = items.reduce((s,p) => s + (p.pvd||0) * p.pedir_uds, 0);
-        const leadProv = obtenerLeadTimeProveedor(prov);
+        const leadProv = obtenerLeadTotal(prov);
         const filas = items.map(p => {
           const tendIcon = p.tendencia === 'subiendo' ? '\ud83d\udcc8' : (p.tendencia === 'bajando' ? '\ud83d\udcc9' : '\u27a1\ufe0f');
           const inboundTxt = p.stock_inbound > 0 ? ' Camino:' + p.stock_inbound : '';
@@ -1257,7 +1265,10 @@ async function cargarAlertas() {
             '</div>' +
             '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;gap:8px;flex-wrap:wrap">' +
               '<div style="color:var(--navy);font-weight:600">\u27a1\ufe0f Pedir ' + p.pedir_uds + 'u</div>' +
-              '<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px;background:var(--green-light);color:#065F46;border:1px solid var(--green)" onclick="marcarComoPedido(\'' + p.id + '\', \'' + provSeguro + '\', \'' + nombreSeguro + '\')" title="Silencia la alerta durante ' + leadProv + ' dias">\u2713 He pedido</button>' +
+              '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+                '<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px;background:var(--gray-100);color:var(--gray-700);border:1px solid var(--gray-200)" onclick="marcarNoInteresaReponer(\'' + p.id + '\', \'' + nombreSeguro + '\')" title="Silencia 30 dias. Util para slow movers marginales.">\ud83d\udeab No interesa</button>' +
+                '<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px;background:var(--green-light);color:#065F46;border:1px solid var(--green)" onclick="marcarComoPedido(\'' + p.id + '\', \'' + provSeguro + '\', \'' + nombreSeguro + '\')" title="Silencia la alerta durante ' + leadProv + ' dias">\u2713 He pedido</button>' +
+              '</div>' +
             '</div>' +
           '</div>';
         }).join('');
@@ -1399,6 +1410,26 @@ async function marcarComoPedido(productoId, proveedor, nombreProducto) {
     cargarAlertas();
   } catch(e) {
     console.error('[marcarComoPedido]', e);
+    showToast('Error: ' + (e.message || 'no se pudo silenciar'), 'error');
+  }
+}
+
+async function marcarNoInteresaReponer(productoId, nombreProducto) {
+  if (!confirm('Marcar "' + (nombreProducto || 'este producto') + '" como "no interesa reponer"?\n\nLa alerta se silenciara durante 30 dias.\nEl producto seguira activo y vendiendose normal. A los 30 dias volvera a aparecer si sigue cumpliendo el umbral de cobertura.')) return;
+  try {
+    const silenciadoHasta = new Date();
+    silenciadoHasta.setDate(silenciadoHasta.getDate() + 30);
+    const { error } = await db.from('alertas_silenciadas').insert({
+      producto_id: productoId,
+      tipo_alerta: 'pedir_proveedor',
+      silenciado_hasta: silenciadoHasta.toISOString(),
+      motivo: 'No interesa reponer (silenciado manualmente 30d)'
+    });
+    if (error) throw error;
+    showToast('Alerta silenciada 30 dias', 'success');
+    cargarAlertas();
+  } catch(e) {
+    console.error('[marcarNoInteresaReponer]', e);
     showToast('Error: ' + (e.message || 'no se pudo silenciar'), 'error');
   }
 }
