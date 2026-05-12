@@ -294,7 +294,6 @@
       <div class="stat-card"><div class="stat-label">📦 Manda a FBA</div><div class="stat-value red" id="stat-manda-fba">—</div><div class="stat-sub">Cobertura FBA &lt; 7 días</div></div>
       <div class="stat-card"><div class="stat-label">🛒 Pide al proveedor</div><div class="stat-value amber" id="stat-pide-prov">—</div><div class="stat-sub">Cobertura &lt; lead time del proveedor</div></div>
       <div class="stat-card"><div class="stat-label">💤 Sin movimiento</div><div class="stat-value amber" id="stat-sin-mov">—</div><div class="stat-sub">0 ventas en 30 días</div></div>
-      <div class="stat-card" style="cursor:pointer" onclick="toggleEstancados()" title="Productos con stock que han dejado de venderse en los ultimos 7 dias"><div class="stat-label">🔍 Estancados</div><div class="stat-value" style="color:var(--navy)" id="stat-estancados">—</div><div class="stat-sub">Vendían pero ahora no</div></div>
       <div class="stat-card"><div class="stat-label">✅ Productos OK</div><div class="stat-value green" id="stat-ok">—</div><div class="stat-sub">Stock suficiente</div></div>
     </div>
     <div class="grid-2" style="gap:20px;align-items:start">
@@ -1334,11 +1333,11 @@ async function cargarAlertas() {
     document.getElementById('stat-manda-fba').textContent = mandaFba.length;
     document.getElementById('stat-pide-prov').textContent = pideProveedor.length;
     document.getElementById('stat-sin-mov').textContent = sinMovimiento.length;
-    document.getElementById('stat-estancados').textContent = estancados.length;
     document.getElementById('stat-ok').textContent = okCount;
 
-    // Renderizar lista de estancados (oculta hasta que pulses el KPI)
+    // Renderizar lista de estancados (oculta hasta que pulses el chip "Ver estancados")
     renderEstancados(estancados);
+    ESTANCADOS_COUNT = estancados.length;
 
     // Badge sidebar (solo manda + pide, no sin movimiento porque no es urgente)
     const badge = document.getElementById('badge-alertas');
@@ -1474,21 +1473,28 @@ async function cargarAlertas() {
 // ALERTAS SILENCIADAS - Contador, lista colapsable y acciones
 // ============================================================
 
+// Contador global de estancados (se actualiza en cargarAlertas, se muestra en la fila superior)
+let ESTANCADOS_COUNT = 0;
+
 function renderContadorSilenciadas(totalActivas, totalSilenciadas) {
   const cont = document.getElementById('alertas-silenciadas-contador');
   if (!cont) return;
+  const partes = [];
+  partes.push('<span>\ud83d\udd14 Alertas activas: <strong style="color:var(--navy)">' + totalActivas + '</strong></span>');
+  if (totalSilenciadas > 0) {
+    partes.push('<span>\ud83e\udd2b Silenciadas: <strong style="color:var(--navy)">' + totalSilenciadas + '</strong></span>');
+    partes.push('<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 10px" onclick="toggleSilenciadas()" id="btn-toggle-silenciadas">Ver silenciadas</button>');
+  }
+  if (ESTANCADOS_COUNT > 0) {
+    partes.push('<span>\ud83d\udd0d Estancados: <strong style="color:var(--navy)">' + ESTANCADOS_COUNT + '</strong></span>');
+    partes.push('<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 10px" onclick="toggleEstancados()" id="btn-toggle-estancados">Ver estancados</button>');
+  }
+  cont.innerHTML = '<div style="font-size:12px;color:var(--gray-500);display:flex;gap:14px;flex-wrap:wrap;align-items:center">' + partes.join('') + '</div>';
+  // Si no hay silenciadas, asegurarse de ocultar la lista
   if (totalSilenciadas === 0) {
-    cont.innerHTML = '<div style="font-size:12px;color:var(--gray-500)">\ud83d\udd14 Alertas activas: <strong style="color:var(--navy)">' + totalActivas + '</strong></div>';
     const lista = document.getElementById('alertas-silenciadas-lista');
     if (lista) lista.style.display = 'none';
-    return;
   }
-  cont.innerHTML =
-    '<div style="font-size:12px;color:var(--gray-500);display:flex;gap:14px;flex-wrap:wrap;align-items:center">' +
-      '<span>\ud83d\udd14 Alertas activas: <strong style="color:var(--navy)">' + totalActivas + '</strong></span>' +
-      '<span>\ud83e\udd2b Silenciadas: <strong style="color:var(--navy)">' + totalSilenciadas + '</strong></span>' +
-      '<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 10px" onclick="toggleSilenciadas()" id="btn-toggle-silenciadas">Ver silenciadas</button>' +
-    '</div>';
 }
 
 function toggleSilenciadas() {
