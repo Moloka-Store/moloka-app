@@ -2389,11 +2389,12 @@ async function confirmarEnvioFBA() {
     if (errIns) throw errIns;
 
     // 4. Actualizar stocks de productos (uno por uno)
+    // NOTA: stock_inbound NO se modifica aqui. La fuente de verdad es el informe FBA de Amazon,
+    // que actualiza stock_inbound directamente (campo "inbound-quantity" del informe).
+    // El silencio de 5 dias (bloque 4b) cubre la ventana de ~24h hasta que Amazon refleja el envio.
     for (const e of envioItems) {
-      const inboundActual = e.stock_inbound || 0;
       await db.from('productos').update({
         stock_moloka: e.stock_moloka - e.qty,
-        stock_inbound: inboundActual + e.qty,
         updated_at: fechaIso
       }).eq('id', e.id);
       await db.from('movimientos').insert({
@@ -2403,11 +2404,12 @@ async function confirmarEnvioFBA() {
       });
     }
 
-    // 4b. Silenciar alertas "mandar_fba" Y "pedir_proveedor" 7 dias para los productos enviados
-    // El stock va en camino a FBA, no hay que ni mandar mas ni pedir mas al proveedor en 7 dias
+    // 4b. Silenciar alertas "mandar_fba" Y "pedir_proveedor" 5 dias para los productos enviados
+    // Amazon refleja envios en su informe FBA ~24h despues. 5 dias da margen de seguridad
+    // (festivos, retrasos UPS, etc.) sin ser un silencio excesivo.
     try {
       const silenciadoHasta = new Date();
-      silenciadoHasta.setDate(silenciadoHasta.getDate() + 7);
+      silenciadoHasta.setDate(silenciadoHasta.getDate() + 5);
       const silenciadoHastaIso = silenciadoHasta.toISOString();
       const filasSilencio = [];
       for (const e of envioItems) {
