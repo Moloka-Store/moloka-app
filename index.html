@@ -273,6 +273,9 @@
     <div class="nav-item" data-page="rentabilidad" onclick="showPage('rentabilidad',this)">
       <span class="nav-icon">📊</span> Rentabilidad
     </div>
+    <div class="nav-item" data-page="devoluciones" onclick="showPage('devoluciones',this)">
+      <span class="nav-icon">📦</span> Devoluciones
+    </div>
   </nav>
   <div class="sidebar-footer" id="conn-status">Conectando...</div>
 </aside>
@@ -575,6 +578,55 @@
       </div>
     </div>
     <div class="info-box" style="margin-top:16px" id="rent-info-actualizacion">ℹ️ Datos reales de Moloka SL desde enero. Comisiones Amazon y FBA extraídas de los informes de transacciones.</div>
+  </div>
+
+  <!-- DEVOLUCIONES -->
+  <div class="page" id="page-devoluciones">
+    <div class="page-header">
+      <div><div class="page-title">📦 Devoluciones</div><div class="page-sub" id="dev-sub">Cargando...</div></div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;align-items:center">
+      <span style="font-size:12px;font-weight:600;color:var(--gray-500)">VER:</span>
+      <div id="dev-meses-botones" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+    </div>
+
+    <div class="stats-row" id="dev-kpis"></div>
+
+    <div class="grid-2" style="align-items:start;margin-top:8px">
+      <div class="card">
+        <div class="section-title" style="margin-bottom:14px">Productos con más devoluciones</div>
+        <div class="table-wrap" style="max-height:600px;overflow-y:auto">
+          <table>
+            <thead><tr>
+              <th>Producto</th>
+              <th style="text-align:center">Devueltas</th>
+              <th style="text-align:center" title="Vendibles que vuelven a stock">✅ Vend.</th>
+              <th style="text-align:center" title="Dañadas por cliente o defectuosas">⚠️ Dañad.</th>
+              <th style="text-align:right">Reemb. Amazon</th>
+            </tr></thead>
+            <tbody id="dev-productos-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="section-title" style="margin-bottom:14px">Reembolsos de Amazon</div>
+        <div class="table-wrap" style="max-height:600px;overflow-y:auto">
+          <table>
+            <thead><tr>
+              <th>Fecha</th>
+              <th>Producto</th>
+              <th style="text-align:center">Motivo</th>
+              <th style="text-align:center">Uds</th>
+              <th style="text-align:right">Importe</th>
+            </tr></thead>
+            <tbody id="dev-reembolsos-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="info-box" style="margin-top:16px">ℹ️ Datos de los 4 informes de devoluciones Amazon: customer returns, removal orders, removal shipments y reimbursements. Importes SIN IVA (indemnización Amazon).</div>
   </div>
 
 </main>
@@ -918,6 +970,7 @@ function showPage(id, el) {
   if (id === 'tareas') cargarTareas();
   if (id === 'rotacion') cargarRotacion();
   if (id === 'rentabilidad') verRentabilidad('acumulado');
+  if (id === 'devoluciones') verDevoluciones('acumulado');
   if (id === 'envios-historial') cargarEnviosHistorial();
 }
 
@@ -3354,6 +3407,247 @@ async function verRentabilidad(periodo) {
       <strong style="font-family:'DM Mono',monospace;font-size:15px">${mesData.beneficio_neto.toFixed(0)}€</strong>
     </div>
   `;
+}
+
+// ============================================================
+// DEVOLUCIONES (lee devoluciones de Supabase + cruza con rentabilidad.json)
+// ============================================================
+const DEV_MESES_NOMBRE = ['enero','febrero','marzo','abril','mayo','junio',
+                          'julio','agosto','septiembre','octubre','noviembre','diciembre'];
+let DEVOLUCIONES_DATA = null;
+let DEV_RENTABILIDAD_DATA = null;
+
+async function cargarDevoluciones() {
+  if (DEVOLUCIONES_DATA) return DEVOLUCIONES_DATA;
+  // Leer en paginas porque Supabase devuelve max 1000 por request
+  const filas = [];
+  let desde = 0;
+  const PAGE = 1000;
+  while (true) {
+    const { data, error } = await db.from('devoluciones')
+      .select('tipo, fecha, sku, asin, producto_id, cantidad, disposition, importe_eur, reimbursement_reason, raw_data')
+      .order('fecha', { ascending: false })
+      .range(desde, desde + PAGE - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    filas.push(...data);
+    if (data.length < PAGE) break;
+    desde += PAGE;
+  }
+  DEVOLUCIONES_DATA = filas;
+  return filas;
+}
+
+async function cargarRentabilidadParaDev() {
+  if (DEV_RENTABILIDAD_DATA) return DEV_RENTABILIDAD_DATA;
+  try {
+    const r = await fetch('rentabilidad.json');
+    if (!r.ok) return null;
+    DEV_RENTABILIDAD_DATA = await r.json();
+    return DEV_RENTABILIDAD_DATA;
+  } catch (e) { return null; }
+}
+
+async function verDevoluciones(periodo) {
+  try {
+    const devs = await cargarDevoluciones();
+    const rent = await cargarRentabilidadParaDev();
+
+    // Renderizar botones de meses (acumulado + meses con datos)
+    const mesesConDatos = new Set();
+    devs.forEach(d => {
+      try {
+        const m = new Date(d.fecha).getMonth();
+        mesesConDatos.add(DEV_MESES_NOMBRE[m]);
+      } catch (e) {}
+    });
+    const ordenMeses = DEV_MESES_NOMBRE.filter(m => mesesConDatos.has(m));
+    const botones = ['acumulado', ...ordenMeses];
+    document.getElementById('dev-meses-botones').innerHTML = botones.map(p => {
+      const activo = p === periodo;
+      const label = p.charAt(0).toUpperCase() + p.slice(1);
+      return '<button class="btn btn-' + (activo ? 'primary' : 'ghost') + ' btn-sm" onclick="verDevoluciones(\'' + p + '\')">' + label + '</button>';
+    }).join('');
+
+    // Filtrar devoluciones segun periodo
+    let devsFiltradas;
+    if (periodo === 'acumulado') {
+      devsFiltradas = devs;
+      document.getElementById('dev-sub').textContent = 'Acumulado 2026 · ' + devs.length + ' movimientos';
+    } else {
+      const mesIdx = DEV_MESES_NOMBRE.indexOf(periodo);
+      devsFiltradas = devs.filter(d => {
+        try { return new Date(d.fecha).getMonth() === mesIdx; } catch (e) { return false; }
+      });
+      document.getElementById('dev-sub').textContent = periodo.charAt(0).toUpperCase() + periodo.slice(1) + ' 2026 · ' + devsFiltradas.length + ' movimientos';
+    }
+
+    renderDevKPIs(devsFiltradas, rent, periodo);
+    renderDevProductos(devsFiltradas);
+    renderDevReembolsos(devsFiltradas);
+  } catch (e) {
+    console.error('[verDevoluciones]', e);
+    document.getElementById('dev-kpis').innerHTML = '<div class="empty-state"><p>Error cargando devoluciones: ' + (e.message || e) + '</p></div>';
+  }
+}
+
+function renderDevKPIs(devs, rent, periodo) {
+  // Customer returns por disposition
+  const cr = devs.filter(d => d.tipo === 'customer_return');
+  const totalUds = cr.reduce((s, d) => s + (d.cantidad || 0), 0);
+  const sellables = cr.filter(d => d.disposition === 'SELLABLE').reduce((s, d) => s + (d.cantidad || 0), 0);
+  const danyadas = cr.filter(d => d.disposition === 'CUSTOMER_DAMAGED' || d.disposition === 'DEFECTIVE').reduce((s, d) => s + (d.cantidad || 0), 0);
+
+  // Reembolsos
+  const reembs = devs.filter(d => d.tipo === 'reimbursement');
+  const totalEur = reembs.reduce((s, d) => s + (parseFloat(d.importe_eur) || 0), 0);
+  const totalUdsReemb = reembs.reduce((s, d) => s + (d.cantidad || 0), 0);
+
+  // Beneficio recuperado (solo para acumulado)
+  let beneficioFantasma = null;
+  if (rent && rent.cruce_devoluciones && periodo === 'acumulado') {
+    beneficioFantasma = rent.cruce_devoluciones.total_ajuste;
+  } else if (rent && periodo !== 'acumulado') {
+    const mesData = rent.meses.find(m => m.mes === periodo);
+    if (mesData && mesData.ajuste_total_devoluciones !== undefined) {
+      beneficioFantasma = mesData.ajuste_total_devoluciones;
+    }
+  }
+
+  // Productos problemáticos: con tasa devolución >5% (necesitamos vel T90 de productos)
+  // Calculo simple: agrupar por producto y contar
+  const porSku = {};
+  cr.forEach(d => {
+    if (!d.sku) return;
+    if (!porSku[d.sku]) porSku[d.sku] = 0;
+    porSku[d.sku] += d.cantidad || 0;
+  });
+  const problematicos = Object.values(porSku).filter(v => v >= 3).length;
+
+  const html = `
+    <div class="stat-card">
+      <div class="stat-label">📦 Devoluciones</div>
+      <div class="stat-value">${totalUds}</div>
+      <div class="stat-sub">${sellables} vendibles · ${danyadas} dañadas</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">💰 Reembolsado Amazon</div>
+      <div class="stat-value" style="color:var(--green)">${totalEur.toFixed(2)}€</div>
+      <div class="stat-sub">${reembs.length} líneas · ${totalUdsReemb}u</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">⚠️ Productos vigilar</div>
+      <div class="stat-value" style="color:var(--amber)">${problematicos}</div>
+      <div class="stat-sub">3+ devoluciones</div>
+    </div>
+    ${beneficioFantasma !== null ? `
+    <div class="stat-card">
+      <div class="stat-label">🔄 Beneficio recuperado</div>
+      <div class="stat-value" style="color:var(--green)">${beneficioFantasma.toFixed(0)}€</div>
+      <div class="stat-sub">Aplicado a rentabilidad</div>
+    </div>
+    ` : ''}
+  `;
+  document.getElementById('dev-kpis').innerHTML = html;
+}
+
+function renderDevProductos(devs) {
+  // Agrupar customer_returns por SKU
+  const porSku = {};
+  devs.filter(d => d.tipo === 'customer_return').forEach(d => {
+    const sku = d.sku || '(sin sku)';
+    if (!porSku[sku]) {
+      porSku[sku] = {
+        sku,
+        nombre: (d.raw_data && d.raw_data['product-name']) || '(sin nombre)',
+        total: 0, sellable: 0, danyada: 0, otros: 0,
+        reemb_eur: 0, reemb_uds: 0
+      };
+    }
+    const p = porSku[sku];
+    p.total += d.cantidad || 0;
+    if (d.disposition === 'SELLABLE') p.sellable += d.cantidad || 0;
+    else if (d.disposition === 'CUSTOMER_DAMAGED' || d.disposition === 'DEFECTIVE') p.danyada += d.cantidad || 0;
+    else p.otros += d.cantidad || 0;
+  });
+  // Sumar reembolsos al mismo SKU
+  devs.filter(d => d.tipo === 'reimbursement').forEach(d => {
+    const sku = d.sku || '(sin sku)';
+    if (!porSku[sku]) {
+      porSku[sku] = {
+        sku, nombre: (d.raw_data && d.raw_data['product-name']) || '(sin nombre)',
+        total: 0, sellable: 0, danyada: 0, otros: 0, reemb_eur: 0, reemb_uds: 0
+      };
+    }
+    porSku[sku].reemb_eur += parseFloat(d.importe_eur) || 0;
+    porSku[sku].reemb_uds += d.cantidad || 0;
+  });
+
+  // Filtrar productos con al menos 1 devolución o 1 reembolso, ordenar por total devs desc
+  const lista = Object.values(porSku)
+    .filter(p => p.total > 0 || p.reemb_eur > 0)
+    .sort((a, b) => (b.total + b.reemb_uds) - (a.total + a.reemb_uds));
+
+  if (lista.length === 0) {
+    document.getElementById('dev-productos-tbody').innerHTML =
+      '<tr><td colspan="5" class="empty-state"><p>Sin devoluciones en este periodo</p></td></tr>';
+    return;
+  }
+
+  const html = lista.map(p => {
+    const pctDanyo = p.total > 0 ? Math.round((p.danyada / p.total) * 100) : 0;
+    const colorDanyo = pctDanyo >= 30 ? 'var(--red)' : (pctDanyo >= 15 ? 'var(--amber)' : 'var(--gray-500)');
+    return '<tr>' +
+      '<td><div style="font-weight:600;font-size:13px">' + escapeHtml(p.nombre.substring(0, 50)) + (p.nombre.length > 50 ? '...' : '') + '</div>' +
+      '<div style="font-size:11px;color:var(--gray-400);font-family:DM Mono,monospace">' + escapeHtml(p.sku) + '</div></td>' +
+      '<td style="text-align:center;font-weight:700">' + (p.total || '—') + '</td>' +
+      '<td style="text-align:center;color:var(--green)">' + (p.sellable || '—') + '</td>' +
+      '<td style="text-align:center;color:' + colorDanyo + ';font-weight:' + (pctDanyo >= 15 ? '700' : '400') + '">' + (p.danyada || '—') + '</td>' +
+      '<td style="text-align:right;font-family:DM Mono,monospace">' + (p.reemb_eur > 0 ? p.reemb_eur.toFixed(2) + '€' : '—') + '</td>' +
+      '</tr>';
+  }).join('');
+  document.getElementById('dev-productos-tbody').innerHTML = html;
+}
+
+function renderDevReembolsos(devs) {
+  const reembs = devs.filter(d => d.tipo === 'reimbursement').sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+  if (reembs.length === 0) {
+    document.getElementById('dev-reembolsos-tbody').innerHTML =
+      '<tr><td colspan="5" class="empty-state"><p>Sin reembolsos en este periodo</p></td></tr>';
+    return;
+  }
+  const html = reembs.map(d => {
+    const fecha = (d.fecha || '').substring(0, 10);
+    const nombre = (d.raw_data && d.raw_data['product-name']) || d.sku || '(sin nombre)';
+    const motivo = d.reimbursement_reason || '—';
+    // Color por motivo
+    let colorMotivo = 'var(--gray-500)';
+    if (motivo.startsWith('Lost')) colorMotivo = 'var(--amber)';
+    else if (motivo.startsWith('Damaged')) colorMotivo = 'var(--red)';
+    else if (motivo.startsWith('CustomerReturn')) colorMotivo = 'var(--navy)';
+    else if (motivo.includes('Reversal')) colorMotivo = 'var(--gray-400)';
+    const importe = parseFloat(d.importe_eur) || 0;
+    const colorImp = importe >= 0 ? 'var(--green)' : 'var(--red)';
+    return '<tr>' +
+      '<td style="font-size:11px;color:var(--gray-500);white-space:nowrap">' + fecha + '</td>' +
+      '<td style="font-size:12px">' + escapeHtml(nombre.substring(0, 40)) + (nombre.length > 40 ? '...' : '') + '</td>' +
+      '<td style="text-align:center;font-size:11px;color:' + colorMotivo + ';font-weight:600">' + escapeHtml(motivo) + '</td>' +
+      '<td style="text-align:center;font-weight:600">' + (d.cantidad || 0) + '</td>' +
+      '<td style="text-align:right;font-family:DM Mono,monospace;color:' + colorImp + ';font-weight:600">' + importe.toFixed(2) + '€</td>' +
+      '</tr>';
+  }).join('');
+  document.getElementById('dev-reembolsos-tbody').innerHTML = html;
+}
+
+// Helper: escape HTML para evitar XSS en strings que provienen de la BD
+function escapeHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // ============================================================
