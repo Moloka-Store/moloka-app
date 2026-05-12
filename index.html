@@ -294,6 +294,7 @@
       <div class="stat-card"><div class="stat-label">📦 Manda a FBA</div><div class="stat-value red" id="stat-manda-fba">—</div><div class="stat-sub">Cobertura FBA &lt; 7 días</div></div>
       <div class="stat-card"><div class="stat-label">🛒 Pide al proveedor</div><div class="stat-value amber" id="stat-pide-prov">—</div><div class="stat-sub">Cobertura &lt; lead time del proveedor</div></div>
       <div class="stat-card"><div class="stat-label">💤 Sin movimiento</div><div class="stat-value amber" id="stat-sin-mov">—</div><div class="stat-sub">0 ventas en 30 días</div></div>
+      <div class="stat-card" style="cursor:pointer" onclick="toggleEstancados()" title="Productos con stock que han dejado de venderse en los ultimos 7 dias"><div class="stat-label">🔍 Estancados</div><div class="stat-value" style="color:var(--navy)" id="stat-estancados">—</div><div class="stat-sub">Vendían pero ahora no</div></div>
       <div class="stat-card"><div class="stat-label">✅ Productos OK</div><div class="stat-value green" id="stat-ok">—</div><div class="stat-sub">Stock suficiente</div></div>
     </div>
     <div class="grid-2" style="gap:20px;align-items:start">
@@ -309,6 +310,14 @@
     <div style="margin-top:24px">
       <div class="section-header"><div class="section-title">💤 Sin movimiento — Capital inmovilizado</div></div>
       <div id="alertas-sin-movimiento"><div class="loading-state"><div class="big-loader"></div></div></div>
+    </div>
+    <div style="margin-top:24px;display:none" id="seccion-estancados">
+      <div class="section-header">
+        <div class="section-title">🔍 Productos estancados — Vendían pero ahora no</div>
+        <button class="btn btn-ghost btn-sm" onclick="toggleEstancados()" style="font-size:11px">Ocultar</button>
+      </div>
+      <div class="info-box" style="margin-bottom:14px;font-size:12px">ℹ️ Productos con stock vendible que <strong>vendían normal hace semanas</strong> pero llevan <strong>7 días sin vender ni una unidad</strong>. Suele indicar caída en Buy Box, competidor más barato, o ficha con problemas. Revisa precio y competencia.</div>
+      <div id="alertas-estancados"><div class="loading-state"><div class="big-loader"></div></div></div>
     </div>
   </div>
 
@@ -1084,6 +1093,53 @@ async function cargarVelocidades() {
 // Estado global de silenciadas (para que el desplegable las pueda renderizar)
 let SILENCIADAS_ACTIVAS = [];
 
+// Renderiza la lista de productos estancados (vendian pero llevan 7d sin vender)
+function renderEstancados(estancados) {
+  const cont = document.getElementById('alertas-estancados');
+  if (!cont) return;
+  if (estancados.length === 0) {
+    cont.innerHTML = '<div class="alert-card" style="background:var(--green-light);border-color:var(--green)"><div>\u2705 Ningun producto estancado. Todo lo que vendia sigue vendiendo.</div></div>';
+    return;
+  }
+  cont.innerHTML = estancados.map(p => {
+    const tendIcon = p.tendencia === 'subiendo' ? '\ud83d\udcc8' : (p.tendencia === 'bajando' ? '\ud83d\udcc9' : '\u27a1\ufe0f');
+    const nombreSeguro = (p.nombre || '').replace(/'/g, "\\'");
+    const eanHtml = p.ean
+      ? '<span style="font-family:\'DM Mono\',monospace;font-size:11px;background:rgba(0,0,0,0.08);padding:2px 6px;border-radius:4px;cursor:pointer" onclick="navigator.clipboard.writeText(\'' + p.ean + '\');showToast(\'EAN copiado\',\'success\')" title="Clic para copiar">' + p.ean + ' \ud83d\udccb</span>'
+      : '';
+    const asinHtml = p.asin
+      ? '<span style="font-family:\'DM Mono\',monospace;font-size:11px;color:var(--gray-500)">' + p.asin + '</span>'
+      : '';
+    return '<div style="background:white;border:1px solid var(--gray-200);border-radius:8px;padding:12px 14px;margin-bottom:8px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:start;gap:12px;flex-wrap:wrap">' +
+        '<div style="flex:1;min-width:240px">' +
+          '<div style="font-weight:600;color:var(--navy);font-size:13px;margin-bottom:4px">' + (p.nombre || '(sin nombre)') + '</div>' +
+          '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' + eanHtml + ' ' + asinHtml + '</div>' +
+        '</div>' +
+        '<div style="text-align:right;font-size:12px">' +
+          '<div style="color:var(--gray-500)">Stock: <strong style="color:var(--navy)">FBA ' + p.stock_fba + 'u</strong>' + (p.stock_moloka > 0 ? ' + Moloka ' + p.stock_moloka + 'u' : '') + '</div>' +
+          '<div style="color:var(--gray-500);margin-top:2px">Antes vendia <strong style="color:var(--navy)">' + p.vel_30d.toFixed(2) + '/d</strong> ' + tendIcon + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div style="display:flex;gap:14px;margin-top:8px;padding-top:8px;border-top:1px dashed var(--gray-200);font-size:11px;color:var(--gray-500)">' +
+        '<span>T7: <strong style="color:var(--red)">' + p.uds_7d + 'u</strong> \ud83d\udeab</span>' +
+        '<span>T30: <strong>' + p.uds_30d + 'u</strong></span>' +
+        '<span>T90: <strong>' + p.uds_90d + 'u</strong></span>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+// Muestra/oculta la seccion de estancados
+function toggleEstancados() {
+  const sec = document.getElementById('seccion-estancados');
+  if (!sec) return;
+  sec.style.display = sec.style.display === 'none' ? 'block' : 'none';
+  if (sec.style.display === 'block') {
+    sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
 async function cargarAlertas() {
   try {
     // Cargar datos en paralelo (productos + velocidades + silenciadas vivas)
@@ -1132,6 +1188,7 @@ async function cargarAlertas() {
     const mandaFba = [];
     const pideProveedor = [];
     const sinMovimiento = [];
+    const estancados = [];           // vendian pero llevan 7d sin vender
     const silenciadasVisibles = [];  // para el desplegable
     let okCount = 0;
 
@@ -1164,6 +1221,23 @@ async function cargarAlertas() {
       const stockInbound = p.stock_inbound || 0;
       const stockFbaEfectivo = stockFba + stockInbound;  // FBA + en camino
       const stockTotal = stockFbaEfectivo + stockMoloka;
+
+      // Detector ESTANCADOS: vendian normal pero llevan 7d sin vender una unidad
+      // Requiere: vel_7d=0 AND vel_30d>0.07 (≈2u/mes) AND stock_fba>0 (excluye rupturas)
+      // Es informativo, no genera alerta urgente. El producto puede estar tambien en
+      // otras categorias (pedir_proveedor si cob<lead, sin_movimiento si v30 es 0).
+      if (v && v.vel_diaria_7d === 0 && v.vel_diaria_30d > 0.07 && stockFba > 0) {
+        estancados.push({
+          ...p,
+          vel_30d: v.vel_diaria_30d,
+          uds_7d: v.uds_7d || 0,
+          uds_30d: v.uds_30d || 0,
+          uds_90d: v.uds_90d || 0,
+          stock_fba: stockFba,
+          stock_moloka: stockMoloka,
+          tendencia: v.tendencia || 'estable'
+        });
+      }
 
       // Cobertura
       const cobFba = velDiaria > 0 ? stockFbaEfectivo / velDiaria : 999;
@@ -1254,12 +1328,17 @@ async function cargarAlertas() {
     mandaFba.sort((a, b) => a.cobertura_fba_dias - b.cobertura_fba_dias);
     pideProveedor.sort((a, b) => a.cobertura_total_dias - b.cobertura_total_dias);
     sinMovimiento.sort((a, b) => b.valor_inmovilizado - a.valor_inmovilizado);
+    estancados.sort((a, b) => b.vel_30d - a.vel_30d);  // mayor vel_30d primero = mayor perdida
 
     // KPIs
     document.getElementById('stat-manda-fba').textContent = mandaFba.length;
     document.getElementById('stat-pide-prov').textContent = pideProveedor.length;
     document.getElementById('stat-sin-mov').textContent = sinMovimiento.length;
+    document.getElementById('stat-estancados').textContent = estancados.length;
     document.getElementById('stat-ok').textContent = okCount;
+
+    // Renderizar lista de estancados (oculta hasta que pulses el KPI)
+    renderEstancados(estancados);
 
     // Badge sidebar (solo manda + pide, no sin movimiento porque no es urgente)
     const badge = document.getElementById('badge-alertas');
