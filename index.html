@@ -289,7 +289,7 @@
     <div id="alertas-silenciadas-lista" style="display:none;margin-bottom:14px"></div>
     <div class="stats-row">
       <div class="stat-card"><div class="stat-label">📦 Manda a FBA</div><div class="stat-value red" id="stat-manda-fba">—</div><div class="stat-sub">Cobertura FBA &lt; 7 días</div></div>
-      <div class="stat-card"><div class="stat-label">🛒 Pide al proveedor</div><div class="stat-value amber" id="stat-pide-prov">—</div><div class="stat-sub">Cobertura total &lt; 44 días</div></div>
+      <div class="stat-card"><div class="stat-label">🛒 Pide al proveedor</div><div class="stat-value amber" id="stat-pide-prov">—</div><div class="stat-sub">Cobertura &lt; lead time del proveedor</div></div>
       <div class="stat-card"><div class="stat-label">💤 Sin movimiento</div><div class="stat-value amber" id="stat-sin-mov">—</div><div class="stat-sub">0 ventas en 30 días</div></div>
       <div class="stat-card"><div class="stat-label">✅ Productos OK</div><div class="stat-value green" id="stat-ok">—</div><div class="stat-sub">Stock suficiente</div></div>
     </div>
@@ -950,7 +950,38 @@ document.querySelectorAll('.modal-overlay').forEach(m => {
 const ALERT_LEAD_TIME_FBA = 7;        // dias desde envio a Amazon hasta disponible
 const ALERT_COBERTURA_OBJETIVO = 14;  // mantener 2 semanas de stock en FBA
 const ALERT_COBERTURA_MINIMA = 7;     // alerta MANDA si cobertura FBA < 7 dias
-const ALERT_LEAD_PROVEEDOR = 30 + 7 + 7;  // 1 mes proveedor + 1 sem FBA + 1 sem margen = 44 dias
+const ALERT_LEAD_PROVEEDOR = 30 + 7 + 7;  // 1 mes proveedor + 1 sem FBA + 1 sem margen = 44 dias (DEPRECATED, usar obtenerLeadTotal)
+
+// Lead times TOTAL por proveedor (en dias): tiempo desde que pides al proveedor
+// hasta que el stock ya llega a FBA y se vuelve vendible.
+// Formula: dias_proveedor + 7d procesamiento Moloka + 7d envio a FBA
+// Usado en alertas pedir_proveedor para evitar gritar si la cobertura es mayor al lead real.
+//
+// NOTA OPERATIVA: Los proveedores de Funkos (TCG, BEMS, HEO, DBLine, Dinotoys) son
+// INTERCAMBIABLES: hoy compras una referencia a uno, manyana a otro segun precio/stock.
+// Por eso todos van a 21d (asumimos 7d max de cualquier proveedor de Funkos).
+// Zentrada y OSMA son distintos: venden primera necesidad (palets), no compiten.
+const LEAD_TIMES_TOTAL = {
+  'TCG': 21,        // Funkos - intercambiable
+  'BEMS': 21,       // Funkos - intercambiable
+  'HEO': 21,        // Funkos - intercambiable
+  'DBLINE': 21,     // Funkos - intercambiable
+  'DINOTOYS': 21,   // Funkos - intercambiable
+  'DEVIR': 21,      // Juegos de mesa
+  'ZENTRADA': 44,   // Primera necesidad (palets) - 30d proveedor + 14d margen
+  'OSMA': 44,       // Primera necesidad (palets) - 30d proveedor + 14d margen
+  '_DEFAULT': 21    // Proveedor desconocido: asumimos rapido
+};
+
+function obtenerLeadTotal(proveedor) {
+  if (!proveedor) return LEAD_TIMES_TOTAL._DEFAULT;
+  const provUpper = String(proveedor).toUpperCase();
+  const claves = ['TCG', 'BEMS', 'HEO', 'DBLINE', 'ZENTRADA', 'OSMA', 'DINOTOYS', 'DEVIR'];
+  for (const k of claves) {
+    if (provUpper.indexOf(k) !== -1) return LEAD_TIMES_TOTAL[k];
+  }
+  return LEAD_TIMES_TOTAL._DEFAULT;
+}
 
 // Lead times por proveedor (en dias) para silenciar alerta tras "He pedido"
 const LEAD_TIMES_PROVEEDOR = {
@@ -1105,8 +1136,9 @@ async function cargarAlertas() {
         }
       }
 
-      // 2) Pide al proveedor si cobertura TOTAL < 44 dias
-      if (cobTotal < ALERT_LEAD_PROVEEDOR) {
+      // 2) Pide al proveedor si cobertura TOTAL < lead time real del proveedor
+      const leadTotal = obtenerLeadTotal(p.proveedor);
+      if (cobTotal < leadTotal) {
         const cantidadSugerida = Math.round(velDiaria * 30); // pedir al menos para 1 mes
         const itemProv = {
           ...p,
@@ -1115,6 +1147,7 @@ async function cargarAlertas() {
           tendencia: v ? v.tendencia : 'estable',
           cobertura_total_dias: cobTotal,
           stock_inbound: stockInbound,
+          lead_time_total: leadTotal,
           pedir_uds: Math.max(1, cantidadSugerida)
         };
         const silProv = silenciadasMap[p.id + '|pedir_proveedor'];
