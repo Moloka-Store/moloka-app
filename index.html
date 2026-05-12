@@ -2390,8 +2390,10 @@ async function confirmarEnvioFBA() {
 
     // 4. Actualizar stocks de productos (uno por uno)
     for (const e of envioItems) {
+      const inboundActual = e.stock_inbound || 0;
       await db.from('productos').update({
         stock_moloka: e.stock_moloka - e.qty,
+        stock_inbound: inboundActual + e.qty,
         updated_at: fechaIso
       }).eq('id', e.id);
       await db.from('movimientos').insert({
@@ -2401,16 +2403,27 @@ async function confirmarEnvioFBA() {
       });
     }
 
-    // 4b. Silenciar alertas "mandar_fba" 7 dias para los productos enviados
+    // 4b. Silenciar alertas "mandar_fba" Y "pedir_proveedor" 7 dias para los productos enviados
+    // El stock va en camino a FBA, no hay que ni mandar mas ni pedir mas al proveedor en 7 dias
     try {
       const silenciadoHasta = new Date();
       silenciadoHasta.setDate(silenciadoHasta.getDate() + 7);
-      const filasSilencio = envioItems.map(e => ({
-        producto_id: e.id,
-        tipo_alerta: 'mandar_fba',
-        silenciado_hasta: silenciadoHasta.toISOString(),
-        motivo: 'Envio FBA ' + referencia
-      }));
+      const silenciadoHastaIso = silenciadoHasta.toISOString();
+      const filasSilencio = [];
+      for (const e of envioItems) {
+        filasSilencio.push({
+          producto_id: e.id,
+          tipo_alerta: 'mandar_fba',
+          silenciado_hasta: silenciadoHastaIso,
+          motivo: 'Envio FBA ' + referencia
+        });
+        filasSilencio.push({
+          producto_id: e.id,
+          tipo_alerta: 'pedir_proveedor',
+          silenciado_hasta: silenciadoHastaIso,
+          motivo: 'Envio FBA ' + referencia + ' (stock en camino)'
+        });
+      }
       if (filasSilencio.length > 0) {
         const { error: errSil } = await db.from('alertas_silenciadas').insert(filasSilencio);
         if (errSil) console.error('[confirmarEnvioFBA] Silencio FBA:', errSil);
