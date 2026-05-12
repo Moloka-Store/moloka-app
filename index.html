@@ -1135,10 +1135,29 @@ async function cargarAlertas() {
     const silenciadasVisibles = [];  // para el desplegable
     let okCount = 0;
 
+    // Velocidad efectiva: ajusta velocidad para casos donde el producto estuvo agotado
+    // recientemente o se ha disparado de golpe. Asi evita coberturas infladas o
+    // alertas tardias en productos que estan acelerando tras ruptura.
+    //
+    // Logica (decision Fernando 12-may):
+    //   - Si vel_7d > vel_30d (producto acelera) -> media ponderada (vel_7d + vel_30d) / 2
+    //     suaviza picos virales sin penalizar la realidad reciente
+    //   - Si vel_7d <= vel_30d (estable o bajando) -> usar vel_30d normal
+    function calcularVelocidadEfectiva(v) {
+      if (!v) return 0;
+      const v7 = v.vel_diaria_7d || 0;
+      const v30 = v.vel_diaria_30d || 0;
+      if (v7 > v30) {
+        // Producto acelerando: media ponderada para suavizar picos virales
+        return (v7 + v30) / 2;
+      }
+      return v30;
+    }
+
     for (const p of productos) {
       // Productos sin SKU no se pueden cruzar con velocidades
       const v = p.sku ? velMap[p.sku] : null;
-      const velDiaria = v ? v.vel_diaria_30d : 0;
+      const velDiaria = calcularVelocidadEfectiva(v);
       const uds30d = v ? v.uds_30d : 0;
       const stockFba = p.stock_fba || 0;
       const stockMoloka = p.stock_moloka || 0;
