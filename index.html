@@ -7,6 +7,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -324,7 +325,10 @@
   <div class="page" id="page-inventario">
     <div class="page-header">
       <div><div class="page-title">📦 Inventario</div><div class="page-sub" id="inv-subtitle">Cargando...</div></div>
-      <button class="btn btn-primary btn-sm" onclick="openModal('modal-nuevo-producto')">+ Nuevo producto</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="openModal('modal-exportar-escaneo')" title="Genera Excel para subir al notebook Escaner.ipynb">📤 Exportar para escaneo</button>
+        <button class="btn btn-primary btn-sm" onclick="openModal('modal-nuevo-producto')">+ Nuevo producto</button>
+      </div>
     </div>
     <div class="card">
       <div class="search-bar">
@@ -666,6 +670,44 @@
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('modal-nuevo-producto')">Cancelar</button>
       <button class="btn btn-primary" id="btn-guardar-producto" onclick="guardarNuevoProducto()">Guardar producto</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL EXPORTAR PARA ESCANEO -->
+<div class="modal-overlay" id="modal-exportar-escaneo">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-title">📤 Exportar inventario para escaneo</div>
+    <div style="font-size:13px;color:var(--gray-500);margin-bottom:16px;line-height:1.5">
+      Genera un Excel con <strong>EAN, PVD, Nombre, Marca, ASIN, Stock Moloka</strong> para subir a <code style="background:var(--gray-100);padding:2px 5px;border-radius:3px;font-size:11px">MyDrive/Escaner/Catálogos/</code> y escanear rentabilidad con el notebook.
+    </div>
+    <div class="input-group">
+      <div class="input-label" style="margin-bottom:8px">¿Qué productos exportar?</div>
+      <label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:6px;cursor:pointer">
+        <input type="radio" name="exp-filtro" value="con_stock_moloka" checked>
+        <div>
+          <div style="font-weight:600;font-size:13px">🟢 Con stock en Moloka</div>
+          <div style="font-size:11px;color:var(--gray-500)">Solo lo que puedes mandar a FBA ya (incluye descatalogados con stock)</div>
+        </div>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:6px;cursor:pointer">
+        <input type="radio" name="exp-filtro" value="todos_activos">
+        <div>
+          <div style="font-weight:600;font-size:13px">📦 Todos los activos</div>
+          <div style="font-size:11px;color:var(--gray-500)">Catálogo completo (OK + SIN_STOCK_LOCAL + DESCATALOGADO + REVISAR)</div>
+        </div>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--gray-200);border-radius:6px;cursor:pointer">
+        <input type="radio" name="exp-filtro" value="solo_ok">
+        <div>
+          <div style="font-weight:600;font-size:13px">✅ Solo OK (catálogo vivo)</div>
+          <div style="font-size:11px;color:var(--gray-500)">Excluye descatalogados — pensado para escanear oportunidades de reposición</div>
+        </div>
+      </label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modal-exportar-escaneo')">Cancelar</button>
+      <button class="btn btn-primary" id="btn-exportar-escaneo" onclick="exportarParaEscaneo()">📥 Descargar Excel</button>
     </div>
   </div>
 </div>
@@ -2197,6 +2239,103 @@ async function guardarNuevoProducto() {
   showToast('Producto guardado ✅', 'success');
   closeModal('modal-nuevo-producto');
   cargarInventario();
+}
+
+// ============================================================
+// EXPORTAR PARA ESCANEO (Excel para subir a MyDrive/Escaner/Catalogos/)
+// ============================================================
+async function exportarParaEscaneo() {
+  const btn = document.getElementById('btn-exportar-escaneo');
+  const btnTextoOriginal = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '\u23f3 Generando Excel...';
+
+  try {
+    // 1. Leer el filtro seleccionado
+    const filtroRadio = document.querySelector('input[name="exp-filtro"]:checked');
+    const filtro = filtroRadio ? filtroRadio.value : 'con_stock_moloka';
+
+    // 2. Construir query segun filtro
+    // Siempre excluimos CONSOLIDADO (activo=false) - el escaner no debe ver fichas archivadas
+    let query = db.from('productos')
+      .select('ean, pvd, nombre, marca, asin, stock_moloka, estado')
+      .eq('activo', true);
+
+    if (filtro === 'con_stock_moloka') {
+      query = query.gt('stock_moloka', 0);
+    } else if (filtro === 'solo_ok') {
+      query = query.eq('estado', 'OK');
+    }
+    // 'todos_activos' no aplica filtro adicional
+
+    // 3. Ejecutar con paginacion (Supabase limita a 1000 por request)
+    const filas = [];
+    let desde = 0;
+    const PAGE = 1000;
+    while (true) {
+      const { data, error } = await query.range(desde, desde + PAGE - 1).order('nombre');
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+      filas.push(...data);
+      if (data.length < PAGE) break;
+      desde += PAGE;
+    }
+
+    if (filas.length === 0) {
+      showToast('No hay productos que cumplan el filtro', 'error');
+      btn.disabled = false;
+      btn.innerHTML = btnTextoOriginal;
+      return;
+    }
+
+    // 4. Construir las filas del Excel con las 6 columnas pedidas
+    const filasExcel = filas.map(p => ({
+      'EAN': p.ean || '',
+      'PVD': (p.pvd !== null && p.pvd !== undefined) ? Number(p.pvd) : '',
+      'Nombre': p.nombre || '',
+      'Marca': p.marca || '',
+      'ASIN': p.asin || '',
+      'Stock Moloka': p.stock_moloka || 0
+    }));
+
+    // 5. Generar Excel con SheetJS
+    if (typeof XLSX === 'undefined') {
+      throw new Error('La libreria XLSX no esta cargada. Recarga la pagina.');
+    }
+    const ws = XLSX.utils.json_to_sheet(filasExcel);
+
+    // Anchos de columna razonables
+    ws['!cols'] = [
+      { wch: 15 },  // EAN
+      { wch: 9 },   // PVD
+      { wch: 60 },  // Nombre
+      { wch: 18 },  // Marca
+      { wch: 14 },  // ASIN
+      { wch: 12 }   // Stock Moloka
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Inventario Moloka');
+
+    // 6. Filename con timestamp
+    const ahora = new Date();
+    const ts = ahora.getFullYear() + String(ahora.getMonth() + 1).padStart(2, '0') +
+               String(ahora.getDate()).padStart(2, '0') + '_' +
+               String(ahora.getHours()).padStart(2, '0') + String(ahora.getMinutes()).padStart(2, '0');
+    const filename = `Inventario_Moloka_${ts}.xlsx`;
+
+    // 7. Descargar
+    XLSX.writeFile(wb, filename);
+
+    showToast(`OK ${filas.length} productos exportados`, 'success');
+    closeModal('modal-exportar-escaneo');
+  } catch (e) {
+    console.error('[exportarParaEscaneo]', e);
+    showToast('Error: ' + (e.message || 'no se pudo exportar'), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = btnTextoOriginal;
+  }
 }
 
 // ============================================================
