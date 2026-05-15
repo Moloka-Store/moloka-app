@@ -5097,8 +5097,12 @@ async function confirmarFactura() {
   }
   // Validacion: lineas con EAN duplicado deben tener resolucion explicita del usuario
   // Resoluciones validas: 'consolidar' | 'ficha_concreta' (ya pasada a unico) | 'repartir' (con suma OK)
+  // EXCEPCION: lineas CHASE (case 5+1 o con menciona_chase) NO requieren resolucion de duplicados,
+  // se procesan por la logica chase_reparto que tiene su propia validacion.
   const duplicadosSinResolver = _facturaLineas.filter(function(l) {
     if (l.match_estado !== 'duplicados') return false;
+    const esChase = l.es_case_chase || l.menciona_chase || (l.chase_unidades_chase || 0) > 0;
+    if (esChase) return false;
     return l.duplicados_resuelto !== 'consolidar' && l.duplicados_resuelto !== 'repartir';
   });
   if (duplicadosSinResolver.length > 0) {
