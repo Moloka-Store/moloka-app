@@ -4793,7 +4793,11 @@ function renderLinea(l, idx) {
       opciones += '<option value="ficha_' + p.id + '">Asignar todo a: ' + etiqueta + '</option>';
     });
     opciones += '<option value="consolidar"' + (l.duplicados_resuelto === 'consolidar' ? ' selected' : '') + '>\ud83d\udd17 Consolidar las ' + l.match_productos.length + ' fichas en una</option>';
-    opciones += '<option value="repartir"' + (l.duplicados_resuelto === 'repartir' ? ' selected' : '') + '>\u2702\ufe0f Repartir entre varias fichas</option>';
+    // Opcion "Repartir" SOLO si la linea NO es CHASE (packs y chase no existen mezclados)
+    const lineaEsChase = l.es_case_chase || l.menciona_chase || (l.chase_unidades_chase || 0) > 0;
+    if (!lineaEsChase) {
+      opciones += '<option value="repartir"' + (l.duplicados_resuelto === 'repartir' ? ' selected' : '') + '>\u2702\ufe0f Repartir entre varias fichas</option>';
+    }
     // Marcar como selected la opcion de ficha concreta si esta resuelta asi
     if (l.duplicados_resuelto === 'ficha_concreta' && l.producto_id_seleccionado) {
       opciones = opciones.replace('value="ficha_' + l.producto_id_seleccionado + '"', 'value="ficha_' + l.producto_id_seleccionado + '" selected');
