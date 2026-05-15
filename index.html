@@ -4792,14 +4792,44 @@ function renderLinea(l, idx) {
         + ' | ASIN ' + (p.asin || 'sin asin');
       opciones += '<option value="ficha_' + p.id + '">Asignar todo a: ' + etiqueta + '</option>';
     });
-    opciones += '<option value="consolidar">\ud83d\udd17 Consolidar las ' + l.match_productos.length + ' fichas en una</option>';
+    opciones += '<option value="consolidar"' + (l.duplicados_resuelto === 'consolidar' ? ' selected' : '') + '>\ud83d\udd17 Consolidar las ' + l.match_productos.length + ' fichas en una</option>';
+    opciones += '<option value="repartir"' + (l.duplicados_resuelto === 'repartir' ? ' selected' : '') + '>\u2702\ufe0f Repartir entre varias fichas</option>';
+    // Marcar como selected la opcion de ficha concreta si esta resuelta asi
+    if (l.duplicados_resuelto === 'ficha_concreta' && l.producto_id_seleccionado) {
+      opciones = opciones.replace('value="ficha_' + l.producto_id_seleccionado + '"', 'value="ficha_' + l.producto_id_seleccionado + '" selected');
+    }
+    // Panel de reparto si esta activo
+    let panelReparto = '';
+    if (l.duplicados_resuelto === 'repartir' && Array.isArray(l.reparto_fichas)) {
+      const sumaFact = l.reparto_fichas.reduce(function(s, r) { return s + (r.uds_facturadas || 0); }, 0);
+      const sumaOk = sumaFact === l.cantidad_editada;
+      panelReparto = '<div style="margin-top:8px;padding:8px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:6px">'
+        + '<div style="font-size:11px;font-weight:600;margin-bottom:6px">Repartir ' + l.cantidad_editada + ' uds facturadas entre las fichas:</div>';
+      l.reparto_fichas.forEach(function(r, fIdx) {
+        const ficha = l.match_productos.find(function(p) { return p.id === r.producto_id; });
+        if (!ficha) return;
+        const nombreCorto = (ficha.nombre || '?').substring(0, 50);
+        panelReparto += '<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;font-size:11px">'
+          + '<div style="flex:1;min-width:0">' + nombreCorto + '<br><span style="color:var(--gray-500)">PVD ' + (ficha.pvd != null ? ficha.pvd.toFixed(2) : '?') + '\u20ac \u00b7 ASIN ' + (ficha.asin || 'sin') + '</span></div>'
+          + '<div style="display:flex;flex-direction:column;align-items:center"><span style="font-size:10px;color:var(--gray-500)">Uds facturadas</span>'
+          + '<input type="number" min="0" value="' + (r.uds_facturadas || 0) + '" style="width:70px;padding:3px;font-size:12px;text-align:center" onchange="actualizarReparto(' + idx + ',' + fIdx + ',\'facturadas\',this.value)"></div>'
+          + '<div style="display:flex;flex-direction:column;align-items:center"><span style="font-size:10px;color:var(--gray-500)">Uds f\u00edsicas</span>'
+          + '<input type="number" min="0" value="' + (r.uds_fisicas || 0) + '" style="width:70px;padding:3px;font-size:12px;text-align:center" onchange="actualizarReparto(' + idx + ',' + fIdx + ',\'fisicas\',this.value)"></div>'
+          + '</div>';
+      });
+      panelReparto += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--gray-200);font-size:12px;font-weight:600;color:' + (sumaOk ? 'var(--green)' : 'var(--red)') + '">'
+        + 'Suma facturada: ' + sumaFact + ' / ' + l.cantidad_editada + ' ' + (sumaOk ? '\u2705' : '\u274c')
+        + '</div>'
+        + '</div>';
+    }
     productoTexto = ''
       + '<div style="font-size:11px;color:var(--gray-500);margin-bottom:4px">Fichas con este EAN: '
         + l.match_productos.map(function(p) { return (p.proveedor || '?') + ' (' + (p.pvd != null ? p.pvd.toFixed(2) : '?') + '\u20ac)'; }).join(', ')
       + '</div>'
       + '<select class="input" style="font-size:12px;padding:4px;width:100%;max-width:480px" onchange="resolverDuplicados(' + idx + ', this.value)">'
       + opciones
-      + '</select>';
+      + '</select>'
+      + panelReparto;
   } else {
     estadoBadge = '<span class="badge badge-orange">\u2728 Producto nuevo</span>';
     productoTexto = '<div style="font-size:11px;color:var(--gray-400)">Se crear\u00e1 con asin_pendiente</div>';
@@ -4996,6 +5026,16 @@ function resolverDuplicados(idx, valor) {
     // Mantener match_estado='duplicados' (lo procesara consolidarDuplicados al confirmar)
     // Pero guardamos preferencia explicita para que el confirmar sepa que el usuario eligio consolidar
     linea.duplicados_resuelto = 'consolidar';
+    linea.reparto_fichas = null;
+    renderRevision();
+    return;
+  }
+  if (valor === 'repartir') {
+    // Inicializar el reparto con todas las fichas a 0
+    linea.duplicados_resuelto = 'repartir';
+    linea.reparto_fichas = linea.match_productos.map(function(p) {
+      return { producto_id: p.id, uds_facturadas: 0, uds_fisicas: 0 };
+    });
     renderRevision();
     return;
   }
@@ -5010,8 +5050,33 @@ function resolverDuplicados(idx, valor) {
     linea.match_productos = [fichaElegida];
     linea.producto_id_seleccionado = fichaElegida.id;
     linea.duplicados_resuelto = 'ficha_concreta';
+    linea.reparto_fichas = null;
     renderRevision();
   }
+}
+
+// ----------------------------------------------------------------
+// 9c. ACTUALIZAR REPARTO ENTRE FICHAS
+// Por defecto, al editar 'uds facturadas' se sincronizan las fisicas 1:1.
+// Si el usuario edita 'uds fisicas' manualmente, ya no se sincronizan mas para esa ficha.
+// ----------------------------------------------------------------
+function actualizarReparto(idxLinea, idxFicha, campo, valor) {
+  const linea = _facturaLineas[idxLinea];
+  if (!linea || !Array.isArray(linea.reparto_fichas)) return;
+  const reparto = linea.reparto_fichas[idxFicha];
+  if (!reparto) return;
+  const n = Math.max(0, parseInt(valor, 10) || 0);
+  if (campo === 'facturadas') {
+    const fisicasIgualAntes = (reparto.uds_fisicas || 0) === (reparto.uds_facturadas || 0);
+    reparto.uds_facturadas = n;
+    // Si las fisicas estaban en 1:1 con facturadas (caso simple), seguir sincronizadas
+    if (fisicasIgualAntes) {
+      reparto.uds_fisicas = n;
+    }
+  } else if (campo === 'fisicas') {
+    reparto.uds_fisicas = n;
+  }
+  renderRevision();
 }
 
 // ----------------------------------------------------------------
@@ -5027,11 +5092,23 @@ async function confirmarFactura() {
     return;
   }
   // Validacion: lineas con EAN duplicado deben tener resolucion explicita del usuario
+  // Resoluciones validas: 'consolidar' | 'ficha_concreta' (ya pasada a unico) | 'repartir' (con suma OK)
   const duplicadosSinResolver = _facturaLineas.filter(function(l) {
-    return l.match_estado === 'duplicados' && l.duplicados_resuelto !== 'consolidar';
+    if (l.match_estado !== 'duplicados') return false;
+    return l.duplicados_resuelto !== 'consolidar' && l.duplicados_resuelto !== 'repartir';
   });
   if (duplicadosSinResolver.length > 0) {
     showToast('Hay ' + duplicadosSinResolver.length + ' linea(s) con EAN compartido sin resolver. Elige una opcion en el desplegable.', 'error');
+    return;
+  }
+  // Validacion del reparto: la suma de uds facturadas debe coincidir con cantidad_editada
+  const repartosMal = _facturaLineas.filter(function(l) {
+    if (l.duplicados_resuelto !== 'repartir' || !Array.isArray(l.reparto_fichas)) return false;
+    const suma = l.reparto_fichas.reduce(function(s, r) { return s + (r.uds_facturadas || 0); }, 0);
+    return suma !== l.cantidad_editada;
+  });
+  if (repartosMal.length > 0) {
+    showToast('Hay ' + repartosMal.length + ' linea(s) con reparto incompleto. La suma debe cuadrar con la cantidad facturada.', 'error');
     return;
   }
   const btn = document.getElementById('btn-confirmar-factura');
@@ -5078,7 +5155,55 @@ async function confirmarFactura() {
 // 11. PROCESAR UNA LINEA: actualizar producto + crear compras
 // ----------------------------------------------------------------
 async function procesarLineaFactura(linea, facturaId, fecha) {
-  const resultado = { creadas: 0, actualizado: false, nuevo: false, consolidado: false };
+  const resultado = { creadas: 0, actualizado: false, nuevo: false, consolidado: false, repartido: false };
+  // CASO REPARTO: procesado especial, sale antes de la logica estandar
+  if (linea.match_estado === 'duplicados' && linea.duplicados_resuelto === 'repartir' && Array.isArray(linea.reparto_fichas)) {
+    for (const r of linea.reparto_fichas) {
+      const udsFact = r.uds_facturadas || 0;
+      const udsFis = r.uds_fisicas || 0;
+      if (udsFact <= 0) continue; // ficha no recibe nada en este reparto
+      const ficha = linea.match_productos.find(function(p) { return p.id === r.producto_id; });
+      if (!ficha) continue;
+      const stockAntes = ficha.stock_moloka || 0;
+      const pvdAntes = ficha.pvd || 0;
+      const stockDespues = stockAntes + udsFis;
+      // PVD ponderado: el coste de la entrada se calcula con uds facturadas x precio_editado,
+      // pero se reparte sobre las uds fisicas que efectivamente entran al stock.
+      // Coste de esta entrada en euros: udsFact * linea.precio_editado
+      const costeEntrada = udsFact * linea.precio_editado;
+      let pvdDespues;
+      if (stockAntes <= 0 || udsFis <= 0) {
+        // Si no entran uds fisicas (raro pero posible), no toca PVD; si stock antes 0, PVD nuevo = coste/uds fisicas
+        pvdDespues = udsFis > 0 ? (costeEntrada / udsFis) : pvdAntes;
+      } else {
+        pvdDespues = (stockAntes * pvdAntes + costeEntrada) / stockDespues;
+      }
+      pvdDespues = Math.round(pvdDespues * 10000) / 10000;
+      const ucAntes = ficha.unidades_compradas || 0;
+      await db.from('productos').update({
+        stock_moloka: stockDespues,
+        pvd: pvdDespues,
+        proveedor: _facturaActual.proveedor,
+        unidades_compradas: ucAntes + udsFis,
+        activo: true,
+        estado: 'OK',
+        updated_at: new Date().toISOString()
+      }).eq('id', r.producto_id);
+      // Compra: queda registrada con uds facturadas y precio facturado (auditoria 1:1 contra factura)
+      await db.from('compras').insert({
+        factura_id: facturaId,
+        producto_id: r.producto_id,
+        fecha: fecha,
+        unidades: udsFact,
+        precio_unitario: linea.precio_editado,
+        es_chase: false
+      });
+      resultado.creadas++;
+    }
+    resultado.actualizado = true;
+    resultado.repartido = true;
+    return resultado;
+  }
   let productoId = linea.producto_id_seleccionado;
   let productoActual = null;
   // Caso A: producto identificado (unico match)
