@@ -4073,10 +4073,11 @@ function parseDBLine(rawText) {
   }
 
   // Lineas de productos
-  // Patron observado: CODIGO PZ. CANT PRECIO_BRUTO DTO1 TOTAL [espacio] EAN13 HSCODE DTO2 DESCRIPCION
+  // Patron observado (orden pdf.js navegador): CODIGO PZ. CANT PRECIO_BRUTO DTO1 TOTAL EAN13 HSCODE [DTO2] DESCRIPCION
   // El TOTAL puede estar PEGADO al EAN (pypdf) o SEPARADO por espacio (pdf.js navegador).
+  // DTO2 (segundo descuento, 5%) es OPCIONAL: productos no-Funko (ej: One Piece Bandai) no lo llevan.
   // Forzamos TOTAL con 2 decimales y EAN de 12-13 digitos.
-  const lineaRegex = /([A-Z]{4}\d{4})\s+PZ\.\s+(\d+)\s+(\d+,\d{2})\s+(\d+,\d{2})\s+(\d+,\d{2})\s*(\d{12,13})\s+(\d{8})\s+(\d+,\d{2})\s+(.+?)(?=\n|$|Vs\.Rif|[A-Z]{4}\d{4}|Totale)/gs;
+  const lineaRegex = /([A-Z]{4}\d{4})\s+PZ\.\s+(\d+)\s+(\d+,\d{2})\s+(\d+,\d{2})\s+(\d+,\d{2})\s*(\d{12,13})\s+(\d{8})\s+((?:\d+,\d{2})?)\s*(.+?)(?=\n|$|Vs\.Rif|[A-Z]{4}\d{4}|Totale)/gs;
 
   let m;
   while ((m = lineaRegex.exec(rawText)) !== null) {
@@ -4086,7 +4087,8 @@ function parseDBLine(rawText) {
     const dto1 = parseFloat(m[4].replace(',', '.'));
     const totalLinea = parseFloat(m[5].replace(',', '.'));
     const ean = m[6];
-    const dto2 = parseFloat(m[8].replace(',', '.'));
+    // dto2 opcional: si la captura viene vacia (producto sin 2o descuento), es 0
+    const dto2 = (m[8] && m[8].trim() !== '') ? parseFloat(m[8].replace(',', '.')) : 0;
     let descripcion = m[9].replace(/\s+/g, ' ').trim();
     // Limpiar descripcion: quitar coletillas tipo "Vs.Rif." si aparece al final
     descripcion = descripcion.replace(/\s*Vs\.Rif.*/i, '').trim();
