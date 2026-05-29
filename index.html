@@ -1066,6 +1066,16 @@ function esLILEligible(velDiaria) {
   // calcularVelocidadEfectiva ya devuelve el maximo razonable entre v7 y v30.
   return (velDiaria * 7) > LIL_UMBRAL_VELOCIDAD_SEMANAL;
 }
+// Version global de calcularVelocidadEfectiva (la version local dentro del calculo de alertas
+// se mantiene por seguridad). Necesaria para que confirmarEnvioFBA pueda decidir
+// si el silencio post-envio aplica o no.
+function calcularVelocidadEfectivaGlobal(v) {
+  if (!v) return 0;
+  const v7 = v.vel_diaria_7d || 0;
+  const v30 = v.vel_diaria_30d || 0;
+  if (v7 > v30) return (v7 + v30) / 2;
+  return v30;
+}
 
 // Lead times TOTAL por proveedor (en dias): tiempo desde que pides al proveedor
 // hasta que el stock ya llega a FBA y se vuelve vendible.
@@ -2825,28 +2835,77 @@ async function confirmarEnvioFBA() {
     // 4b. Silenciar alertas "mandar_fba" Y "pedir_proveedor" 5 dias para los productos enviados
     // Amazon refleja envios en su informe FBA ~24h despues. 5 dias da margen de seguridad
     // (festivos, retrasos UPS, etc.) sin ser un silencio excesivo.
+    //
+    // FIX LIL FEE: silencio condicional para top sellers.
+    // Antes el silencio era automatico. Pero si envias 30 uds de Kukident (vendes 10/dia)
+    // el envio NO saca al producto del umbral LIL (28d Amazon / 35d nuestro). Silenciar
+    // la alerta en ese caso enmascara que sigues pagando LIL fee cada venta.
+    // Ahora: si proyeccion tras envio NO supera umbral -> NO silenciar (alerta sigue viva).
     try {
       const silenciadoHasta = new Date();
       silenciadoHasta.setDate(silenciadoHasta.getDate() + 5);
       const silenciadoHastaIso = silenciadoHasta.toISOString();
+      // Cargar velocidades para poder evaluar suficiencia de envio
+      const velData = await cargarVelocidades();
+      const velMap = {};
+      if (velData && velData.productos) {
+        velData.productos.forEach(p => { velMap[p.sku] = p; });
+      }
       const filasSilencio = [];
+      const insuficientes = []; // top sellers con envio insuficiente
       for (const e of envioItems) {
-        filasSilencio.push({
-          producto_id: e.id,
-          tipo_alerta: 'mandar_fba',
-          silenciado_hasta: silenciadoHastaIso,
-          motivo: 'Envio FBA ' + referencia
-        });
-        filasSilencio.push({
-          producto_id: e.id,
-          tipo_alerta: 'pedir_proveedor',
-          silenciado_hasta: silenciadoHastaIso,
-          motivo: 'Envio FBA ' + referencia + ' (stock en camino)'
-        });
+        // envioItems contiene la ficha completa del producto al hacer spread (...p)
+        // Por tanto tiene sku, stock_fba, stock_inbound, stock_moloka, nombre
+        const v = e.sku ? velMap[e.sku] : null;
+        const velDiaria = calcularVelocidadEfectivaGlobal(v);
+        const esLIL = esLILEligible(velDiaria);
+        // Stock FBA + inbound proyectado tras este envio
+        const stockFbaProyectado = (e.stock_fba || 0) + (e.stock_inbound || 0) + e.qty;
+        const coberturaProyectada = velDiaria > 0 ? stockFbaProyectado / velDiaria : 999;
+        const umbralSilencio = esLIL ? LIL_COBERTURA_MINIMA : ALERT_COBERTURA_OBJETIVO;
+        // Si el envio NO cubre el umbral, NO silenciar mandar_fba (alerta sigue activa)
+        const envioSuficiente = coberturaProyectada >= umbralSilencio;
+        if (envioSuficiente) {
+          filasSilencio.push({
+            producto_id: e.id,
+            tipo_alerta: 'mandar_fba',
+            silenciado_hasta: silenciadoHastaIso,
+            motivo: 'Envio FBA ' + referencia
+          });
+        } else if (esLIL) {
+          // Top seller con envio insuficiente: registrar para avisar
+          insuficientes.push({
+            nombre: e.nombre || 'Producto',
+            enviado: e.qty,
+            cobertura_proyectada: coberturaProyectada,
+            umbral: umbralSilencio,
+            vel: velDiaria
+          });
+        }
+        // pedir_proveedor: para LIL eligibles, NO silenciar (enviar a FBA no cubre la
+        // necesidad de reponer Moloka). Para resto, mantener silencio como antes.
+        if (!esLIL) {
+          filasSilencio.push({
+            producto_id: e.id,
+            tipo_alerta: 'pedir_proveedor',
+            silenciado_hasta: silenciadoHastaIso,
+            motivo: 'Envio FBA ' + referencia + ' (stock en camino)'
+          });
+        }
       }
       if (filasSilencio.length > 0) {
         const { error: errSil } = await db.from('alertas_silenciadas').insert(filasSilencio);
         if (errSil) console.error('[confirmarEnvioFBA] Silencio FBA:', errSil);
+      }
+      // Avisar al usuario si hay top sellers con envio insuficiente
+      if (insuficientes.length > 0) {
+        const detalle = insuficientes.map(i =>
+          '- ' + i.nombre.substring(0,40) + ' (enviado ' + i.enviado + 'u, cobertura proyectada ' + i.cobertura_proyectada.toFixed(0) + 'd < ' + i.umbral + 'd)'
+        ).join('\n');
+        console.warn('[confirmarEnvioFBA] Envio insuficiente para top sellers:\n' + detalle);
+        setTimeout(() => {
+          showToast('\u26a0\ufe0f Envio insuficiente para ' + insuficientes.length + ' top seller(s) - alerta sigue activa para evitar LIL fee', 'warning');
+        }, 1500);
       }
     } catch (errSilCatch) {
       console.error('[confirmarEnvioFBA] Silencio FBA catch:', errSilCatch);
