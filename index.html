@@ -1054,6 +1054,18 @@ const ALERT_LEAD_TIME_FBA = 7;        // dias desde envio a Amazon hasta disponi
 const ALERT_COBERTURA_OBJETIVO = 21;  // al mandar a FBA, llenar para 3 semanas de stock
 const ALERT_COBERTURA_MINIMA = 12;    // alerta MANDA si cobertura FBA < 12 dias (5d lead reposicion + 7d colchon objetivo)
 const ALERT_LEAD_PROVEEDOR = 30 + 7 + 7;  // 1 mes proveedor + 1 sem FBA + 1 sem margen = 44 dias (DEPRECATED, usar obtenerLeadTotal)
+// LIL FEE (Low Inventory Level Fee): Amazon cobra sobrecargo si cobertura FBA < 28 dias
+// Y vendes >20 uds/semana en cualquier ventana (7d o 30d).
+// Para top sellers, los umbrales normales (12d/21d) son INSUFICIENTES: para cuando saltan,
+// ya estamos pagando LIL fee. Por eso definimos umbrales mas conservadores.
+const LIL_UMBRAL_VELOCIDAD_SEMANAL = 20;   // criterio exacto de Amazon: >20 uds/semana = LIL eligible
+const LIL_COBERTURA_OBJETIVO = 42;          // objetivo de cobertura FBA para top sellers (28 Amazon + 2 sem margen)
+const LIL_COBERTURA_MINIMA = 35;            // disparar alerta cuando bajemos de aqui (7 dias antes del umbral Amazon)
+function esLILEligible(velDiaria) {
+  // True si el producto vende >20 uds/semana con velocidad efectiva.
+  // calcularVelocidadEfectiva ya devuelve el maximo razonable entre v7 y v30.
+  return (velDiaria * 7) > LIL_UMBRAL_VELOCIDAD_SEMANAL;
+}
 
 // Lead times TOTAL por proveedor (en dias): tiempo desde que pides al proveedor
 // hasta que el stock ya llega a FBA y se vuelve vendible.
@@ -1300,10 +1312,15 @@ async function cargarAlertas() {
         continue;
       }
 
-      // 1) Manda a FBA si cobertura FBA < 7 dias y hay stock en Moloka
+      // 1) Manda a FBA si cobertura FBA es baja
+      // FIX LIL FEE: top sellers (>20 uds/semana) usan umbrales mas conservadores
+      // para no caer en la tarifa por bajo nivel de inventario de Amazon (LIL fee).
+      const esLIL = esLILEligible(velDiaria);
+      const umbralMin = esLIL ? LIL_COBERTURA_MINIMA : ALERT_COBERTURA_MINIMA;
+      const umbralObj = esLIL ? LIL_COBERTURA_OBJETIVO : ALERT_COBERTURA_OBJETIVO;
       let alertaManda = false;
-      if (cobFba < ALERT_COBERTURA_MINIMA && stockMoloka > 0) {
-        const objetivoUds = Math.round(ALERT_COBERTURA_OBJETIVO * velDiaria);
+      if (cobFba < umbralMin && stockMoloka > 0) {
+        const objetivoUds = Math.round(umbralObj * velDiaria);
         const necesitoEnviar = Math.max(1, objetivoUds - stockFbaEfectivo);
         const enviarReal = Math.min(necesitoEnviar, stockMoloka);
         const itemFba = {
@@ -1314,7 +1331,9 @@ async function cargarAlertas() {
           cobertura_fba_dias: cobFba,
           stock_inbound: stockInbound,
           enviar_uds: enviarReal,
-          stock_moloka_insuficiente: necesitoEnviar > stockMoloka
+          stock_moloka_insuficiente: necesitoEnviar > stockMoloka,
+          es_lil_eligible: esLIL,
+          umbral_objetivo: umbralObj
         };
         const silFba = silenciadasMap[p.id + '|mandar_fba'];
         if (silFba) {
@@ -1334,7 +1353,16 @@ async function cargarAlertas() {
       // 2) Pide al proveedor si cobertura TOTAL < lead time real del proveedor
       const leadTotal = obtenerLeadTotal(p.proveedor);
       if (cobTotal < leadTotal) {
-        const cantidadSugerida = Math.round(velDiaria * 30); // pedir al menos para 1 mes
+        // FIX LIL FEE: para top sellers, la cantidad a pedir debe cubrir:
+        // - Las ventas durante el lead time del proveedor (sino entras en LIL fee)
+        // - + el objetivo de cobertura tras recibir (42d para LIL eligibles, 30d para resto)
+        // - - el stock que ya tienes (Moloka + FBA + inbound)
+        // Asi la cantidad propuesta lleva al producto a salir del riesgo cuando llegue.
+        const coberturaObjetivoTrasRecibir = esLIL ? LIL_COBERTURA_OBJETIVO : 30;
+        const udsConsumeDuranteLead = velDiaria * leadTotal;
+        const udsObjetivoTrasLlegar = velDiaria * coberturaObjetivoTrasRecibir;
+        const udsTotalNecesarias = udsConsumeDuranteLead + udsObjetivoTrasLlegar;
+        const cantidadSugerida = Math.round(Math.max(velDiaria * 30, udsTotalNecesarias - stockTotal));
         const itemProv = {
           ...p,
           vel_diaria: velDiaria,
@@ -1343,7 +1371,9 @@ async function cargarAlertas() {
           cobertura_total_dias: cobTotal,
           stock_inbound: stockInbound,
           lead_time_total: leadTotal,
-          pedir_uds: Math.max(1, cantidadSugerida)
+          pedir_uds: Math.max(1, cantidadSugerida),
+          es_lil_eligible: esLIL,
+          cobertura_objetivo_tras_recibir: coberturaObjetivoTrasRecibir
         };
         const silProv = silenciadasMap[p.id + '|pedir_proveedor'];
         if (silProv) {
@@ -1366,7 +1396,12 @@ async function cargarAlertas() {
     SILENCIADAS_ACTIVAS = silenciadasVisibles;
 
     // Ordenar por urgencia
-    mandaFba.sort((a, b) => a.cobertura_fba_dias - b.cobertura_fba_dias);
+    // Ordenar: LIL eligibles primero (mas criticos), luego por cobertura ascendente
+    mandaFba.sort((a, b) => {
+      if (a.es_lil_eligible && !b.es_lil_eligible) return -1;
+      if (!a.es_lil_eligible && b.es_lil_eligible) return 1;
+      return a.cobertura_fba_dias - b.cobertura_fba_dias;
+    });
     pideProveedor.sort((a, b) => a.cobertura_total_dias - b.cobertura_total_dias);
     sinMovimiento.sort((a, b) => b.valor_inmovilizado - a.valor_inmovilizado);
     estancados.sort((a, b) => b.vel_30d - a.vel_30d);  // mayor vel_30d primero = mayor perdida
@@ -1406,9 +1441,20 @@ async function cargarAlertas() {
           ? '<div class="alert-detail" style="color:var(--red);font-weight:600;margin-top:4px">\u26a0\ufe0f Stock Moloka insuficiente - falta pedir al proveedor</div>'
           : '';
         const inboundTxt = p.stock_inbound > 0 ? ' + <strong style="color:var(--accent)">' + p.stock_inbound + 'u en camino</strong>' : '';
-        return '<div class="alert-card red">' +
+        // FIX LIL FEE: marcado visual para top sellers
+        const esLIL = p.es_lil_eligible === true;
+        const cardStyle = esLIL ? ' style="border-width:3px;box-shadow:0 0 0 1px rgba(220,38,38,0.15)"' : '';
+        const lilBadge = esLIL
+          ? '<div style="position:absolute;top:8px;right:10px;background:#DC2626;color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:0.3px">\ud83d\udd25 ALTA ROTACION</div>'
+          : '';
+        const lilAviso = esLIL
+          ? '<div class="alert-detail" style="color:#DC2626;font-weight:600;margin-top:4px;font-size:11px">\ud83d\udd25 Top seller (>20u/sem) - Mantener cobertura FBA >28d para evitar tarifa Amazon</div>'
+          : '';
+        const objetivoTxt = p.umbral_objetivo || 14;
+        return '<div class="alert-card red" style="position:relative' + (esLIL ? ';border-width:3px;box-shadow:0 0 0 1px rgba(220,38,38,0.15)' : '') + '">' +
+          lilBadge +
           '<div class="alert-icon">\ud83d\udce6</div>' +
-          '<div style="flex:1">' +
+          '<div style="flex:1' + (esLIL ? ';padding-right:80px' : '') + '">' +
             '<div class="alert-title">' + (p.nombre || '') + '</div>' +
             '<div class="alert-detail" style="display:flex;gap:8px;align-items:center;margin-top:3px;flex-wrap:wrap">' +
               (p.ean ? '<span style="font-family:\'DM Mono\',monospace;font-size:11px;background:rgba(0,0,0,0.08);padding:2px 6px;border-radius:4px;cursor:pointer" onclick="navigator.clipboard.writeText(\'' + p.ean + '\');showToast(\'EAN copiado\',\'success\')" title="Clic para copiar">' + p.ean + ' \ud83d\udccb</span>' : '') +
@@ -1417,8 +1463,9 @@ async function cargarAlertas() {
             '</div>' +
             '<div class="alert-detail">FBA: <strong>' + (p.stock_fba||0) + 'u</strong>' + inboundTxt + ' \u00b7 Moloka: <strong>' + (p.stock_moloka||0) + 'u</strong> \u00b7 Vel: ' + p.vel_diaria.toFixed(2) + '/dia ' + tendIcon + '</div>' +
             '<div class="alert-detail">Cobertura FBA: <strong>' + cobTxt + '</strong> \u00b7 Vendidas T30: ' + p.uds_30d + 'u</div>' +
+            lilAviso +
             aviso +
-            '<div class="alert-urgency">\u27a1\ufe0f Manda <strong>' + p.enviar_uds + 'u</strong> a FBA (objetivo 14 dias cobertura)</div>' +
+            '<div class="alert-urgency">\u27a1\ufe0f Manda <strong>' + p.enviar_uds + 'u</strong> a FBA (objetivo ' + objetivoTxt + ' dias cobertura)</div>' +
           '</div>' +
         '</div>';
       }).join('');
@@ -1450,8 +1497,16 @@ async function cargarAlertas() {
           // Escape de comillas simples en nombre y proveedor para el onclick
           const nombreSeguro = (p.nombre || '').replace(/'/g, "\\'");
           const provSeguro = (p.proveedor || '').replace(/'/g, "\\'");
-          return '<div style="padding:8px 12px;border-bottom:1px solid var(--gray-100);font-size:12px">' +
-            '<div style="font-weight:600;color:var(--navy)">' + (p.nombre||'').substring(0,55) + ((p.nombre||'').length>55?'...':'') + '</div>' +
+          // FIX LIL FEE: marcar top sellers con badge
+          const esLIL = p.es_lil_eligible === true;
+          const lilBadge = esLIL
+            ? '<span style="background:#DC2626;color:#fff;font-size:9px;font-weight:700;padding:2px 6px;border-radius:8px;letter-spacing:0.2px;margin-left:6px">\ud83d\udd25 ALTA ROTACION</span>'
+            : '';
+          const objCobTxt = p.cobertura_objetivo_tras_recibir
+            ? ' (cobertura ' + p.cobertura_objetivo_tras_recibir + 'd tras recibir)'
+            : '';
+          return '<div style="padding:8px 12px;border-bottom:1px solid var(--gray-100);font-size:12px' + (esLIL ? ';background:rgba(220,38,38,0.04)' : '') + '">' +
+            '<div style="font-weight:600;color:var(--navy)">' + (p.nombre||'').substring(0,55) + ((p.nombre||'').length>55?'...':'') + lilBadge + '</div>' +
             '<div style="color:var(--gray-500);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap">' +
               (p.ean ? '<span style="font-family:\'DM Mono\',monospace">' + p.ean + '</span>' : '') +
               '<span>FBA:' + (p.stock_fba||0) + inboundTxt + ' Moloka:' + (p.stock_moloka||0) + '</span>' +
@@ -1459,7 +1514,7 @@ async function cargarAlertas() {
               '<span style="color:var(--amber);font-weight:600">Cobertura ' + p.cobertura_total_dias.toFixed(0) + 'd</span>' +
             '</div>' +
             '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;gap:8px;flex-wrap:wrap">' +
-              '<div style="color:var(--navy);font-weight:600">\u27a1\ufe0f Pedir ' + p.pedir_uds + 'u</div>' +
+              '<div style="color:var(--navy);font-weight:600">\u27a1\ufe0f Pedir ' + p.pedir_uds + 'u' + objCobTxt + '</div>' +
               '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
                 '<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px;background:var(--gray-100);color:var(--gray-700);border:1px solid var(--gray-200)" onclick="marcarNoInteresaReponer(\'' + p.id + '\', \'' + nombreSeguro + '\')" title="Silencia 30 dias. Util para slow movers marginales.">\ud83d\udeab No interesa</button>' +
                 '<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px;background:var(--green-light);color:#065F46;border:1px solid var(--green)" onclick="marcarComoPedido(\'' + p.id + '\', \'' + provSeguro + '\', \'' + nombreSeguro + '\')" title="Silencia la alerta durante ' + leadSilencio + ' dias">\u2713 He pedido</button>' +
