@@ -1059,8 +1059,9 @@ const ALERT_LEAD_PROVEEDOR = 30 + 7 + 7;  // 1 mes proveedor + 1 sem FBA + 1 sem
 // Para top sellers, los umbrales normales (12d/21d) son INSUFICIENTES: para cuando saltan,
 // ya estamos pagando LIL fee. Por eso definimos umbrales mas conservadores.
 const LIL_UMBRAL_VELOCIDAD_SEMANAL = 20;   // criterio exacto de Amazon: >20 uds/semana = LIL eligible
-const LIL_COBERTURA_OBJETIVO = 42;          // objetivo de cobertura FBA para top sellers (28 Amazon + 2 sem margen)
-const LIL_COBERTURA_MINIMA = 35;            // disparar alerta cuando bajemos de aqui (7 dias antes del umbral Amazon)
+// 40 dias = 28 (umbral Amazon) + 8 (logistica: 3d procesado + 5d camino) + 4 (margen picos ventas)
+const LIL_COBERTURA_OBJETIVO = 40;          // cobertura FBA objetivo top sellers
+const LIL_COBERTURA_MINIMA = 40;            // disparar alerta cuando bajemos del objetivo
 function esLILEligible(velDiaria) {
   // True si el producto vende >20 uds/semana con velocidad efectiva.
   // calcularVelocidadEfectiva ya devuelve el maximo razonable entre v7 y v30.
@@ -1360,15 +1361,19 @@ async function cargarAlertas() {
         }
       }
 
-      // 2) Pide al proveedor si cobertura TOTAL < lead time real del proveedor
+      // 2) Pide al proveedor
+      // FIX LIL FEE: para top sellers, el umbral no es solo el lead time. Si pides hoy
+      // y el lead son 21d, durante ese tiempo seguiras vendiendo. Necesitas que el stock
+      // aguante el lead + cobertura objetivo (42d para LIL, 30d para resto) sin caer
+      // bajo el umbral 28d de Amazon. Por eso umbral = leadTotal + coberturaObjetivo.
       const leadTotal = obtenerLeadTotal(p.proveedor);
-      if (cobTotal < leadTotal) {
-        // FIX LIL FEE: para top sellers, la cantidad a pedir debe cubrir:
+      const coberturaObjetivoTrasRecibir = esLIL ? LIL_COBERTURA_OBJETIVO : 30;
+      const umbralPedirProveedor = esLIL ? (leadTotal + coberturaObjetivoTrasRecibir) : leadTotal;
+      if (cobTotal < umbralPedirProveedor) {
+        // Calculo de cantidad a pedir:
         // - Las ventas durante el lead time del proveedor (sino entras en LIL fee)
-        // - + el objetivo de cobertura tras recibir (42d para LIL eligibles, 30d para resto)
+        // - + el objetivo de cobertura tras recibir
         // - - el stock que ya tienes (Moloka + FBA + inbound)
-        // Asi la cantidad propuesta lleva al producto a salir del riesgo cuando llegue.
-        const coberturaObjetivoTrasRecibir = esLIL ? LIL_COBERTURA_OBJETIVO : 30;
         const udsConsumeDuranteLead = velDiaria * leadTotal;
         const udsObjetivoTrasLlegar = velDiaria * coberturaObjetivoTrasRecibir;
         const udsTotalNecesarias = udsConsumeDuranteLead + udsObjetivoTrasLlegar;
@@ -1455,16 +1460,14 @@ async function cargarAlertas() {
         const esLIL = p.es_lil_eligible === true;
         const cardStyle = esLIL ? ' style="border-width:3px;box-shadow:0 0 0 1px rgba(220,38,38,0.15)"' : '';
         const lilBadge = esLIL
-          ? '<div style="position:absolute;top:8px;right:10px;background:#DC2626;color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:0.3px">\ud83d\udd25 ALTA ROTACION</div>'
+          ? '<div style="position:absolute;top:8px;right:10px;background:#DC2626;color:#fff;font-size:14px;padding:4px 8px;border-radius:50%;line-height:1" title="Top seller - vigilar tarifa Amazon">\ud83d\udd25</div>'
           : '';
-        const lilAviso = esLIL
-          ? '<div class="alert-detail" style="color:#DC2626;font-weight:600;margin-top:4px;font-size:11px">\ud83d\udd25 Top seller (>20u/sem) - Mantener cobertura FBA >28d para evitar tarifa Amazon</div>'
-          : '';
+        const lilAviso = '';  // Aviso textual eliminado por peticion de Fernando, basta con el badge fuego
         const objetivoTxt = p.umbral_objetivo || 14;
         return '<div class="alert-card red" style="position:relative' + (esLIL ? ';border-width:3px;box-shadow:0 0 0 1px rgba(220,38,38,0.15)' : '') + '">' +
           lilBadge +
           '<div class="alert-icon">\ud83d\udce6</div>' +
-          '<div style="flex:1' + (esLIL ? ';padding-right:80px' : '') + '">' +
+          '<div style="flex:1' + (esLIL ? ';padding-right:35px' : '') + '">' +
             '<div class="alert-title">' + (p.nombre || '') + '</div>' +
             '<div class="alert-detail" style="display:flex;gap:8px;align-items:center;margin-top:3px;flex-wrap:wrap">' +
               (p.ean ? '<span style="font-family:\'DM Mono\',monospace;font-size:11px;background:rgba(0,0,0,0.08);padding:2px 6px;border-radius:4px;cursor:pointer" onclick="navigator.clipboard.writeText(\'' + p.ean + '\');showToast(\'EAN copiado\',\'success\')" title="Clic para copiar">' + p.ean + ' \ud83d\udccb</span>' : '') +
@@ -1510,7 +1513,7 @@ async function cargarAlertas() {
           // FIX LIL FEE: marcar top sellers con badge
           const esLIL = p.es_lil_eligible === true;
           const lilBadge = esLIL
-            ? '<span style="background:#DC2626;color:#fff;font-size:9px;font-weight:700;padding:2px 6px;border-radius:8px;letter-spacing:0.2px;margin-left:6px">\ud83d\udd25 ALTA ROTACION</span>'
+            ? '<span style="font-size:13px;margin-left:6px" title="Top seller - vigilar tarifa Amazon">\ud83d\udd25</span>'
             : '';
           const objCobTxt = p.cobertura_objetivo_tras_recibir
             ? ' (cobertura ' + p.cobertura_objetivo_tras_recibir + 'd tras recibir)'
