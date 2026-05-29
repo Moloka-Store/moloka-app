@@ -1441,6 +1441,9 @@ async function cargarAlertas() {
         const totalUds = items.reduce((s,p) => s + p.pedir_uds, 0);
         const totalEur = items.reduce((s,p) => s + (p.pvd||0) * p.pedir_uds, 0);
         const leadProv = obtenerLeadTotal(prov);
+        // Lead time REAL del proveedor para silencio tras "He pedido": Funkos 7d, primera necesidad 30d.
+        // No confundir con leadProv (lead time TOTAL del ciclo) que se muestra en el header.
+        const leadSilencio = obtenerLeadTimeProveedor(prov);
         const filas = items.map(p => {
           const tendIcon = p.tendencia === 'subiendo' ? '\ud83d\udcc8' : (p.tendencia === 'bajando' ? '\ud83d\udcc9' : '\u27a1\ufe0f');
           const inboundTxt = p.stock_inbound > 0 ? ' Camino:' + p.stock_inbound : '';
@@ -1459,7 +1462,7 @@ async function cargarAlertas() {
               '<div style="color:var(--navy);font-weight:600">\u27a1\ufe0f Pedir ' + p.pedir_uds + 'u</div>' +
               '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
                 '<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px;background:var(--gray-100);color:var(--gray-700);border:1px solid var(--gray-200)" onclick="marcarNoInteresaReponer(\'' + p.id + '\', \'' + nombreSeguro + '\')" title="Silencia 30 dias. Util para slow movers marginales.">\ud83d\udeab No interesa</button>' +
-                '<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px;background:var(--green-light);color:#065F46;border:1px solid var(--green)" onclick="marcarComoPedido(\'' + p.id + '\', \'' + provSeguro + '\', \'' + nombreSeguro + '\')" title="Silencia la alerta durante ' + leadProv + ' dias">\u2713 He pedido</button>' +
+                '<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px;background:var(--green-light);color:#065F46;border:1px solid var(--green)" onclick="marcarComoPedido(\'' + p.id + '\', \'' + provSeguro + '\', \'' + nombreSeguro + '\')" title="Silencia la alerta durante ' + leadSilencio + ' dias">\u2713 He pedido</button>' +
               '</div>' +
             '</div>' +
           '</div>';
@@ -5142,9 +5145,16 @@ async function confirmarFactura() {
     }).select().single();
     if (factError) throw new Error('Creando factura: ' + factError.message);
     // 3. Por cada linea, procesar
+    // Cache: EAN normalizado -> producto_id ya procesado en esta factura.
+    // Sirve para: (Bug B) reutilizar ficha en lugar de crear duplicada cuando la factura
+    // trae 2+ lineas del mismo EAN sin match previo en BD.
+    // Tambien sirve como pista para el Fix Bug A (snapshot estancado): si la 2a linea
+    // apunta al mismo producto_id que la 1a, hay que releer fresco de BD para que los
+    // calculos de stock acumulen correctamente.
+    const _lineEanCache = {};
     let creadas = 0, actualizados = 0, nuevos = 0, consolidados = 0;
     for (const l of _facturaLineas) {
-      const r = await procesarLineaFactura(l, factCreada.id, f.fecha);
+      const r = await procesarLineaFactura(l, factCreada.id, f.fecha, _lineEanCache);
       if (r.creadas) creadas += r.creadas;
       if (r.actualizado) actualizados++;
       if (r.nuevo) nuevos++;
@@ -5164,16 +5174,32 @@ async function confirmarFactura() {
 // ----------------------------------------------------------------
 // 11. PROCESAR UNA LINEA: actualizar producto + crear compras
 // ----------------------------------------------------------------
-async function procesarLineaFactura(linea, facturaId, fecha) {
+async function procesarLineaFactura(linea, facturaId, fecha, eanCache) {
   const resultado = { creadas: 0, actualizado: false, nuevo: false, consolidado: false, repartido: false };
+  // Cache es opcional para retrocompatibilidad. Si no se pasa, se crea uno vacio.
+  if (!eanCache) eanCache = {};
+  // Clave de EAN para el cache: usamos el EAN normalizado (sin 0 inicial).
+  // Si la linea no tiene EAN (HEO/OSMA), usamos ref_proveedor como fallback.
+  const eanKeyRaw = (linea.ean_editado || linea.ean_raw || '').trim();
+  let eanKey = eanKeyRaw;
+  if (eanKey.length === 13 && eanKey.startsWith('0')) eanKey = eanKey.substring(1);
+  if (!eanKey && linea.ref_proveedor) eanKey = (_facturaActual.proveedor || '') + ':' + linea.ref_proveedor;
   // CASO REPARTO: procesado especial, sale antes de la logica estandar
   if (linea.match_estado === 'duplicados' && linea.duplicados_resuelto === 'repartir' && Array.isArray(linea.reparto_fichas)) {
     for (const r of linea.reparto_fichas) {
       const udsFact = r.uds_facturadas || 0;
       const udsFis = r.uds_fisicas || 0;
       if (udsFact <= 0) continue; // ficha no recibe nada en este reparto
-      const ficha = linea.match_productos.find(function(p) { return p.id === r.producto_id; });
+      let ficha = linea.match_productos.find(function(p) { return p.id === r.producto_id; });
       if (!ficha) continue;
+      // FIX BUG A: si esta ficha ya fue tocada por otra linea de la misma factura,
+      // releer fresco de BD para no perder el incremento previo.
+      if (eanCache['_id:' + r.producto_id]) {
+        const { data: fresco } = await db.from('productos')
+          .select('id, ean, asin, nombre, marca, proveedor, pvd, stock_moloka, stock_fba, unidades_compradas, activo, estado, es_chase')
+          .eq('id', r.producto_id).single();
+        if (fresco) ficha = fresco;
+      }
       const stockAntes = ficha.stock_moloka || 0;
       const pvdAntes = ficha.pvd || 0;
       const stockDespues = stockAntes + udsFis;
@@ -5209,6 +5235,9 @@ async function procesarLineaFactura(linea, facturaId, fecha) {
         es_chase: false
       });
       resultado.creadas++;
+      // Marcar la ficha en el cache (por id) para que lineas posteriores
+      // que apunten a la misma releen fresco
+      eanCache['_id:' + r.producto_id] = r.producto_id;
     }
     resultado.actualizado = true;
     resultado.repartido = true;
@@ -5220,6 +5249,15 @@ async function procesarLineaFactura(linea, facturaId, fecha) {
   if (linea.match_estado === 'unico') {
     productoActual = linea.match_productos[0];
     productoId = productoActual.id;
+    // FIX BUG A (snapshot estancado): si una linea anterior de esta misma factura
+    // ya proceso el mismo producto, el objeto productoActual en memoria tiene datos
+    // antiguos. Releemos fresco de BD para que stockAntes / pvdAntes / ucAntes sean correctos.
+    if (eanKey && eanCache[eanKey]) {
+      const { data: fresco } = await db.from('productos')
+        .select('id, ean, asin, nombre, marca, proveedor, pvd, stock_moloka, stock_fba, unidades_compradas, activo, estado, es_chase')
+        .eq('id', productoId).single();
+      if (fresco) productoActual = fresco;
+    }
   }
   // Caso B: hay duplicados, consolidar
   else if (linea.match_estado === 'duplicados') {
@@ -5227,18 +5265,46 @@ async function procesarLineaFactura(linea, facturaId, fecha) {
     productoId = principalId;
     productoActual = linea.match_productos.find(p => p.id === principalId);
     resultado.consolidado = true;
+    // Mismo fix bug A: si ya estaba en cache (otra linea anterior con mismo EAN), refrescar
+    if (eanKey && eanCache[eanKey]) {
+      const { data: fresco } = await db.from('productos')
+        .select('id, ean, asin, nombre, marca, proveedor, pvd, stock_moloka, stock_fba, unidades_compradas, activo, estado, es_chase')
+        .eq('id', productoId).single();
+      if (fresco) productoActual = fresco;
+    }
   }
   // Caso C: producto nuevo
   else if (linea.match_estado === 'no_encontrado') {
-    const nuevoProducto = await crearProductoNuevo(linea);
-    productoId = nuevoProducto.id;
-    productoActual = nuevoProducto;
-    resultado.nuevo = true;
+    // FIX BUG B (fichas duplicadas creadas): si una linea anterior de esta misma factura
+    // ya creo una ficha nueva para este EAN, reutilizamos en lugar de crear otra duplicada.
+    if (eanKey && eanCache[eanKey]) {
+      productoId = eanCache[eanKey];
+      const { data: fresco } = await db.from('productos')
+        .select('id, ean, asin, nombre, marca, proveedor, pvd, stock_moloka, stock_fba, unidades_compradas, activo, estado, es_chase')
+        .eq('id', productoId).single();
+      if (fresco) {
+        productoActual = fresco;
+        resultado.actualizado = true; // reutiliza ficha existente, no es nuevo
+      } else {
+        // Algo raro: el cache apuntaba a una ficha que no existe. Creamos nueva.
+        const nuevoProducto = await crearProductoNuevo(linea);
+        productoId = nuevoProducto.id;
+        productoActual = nuevoProducto;
+        resultado.nuevo = true;
+      }
+    } else {
+      const nuevoProducto = await crearProductoNuevo(linea);
+      productoId = nuevoProducto.id;
+      productoActual = nuevoProducto;
+      resultado.nuevo = true;
+    }
   }
   if (!productoId) {
     console.warn('Linea sin producto_id, saltando:', linea);
     return resultado;
   }
+  // Registrar en cache el producto_id procesado para esta EAN
+  if (eanKey) eanCache[eanKey] = productoId;
 
   // ============================================================
   // PROCESAR UNIDADES REGULAR (al producto regular)
