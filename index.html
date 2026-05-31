@@ -1070,11 +1070,24 @@ function esLILEligible(velDiaria) {
 // Version global de calcularVelocidadEfectiva (la version local dentro del calculo de alertas
 // se mantiene por seguridad). Necesaria para que confirmarEnvioFBA pueda decidir
 // si el silencio post-envio aplica o no.
+//
+// FIX productos acelerando / nuevos: si vel_7d es muy superior a vel_30d, NO promediar
+// porque eso suaviza la realidad reciente. Casos cubiertos:
+//   - Producto nuevo (vel_30d cerca de 0): usar vel_7d directamente
+//   - Producto viral / acelerando fuerte (vel_7d >= 2x vel_30d): usar vel_7d
+//   - Producto acelerando moderado (vel_7d > vel_30d pero <2x): media ponderada como antes
+//   - Producto estable o bajando: vel_30d
 function calcularVelocidadEfectivaGlobal(v) {
   if (!v) return 0;
   const v7 = v.vel_diaria_7d || 0;
   const v30 = v.vel_diaria_30d || 0;
+  // Producto nuevo o restablecido: vel_30d cerca de 0 pero vel_7d activa
+  if (v7 > 0 && v30 < 0.05) return v7;
+  // Producto viral / acelerando fuerte: vel_7d al menos el doble de vel_30d
+  if (v7 >= v30 * 2) return v7;
+  // Producto acelerando moderado: media ponderada (suaviza picos pequenos)
   if (v7 > v30) return (v7 + v30) / 2;
+  // Producto estable o bajando
   return v30;
 }
 
@@ -1264,12 +1277,19 @@ async function cargarAlertas() {
     //   - Si vel_7d > vel_30d (producto acelera) -> media ponderada (vel_7d + vel_30d) / 2
     //     suaviza picos virales sin penalizar la realidad reciente
     //   - Si vel_7d <= vel_30d (estable o bajando) -> usar vel_30d normal
+    //   - FIX productos acelerando fuerte: si vel_7d >= 2x vel_30d (viral) o vel_30d cerca
+    //     de 0 (producto nuevo), usar vel_7d directamente. La media ponderada infravalora
+    //     productos que acaban de empezar a venderse bien.
     function calcularVelocidadEfectiva(v) {
       if (!v) return 0;
       const v7 = v.vel_diaria_7d || 0;
       const v30 = v.vel_diaria_30d || 0;
+      // Producto nuevo o restablecido: vel_30d cerca de 0 pero vel_7d activa -> usar vel_7d
+      if (v7 > 0 && v30 < 0.05) return v7;
+      // Viral / acelerando fuerte: vel_7d al menos el doble -> usar vel_7d
+      if (v7 >= v30 * 2) return v7;
       if (v7 > v30) {
-        // Producto acelerando: media ponderada para suavizar picos virales
+        // Acelerando moderado: media ponderada para suavizar picos pequenos
         return (v7 + v30) / 2;
       }
       return v30;
