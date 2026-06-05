@@ -112,6 +112,10 @@
   .tabs { display: flex; gap: 4px; background: var(--gray-100); padding: 4px; border-radius: 10px; width: fit-content; margin-bottom: 20px; }
   .tab { padding: 8px 18px; border-radius: 7px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; color: var(--gray-500); }
   .tab.active { background: white; color: var(--navy); box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+  .rot-canal-btn { padding: 7px 12px; border: none; background: transparent; border-radius: 7px; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--gray-500); transition: all 0.15s; white-space: nowrap; }
+  .rot-canal-btn.active { background: white; color: var(--navy); box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+  .rot-calc-input { width: 66px; padding: 5px 6px; border: 1px solid var(--gray-200); border-radius: 6px; font-size: 12px; font-family: 'DM Mono', monospace; text-align: right; outline: none; }
+  .rot-calc-input:focus { border-color: var(--navy); background: var(--gray-50); }
 
   /* ALERT CARDS */
   .alert-card { border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; border-left: 4px solid; display: flex; align-items: flex-start; gap: 12px; }
@@ -525,25 +529,36 @@
     </div>
     <div class="card" style="padding:0;overflow:hidden">
       <div style="padding:14px 16px;border-bottom:1px solid var(--gray-200);display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <input type="text" id="rot-buscar" placeholder="🔍 Buscar producto, EAN o ASIN..." oninput="renderRotacion()" style="flex:1;min-width:240px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">
+        <div style="display:flex;gap:4px;background:var(--gray-100);padding:4px;border-radius:10px">
+          <button class="rot-canal-btn active" data-canal="ES" onclick="cambiarCanalRotacion('ES')">🇪🇸 Amazon ES</button>
+          <button class="rot-canal-btn" data-canal="IT" onclick="cambiarCanalRotacion('IT')">🇮🇹 IT</button>
+          <button class="rot-canal-btn" data-canal="FR" onclick="cambiarCanalRotacion('FR')">🇫🇷 FR</button>
+          <button class="rot-canal-btn" data-canal="MIRAVIA" onclick="cambiarCanalRotacion('MIRAVIA')">🛒 Miravia</button>
+        </div>
+        <input type="text" id="rot-buscar" placeholder="🔍 Buscar..." oninput="renderRotacion()" style="flex:1;min-width:180px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">
         <span style="font-size:12px;color:var(--gray-500)" id="rot-contador">—</span>
+        <button class="btn btn-ghost btn-sm" onclick="exportarCambiosPrecios()" title="Descarga un Excel con los precios que has cambiado, para aplicarlos en el Seller">📥 Exportar cambios</button>
       </div>
       <div class="table-wrap" style="max-height:75vh;overflow:auto">
         <table id="rot-tabla">
           <thead style="position:sticky;top:0;background:white;z-index:10">
             <tr>
               <th>Producto</th>
-              <th style="text-align:center">EAN</th>
               <th style="text-align:center">Moloka</th>
               <th style="text-align:center">FBA</th>
               <th style="text-align:center">Tránsito</th>
               <th style="text-align:right">T7</th>
               <th style="text-align:right">T30</th>
-              <th style="text-align:right">T90</th>
-              <th style="text-align:right">Margen abril</th>
+              <th style="text-align:right">PVD</th>
+              <th style="text-align:center">Precio venta</th>
+              <th style="text-align:center">% Com.</th>
+              <th style="text-align:center">Envío</th>
+              <th style="text-align:center">Almacén</th>
+              <th style="text-align:right">Margen</th>
+              <th style="text-align:center">Buy Box</th>
             </tr>
           </thead>
-          <tbody id="rot-tbody"><tr><td colspan="9"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr></tbody>
+          <tbody id="rot-tbody"><tr><td colspan="13"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr></tbody>
         </table>
       </div>
     </div>
@@ -1498,7 +1513,7 @@ async function cargarAlertas() {
         const esLIL = p.es_lil_eligible === true;
         const cardStyle = esLIL ? ' style="border-width:3px;box-shadow:0 0 0 1px rgba(220,38,38,0.15)"' : '';
         const lilBadge = esLIL
-          ? '<div style="position:absolute;top:8px;right:10px;background:#DC2626;color:#fff;font-size:14px;padding:4px 8px;border-radius:50%;line-height:1" title="Top seller - vigilar tarifa Amazon">\ud83d\udd25</div>'
+          ? '<div style="position:absolute;top:8px;right:10px;font-size:18px;line-height:1" title="Top seller - vigilar tarifa Amazon">\ud83d\udd25</div>'
           : '';
         const lilAviso = '';  // Aviso textual eliminado por peticion de Fernando, basta con el badge fuego
         const objetivoTxt = p.umbral_objetivo || 14;
@@ -1759,12 +1774,14 @@ async function desSilenciar(silenciadoId) {
 // ROTACION DE VENTAS
 // ============================================================
 let ROTACION_DATOS = null;
+let ROTACION_MAP = {};
+let ROTACION_CANAL = 'ES';
 
 async function cargarRotacion() {
   try {
     // Cargar en paralelo: productos activos + velocidades + rentabilidad
     const [prodResult, vel, rent] = await Promise.all([
-      db.from('productos').select('id, sku, asin, ean, nombre, stock_moloka, stock_fba, stock_inbound, proveedor, es_chase').eq('activo', true).neq('estado', 'DESCATALOGADO'),
+      db.from('productos').select('id, sku, asin, ean, nombre, stock_moloka, stock_fba, stock_inbound, proveedor, es_chase, pvd, precio_venta, comision_pct, comision_envio, iva_pct').eq('activo', true).neq('estado', 'DESCATALOGADO'),
       cargarVelocidades(),
       cargarRentData()
     ]);
@@ -1798,6 +1815,16 @@ async function cargarRotacion() {
     const filas = productos.map(p => {
       const v = p.sku ? velMap[p.sku] : null;
       const margen = p.asin ? margenAbril[p.asin] : null;
+      // Datos para la calculadora (canal ES). Fuente principal: informe de transacciones
+      // (precio/comision/envio REALES de lo que se vendio). Respaldo: campos de la ficha. Si no, null.
+      const realVenta = p.asin ? obtenerDatosVentaReal(p.asin) : null;
+      const precioVenta = (realVenta && realVenta.precio_venta != null) ? realVenta.precio_venta
+                        : ((p.precio_venta != null) ? p.precio_venta : null);
+      const comPct = (realVenta && realVenta.comision_pct != null) ? realVenta.comision_pct
+                   : ((p.comision_pct != null) ? +(p.comision_pct * 100).toFixed(2) : null);
+      const envio = (realVenta && realVenta.envio != null) ? realVenta.envio
+                  : ((p.comision_envio != null) ? p.comision_envio : null);
+      const ivaPct = (p.iva_pct != null) ? +(p.iva_pct * 100).toFixed(2) : 21;
       return {
         id: p.id,
         nombre: p.nombre || '',
@@ -1815,7 +1842,14 @@ async function cargarRotacion() {
         tendencia: v ? v.tendencia : 'sin_ventas',
         margen_pct: margen ? margen.margen_pct : null,
         beneficio_abr: margen ? margen.beneficio : null,
-        uds_abr: margen ? margen.uds : 0
+        uds_abr: margen ? margen.uds : 0,
+        // Calculadora (ES)
+        pvd: (p.pvd != null) ? p.pvd : null,
+        precio_venta: precioVenta,
+        precio_venta_original: precioVenta,
+        comision_pct: comPct,
+        comision_envio: envio,
+        iva_pct: ivaPct
       };
     });
 
@@ -1823,6 +1857,8 @@ async function cargarRotacion() {
     filas.sort((a, b) => b.uds_7d - a.uds_7d);
 
     ROTACION_DATOS = filas;
+    ROTACION_MAP = {};
+    filas.forEach(f => { ROTACION_MAP[f.id] = f; });
 
     // Sub con fecha
     if (vel && vel.fecha_calculo) {
@@ -1830,7 +1866,7 @@ async function cargarRotacion() {
       const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
       const fechaTxt = partes.length === 3 ? parseInt(partes[2],10) + ' de ' + (meses[parseInt(partes[1],10)-1] || '') + ' de ' + partes[0] : vel.fecha_calculo;
       const sub = document.getElementById('rot-sub');
-      if (sub) sub.textContent = filas.length + ' productos activos \u00b7 Ventas hasta ' + fechaTxt + ' \u00b7 Margen del ultimo mes cerrado (abril)';
+      if (sub) sub.textContent = filas.length + ' productos activos \u00b7 Ventas hasta ' + fechaTxt;
     }
 
     renderRotacion();
@@ -1843,6 +1879,21 @@ async function cargarRotacion() {
 
 function renderRotacion() {
   if (!ROTACION_DATOS) return;
+
+  // Canales IT/FR/Miravia: pendientes de precios/comisiones por canal (paquete de canales)
+  if (ROTACION_CANAL !== 'ES') {
+    const tb = document.getElementById('rot-tbody');
+    const nombreCanal = ROTACION_CANAL === 'IT' ? 'Italia' : (ROTACION_CANAL === 'FR' ? 'Francia' : 'Miravia');
+    if (tb) tb.innerHTML = '<tr><td colspan="13" style="padding:40px;text-align:center;color:var(--gray-500)">' +
+      '<div style="font-size:32px;margin-bottom:10px">\ud83d\udea7</div>' +
+      '<div style="font-weight:600;color:var(--navy);margin-bottom:6px">Canal ' + nombreCanal + ' \u2014 pendiente</div>' +
+      '<div style="font-size:13px;max-width:500px;margin:0 auto">Este canal necesita sus propios precios y comisiones, que todav\u00eda no est\u00e1n en la base de datos. Forma parte del paquete de canales (FR/IT/Miravia) que tenemos pendiente. Por ahora la calculadora funciona con Amazon ES.</div>' +
+      '</td></tr>';
+    const cont = document.getElementById('rot-contador');
+    if (cont) cont.textContent = '\u2014';
+    return;
+  }
+
   const buscar = (document.getElementById('rot-buscar').value || '').toLowerCase().trim();
   let filas = ROTACION_DATOS;
   if (buscar) {
@@ -1858,46 +1909,126 @@ function renderRotacion() {
 
   const tbody = document.getElementById('rot-tbody');
   if (filas.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="9" style="color:var(--gray-400);padding:20px;text-align:center">Sin resultados</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="13" style="color:var(--gray-400);padding:20px;text-align:center">Sin resultados</td></tr>';
     return;
   }
 
   tbody.innerHTML = filas.map(f => {
-    // Color margen
-    let margenHtml = '<span style="color:var(--gray-300)">\u2014</span>';
-    if (f.margen_pct !== null && f.margen_pct !== undefined) {
-      const m = f.margen_pct;
-      const color = m >= 10 ? 'var(--green)' : (m >= 0 ? 'var(--amber)' : 'var(--red)');
-      const benTxt = f.beneficio_abr !== null ? ' <span style="font-size:10px;color:var(--gray-400)">(' + f.beneficio_abr.toFixed(0) + '\u20ac)</span>' : '';
-      margenHtml = '<strong style="color:' + color + '">' + m.toFixed(1) + '%</strong>' + benTxt;
-    }
-
-    // Tendencia icono al lado de T7
     const tendIcon = f.tendencia === 'subiendo' ? ' <span title="Subiendo">\ud83d\udcc8</span>' : (f.tendencia === 'bajando' ? ' <span title="Bajando">\ud83d\udcc9</span>' : '');
-
-    // Inbound destacado
     const inboundHtml = f.stock_inbound > 0
       ? '<span style="color:var(--accent);font-weight:600">\ud83d\ude9a ' + f.stock_inbound + '</span>'
       : '<span style="color:var(--gray-300)">\u2014</span>';
-
-    const eanHtml = f.ean
-      ? '<span style="font-family:\'DM Mono\',monospace;font-size:11px;background:rgba(0,0,0,0.05);padding:2px 6px;border-radius:4px;cursor:pointer" onclick="event.stopPropagation();navigator.clipboard.writeText(\'' + f.ean + '\');showToast(\'EAN copiado\',\'success\')" title="Clic para copiar">' + f.ean + '</span>'
-      : '<span style="color:var(--gray-300)">\u2014</span>';
-
     const chaseTag = f.es_chase ? ' <span style="background:#8b5cf6;color:white;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:4px">CHASE</span>' : '';
 
+    const pvdTxt = (f.pvd != null) ? f.pvd.toFixed(2) + '\u20ac' : '<span style="color:var(--gray-300)">\u2014</span>';
+    const almacen = 0.15;
+    const pvVal  = (f.precio_venta != null) ? f.precio_venta : '';
+    const comVal = (f.comision_pct != null) ? f.comision_pct : '';
+    const envVal = (f.comision_envio != null) ? f.comision_envio : '';
+
+    const calc = calcMargenRot(f.pvd, f.precio_venta, f.comision_pct, f.comision_envio, almacen, f.iva_pct);
+    const margenHtml = renderMargenCelda(calc);
+
     return '<tr>' +
-      '<td><div class="td-main">' + (f.nombre.substring(0,55)) + (f.nombre.length>55?'...':'') + chaseTag + '</div><div class="td-sub" style="font-family:\'DM Mono\',monospace;font-size:11px">' + (f.asin || 'sin asin') + '</div></td>' +
-      '<td style="text-align:center">' + eanHtml + '</td>' +
-      '<td style="text-align:center;font-weight:' + (f.stock_moloka > 0 ? '700' : '400') + ';color:' + (f.stock_moloka > 0 ? 'var(--navy)' : 'var(--gray-400)') + '">' + f.stock_moloka + '</td>' +
-      '<td style="text-align:center;font-weight:' + (f.stock_fba > 0 ? '700' : '400') + ';color:' + (f.stock_fba > 0 ? 'var(--navy)' : 'var(--gray-400)') + '">' + f.stock_fba + '</td>' +
+      '<td><div class="td-main">' + (f.nombre.substring(0,48)) + (f.nombre.length>48?'...':'') + chaseTag + '</div><div class="td-sub" style="font-family:\'DM Mono\',monospace;font-size:11px">' + (f.asin || 'sin asin') + '</div></td>' +
+      '<td style="text-align:center;font-weight:' + (f.stock_moloka>0?'700':'400') + ';color:' + (f.stock_moloka>0?'var(--navy)':'var(--gray-400)') + '">' + f.stock_moloka + '</td>' +
+      '<td style="text-align:center;font-weight:' + (f.stock_fba>0?'700':'400') + ';color:' + (f.stock_fba>0?'var(--navy)':'var(--gray-400)') + '">' + f.stock_fba + '</td>' +
       '<td style="text-align:center">' + inboundHtml + '</td>' +
-      '<td style="text-align:right;font-weight:600;color:' + (f.uds_7d > 0 ? 'var(--navy)' : 'var(--gray-400)') + '">' + f.uds_7d + tendIcon + '</td>' +
-      '<td style="text-align:right;color:' + (f.uds_30d > 0 ? 'var(--gray-700)' : 'var(--gray-400)') + '">' + f.uds_30d + '</td>' +
-      '<td style="text-align:right;color:' + (f.uds_90d > 0 ? 'var(--gray-700)' : 'var(--gray-400)') + '">' + f.uds_90d + '</td>' +
-      '<td style="text-align:right">' + margenHtml + '</td>' +
+      '<td style="text-align:right;font-weight:600;color:' + (f.uds_7d>0?'var(--navy)':'var(--gray-400)') + '">' + f.uds_7d + tendIcon + '</td>' +
+      '<td style="text-align:right;color:' + (f.uds_30d>0?'var(--gray-700)':'var(--gray-400)') + '">' + f.uds_30d + '</td>' +
+      '<td style="text-align:right;font-family:\'DM Mono\',monospace;font-size:12px;color:var(--gray-600)">' + pvdTxt + '</td>' +
+      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvVal + '" placeholder="\u2014" id="rot-pv-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
+      '<td style="text-align:center"><input class="rot-calc-input" style="width:52px" type="number" step="0.1" min="0" value="' + comVal + '" placeholder="\u2014" id="rot-com-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
+      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + envVal + '" placeholder="\u2014" id="rot-env-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
+      '<td style="text-align:center"><input class="rot-calc-input" style="width:52px" type="number" step="0.01" min="0" value="' + almacen + '" id="rot-alm-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
+      '<td style="text-align:right" id="rot-margen-' + f.id + '">' + margenHtml + '</td>' +
+      '<td style="text-align:center;color:var(--gray-300)" title="Pr\u00f3ximamente v\u00eda Keepa">\u2014</td>' +
     '</tr>';
   }).join('');
+}
+
+// Formula validada (replica el Excel de Fernando):
+//   base = precio_venta / (1 + IVA)
+//   comision_amazon = %comision * precio_venta   (comision base, sin IVA)
+//   beneficio = base - PVD - comision_amazon - envio - almacen
+//   margen = beneficio / precio_venta
+// Devuelve null si falta algun dato imprescindible (no inventa).
+function calcMargenRot(pvd, precioVenta, comPct, envio, almacen, ivaPct) {
+  const pv = parseFloat(precioVenta);
+  if (isNaN(pv) || pv <= 0) return null;
+  if (pvd == null || isNaN(parseFloat(pvd))) return null;
+  const com = parseFloat(comPct); if (isNaN(com)) return null;
+  const env = parseFloat(envio); if (isNaN(env)) return null;
+  const iva = (ivaPct != null && !isNaN(parseFloat(ivaPct))) ? parseFloat(ivaPct) : 21;
+  const alm = (almacen != null && !isNaN(parseFloat(almacen))) ? parseFloat(almacen) : 0;
+  const base = pv / (1 + iva / 100);
+  const comAmazon = (com / 100) * pv;
+  const beneficio = base - parseFloat(pvd) - comAmazon - env - alm;
+  return { beneficio: beneficio, margen: beneficio / pv * 100 };
+}
+
+function renderMargenCelda(calc) {
+  if (!calc) return '<span style="color:var(--gray-300)" title="Faltan datos (PVD, precio, comisi\u00f3n o env\u00edo)">\u2014</span>';
+  const m = calc.margen;
+  const color = m >= 10 ? 'var(--green)' : (m >= 0 ? 'var(--amber)' : 'var(--red)');
+  return '<strong style="color:' + color + '">' + m.toFixed(1) + '%</strong>';
+}
+
+// Recalcula SOLO la celda de margen de una fila (no re-renderiza -> no pierde el foco al escribir)
+function recalcularMargenFila(id) {
+  const f = ROTACION_MAP[id];
+  if (!f) return;
+  const pv  = document.getElementById('rot-pv-' + id).value;
+  const com = document.getElementById('rot-com-' + id).value;
+  const env = document.getElementById('rot-env-' + id).value;
+  const alm = document.getElementById('rot-alm-' + id).value;
+  const calc = calcMargenRot(f.pvd, pv, com, env, alm, f.iva_pct);
+  const celda = document.getElementById('rot-margen-' + id);
+  if (celda) celda.innerHTML = renderMargenCelda(calc);
+}
+
+function cambiarCanalRotacion(canal) {
+  ROTACION_CANAL = canal;
+  document.querySelectorAll('.rot-canal-btn').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-canal') === canal);
+  });
+  renderRotacion();
+}
+
+// Exporta a Excel los productos cuyo precio de venta se ha cambiado respecto al original
+function exportarCambiosPrecios() {
+  if (ROTACION_CANAL !== 'ES') { showToast('Solo disponible en Amazon ES por ahora', 'warning'); return; }
+  if (!ROTACION_DATOS) return;
+  const cambios = [];
+  ROTACION_DATOS.forEach(f => {
+    const inp = document.getElementById('rot-pv-' + f.id);
+    if (!inp) return;
+    const nuevo = parseFloat(inp.value);
+    if (isNaN(nuevo)) return;
+    const original = (f.precio_venta_original != null) ? f.precio_venta_original : null;
+    if (original == null || Math.abs(nuevo - original) >= 0.01) {
+      const com = parseFloat(document.getElementById('rot-com-' + f.id).value);
+      const env = parseFloat(document.getElementById('rot-env-' + f.id).value);
+      const alm = parseFloat(document.getElementById('rot-alm-' + f.id).value);
+      const calc = calcMargenRot(f.pvd, nuevo, com, env, alm, f.iva_pct);
+      cambios.push({
+        Producto: f.nombre,
+        ASIN: f.asin || '',
+        SKU: f.sku || '',
+        EAN: f.ean || '',
+        'Precio anterior': (original != null) ? original.toFixed(2) : '(sin precio)',
+        'Precio nuevo': nuevo.toFixed(2),
+        'Margen nuevo': calc ? calc.margen.toFixed(1) + '%' : '\u2014'
+      });
+    }
+  });
+  if (cambios.length === 0) { showToast('No has cambiado ningun precio', 'warning'); return; }
+  const ws = XLSX.utils.json_to_sheet(cambios);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Cambios precio');
+  const hoy = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, 'Cambios_precio_ES_' + hoy + '.xlsx');
+  showToast(cambios.length + ' cambio(s) exportado(s)', 'success');
 }
 
 // ============================================================
@@ -3483,6 +3614,32 @@ function obtenerTarifaEnvioReal(asin) {
       return {
         tarifa: prod.logistica_fba / prod.unidades,
         unidades: prod.unidades,
+        mes: mes.mes
+      };
+    }
+  }
+  return null;
+}
+
+// Saca precio de venta, % comision y envio REALES del informe de transacciones (rentabilidad.json),
+// del mes mas reciente con ventas. Solo ES (rentabilidad.json es solo-ES). No inventa: null si no hay.
+//   precio_venta  = facturado_iva / unidades        (precio medio con IVA realmente cobrado)
+//   comision_pct  = comision_amazon / facturado_iva  (% sobre precio con IVA, coincide con la formula)
+//   envio         = logistica_fba / unidades
+function obtenerDatosVentaReal(asin) {
+  if (!asin || !RENT_DATA || !RENT_DATA.meses) return null;
+  for (let i = RENT_DATA.meses.length - 1; i >= 0; i--) {
+    const mes = RENT_DATA.meses[i];
+    if (!mes || !mes.productos) continue;
+    const prod = mes.productos.find(function(p) { return p.asin === asin; });
+    if (prod && prod.unidades > 0 && prod.facturado_iva > 0) {
+      const precio = prod.facturado_iva / prod.unidades;
+      const comPct = (prod.comision_amazon != null) ? (prod.comision_amazon / prod.facturado_iva * 100) : null;
+      const envio = (prod.logistica_fba != null) ? (prod.logistica_fba / prod.unidades) : null;
+      return {
+        precio_venta: +precio.toFixed(2),
+        comision_pct: (comPct != null) ? +comPct.toFixed(2) : null,
+        envio: (envio != null) ? +envio.toFixed(2) : null,
         mes: mes.mes
       };
     }
