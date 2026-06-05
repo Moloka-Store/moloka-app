@@ -531,10 +531,10 @@
     <div class="card" style="padding:0;overflow:hidden">
       <div style="padding:14px 16px;border-bottom:1px solid var(--gray-200);display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <div style="display:flex;gap:4px;background:var(--gray-100);padding:4px;border-radius:10px">
-          <button class="rot-canal-btn active" data-canal="ES" onclick="cambiarCanalRotacion('ES')">🇪🇸 Amazon ES</button>
-          <button class="rot-canal-btn" data-canal="IT" onclick="cambiarCanalRotacion('IT')">🇮🇹 Amazon IT</button>
-          <button class="rot-canal-btn" data-canal="FR" onclick="cambiarCanalRotacion('FR')">🇫🇷 Amazon FR</button>
-          <button class="rot-canal-btn" data-canal="MIRAVIA" onclick="cambiarCanalRotacion('MIRAVIA')">🛒 Miravia</button>
+          <button class="rot-canal-btn active" data-canal="ES" onclick="cambiarCanalRotacion('ES')">Amazon ES</button>
+          <button class="rot-canal-btn" data-canal="IT" onclick="cambiarCanalRotacion('IT')">Amazon IT</button>
+          <button class="rot-canal-btn" data-canal="FR" onclick="cambiarCanalRotacion('FR')">Amazon FR</button>
+          <button class="rot-canal-btn" data-canal="MIRAVIA" onclick="cambiarCanalRotacion('MIRAVIA')">Miravia</button>
         </div>
         <input type="text" id="rot-buscar" placeholder="🔍 Buscar..." oninput="renderRotacion()" style="flex:1;min-width:180px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">
         <span style="font-size:12px;color:var(--gray-500)" id="rot-contador">—</span>
@@ -1783,7 +1783,7 @@ async function cargarRotacion() {
   try {
     // Cargar en paralelo: productos activos + velocidades + rentabilidad
     const [prodResult, vel, rent] = await Promise.all([
-      db.from('productos').select('id, sku, asin, ean, nombre, stock_moloka, stock_fba, stock_inbound, proveedor, es_chase, pvd, precio_venta, comision_pct, comision_envio, iva_pct, coste_almacen').eq('activo', true).neq('estado', 'DESCATALOGADO'),
+      db.from('productos').select('id, sku, asin, ean, nombre, stock_moloka, stock_fba, stock_inbound, proveedor, es_chase, pvd, precio_venta, comision_pct, comision_envio, iva_pct, coste_almacen, buy_box').eq('activo', true).neq('estado', 'DESCATALOGADO'),
       cargarVelocidades(),
       cargarRentData()
     ]);
@@ -1852,7 +1852,8 @@ async function cargarRotacion() {
         comision_pct: comPct,
         comision_envio: envio,
         iva_pct: ivaPct,
-        coste_almacen: (p.coste_almacen != null) ? p.coste_almacen : null
+        coste_almacen: (p.coste_almacen != null) ? p.coste_almacen : null,
+        buy_box: (p.buy_box != null) ? p.buy_box : null
       };
     });
 
@@ -1924,7 +1925,7 @@ function renderRotacion() {
     const chaseTag = f.es_chase ? ' <span style="background:#8b5cf6;color:white;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:4px">CHASE</span>' : '';
 
     const almacen = (f.coste_almacen != null) ? f.coste_almacen : 0.15;
-    const pvdVal = (f.pvd != null) ? f.pvd : '';
+    const pvdVal = (f.pvd != null) ? f.pvd.toFixed(2) : '';
     const pvVal  = (f.precio_venta != null) ? f.precio_venta : '';
     const comVal = (f.comision_pct != null) ? f.comision_pct : '';
     const envVal = (f.comision_envio != null) ? f.comision_envio : '';
@@ -1932,6 +1933,13 @@ function renderRotacion() {
     const calc = calcMargenRot(f.pvd, f.precio_venta, f.comision_pct, f.comision_envio, almacen, f.iva_pct);
     const margenHtml = renderMargenCelda(calc);
     const tarifasHtml = renderTarifasCelda(calc);
+    // Buy Box: precio actual de mercado (via Keepa). Verde si tu precio es competitivo, rojo si estas por encima.
+    let bbHtml = '<span style="color:var(--gray-300)" title="Pendiente del feed de Keepa">\u2014</span>';
+    if (f.buy_box != null) {
+      let bbColor = 'var(--gray-600)';
+      if (f.precio_venta != null) bbColor = (f.precio_venta > f.buy_box + 0.01) ? 'var(--red)' : 'var(--green)';
+      bbHtml = '<span style="font-family:\'DM Mono\',monospace;font-size:12px;color:' + bbColor + '">' + f.buy_box.toFixed(2) + '\u20ac</span>';
+    }
 
     return '<tr>' +
       '<td><div class="td-main">' + (f.nombre.substring(0,48)) + (f.nombre.length>48?'...':'') + chaseTag + '</div><div class="td-sub" style="font-family:\'DM Mono\',monospace;font-size:11px">' + (f.asin || 'sin asin') + '</div></td>' +
@@ -1942,7 +1950,7 @@ function renderRotacion() {
       '<td style="text-align:right;color:' + (f.uds_30d>0?'var(--gray-700)':'var(--gray-400)') + '">' + f.uds_30d + '</td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvdVal + '" placeholder="\u2014" id="rot-pvd-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvVal + '" placeholder="\u2014" id="rot-pv-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
-      '<td style="text-align:center;color:var(--gray-300)" id="rot-bb-' + f.id + '" title="Pr\u00f3ximamente v\u00eda Keepa">\u2014</td>' +
+      '<td style="text-align:center" id="rot-bb-' + f.id + '">' + bbHtml + '</td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.1" min="0" value="' + comVal + '" placeholder="\u2014" id="rot-com-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + envVal + '" placeholder="\u2014" id="rot-env-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center" id="rot-tar-' + f.id + '">' + tarifasHtml + '</td>' +
