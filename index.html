@@ -249,8 +249,8 @@
       <span class="nav-icon">⚠️</span> Alertas
       <span class="nav-badge" id="badge-alertas" style="display:none">0</span>
     </div>
-    <div class="nav-item" data-page="inventario" onclick="showPage('inventario',this)">
-      <span class="nav-icon">📦</span> Inventario
+    <div class="nav-item" data-page="rotacion" onclick="showPage('rotacion',this)">
+      <span class="nav-icon">🔄</span> Rotación de ventas
     </div>
     <div class="nav-item" data-page="entrada" onclick="showPage('entrada',this)">
       <span class="nav-icon">🔄</span> Entrada mercancía
@@ -268,8 +268,8 @@
       <span class="nav-icon">📝</span> Tareas
       <span class="nav-badge amber" id="badge-tareas" style="display:none">0</span>
     </div>
-    <div class="nav-item" data-page="rotacion" onclick="showPage('rotacion',this)">
-      <span class="nav-icon">🔄</span> Rotación de ventas
+    <div class="nav-item" data-page="inventario" onclick="showPage('inventario',this)">
+      <span class="nav-icon">📦</span> Inventario
     </div>
     <div class="nav-item" data-page="rentabilidad" onclick="showPage('rentabilidad',this)">
       <span class="nav-icon">📊</span> Rentabilidad
@@ -472,8 +472,8 @@
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Referencia</th><th>Fecha</th><th style="text-align:center">Unidades</th><th style="text-align:center">Productos</th><th>Estado</th><th></th></tr></thead>
-        <tbody id="envios-tbody"><tr><td colspan="6"><div class="loading-state"><div class="big-loader"></div></div></td></tr></tbody>
+        <thead><tr><th>Referencia</th><th>Fecha</th><th style="text-align:center">Unidades</th><th style="text-align:center">Productos</th><th style="text-align:center">Bultos · Peso</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="envios-tbody"><tr><td colspan="7"><div class="loading-state"><div class="big-loader"></div></div></td></tr></tbody>
       </table>
     </div>
   </div>
@@ -796,12 +796,33 @@
       <span style="font-size:12px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px">Total</span>
       <span style="font-size:18px;font-weight:700;color:var(--navy);margin-left:10px" id="env-detalle-total">0 unidades</span>
     </div>
+    <div id="env-detalle-cajas-wrap" style="background:var(--gray-50);padding:10px 14px;border-radius:8px;margin-bottom:14px;display:none">
+      <span style="font-size:12px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px">Cajas maestras (para UPS)</span>
+      <span style="font-size:18px;font-weight:700;color:var(--navy);margin-left:10px" id="env-detalle-cajas"></span>
+      <div id="env-detalle-cajas-detalle" style="font-size:12px;color:var(--gray-500);margin-top:4px"></div>
+    </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
       <button class="btn btn-ghost btn-sm" onclick="cambiarEstadoEnvio('preparado')">Marcar Preparado</button>
       <button class="btn btn-ghost btn-sm" onclick="cambiarEstadoEnvio('enviado')">Marcar Enviado</button>
       <button class="btn btn-ghost btn-sm" onclick="cambiarEstadoEnvio('recibido')">Marcar Recibido en Amazon</button>
       <button class="btn btn-primary btn-sm" onclick="redescargarEnvioPDF()">📄 Descargar PDF</button>
       <button class="btn btn-ghost btn-sm" onclick="closeModal('modal-detalle-envio')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL PESO DE CAJAS MAESTRAS (al confirmar envio) -->
+<div class="modal-overlay" id="modal-cajas-envio">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-title">📦 Confirmar envío FBA</div>
+    <div style="font-size:13px;color:var(--gray-500);margin-bottom:14px">Vas a enviar <strong id="cajas-resumen"></strong>. Añade el peso de cada caja maestra para tenerlo en Envíos pasados (lo que te pide UPS).</div>
+    <div class="input-label" style="margin-bottom:6px">Cajas maestras (peso en kg)</div>
+    <div id="cajas-lista"></div>
+    <button class="btn btn-ghost btn-sm" onclick="agregarCajaModal()" style="margin-top:6px">+ Añadir caja</button>
+    <div id="cajas-total" style="margin-top:14px;font-weight:700;color:var(--navy);font-size:16px;text-align:center;background:var(--gray-50);padding:10px;border-radius:8px"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="cancelarCajasEnvio()">Cancelar</button>
+      <button class="btn btn-green" onclick="confirmarCajasEnvio()">✓ Confirmar envío</button>
     </div>
   </div>
 </div>
@@ -1432,11 +1453,8 @@ async function cargarAlertas() {
 
     // Ordenar por urgencia
     // Ordenar: LIL eligibles primero (mas criticos), luego por cobertura ascendente
-    mandaFba.sort((a, b) => {
-      if (a.es_lil_eligible && !b.es_lil_eligible) return -1;
-      if (!a.es_lil_eligible && b.es_lil_eligible) return 1;
-      return a.cobertura_fba_dias - b.cobertura_fba_dias;
-    });
+    // Orden: todos por velocidad de venta de mayor a menor (los de alta velocidad quedan arriba)
+    mandaFba.sort((a, b) => b.vel_diaria - a.vel_diaria);
     pideProveedor.sort((a, b) => a.cobertura_total_dias - b.cobertura_total_dias);
     sinMovimiento.sort((a, b) => b.valor_inmovilizado - a.valor_inmovilizado);
     estancados.sort((a, b) => b.vel_30d - a.vel_30d);  // mayor vel_30d primero = mayor perdida
@@ -1484,7 +1502,7 @@ async function cargarAlertas() {
           : '';
         const lilAviso = '';  // Aviso textual eliminado por peticion de Fernando, basta con el badge fuego
         const objetivoTxt = p.umbral_objetivo || 14;
-        return '<div class="alert-card red" style="position:relative' + (esLIL ? ';border-width:3px;box-shadow:0 0 0 1px rgba(220,38,38,0.15)' : '') + '">' +
+        return '<div class="alert-card red" style="position:relative">' +
           lilBadge +
           '<div class="alert-icon">\ud83d\udce6</div>' +
           '<div style="flex:1' + (esLIL ? ';padding-right:35px' : '') + '">' +
@@ -1538,10 +1556,10 @@ async function cargarAlertas() {
           const objCobTxt = p.cobertura_objetivo_tras_recibir
             ? ' (cobertura ' + p.cobertura_objetivo_tras_recibir + 'd tras recibir)'
             : '';
-          return '<div style="padding:8px 12px;border-bottom:1px solid var(--gray-100);font-size:12px' + (esLIL ? ';background:rgba(220,38,38,0.04)' : '') + '">' +
+          return '<div style="padding:8px 12px;border-bottom:1px solid var(--gray-100);font-size:12px">' +
             '<div style="font-weight:600;color:var(--navy)">' + (p.nombre||'').substring(0,55) + ((p.nombre||'').length>55?'...':'') + lilBadge + '</div>' +
             '<div style="color:var(--gray-500);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap">' +
-              (p.ean ? '<span style="font-family:\'DM Mono\',monospace">' + p.ean + '</span>' : '') +
+              (p.ean ? '<span style="font-family:\'DM Mono\',monospace;cursor:pointer" onclick="navigator.clipboard.writeText(\'' + p.ean + '\');showToast(\'EAN copiado\',\'success\')" title="Clic para copiar">' + p.ean + ' \ud83d\udccb</span>' : '') +
               '<span>FBA:' + (p.stock_fba||0) + inboundTxt + ' Moloka:' + (p.stock_moloka||0) + '</span>' +
               '<span>Vel ' + p.vel_diaria.toFixed(2) + '/d ' + tendIcon + '</span>' +
               '<span style="color:var(--amber);font-weight:600">Cobertura ' + p.cobertura_total_dias.toFixed(0) + 'd</span>' +
@@ -2807,10 +2825,51 @@ async function generarReferenciaEnvio() {
   }
 }
 
+// ----- Modal de peso de cajas maestras (para UPS) -----
+let _cajasPesos = [];
+let _resolverCajas = null;
+function pedirPesosCajas(totalUds, totalProd) {
+  document.getElementById('cajas-resumen').textContent = totalUds + ' unidades \u00b7 ' + totalProd + ' productos';
+  _cajasPesos = [''];
+  renderCajasModal();
+  openModal('modal-cajas-envio');
+  return new Promise(resolve => { _resolverCajas = resolve; });
+}
+function renderCajasModal() {
+  const cont = document.getElementById('cajas-lista');
+  cont.innerHTML = _cajasPesos.map((peso, i) =>
+    '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">' +
+      '<span style="font-size:12px;color:var(--gray-500);width:56px">Caja ' + (i + 1) + '</span>' +
+      '<input class="input" type="number" step="0.1" min="0" value="' + peso + '" placeholder="kg" oninput="actualizarCajaPeso(' + i + ', this.value)" style="flex:1">' +
+      (_cajasPesos.length > 1 ? '<button class="btn btn-ghost btn-sm" onclick="quitarCajaModal(' + i + ')" style="color:var(--red);padding:4px 10px">\u2715</button>' : '') +
+    '</div>'
+  ).join('');
+  recalcularTotalCajasModal();
+}
+function actualizarCajaPeso(i, val) { _cajasPesos[i] = val; recalcularTotalCajasModal(); }
+function agregarCajaModal() { _cajasPesos.push(''); renderCajasModal(); }
+function quitarCajaModal(i) { _cajasPesos.splice(i, 1); renderCajasModal(); }
+function recalcularTotalCajasModal() {
+  const pesos = _cajasPesos.map(x => parseFloat(x)).filter(x => !isNaN(x) && x > 0);
+  const total = pesos.reduce((s, x) => s + x, 0);
+  document.getElementById('cajas-total').textContent = pesos.length + ' bulto' + (pesos.length === 1 ? '' : 's') + ' \u00b7 ' + total.toFixed(1) + ' kg';
+}
+function confirmarCajasEnvio() {
+  const pesos = _cajasPesos.map(x => parseFloat(x)).filter(x => !isNaN(x) && x > 0);
+  closeModal('modal-cajas-envio');
+  if (_resolverCajas) { _resolverCajas(pesos); _resolverCajas = null; }
+}
+function cancelarCajasEnvio() {
+  closeModal('modal-cajas-envio');
+  if (_resolverCajas) { _resolverCajas(null); _resolverCajas = null; }
+}
+
 async function confirmarEnvioFBA() {
   if (!envioItems.length) { showToast('No hay productos en el envio', 'error'); return; }
   const totalUds = envioItems.reduce((s,e)=>s+e.qty, 0);
-  if (!confirm(`Confirmar envio de ${totalUds} unidades? El stock de Moloka se actualizara y se generara un PDF.`)) return;
+  // Pedir pesos de cajas maestras via modal (sustituye al confirm nativo). null = cancelado.
+  const cajasEnvio = await pedirPesosCajas(totalUds, envioItems.length);
+  if (cajasEnvio === null) return;
 
   try {
     // 1. Generar referencia
@@ -2835,6 +2894,7 @@ async function confirmarEnvioFBA() {
       total_unidades: totalUds,
       total_productos: envioItems.length,
       productos: snapshot,
+      cajas: cajasEnvio,
       estado: 'preparado'
     });
     if (errIns) throw errIns;
@@ -3064,7 +3124,7 @@ let envioActualEnModal = null;
 
 async function cargarEnviosHistorial() {
   const tbody = document.getElementById('envios-tbody');
-  tbody.innerHTML = '<tr><td colspan="6"><div class="loading-state"><div class="big-loader"></div></div></td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7"><div class="loading-state"><div class="big-loader"></div></div></td></tr>';
   try {
     const { data, error } = await db.from('envios_fba')
       .select('*')
@@ -3072,7 +3132,7 @@ async function cargarEnviosHistorial() {
       .limit(200);
     if (error) throw error;
     if (!data || !data.length) {
-      tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">\ud83d\udce6</div><p>Aun no hay envios registrados</p></div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">\ud83d\udce6</div><p>Aun no hay envios registrados</p></div></td></tr>';
       return;
     }
     tbody.innerHTML = data.map(e => {
@@ -3090,18 +3150,24 @@ async function cargarEnviosHistorial() {
       }
       // Escapar comillas en el atributo HTML
       const blobEsc = blobBusqueda.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+      // Cajas maestras: nº de bultos y peso total (de campo e.cajas, array de pesos)
+      const cajasArr = Array.isArray(e.cajas) ? e.cajas.map(Number).filter(x => x > 0) : [];
+      const cajasTxt = cajasArr.length
+        ? cajasArr.length + ' \u00b7 ' + cajasArr.reduce((s, x) => s + x, 0).toFixed(1) + ' kg'
+        : '<span style="color:var(--gray-300)">\u2014</span>';
       return `<tr data-search="${blobEsc}">
         <td><strong>${e.referencia}</strong></td>
         <td>${fechaStr}</td>
         <td style="text-align:center;font-weight:600">${e.total_unidades}</td>
         <td style="text-align:center">${e.total_productos}</td>
+        <td style="text-align:center;font-size:12px">${cajasTxt}</td>
         <td><span style="display:inline-block;padding:2px 10px;border-radius:12px;background:${estadoColor}20;color:${estadoColor};font-size:11px;font-weight:600">${estadoTxt}</span></td>
         <td><button class="btn btn-ghost btn-sm" onclick="verDetalleEnvio('${e.id}')">Ver</button></td>
       </tr>`;
     }).join('');
   } catch (e) {
     console.error('[ENVIOS]', e);
-    tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><p>Error cargando historial: ' + (e.message || '') + '</p></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><p>Error cargando historial: ' + (e.message || '') + '</p></div></td></tr>';
   }
 }
 
@@ -3125,6 +3191,16 @@ async function verDetalleEnvio(id) {
       <td style="text-align:center;font-weight:600">${p.cantidad}</td>
     </tr>`).join('');
     document.getElementById('env-detalle-total').textContent = `${data.total_unidades} unidades  \u00b7  ${data.total_productos} productos`;
+    // Cajas maestras (peso para UPS)
+    const cajasD = Array.isArray(data.cajas) ? data.cajas.map(Number).filter(x => x > 0) : [];
+    const wrapC = document.getElementById('env-detalle-cajas-wrap');
+    if (cajasD.length) {
+      document.getElementById('env-detalle-cajas').textContent = cajasD.length + ' bulto' + (cajasD.length === 1 ? '' : 's') + ' \u00b7 ' + cajasD.reduce((s, x) => s + x, 0).toFixed(1) + ' kg';
+      document.getElementById('env-detalle-cajas-detalle').textContent = cajasD.map((x, i) => 'Caja ' + (i + 1) + ': ' + x + ' kg').join('   \u00b7   ');
+      wrapC.style.display = 'block';
+    } else {
+      wrapC.style.display = 'none';
+    }
     openModal('modal-detalle-envio');
   } catch (e) {
     showToast('Error al cargar detalle: ' + (e.message || ''), 'error');
