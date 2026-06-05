@@ -114,7 +114,8 @@
   .tab.active { background: white; color: var(--navy); box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
   .rot-canal-btn { padding: 7px 12px; border: none; background: transparent; border-radius: 7px; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--gray-500); transition: all 0.15s; white-space: nowrap; }
   .rot-canal-btn.active { background: white; color: var(--navy); box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
-  .rot-calc-input { width: 66px; padding: 5px 6px; border: 1px solid var(--gray-200); border-radius: 6px; font-size: 12px; font-family: 'DM Mono', monospace; text-align: right; outline: none; }
+  .rot-calc-input { width: 64px; padding: 5px 7px; border: 1px solid var(--gray-200); border-radius: 6px; font-size: 12px; font-family: 'DM Mono', monospace; text-align: right; outline: none; -moz-appearance: textfield; }
+  .rot-calc-input::-webkit-outer-spin-button, .rot-calc-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   .rot-calc-input:focus { border-color: var(--navy); background: var(--gray-50); }
 
   /* ALERT CARDS */
@@ -531,8 +532,8 @@
       <div style="padding:14px 16px;border-bottom:1px solid var(--gray-200);display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <div style="display:flex;gap:4px;background:var(--gray-100);padding:4px;border-radius:10px">
           <button class="rot-canal-btn active" data-canal="ES" onclick="cambiarCanalRotacion('ES')">🇪🇸 Amazon ES</button>
-          <button class="rot-canal-btn" data-canal="IT" onclick="cambiarCanalRotacion('IT')">🇮🇹 IT</button>
-          <button class="rot-canal-btn" data-canal="FR" onclick="cambiarCanalRotacion('FR')">🇫🇷 FR</button>
+          <button class="rot-canal-btn" data-canal="IT" onclick="cambiarCanalRotacion('IT')">🇮🇹 Amazon IT</button>
+          <button class="rot-canal-btn" data-canal="FR" onclick="cambiarCanalRotacion('FR')">🇫🇷 Amazon FR</button>
           <button class="rot-canal-btn" data-canal="MIRAVIA" onclick="cambiarCanalRotacion('MIRAVIA')">🛒 Miravia</button>
         </div>
         <input type="text" id="rot-buscar" placeholder="🔍 Buscar..." oninput="renderRotacion()" style="flex:1;min-width:180px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">
@@ -549,16 +550,17 @@
               <th style="text-align:center">Tránsito</th>
               <th style="text-align:right">T7</th>
               <th style="text-align:right">T30</th>
-              <th style="text-align:right">PVD</th>
+              <th style="text-align:center">PVD</th>
               <th style="text-align:center">Precio venta</th>
+              <th style="text-align:center">Buy Box</th>
               <th style="text-align:center">% Com.</th>
               <th style="text-align:center">Envío</th>
+              <th style="text-align:center" title="Comisión + servicios digitales (3%) + envío. Comparable con las Tarifas totales del Seller">Tarifas tot.</th>
               <th style="text-align:center">Almacén</th>
               <th style="text-align:right">Margen</th>
-              <th style="text-align:center">Buy Box</th>
             </tr>
           </thead>
-          <tbody id="rot-tbody"><tr><td colspan="13"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr></tbody>
+          <tbody id="rot-tbody"><tr><td colspan="14"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr></tbody>
         </table>
       </div>
     </div>
@@ -1781,7 +1783,7 @@ async function cargarRotacion() {
   try {
     // Cargar en paralelo: productos activos + velocidades + rentabilidad
     const [prodResult, vel, rent] = await Promise.all([
-      db.from('productos').select('id, sku, asin, ean, nombre, stock_moloka, stock_fba, stock_inbound, proveedor, es_chase, pvd, precio_venta, comision_pct, comision_envio, iva_pct').eq('activo', true).neq('estado', 'DESCATALOGADO'),
+      db.from('productos').select('id, sku, asin, ean, nombre, stock_moloka, stock_fba, stock_inbound, proveedor, es_chase, pvd, precio_venta, comision_pct, comision_envio, iva_pct, coste_almacen').eq('activo', true).neq('estado', 'DESCATALOGADO'),
       cargarVelocidades(),
       cargarRentData()
     ]);
@@ -1849,7 +1851,8 @@ async function cargarRotacion() {
         precio_venta_original: precioVenta,
         comision_pct: comPct,
         comision_envio: envio,
-        iva_pct: ivaPct
+        iva_pct: ivaPct,
+        coste_almacen: (p.coste_almacen != null) ? p.coste_almacen : null
       };
     });
 
@@ -1884,7 +1887,7 @@ function renderRotacion() {
   if (ROTACION_CANAL !== 'ES') {
     const tb = document.getElementById('rot-tbody');
     const nombreCanal = ROTACION_CANAL === 'IT' ? 'Italia' : (ROTACION_CANAL === 'FR' ? 'Francia' : 'Miravia');
-    if (tb) tb.innerHTML = '<tr><td colspan="13" style="padding:40px;text-align:center;color:var(--gray-500)">' +
+    if (tb) tb.innerHTML = '<tr><td colspan="14" style="padding:40px;text-align:center;color:var(--gray-500)">' +
       '<div style="font-size:32px;margin-bottom:10px">\ud83d\udea7</div>' +
       '<div style="font-weight:600;color:var(--navy);margin-bottom:6px">Canal ' + nombreCanal + ' \u2014 pendiente</div>' +
       '<div style="font-size:13px;max-width:500px;margin:0 auto">Este canal necesita sus propios precios y comisiones, que todav\u00eda no est\u00e1n en la base de datos. Forma parte del paquete de canales (FR/IT/Miravia) que tenemos pendiente. Por ahora la calculadora funciona con Amazon ES.</div>' +
@@ -1909,7 +1912,7 @@ function renderRotacion() {
 
   const tbody = document.getElementById('rot-tbody');
   if (filas.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="13" style="color:var(--gray-400);padding:20px;text-align:center">Sin resultados</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="14" style="color:var(--gray-400);padding:20px;text-align:center">Sin resultados</td></tr>';
     return;
   }
 
@@ -1920,14 +1923,15 @@ function renderRotacion() {
       : '<span style="color:var(--gray-300)">\u2014</span>';
     const chaseTag = f.es_chase ? ' <span style="background:#8b5cf6;color:white;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:4px">CHASE</span>' : '';
 
-    const pvdTxt = (f.pvd != null) ? f.pvd.toFixed(2) + '\u20ac' : '<span style="color:var(--gray-300)">\u2014</span>';
-    const almacen = 0.15;
+    const almacen = (f.coste_almacen != null) ? f.coste_almacen : 0.15;
+    const pvdVal = (f.pvd != null) ? f.pvd : '';
     const pvVal  = (f.precio_venta != null) ? f.precio_venta : '';
     const comVal = (f.comision_pct != null) ? f.comision_pct : '';
     const envVal = (f.comision_envio != null) ? f.comision_envio : '';
 
     const calc = calcMargenRot(f.pvd, f.precio_venta, f.comision_pct, f.comision_envio, almacen, f.iva_pct);
     const margenHtml = renderMargenCelda(calc);
+    const tarifasHtml = renderTarifasCelda(calc);
 
     return '<tr>' +
       '<td><div class="td-main">' + (f.nombre.substring(0,48)) + (f.nombre.length>48?'...':'') + chaseTag + '</div><div class="td-sub" style="font-family:\'DM Mono\',monospace;font-size:11px">' + (f.asin || 'sin asin') + '</div></td>' +
@@ -1936,13 +1940,14 @@ function renderRotacion() {
       '<td style="text-align:center">' + inboundHtml + '</td>' +
       '<td style="text-align:right;font-weight:600;color:' + (f.uds_7d>0?'var(--navy)':'var(--gray-400)') + '">' + f.uds_7d + tendIcon + '</td>' +
       '<td style="text-align:right;color:' + (f.uds_30d>0?'var(--gray-700)':'var(--gray-400)') + '">' + f.uds_30d + '</td>' +
-      '<td style="text-align:right;font-family:\'DM Mono\',monospace;font-size:12px;color:var(--gray-600)">' + pvdTxt + '</td>' +
+      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvdVal + '" placeholder="\u2014" id="rot-pvd-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvVal + '" placeholder="\u2014" id="rot-pv-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
-      '<td style="text-align:center"><input class="rot-calc-input" style="width:52px" type="number" step="0.1" min="0" value="' + comVal + '" placeholder="\u2014" id="rot-com-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
+      '<td style="text-align:center;color:var(--gray-300)" id="rot-bb-' + f.id + '" title="Pr\u00f3ximamente v\u00eda Keepa">\u2014</td>' +
+      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.1" min="0" value="' + comVal + '" placeholder="\u2014" id="rot-com-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + envVal + '" placeholder="\u2014" id="rot-env-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
-      '<td style="text-align:center"><input class="rot-calc-input" style="width:52px" type="number" step="0.01" min="0" value="' + almacen + '" id="rot-alm-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
+      '<td style="text-align:center" id="rot-tar-' + f.id + '">' + tarifasHtml + '</td>' +
+      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + almacen + '" id="rot-alm-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:right" id="rot-margen-' + f.id + '">' + margenHtml + '</td>' +
-      '<td style="text-align:center;color:var(--gray-300)" title="Pr\u00f3ximamente v\u00eda Keepa">\u2014</td>' +
     '</tr>';
   }).join('');
 }
@@ -1962,9 +1967,11 @@ function calcMargenRot(pvd, precioVenta, comPct, envio, almacen, ivaPct) {
   const iva = (ivaPct != null && !isNaN(parseFloat(ivaPct))) ? parseFloat(ivaPct) : 21;
   const alm = (almacen != null && !isNaN(parseFloat(almacen))) ? parseFloat(almacen) : 0;
   const base = pv / (1 + iva / 100);
-  const comAmazon = (com / 100) * pv;
+  const comReferencia = (com / 100) * pv;
+  const serviciosDigitales = comReferencia * 0.03;   // tarifa por servicios digitales = 3% de la comision de referencia
+  const comAmazon = comReferencia + serviciosDigitales;
   const beneficio = base - parseFloat(pvd) - comAmazon - env - alm;
-  return { beneficio: beneficio, margen: beneficio / pv * 100 };
+  return { beneficio: beneficio, margen: beneficio / pv * 100, comisionEur: comAmazon, tarifasTotales: comAmazon + env };
 }
 
 function renderMargenCelda(calc) {
@@ -1974,17 +1981,26 @@ function renderMargenCelda(calc) {
   return '<strong style="color:' + color + '">' + m.toFixed(1) + '%</strong>';
 }
 
+// Suma de comision Amazon (en euros) + envio, para comparar con las "Tarifas totales" del Seller
+function renderTarifasCelda(calc) {
+  if (!calc) return '<span style="color:var(--gray-300)">\u2014</span>';
+  return '<span style="font-family:\'DM Mono\',monospace;font-size:12px;color:var(--gray-600)">' + calc.tarifasTotales.toFixed(2) + '\u20ac</span>';
+}
+
 // Recalcula SOLO la celda de margen de una fila (no re-renderiza -> no pierde el foco al escribir)
 function recalcularMargenFila(id) {
   const f = ROTACION_MAP[id];
   if (!f) return;
+  const pvd = document.getElementById('rot-pvd-' + id).value;
   const pv  = document.getElementById('rot-pv-' + id).value;
   const com = document.getElementById('rot-com-' + id).value;
   const env = document.getElementById('rot-env-' + id).value;
   const alm = document.getElementById('rot-alm-' + id).value;
-  const calc = calcMargenRot(f.pvd, pv, com, env, alm, f.iva_pct);
-  const celda = document.getElementById('rot-margen-' + id);
-  if (celda) celda.innerHTML = renderMargenCelda(calc);
+  const calc = calcMargenRot(pvd, pv, com, env, alm, f.iva_pct);
+  const celdaM = document.getElementById('rot-margen-' + id);
+  if (celdaM) celdaM.innerHTML = renderMargenCelda(calc);
+  const celdaT = document.getElementById('rot-tar-' + id);
+  if (celdaT) celdaT.innerHTML = renderTarifasCelda(calc);
 }
 
 function cambiarCanalRotacion(canal) {
@@ -2007,10 +2023,11 @@ function exportarCambiosPrecios() {
     if (isNaN(nuevo)) return;
     const original = (f.precio_venta_original != null) ? f.precio_venta_original : null;
     if (original == null || Math.abs(nuevo - original) >= 0.01) {
+      const pvd = parseFloat(document.getElementById('rot-pvd-' + f.id).value);
       const com = parseFloat(document.getElementById('rot-com-' + f.id).value);
       const env = parseFloat(document.getElementById('rot-env-' + f.id).value);
       const alm = parseFloat(document.getElementById('rot-alm-' + f.id).value);
-      const calc = calcMargenRot(f.pvd, nuevo, com, env, alm, f.iva_pct);
+      const calc = calcMargenRot(pvd, nuevo, com, env, alm, f.iva_pct);
       cambios.push({
         Producto: f.nombre,
         ASIN: f.asin || '',
@@ -2168,9 +2185,10 @@ function renderInvDetalle(productoId) {
         <div><div class="inv-field-label">PVP (€)</div><input class="input" id="ed-pvp-${p.id}" type="number" step="0.01" value="${p.precio_venta||''}" style="font-family:'DM Mono',monospace;font-size:12px"></div>
         <div><div class="inv-field-label">Stock mínimo</div><input class="input" id="ed-smin-${p.id}" type="number" value="${p.stock_minimo||''}" style="font-size:13px"></div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
         <div><div class="inv-field-label">IVA (%)</div><input class="input" id="ed-iva-${p.id}" type="number" step="0.1" value="${p.iva_pct!=null?(p.iva_pct*100).toFixed(1):'21'}" style="font-size:13px"></div>
         <div><div class="inv-field-label">Comisión Amazon (%)</div><input class="input" id="ed-com-${p.id}" type="number" step="0.1" value="${p.comision_pct!=null?(p.comision_pct*100).toFixed(1):'15.5'}" style="font-size:13px"></div>
+        <div><div class="inv-field-label">Coste almacén (€)</div><input class="input" id="ed-almacen-${p.id}" type="number" step="0.01" value="${p.coste_almacen!=null?p.coste_almacen:''}" placeholder="0.15" style="font-family:'DM Mono',monospace;font-size:12px"></div>
       </div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--gray-200);padding-top:12px" onclick="event.stopPropagation()">
@@ -2208,6 +2226,7 @@ async function guardarEdicionProducto(productoId) {
       stock_minimo: parseInt(document.getElementById('ed-smin-' + productoId).value) || null,
       iva_pct: isNaN(ivaRaw) ? null : ivaRaw / 100,
       comision_pct: isNaN(comRaw) ? null : comRaw / 100,
+      coste_almacen: parseFloat(document.getElementById('ed-almacen-' + productoId).value) || null,
       updated_at: new Date().toISOString()
     };
     const { error } = await db.from('productos').update(updates).eq('id', productoId);
@@ -3627,7 +3646,18 @@ function obtenerTarifaEnvioReal(asin) {
 //   comision_pct  = comision_amazon / facturado_iva  (% sobre precio con IVA, coincide con la formula)
 //   envio         = logistica_fba / unidades
 function obtenerDatosVentaReal(asin) {
-  if (!asin || !RENT_DATA || !RENT_DATA.meses) return null;
+  if (!asin || !RENT_DATA) return null;
+  // 1) Datos buenos del notebook: precio ULTIMA venta + envio/comision MEDIANA de las ultimas 10
+  if (RENT_DATA.venta_actual && RENT_DATA.venta_actual[asin]) {
+    const v = RENT_DATA.venta_actual[asin];
+    return {
+      precio_venta: (v.precio_ultima_venta != null) ? v.precio_ultima_venta : null,
+      comision_pct: (v.comision_pct_mediana != null) ? v.comision_pct_mediana : null,
+      envio: (v.envio_mediana != null) ? v.envio_mediana : null
+    };
+  }
+  // 2) Fallback: media del ultimo mes con ventas (si el JSON aun no trae venta_actual)
+  if (!RENT_DATA.meses) return null;
   for (let i = RENT_DATA.meses.length - 1; i >= 0; i--) {
     const mes = RENT_DATA.meses[i];
     if (!mes || !mes.productos) continue;
@@ -3639,8 +3669,7 @@ function obtenerDatosVentaReal(asin) {
       return {
         precio_venta: +precio.toFixed(2),
         comision_pct: (comPct != null) ? +comPct.toFixed(2) : null,
-        envio: (envio != null) ? +envio.toFixed(2) : null,
-        mes: mes.mes
+        envio: (envio != null) ? +envio.toFixed(2) : null
       };
     }
   }
