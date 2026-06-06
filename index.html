@@ -117,6 +117,8 @@
   .rot-calc-input { width: 64px; padding: 5px 7px; border: 1px solid var(--gray-200); border-radius: 6px; font-size: 12px; font-family: 'DM Mono', monospace; text-align: right; outline: none; -moz-appearance: textfield; }
   .rot-calc-input::-webkit-outer-spin-button, .rot-calc-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   .rot-calc-input:focus { border-color: var(--navy); background: var(--gray-50); }
+  .rot-name-link { color: inherit; text-decoration: none; cursor: pointer; }
+  .rot-name-link:hover { text-decoration: underline; color: var(--accent); }
 
   /* ALERT CARDS */
   .alert-card { border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; border-left: 4px solid; display: flex; align-items: flex-start; gap: 12px; }
@@ -551,6 +553,7 @@
               <th style="text-align:right">T7</th>
               <th style="text-align:right">T30</th>
               <th style="text-align:right" title="T30 global: ventas de los ultimos 30 dias sumando ES + IT + FR (rotacion total del stock paneuropeo)">T30 EU</th>
+              <th style="text-align:right" title="Unidades que vende TODO el mercado de este producto al mes (todos los vendedores), segun Keepa. Es demanda total del ASIN en este pais, no tus ventas.">Mes (Keepa)</th>
               <th style="text-align:center">PVD</th>
               <th style="text-align:center">Precio venta</th>
               <th style="text-align:center">Buy Box</th>
@@ -561,7 +564,7 @@
               <th style="text-align:right">Margen</th>
             </tr>
           </thead>
-          <tbody id="rot-tbody"><tr><td colspan="15"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr></tbody>
+          <tbody id="rot-tbody"><tr><td colspan="16"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr></tbody>
         </table>
       </div>
     </div>
@@ -1784,11 +1787,32 @@ let CANALES_IT_MAP = {};               // producto_id -> { precio_venta, comisio
 let CANALES_FR_MAP = {};               // producto_id -> { precio_venta, comision_pct, envio, iva_pct } (canal amazon_fr)
 const COSTE_CAJA_MIRAVIA = 0.30;       // coste fijo de caja por unidad en Miravia (el protector se suma a mano)
 
+// Construye la URL de la ficha del producto en Amazon segun el canal (ES/IT/FR).
+// El ASIN es comun en los marketplaces paneuropeos. Devuelve null si no hay ASIN.
+function urlAmazonProducto(asin, canal) {
+  if (!asin) return null;
+  const dom = (canal === 'IT') ? 'it' : ((canal === 'FR') ? 'fr' : 'es');
+  return 'https://www.amazon.' + dom + '/dp/' + asin;
+}
+
+// Miniatura del producto (imagen de Keepa, comun a los 3 marketplaces). Al pasar el raton
+// se amplia. Si no hay imagen aun (Keepa no la ha escrito), muestra un placeholder.
+function miniaturaProducto(f) {
+  if (f.keepa_image) {
+    return '<img src="' + f.keepa_image + '" alt="" loading="lazy" '
+      + 'style="width:38px;height:38px;object-fit:contain;border-radius:6px;background:#fff;border:1px solid var(--gray-200);flex-shrink:0;transition:transform 0.15s;cursor:zoom-in" '
+      + 'onmouseover="this.style.transform=\'scale(3)\';this.style.position=\'relative\';this.style.zIndex=\'30\'" '
+      + 'onmouseout="this.style.transform=\'scale(1)\';this.style.position=\'\';this.style.zIndex=\'\'" '
+      + 'onerror="this.style.display=\'none\'">';
+  }
+  return '<div style="width:38px;height:38px;border-radius:6px;background:var(--gray-100);border:1px solid var(--gray-200);flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--gray-300);font-size:15px">\ud83d\udce6</div>';
+}
+
 async function cargarRotacion() {
   try {
     // Cargar en paralelo: productos activos + velocidades + rentabilidad
     const [prodResult, vel, rent] = await Promise.all([
-      db.from('productos').select('id, sku, asin, ean, nombre, stock_moloka, stock_fba, stock_inbound, proveedor, es_chase, pvd, precio_venta, comision_pct, comision_envio, iva_pct, coste_almacen, buy_box').eq('activo', true).neq('estado', 'DESCATALOGADO'),
+      db.from('productos').select('id, sku, asin, ean, nombre, stock_moloka, stock_fba, stock_inbound, proveedor, es_chase, pvd, precio_venta, comision_pct, comision_envio, iva_pct, coste_almacen, buy_box, buy_box_it, buy_box_fr, keepa_image, keepa_monthly_sold_es, keepa_monthly_sold_it, keepa_monthly_sold_fr').eq('activo', true).neq('estado', 'DESCATALOGADO'),
       cargarVelocidades(),
       cargarRentData()
     ]);
@@ -1883,7 +1907,13 @@ async function cargarRotacion() {
         comision_envio: envio,
         iva_pct: ivaPct,
         coste_almacen: (p.coste_almacen != null) ? p.coste_almacen : null,
-        buy_box: (p.buy_box != null) ? p.buy_box : null
+        buy_box: (p.buy_box != null) ? p.buy_box : null,
+        buy_box_it: (p.buy_box_it != null) ? p.buy_box_it : null,
+        buy_box_fr: (p.buy_box_fr != null) ? p.buy_box_fr : null,
+        keepa_image: p.keepa_image || null,
+        keepa_monthly_sold_es: (p.keepa_monthly_sold_es != null) ? p.keepa_monthly_sold_es : null,
+        keepa_monthly_sold_it: (p.keepa_monthly_sold_it != null) ? p.keepa_monthly_sold_it : null,
+        keepa_monthly_sold_fr: (p.keepa_monthly_sold_fr != null) ? p.keepa_monthly_sold_fr : null
       };
     });
 
@@ -1935,11 +1965,12 @@ function renderRotacion() {
 
   const tbody = document.getElementById('rot-tbody');
   if (filas.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="15" style="color:var(--gray-400);padding:20px;text-align:center">Sin resultados</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="16" style="color:var(--gray-400);padding:20px;text-align:center">Sin resultados</td></tr>';
     return;
   }
 
   tbody.innerHTML = filas.map(f => {
+    const _amzCanal = 'ES';
     // Velocidad de ESPANA (no la total): de por_pais['ES']. Fallback al total si no hay desglose.
     const vpES = (f.por_pais && f.por_pais['ES']) ? f.por_pais['ES'] : null;
     const uds7ES  = vpES ? vpES.uds_7d  : f.uds_7d;
@@ -1977,13 +2008,14 @@ function renderRotacion() {
     }
 
     return '<tr>' +
-      '<td><div class="td-main">' + (f.nombre.substring(0,48)) + (f.nombre.length>48?'...':'') + chaseTag + '</div><div class="td-sub" style="font-family:\'DM Mono\',monospace;font-size:11px">' + (f.asin || 'sin asin') + '</div></td>' +
+      '<td><div style="display:flex;align-items:center;gap:10px">' + miniaturaProducto(f) + '<div style="min-width:0"><div class="td-main">' + (f.asin ? ('<a class="rot-name-link" href="' + urlAmazonProducto(f.asin, _amzCanal) + '" target="_blank" rel="noopener" title="Abrir ficha en Amazon">' + (f.nombre.substring(0,48)) + (f.nombre.length>48?'...':'') + '</a>') : ((f.nombre.substring(0,48)) + (f.nombre.length>48?'...':''))) + chaseTag + '</div><div class="td-sub" style="font-family:\'DM Mono\',monospace;font-size:11px">' + (f.asin || 'sin asin') + '</div></div></div></td>' +
       '<td style="text-align:center;font-weight:' + (f.stock_moloka>0?'700':'400') + ';color:' + (f.stock_moloka>0?'var(--navy)':'var(--gray-400)') + '">' + f.stock_moloka + '</td>' +
       '<td style="text-align:center;font-weight:' + (f.stock_fba>0?'700':'400') + ';color:' + (f.stock_fba>0?'var(--navy)':'var(--gray-400)') + '">' + f.stock_fba + '</td>' +
       '<td style="text-align:center">' + inboundHtml + '</td>' +
       '<td style="text-align:right;font-weight:600;color:' + (uds7ES>0?'var(--navy)':'var(--gray-400)') + '">' + uds7ES + tendIcon + '</td>' +
       '<td style="text-align:right;color:' + (uds30ES>0?'var(--gray-700)':'var(--gray-400)') + '">' + uds30ES + '</td>' +
       '<td style="text-align:right;color:' + (uds30EU>0?'var(--gray-500)':'var(--gray-300)') + '" title="ES + IT + FR (30 dias)">' + uds30EU + '</td>' +
+      '<td style="text-align:right;color:' + (f.keepa_monthly_sold_es>0?'var(--navy)':'var(--gray-300)') + '" title="Demanda mensual del mercado segun Keepa (todos los vendedores)">' + (f.keepa_monthly_sold_es != null ? f.keepa_monthly_sold_es : '\u2014') + '</td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvdVal + '" placeholder="\u2014" id="rot-pvd-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvVal + '" placeholder="\u2014" id="rot-pv-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center" id="rot-bb-' + f.id + '">' + bbHtml + '</td>' +
@@ -2015,7 +2047,7 @@ function renderRotacionMiravia() {
   if (cont) cont.textContent = filas.length + ' productos en Miravia';
 
   if (filas.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="15" style="color:var(--gray-400);padding:20px;text-align:center">Sin productos de Miravia (revisa la tabla canales_producto)</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="16" style="color:var(--gray-400);padding:20px;text-align:center">Sin productos de Miravia (revisa la tabla canales_producto)</td></tr>';
     return;
   }
 
@@ -2038,13 +2070,14 @@ function renderRotacionMiravia() {
     const tarifasHtml = renderTarifasCelda(calc);
 
     return '<tr>' +
-      '<td><div class="td-main">' + (f.nombre.substring(0,48)) + (f.nombre.length>48?'...':'') + chaseTag + '</div><div class="td-sub" style="font-family:\'DM Mono\',monospace;font-size:11px">' + (f.ean || '') + '</div></td>' +
+      '<td><div style="display:flex;align-items:center;gap:10px">' + miniaturaProducto(f) + '<div style="min-width:0"><div class="td-main">' + (f.nombre.substring(0,48)) + (f.nombre.length>48?'...':'') + chaseTag + '</div><div class="td-sub" style="font-family:\'DM Mono\',monospace;font-size:11px">' + (f.ean || '') + '</div></div></div></td>' +
       '<td style="text-align:center;font-weight:' + (f.stock_moloka>0?'700':'400') + ';color:' + (f.stock_moloka>0?'var(--navy)':'var(--gray-400)') + '">' + f.stock_moloka + '</td>' +
       '<td style="text-align:center;font-weight:' + (f.stock_fba>0?'700':'400') + ';color:' + (f.stock_fba>0?'var(--navy)':'var(--gray-400)') + '">' + f.stock_fba + '</td>' +
       '<td style="text-align:center">' + inboundHtml + '</td>' +
       '<td style="text-align:right;color:var(--gray-300)" title="Velocidad de Miravia pendiente">\u2014</td>' +
       '<td style="text-align:right;color:var(--gray-300)">\u2014</td>' +
       '<td style="text-align:right;color:' + (f.uds_30d>0?'var(--gray-500)':'var(--gray-300)') + '" title="ES + IT + FR (30 dias)">' + (f.uds_30d != null ? f.uds_30d : '\u2014') + '</td>' +
+      '<td style="text-align:right;color:var(--gray-300)" title="Demanda Keepa no aplica en Miravia">\u2014</td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvdVal + '" placeholder="\u2014" id="rot-pvd-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvVal + '" placeholder="\u2014" id="rot-pv-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center;color:var(--gray-300)" title="Buy Box no disponible en Miravia">\u2014</td>' +
@@ -2081,12 +2114,14 @@ function renderRotacionAmazonCanal(canal) {
   if (cont) cont.textContent = filas.length + ' productos en Amazon ' + nombreCanal;
 
   if (filas.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="15" style="color:var(--gray-400);padding:20px;text-align:center">Sin productos con ventas en Amazon ' + nombreCanal + ' (revisa la tabla canales_producto)</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="16" style="color:var(--gray-400);padding:20px;text-align:center">Sin productos con ventas en Amazon ' + nombreCanal + ' (revisa la tabla canales_producto)</td></tr>';
     return;
   }
 
   tbody.innerHTML = filas.map(f => {
     const c = mapa[f.id];
+    const _amzCanal = canal;  // 'IT' o 'FR'
+    const mesKeepa = (canal === 'IT') ? f.keepa_monthly_sold_it : f.keepa_monthly_sold_fr;
     // Velocidad REAL del pais (no la total Europa): viene de por_pais en velocidades.json.
     const paisKey = canal;  // 'IT' o 'FR'
     const vp = (f.por_pais && f.por_pais[paisKey]) ? f.por_pais[paisKey] : null;
@@ -2114,17 +2149,25 @@ function renderRotacionAmazonCanal(canal) {
     const calc = calcMargenRot(f.pvd, c.precio_venta, c.comision_pct, c.envio, almacen, ivaCanal);
     const margenHtml = renderMargenCelda(calc);
     const tarifasHtml = renderTarifasCelda(calc);
-    // Buy Box: en IT/FR el campo buy_box de productos es de ES -> no aplica aqui.
-    const bbHtml = '<span style="color:var(--gray-300)" title="Buy Box de ' + nombreCanal + ' pendiente (solo ES por ahora)">\u2014</span>';
+    // Buy Box del canal (IT/FR) desde Keepa. Verde si tu precio es competitivo, rojo si te pasas.
+    const bbVal = (canal === 'IT') ? f.buy_box_it : f.buy_box_fr;
+    let bbHtml = '<span style="color:var(--gray-300)" title="Buy Box de ' + nombreCanal + ' pendiente (Keepa)">\u2014</span>';
+    if (bbVal != null) {
+      let bbColor = 'var(--gray-600)';
+      const pvNum = (c.precio_venta != null) ? parseFloat(c.precio_venta) : null;
+      if (pvNum != null) bbColor = (pvNum > bbVal + 0.01) ? 'var(--red)' : 'var(--green)';
+      bbHtml = '<span style="font-family:\'DM Mono\',monospace;font-size:12px;color:' + bbColor + '">' + bbVal.toFixed(2) + '\u20ac</span>';
+    }
 
     return '<tr>' +
-      '<td><div class="td-main">' + (f.nombre.substring(0,48)) + (f.nombre.length>48?'...':'') + chaseTag + '</div><div class="td-sub" style="font-family:\'DM Mono\',monospace;font-size:11px">' + (f.asin || 'sin asin') + '</div></td>' +
+      '<td><div style="display:flex;align-items:center;gap:10px">' + miniaturaProducto(f) + '<div style="min-width:0"><div class="td-main">' + (f.asin ? ('<a class="rot-name-link" href="' + urlAmazonProducto(f.asin, _amzCanal) + '" target="_blank" rel="noopener" title="Abrir ficha en Amazon">' + (f.nombre.substring(0,48)) + (f.nombre.length>48?'...':'') + '</a>') : ((f.nombre.substring(0,48)) + (f.nombre.length>48?'...':''))) + chaseTag + '</div><div class="td-sub" style="font-family:\'DM Mono\',monospace;font-size:11px">' + (f.asin || 'sin asin') + '</div></div></div></td>' +
       '<td style="text-align:center;font-weight:' + (f.stock_moloka>0?'700':'400') + ';color:' + (f.stock_moloka>0?'var(--navy)':'var(--gray-400)') + '">' + f.stock_moloka + '</td>' +
       '<td style="text-align:center;font-weight:' + (f.stock_fba>0?'700':'400') + ';color:' + (f.stock_fba>0?'var(--navy)':'var(--gray-400)') + '">' + f.stock_fba + '</td>' +
       '<td style="text-align:center">' + inboundHtml + '</td>' +
       '<td style="text-align:right;font-weight:600;color:' + (uds7>0?'var(--navy)':'var(--gray-400)') + '">' + uds7 + tendIcon + '</td>' +
       '<td style="text-align:right;color:' + (uds30>0?'var(--gray-700)':'var(--gray-400)') + '">' + uds30 + '</td>' +
       '<td style="text-align:right;color:' + (f.uds_30d>0?'var(--gray-500)':'var(--gray-300)') + '" title="ES + IT + FR (30 dias)">' + f.uds_30d + '</td>' +
+      '<td style="text-align:right;color:' + (mesKeepa>0?'var(--navy)':'var(--gray-300)') + '" title="Demanda mensual del mercado segun Keepa (todos los vendedores)">' + (mesKeepa != null ? mesKeepa : '\u2014') + '</td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvdVal + '" placeholder="\u2014" id="rot-pvd-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvVal + '" placeholder="\u2014" id="rot-pv-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center" id="rot-bb-' + f.id + '">' + bbHtml + '</td>' +
