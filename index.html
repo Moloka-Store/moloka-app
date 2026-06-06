@@ -1869,6 +1869,7 @@ async function cargarRotacion() {
         uds_7d: v ? v.uds_7d : 0,
         uds_30d: v ? v.uds_30d : 0,
         uds_90d: v ? v.uds_90d : 0,
+        por_pais: (v && v.por_pais) ? v.por_pais : null,
         tendencia: v ? v.tendencia : 'sin_ventas',
         margen_pct: margen ? margen.margen_pct : null,
         beneficio_abr: margen ? margen.beneficio : null,
@@ -2070,7 +2071,18 @@ function renderRotacionAmazonCanal(canal) {
 
   tbody.innerHTML = filas.map(f => {
     const c = mapa[f.id];
-    const tendIcon = f.tendencia === 'subiendo' ? ' <span title="Subiendo">\ud83d\udcc8</span>' : (f.tendencia === 'bajando' ? ' <span title="Bajando">\ud83d\udcc9</span>' : '');
+    // Velocidad REAL del pais (no la total Europa): viene de por_pais en velocidades.json.
+    const paisKey = canal;  // 'IT' o 'FR'
+    const vp = (f.por_pais && f.por_pais[paisKey]) ? f.por_pais[paisKey] : null;
+    const uds7  = vp ? vp.uds_7d : 0;
+    const uds30 = vp ? vp.uds_30d : 0;
+    // Tendencia del pais (calculada aqui con sus propias velocidades)
+    let tendPais = 'sin_ventas';
+    if (vp && vp.vel_diaria_30d > 0) {
+      const r = vp.vel_diaria_7d / vp.vel_diaria_30d;
+      tendPais = r > 1.15 ? 'subiendo' : (r < 0.85 ? 'bajando' : 'estable');
+    }
+    const tendIcon = tendPais === 'subiendo' ? ' <span title="Subiendo">\ud83d\udcc8</span>' : (tendPais === 'bajando' ? ' <span title="Bajando">\ud83d\udcc9</span>' : '');
     const inboundHtml = f.stock_inbound > 0
       ? '<span style="color:var(--accent);font-weight:600">\ud83d\ude9a ' + f.stock_inbound + '</span>'
       : '<span style="color:var(--gray-300)">\u2014</span>';
@@ -2094,8 +2106,8 @@ function renderRotacionAmazonCanal(canal) {
       '<td style="text-align:center;font-weight:' + (f.stock_moloka>0?'700':'400') + ';color:' + (f.stock_moloka>0?'var(--navy)':'var(--gray-400)') + '">' + f.stock_moloka + '</td>' +
       '<td style="text-align:center;font-weight:' + (f.stock_fba>0?'700':'400') + ';color:' + (f.stock_fba>0?'var(--navy)':'var(--gray-400)') + '">' + f.stock_fba + '</td>' +
       '<td style="text-align:center">' + inboundHtml + '</td>' +
-      '<td style="text-align:right;font-weight:600;color:' + (f.uds_7d>0?'var(--navy)':'var(--gray-400)') + '">' + f.uds_7d + tendIcon + '</td>' +
-      '<td style="text-align:right;color:' + (f.uds_30d>0?'var(--gray-700)':'var(--gray-400)') + '">' + f.uds_30d + '</td>' +
+      '<td style="text-align:right;font-weight:600;color:' + (uds7>0?'var(--navy)':'var(--gray-400)') + '">' + uds7 + tendIcon + '</td>' +
+      '<td style="text-align:right;color:' + (uds30>0?'var(--gray-700)':'var(--gray-400)') + '">' + uds30 + '</td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvdVal + '" placeholder="\u2014" id="rot-pvd-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvVal + '" placeholder="\u2014" id="rot-pv-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center" id="rot-bb-' + f.id + '">' + bbHtml + '</td>' +
