@@ -1779,6 +1779,8 @@ let ROTACION_DATOS = null;
 let ROTACION_MAP = {};
 let ROTACION_CANAL = 'ES';
 let CANALES_MIRAVIA_MAP = {};          // producto_id -> { precio_venta, comision_pct, envio } (tabla canales_producto)
+let CANALES_IT_MAP = {};               // producto_id -> { precio_venta, comision_pct, envio, iva_pct } (canal amazon_it)
+let CANALES_FR_MAP = {};               // producto_id -> { precio_venta, comision_pct, envio, iva_pct } (canal amazon_fr)
 const COSTE_CAJA_MIRAVIA = 0.30;       // coste fijo de caja por unidad en Miravia (el protector se suma a mano)
 
 async function cargarRotacion() {
@@ -1801,6 +1803,20 @@ async function cargarRotacion() {
         .eq('canal', 'miravia').eq('activo', true);
       if (canalesMrv) canalesMrv.forEach(c => { CANALES_MIRAVIA_MAP[c.producto_id] = c; });
     } catch(e) { console.warn('No se pudo cargar canales_producto (Miravia):', e); }
+
+    // Canales Amazon IT / FR: datos por producto (tabla canales_producto). Carga AISLADA:
+    // si fallara, Amazon ES y Miravia siguen funcionando con normalidad.
+    CANALES_IT_MAP = {};
+    CANALES_FR_MAP = {};
+    try {
+      const { data: canalesAmz } = await db.from('canales_producto')
+        .select('producto_id, precio_venta, comision_pct, envio, iva_pct, canal')
+        .in('canal', ['amazon_it', 'amazon_fr']).eq('activo', true);
+      if (canalesAmz) canalesAmz.forEach(c => {
+        if (c.canal === 'amazon_it') CANALES_IT_MAP[c.producto_id] = c;
+        else if (c.canal === 'amazon_fr') CANALES_FR_MAP[c.producto_id] = c;
+      });
+    } catch(e) { console.warn('No se pudo cargar canales_producto (IT/FR):', e); }
 
     // Mapas auxiliares
     const velMap = {};
@@ -1896,22 +1912,11 @@ async function cargarRotacion() {
 function renderRotacion() {
   if (!ROTACION_DATOS) return;
 
-  // Canal MIRAVIA: pinta su propia tabla (datos de canales_producto). IT/FR siguen pendientes.
+  // Canal MIRAVIA: pinta su propia tabla (datos de canales_producto).
   if (ROTACION_CANAL === 'MIRAVIA') { renderRotacionMiravia(); return; }
 
-  // Canales IT/FR: pendientes de precios/comisiones por canal (paquete de canales)
-  if (ROTACION_CANAL !== 'ES') {
-    const tb = document.getElementById('rot-tbody');
-    const nombreCanal = ROTACION_CANAL === 'IT' ? 'Italia' : 'Francia';
-    if (tb) tb.innerHTML = '<tr><td colspan="14" style="padding:40px;text-align:center;color:var(--gray-500)">' +
-      '<div style="font-size:32px;margin-bottom:10px">\ud83d\udea7</div>' +
-      '<div style="font-weight:600;color:var(--navy);margin-bottom:6px">Canal ' + nombreCanal + ' \u2014 pendiente</div>' +
-      '<div style="font-size:13px;max-width:500px;margin:0 auto">Este canal necesita sus propios precios y comisiones, que todav\u00eda no est\u00e1n en la base de datos. Por ahora la calculadora funciona con Amazon ES y Miravia.</div>' +
-      '</td></tr>';
-    const cont = document.getElementById('rot-contador');
-    if (cont) cont.textContent = '\u2014';
-    return;
-  }
+  // Canales Amazon IT / FR: pintan su tabla con datos de canales_producto (amazon_it / amazon_fr).
+  if (ROTACION_CANAL === 'IT' || ROTACION_CANAL === 'FR') { renderRotacionAmazonCanal(ROTACION_CANAL); return; }
 
   const buscar = (document.getElementById('rot-buscar').value || '').toLowerCase().trim();
   let filas = ROTACION_DATOS;
@@ -2034,6 +2039,74 @@ function renderRotacionMiravia() {
     '</tr>';
   }).join('');
 }
+// Render de la tabla de Rotacion para los canales Amazon IT / FR.
+// Reutiliza ROTACION_DATOS (pvd, nombre, stocks, velocidad, buy_box) y le cruza
+// los datos de canales_producto (precio_venta, comision_pct, envio, iva_pct del canal).
+// Usa la MISMA formula que ES (calcMargenRot): es Amazon, lleva el 3% de servicios
+// digitales. El envio y la comision ya vienen del notebook con el /1.21 aplicado.
+// Solo pinta productos que tienen ficha en ese canal (igual criterio que Miravia).
+function renderRotacionAmazonCanal(canal) {
+  const tbody = document.getElementById('rot-tbody');
+  if (!ROTACION_DATOS) return;
+  const mapa = (canal === 'IT') ? CANALES_IT_MAP : CANALES_FR_MAP;
+  const nombreCanal = (canal === 'IT') ? 'Italia' : 'Francia';
+  const buscar = (document.getElementById('rot-buscar').value || '').toLowerCase().trim();
+
+  let filas = ROTACION_DATOS.filter(f => mapa[f.id]);
+  if (buscar) {
+    filas = filas.filter(f =>
+      (f.nombre || '').toLowerCase().includes(buscar) ||
+      (f.ean || '').toLowerCase().includes(buscar) ||
+      (f.asin || '').toLowerCase().includes(buscar));
+  }
+
+  const cont = document.getElementById('rot-contador');
+  if (cont) cont.textContent = filas.length + ' productos en Amazon ' + nombreCanal;
+
+  if (filas.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="14" style="color:var(--gray-400);padding:20px;text-align:center">Sin productos con ventas en Amazon ' + nombreCanal + ' (revisa la tabla canales_producto)</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = filas.map(f => {
+    const c = mapa[f.id];
+    const tendIcon = f.tendencia === 'subiendo' ? ' <span title="Subiendo">\ud83d\udcc8</span>' : (f.tendencia === 'bajando' ? ' <span title="Bajando">\ud83d\udcc9</span>' : '');
+    const inboundHtml = f.stock_inbound > 0
+      ? '<span style="color:var(--accent);font-weight:600">\ud83d\ude9a ' + f.stock_inbound + '</span>'
+      : '<span style="color:var(--gray-300)">\u2014</span>';
+    const chaseTag = f.es_chase ? ' <span style="background:#8b5cf6;color:white;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:4px">CHASE</span>' : '';
+
+    const almacen = (f.coste_almacen != null) ? f.coste_almacen : 0.15;
+    const ivaCanal = (c.iva_pct != null) ? c.iva_pct : (canal === 'IT' ? 22 : 20);
+    const pvdVal = (f.pvd != null) ? f.pvd.toFixed(2) : '';
+    const pvVal  = (c.precio_venta != null) ? c.precio_venta : '';
+    const comVal = (c.comision_pct != null) ? c.comision_pct : '';
+    const envVal = (c.envio != null) ? c.envio : '';
+
+    const calc = calcMargenRot(f.pvd, c.precio_venta, c.comision_pct, c.envio, almacen, ivaCanal);
+    const margenHtml = renderMargenCelda(calc);
+    const tarifasHtml = renderTarifasCelda(calc);
+    // Buy Box: en IT/FR el campo buy_box de productos es de ES -> no aplica aqui.
+    const bbHtml = '<span style="color:var(--gray-300)" title="Buy Box de ' + nombreCanal + ' pendiente (solo ES por ahora)">\u2014</span>';
+
+    return '<tr>' +
+      '<td><div class="td-main">' + (f.nombre.substring(0,48)) + (f.nombre.length>48?'...':'') + chaseTag + '</div><div class="td-sub" style="font-family:\'DM Mono\',monospace;font-size:11px">' + (f.asin || 'sin asin') + '</div></td>' +
+      '<td style="text-align:center;font-weight:' + (f.stock_moloka>0?'700':'400') + ';color:' + (f.stock_moloka>0?'var(--navy)':'var(--gray-400)') + '">' + f.stock_moloka + '</td>' +
+      '<td style="text-align:center;font-weight:' + (f.stock_fba>0?'700':'400') + ';color:' + (f.stock_fba>0?'var(--navy)':'var(--gray-400)') + '">' + f.stock_fba + '</td>' +
+      '<td style="text-align:center">' + inboundHtml + '</td>' +
+      '<td style="text-align:right;font-weight:600;color:' + (f.uds_7d>0?'var(--navy)':'var(--gray-400)') + '">' + f.uds_7d + tendIcon + '</td>' +
+      '<td style="text-align:right;color:' + (f.uds_30d>0?'var(--gray-700)':'var(--gray-400)') + '">' + f.uds_30d + '</td>' +
+      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvdVal + '" placeholder="\u2014" id="rot-pvd-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
+      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvVal + '" placeholder="\u2014" id="rot-pv-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
+      '<td style="text-align:center" id="rot-bb-' + f.id + '">' + bbHtml + '</td>' +
+      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.1" min="0" value="' + comVal + '" placeholder="\u2014" id="rot-com-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
+      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + envVal + '" placeholder="\u2014" id="rot-env-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
+      '<td style="text-align:center" id="rot-tar-' + f.id + '">' + tarifasHtml + '</td>' +
+      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + almacen + '" id="rot-alm-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
+      '<td style="text-align:right" id="rot-margen-' + f.id + '">' + margenHtml + '</td>' +
+    '</tr>';
+  }).join('');
+}
 //   base = precio_venta / (1 + IVA)
 //   comision_amazon = %comision * precio_venta   (comision base, sin IVA)
 //   beneficio = base - PVD - comision_amazon - envio - almacen
@@ -2095,9 +2168,17 @@ function recalcularMargenFila(id) {
   const com = document.getElementById('rot-com-' + id).value;
   const env = document.getElementById('rot-env-' + id).value;
   const alm = document.getElementById('rot-alm-' + id).value;
-  const calc = (ROTACION_CANAL === 'MIRAVIA')
-    ? calcMargenMiravia(pvd, pv, com, env, alm, 21)
-    : calcMargenRot(pvd, pv, com, env, alm, f.iva_pct);
+  let calc;
+  if (ROTACION_CANAL === 'MIRAVIA') {
+    calc = calcMargenMiravia(pvd, pv, com, env, alm, 21);
+  } else if (ROTACION_CANAL === 'IT' || ROTACION_CANAL === 'FR') {
+    // Amazon IT/FR: misma formula que ES (con servicios digitales), pero IVA del canal.
+    const cCanal = (ROTACION_CANAL === 'IT') ? CANALES_IT_MAP[id] : CANALES_FR_MAP[id];
+    const ivaCanal = (cCanal && cCanal.iva_pct != null) ? cCanal.iva_pct : (ROTACION_CANAL === 'IT' ? 22 : 20);
+    calc = calcMargenRot(pvd, pv, com, env, alm, ivaCanal);
+  } else {
+    calc = calcMargenRot(pvd, pv, com, env, alm, f.iva_pct);
+  }
   const celdaM = document.getElementById('rot-margen-' + id);
   if (celdaM) celdaM.innerHTML = renderMargenCelda(calc);
   const celdaT = document.getElementById('rot-tar-' + id);
