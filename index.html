@@ -258,7 +258,7 @@
       <span class="nav-badge" id="badge-alertas" style="display:none">0</span>
     </div>
     <div class="nav-item" data-page="rotacion" onclick="showPage('rotacion',this)">
-      <span class="nav-icon">🔄</span> Rotación de ventas
+      <span class="nav-icon">🛒</span> Rotación de ventas
     </div>
     <div class="nav-item" data-page="entrada" onclick="showPage('entrada',this)">
       <span class="nav-icon">🔄</span> Entrada mercancía
@@ -529,7 +529,7 @@
   <!-- ROTACION DE VENTAS -->
   <div class="page" id="page-rotacion">
     <div class="page-header">
-      <div><div class="page-title">🔄 Rotación de ventas</div><div class="page-sub" id="rot-sub">Catálogo completo con stock, ventas y rentabilidad</div></div>
+      <div><div class="page-title">🛒 Rotación de ventas</div><div class="page-sub" id="rot-sub">Catálogo completo con stock, ventas y rentabilidad</div></div>
     </div>
     <div class="card" style="padding:0;overflow:hidden">
       <div style="padding:14px 16px;border-bottom:1px solid var(--gray-200);display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -2144,24 +2144,36 @@ function renderRotacionAmazonCanal(canal) {
   const nombreCanal = (canal === 'IT') ? 'Italia' : 'Francia';
   const buscar = (document.getElementById('rot-buscar').value || '').toLowerCase().trim();
 
-  let filas = ROTACION_DATOS.filter(f => mapa[f.id]);
+  let filas = ROTACION_DATOS.slice();   // TODO el catalogo (no solo lo que ya vendemos en este canal)
   if (buscar) {
     filas = filas.filter(f =>
       (f.nombre || '').toLowerCase().includes(buscar) ||
       (f.ean || '').toLowerCase().includes(buscar) ||
       (f.asin || '').toLowerCase().includes(buscar));
   }
+  // Orden: mas vendidos en ESTE pais primero (uds 7d del pais, desempate 30d). Los que aun
+  // no vendemos aqui caen al final, pero aparecen igual: asi puedes ver su Buy Box y decidir
+  // si merece la pena activarlos en paneuropeo.
+  const ventaPais = (f) => {
+    const vp = (f.por_pais && f.por_pais[canal]) ? f.por_pais[canal] : null;
+    return vp ? [vp.uds_7d || 0, vp.uds_30d || 0] : [0, 0];
+  };
+  filas.sort((a, b) => {
+    const va = ventaPais(a), vb = ventaPais(b);
+    return (vb[0] - va[0]) || (vb[1] - va[1]);
+  });
 
   const cont = document.getElementById('rot-contador');
-  if (cont) cont.textContent = filas.length + ' productos en Amazon ' + nombreCanal;
+  const conPrecio = filas.filter(f => mapa[f.id]).length;
+  if (cont) cont.textContent = filas.length + ' productos \u00b7 ' + conPrecio + ' con precio en Amazon ' + nombreCanal;
 
   if (filas.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="16" style="color:var(--gray-400);padding:20px;text-align:center">Sin productos con ventas en Amazon ' + nombreCanal + ' (revisa la tabla canales_producto)</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="16" style="color:var(--gray-400);padding:20px;text-align:center">Sin productos</td></tr>';
     return;
   }
 
   tbody.innerHTML = filas.map(f => {
-    const c = mapa[f.id];
+    const c = mapa[f.id] || {};
     const _amzCanal = canal;  // 'IT' o 'FR'
     const mesKeepa = (canal === 'IT') ? f.keepa_monthly_sold_it : f.keepa_monthly_sold_fr;
     // Velocidad REAL del pais (no la total Europa): viene de por_pais en velocidades.json.
