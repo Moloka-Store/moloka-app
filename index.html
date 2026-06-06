@@ -550,6 +550,7 @@
               <th style="text-align:center">Tránsito</th>
               <th style="text-align:right">T7</th>
               <th style="text-align:right">T30</th>
+              <th style="text-align:right" title="T30 global: ventas de los ultimos 30 dias sumando ES + IT + FR (rotacion total del stock paneuropeo)">T30 EU</th>
               <th style="text-align:center">PVD</th>
               <th style="text-align:center">Precio venta</th>
               <th style="text-align:center">Buy Box</th>
@@ -560,7 +561,7 @@
               <th style="text-align:right">Margen</th>
             </tr>
           </thead>
-          <tbody id="rot-tbody"><tr><td colspan="14"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr></tbody>
+          <tbody id="rot-tbody"><tr><td colspan="15"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr></tbody>
         </table>
       </div>
     </div>
@@ -1934,12 +1935,25 @@ function renderRotacion() {
 
   const tbody = document.getElementById('rot-tbody');
   if (filas.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="14" style="color:var(--gray-400);padding:20px;text-align:center">Sin resultados</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="15" style="color:var(--gray-400);padding:20px;text-align:center">Sin resultados</td></tr>';
     return;
   }
 
   tbody.innerHTML = filas.map(f => {
-    const tendIcon = f.tendencia === 'subiendo' ? ' <span title="Subiendo">\ud83d\udcc8</span>' : (f.tendencia === 'bajando' ? ' <span title="Bajando">\ud83d\udcc9</span>' : '');
+    // Velocidad de ESPANA (no la total): de por_pais['ES']. Fallback al total si no hay desglose.
+    const vpES = (f.por_pais && f.por_pais['ES']) ? f.por_pais['ES'] : null;
+    const uds7ES  = vpES ? vpES.uds_7d  : f.uds_7d;
+    const uds30ES = vpES ? vpES.uds_30d : f.uds_30d;
+    const uds30EU = f.uds_30d;   // total Europa (suma de los 3 mercados)
+    // Tendencia de ES (con sus propias velocidades); si no hay desglose, la global.
+    let tendES = f.tendencia;
+    if (vpES && vpES.vel_diaria_30d > 0) {
+      const r = vpES.vel_diaria_7d / vpES.vel_diaria_30d;
+      tendES = r > 1.15 ? 'subiendo' : (r < 0.85 ? 'bajando' : 'estable');
+    } else if (vpES) {
+      tendES = 'sin_ventas';
+    }
+    const tendIcon = tendES === 'subiendo' ? ' <span title="Subiendo">\ud83d\udcc8</span>' : (tendES === 'bajando' ? ' <span title="Bajando">\ud83d\udcc9</span>' : '');
     const inboundHtml = f.stock_inbound > 0
       ? '<span style="color:var(--accent);font-weight:600">\ud83d\ude9a ' + f.stock_inbound + '</span>'
       : '<span style="color:var(--gray-300)">\u2014</span>';
@@ -1967,8 +1981,9 @@ function renderRotacion() {
       '<td style="text-align:center;font-weight:' + (f.stock_moloka>0?'700':'400') + ';color:' + (f.stock_moloka>0?'var(--navy)':'var(--gray-400)') + '">' + f.stock_moloka + '</td>' +
       '<td style="text-align:center;font-weight:' + (f.stock_fba>0?'700':'400') + ';color:' + (f.stock_fba>0?'var(--navy)':'var(--gray-400)') + '">' + f.stock_fba + '</td>' +
       '<td style="text-align:center">' + inboundHtml + '</td>' +
-      '<td style="text-align:right;font-weight:600;color:' + (f.uds_7d>0?'var(--navy)':'var(--gray-400)') + '">' + f.uds_7d + tendIcon + '</td>' +
-      '<td style="text-align:right;color:' + (f.uds_30d>0?'var(--gray-700)':'var(--gray-400)') + '">' + f.uds_30d + '</td>' +
+      '<td style="text-align:right;font-weight:600;color:' + (uds7ES>0?'var(--navy)':'var(--gray-400)') + '">' + uds7ES + tendIcon + '</td>' +
+      '<td style="text-align:right;color:' + (uds30ES>0?'var(--gray-700)':'var(--gray-400)') + '">' + uds30ES + '</td>' +
+      '<td style="text-align:right;color:' + (uds30EU>0?'var(--gray-500)':'var(--gray-300)') + '" title="ES + IT + FR (30 dias)">' + uds30EU + '</td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvdVal + '" placeholder="\u2014" id="rot-pvd-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvVal + '" placeholder="\u2014" id="rot-pv-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center" id="rot-bb-' + f.id + '">' + bbHtml + '</td>' +
@@ -2000,7 +2015,7 @@ function renderRotacionMiravia() {
   if (cont) cont.textContent = filas.length + ' productos en Miravia';
 
   if (filas.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="14" style="color:var(--gray-400);padding:20px;text-align:center">Sin productos de Miravia (revisa la tabla canales_producto)</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="15" style="color:var(--gray-400);padding:20px;text-align:center">Sin productos de Miravia (revisa la tabla canales_producto)</td></tr>';
     return;
   }
 
@@ -2029,6 +2044,7 @@ function renderRotacionMiravia() {
       '<td style="text-align:center">' + inboundHtml + '</td>' +
       '<td style="text-align:right;color:var(--gray-300)" title="Velocidad de Miravia pendiente">\u2014</td>' +
       '<td style="text-align:right;color:var(--gray-300)">\u2014</td>' +
+      '<td style="text-align:right;color:' + (f.uds_30d>0?'var(--gray-500)':'var(--gray-300)') + '" title="ES + IT + FR (30 dias)">' + (f.uds_30d != null ? f.uds_30d : '\u2014') + '</td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvdVal + '" placeholder="\u2014" id="rot-pvd-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvVal + '" placeholder="\u2014" id="rot-pv-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center;color:var(--gray-300)" title="Buy Box no disponible en Miravia">\u2014</td>' +
@@ -2065,7 +2081,7 @@ function renderRotacionAmazonCanal(canal) {
   if (cont) cont.textContent = filas.length + ' productos en Amazon ' + nombreCanal;
 
   if (filas.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="14" style="color:var(--gray-400);padding:20px;text-align:center">Sin productos con ventas en Amazon ' + nombreCanal + ' (revisa la tabla canales_producto)</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="15" style="color:var(--gray-400);padding:20px;text-align:center">Sin productos con ventas en Amazon ' + nombreCanal + ' (revisa la tabla canales_producto)</td></tr>';
     return;
   }
 
@@ -2108,6 +2124,7 @@ function renderRotacionAmazonCanal(canal) {
       '<td style="text-align:center">' + inboundHtml + '</td>' +
       '<td style="text-align:right;font-weight:600;color:' + (uds7>0?'var(--navy)':'var(--gray-400)') + '">' + uds7 + tendIcon + '</td>' +
       '<td style="text-align:right;color:' + (uds30>0?'var(--gray-700)':'var(--gray-400)') + '">' + uds30 + '</td>' +
+      '<td style="text-align:right;color:' + (f.uds_30d>0?'var(--gray-500)':'var(--gray-300)') + '" title="ES + IT + FR (30 dias)">' + f.uds_30d + '</td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvdVal + '" placeholder="\u2014" id="rot-pvd-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvVal + '" placeholder="\u2014" id="rot-pv-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center" id="rot-bb-' + f.id + '">' + bbHtml + '</td>' +
