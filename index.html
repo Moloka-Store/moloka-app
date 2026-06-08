@@ -391,8 +391,8 @@
           <div class="card">
             <div class="form-row">
               <div class="input-group"><div class="input-label">Unidades que entran</div><input class="input" type="number" id="entrada-qty" value="1" min="1"></div>
-              <div class="input-group"><div class="input-label">Ubicación</div><input class="input" id="entrada-loc" placeholder="D-1, A-3..."></div>
             </div>
+            <div style="font-size:12px;color:var(--gray-600);background:var(--gray-50);padding:8px 10px;border-radius:8px;margin-bottom:10px">📍 Entra en <strong>P</strong> (zona de paso). Recoloca en su estantería desde Inventario cuando la guardes.</div>
             <button class="btn btn-green" style="width:100%" id="btn-confirmar-entrada" onclick="confirmarEntrada()">✅ Confirmar entrada</button>
             <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--gray-200)">
               <button class="btn btn-ghost btn-sm" style="width:100%" onclick="confirmarEntradaChase()" title="Las unidades van a la ficha CHASE de este producto (mismo EAN). Si la ficha no existe, se crea.">✨ Estas unidades son CHASE</button>
@@ -417,9 +417,9 @@
             </div>
             <div class="form-row">
               <div class="input-group"><div class="input-label">Unidades que entran</div><input class="input" type="number" id="new-qty" value="1"></div>
-              <div class="input-group"><div class="input-label">Ubicación</div><input class="input" id="new-loc" placeholder="D-1, A-3..."></div>
+              <div class="input-group"><div class="input-label">Stock mínimo (reposición)</div><input class="input" type="number" id="new-min" placeholder="20"></div>
             </div>
-            <div class="input-group"><div class="input-label">Stock mínimo (reposición)</div><input class="input" type="number" id="new-min" placeholder="20"></div>
+            <div style="font-size:12px;color:var(--gray-600);background:var(--gray-50);padding:8px 10px;border-radius:8px;margin-bottom:10px">📍 Entra en <strong>P</strong> (zona de paso). Recoloca en su estantería desde Inventario cuando la guardes.</div>
             <button class="btn btn-primary" style="width:100%" onclick="crearProductoYEntrada()">➕ Añadir producto y registrar entrada</button>
           </div>
         </div>
@@ -545,7 +545,7 @@
       </div>
       <div class="table-wrap" style="max-height:75vh;overflow:auto">
         <table id="rot-tabla">
-          <thead style="position:sticky;top:0;background:white;z-index:10">
+          <thead style="position:sticky;top:0;background:white;z-index:10" id="rot-thead">
             <tr>
               <th>Producto</th>
               <th style="text-align:center">Moloka</th>
@@ -845,6 +845,19 @@
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="cancelarCajasEnvio()">Cancelar</button>
       <button class="btn btn-green" onclick="confirmarCajasEnvio()">✓ Confirmar envío</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL REPARTO POR ESTANTERIA (envio FBA: productos en varias estanterias) -->
+<div class="modal-overlay" id="modal-reparto-est">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-title">📍 ¿De qué estantería sale cada uno?</div>
+    <div style="font-size:13px;color:var(--gray-500);margin-bottom:14px">Estos productos están repartidos en varias estanterías. Indica de cuál sacas las unidades que vas a enviar.</div>
+    <div id="reparto-lista" style="display:flex;flex-direction:column;gap:12px;max-height:55vh;overflow-y:auto"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="cancelarReparto()">Cancelar</button>
+      <button class="btn btn-green" id="reparto-confirmar-btn" onclick="confirmarReparto()">✓ Continuar</button>
     </div>
   </div>
 </div>
@@ -1854,7 +1867,7 @@ async function cargarRotacion() {
   try {
     // Cargar en paralelo: productos activos + velocidades + rentabilidad
     const [prodResult, vel, rent] = await Promise.all([
-      db.from('productos').select('id, sku, asin, ean, nombre, stock_moloka, stock_fba, stock_inbound, proveedor, es_chase, pvd, precio_venta, comision_pct, comision_envio, iva_pct, coste_almacen, buy_box, buy_box_it, buy_box_fr, comision_pct_it, comision_pct_fr, envio_it, envio_fr, keepa_image, keepa_monthly_sold_es, keepa_monthly_sold_it, keepa_monthly_sold_fr').eq('activo', true).neq('estado', 'DESCATALOGADO'),
+      db.from('productos').select('id, sku, asin, ean, nombre, stock_moloka, stock_miravia, stock_fba, stock_inbound, proveedor, es_chase, pvd, precio_venta, comision_pct, comision_envio, iva_pct, coste_almacen, buy_box, buy_box_it, buy_box_fr, comision_pct_it, comision_pct_fr, envio_it, envio_fr, keepa_image, keepa_monthly_sold_es, keepa_monthly_sold_it, keepa_monthly_sold_fr').eq('activo', true).neq('estado', 'DESCATALOGADO'),
       cargarVelocidades(),
       cargarRentData()
     ]);
@@ -1866,7 +1879,7 @@ async function cargarRotacion() {
     CANALES_MIRAVIA_MAP = {};
     try {
       const { data: canalesMrv } = await db.from('canales_producto')
-        .select('producto_id, precio_venta, comision_pct, envio')
+        .select('producto_id, precio_venta, comision_pct, envio, coste_almacen, uds_7d, uds_30d')
         .eq('canal', 'miravia').eq('activo', true);
       if (canalesMrv) canalesMrv.forEach(c => { CANALES_MIRAVIA_MAP[c.producto_id] = c; });
     } catch(e) { console.warn('No se pudo cargar canales_producto (Miravia):', e); }
@@ -1987,8 +2000,50 @@ async function cargarRotacion() {
   }
 }
 
+// Cabecera de la tabla de Rotacion segun canal. Miravia es un mundo aparte de Amazon:
+// no tiene FBA, ni Buy Box, ni Transito, ni demanda Keepa -> cabecera reducida y propia.
+function renderCabeceraRotacion(canal) {
+  const thead = document.getElementById('rot-thead');
+  if (!thead) return;
+  if (canal === 'MIRAVIA') {
+    thead.innerHTML = '<tr>' +
+      '<th>Producto</th>' +
+      '<th style="text-align:center" title="Stock total en Moloka (almac\u00e9n + mueble Miravia)">Stock Moloka</th>' +
+      '<th style="text-align:right" title="Unidades vendidas en Miravia (7 d\u00edas)">T7</th>' +
+      '<th style="text-align:right" title="Unidades vendidas en Miravia (30 d\u00edas)">T30</th>' +
+      '<th style="text-align:center">PVD</th>' +
+      '<th style="text-align:center">Precio venta</th>' +
+      '<th style="text-align:center">% Com.</th>' +
+      '<th style="text-align:center" title="Tarifa de log\u00edstica real de Miravia (sin caja ni protector)">Env\u00edo</th>' +
+      '<th style="text-align:center" title="Comisi\u00f3n + env\u00edo">Tarifas tot.</th>' +
+      '<th style="text-align:center" title="Caja + protector + almac\u00e9n. Lo que escribas aqu\u00ed SE GUARDA">Almac\u00e9n</th>' +
+      '<th style="text-align:right">Margen</th>' +
+    '</tr>';
+  } else {
+    thead.innerHTML = '<tr>' +
+      '<th>Producto</th>' +
+      '<th style="text-align:center">Moloka</th>' +
+      '<th style="text-align:center">FBA</th>' +
+      '<th style="text-align:center">Tr\u00e1nsito</th>' +
+      '<th style="text-align:right">T7</th>' +
+      '<th style="text-align:right">T30</th>' +
+      '<th style="text-align:right" title="T30 global: ventas de los ultimos 30 dias sumando ES + IT + FR">T30 EU</th>' +
+      '<th style="text-align:right" title="Unidades que vende TODO el mercado de este producto al mes (Keepa)">Mes (Keepa)</th>' +
+      '<th style="text-align:center">PVD</th>' +
+      '<th style="text-align:center">Precio venta</th>' +
+      '<th style="text-align:center">Buy Box</th>' +
+      '<th style="text-align:center">% Com.</th>' +
+      '<th style="text-align:center">Env\u00edo</th>' +
+      '<th style="text-align:center" title="Comisi\u00f3n + servicios digitales (3%) + env\u00edo. Comparable con las Tarifas totales del Seller">Tarifas tot.</th>' +
+      '<th style="text-align:center">Almac\u00e9n</th>' +
+      '<th style="text-align:right">Margen</th>' +
+    '</tr>';
+  }
+}
+
 function renderRotacion() {
   if (!ROTACION_DATOS) return;
+  renderCabeceraRotacion(ROTACION_CANAL);
 
   // Canal MIRAVIA: pinta su propia tabla (datos de canales_producto).
   if (ROTACION_CANAL === 'MIRAVIA') { renderRotacionMiravia(); return; }
@@ -2093,47 +2148,58 @@ function renderRotacionMiravia() {
   if (cont) cont.textContent = filas.length + ' productos en Miravia';
 
   if (filas.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="16" style="color:var(--gray-400);padding:20px;text-align:center">Sin productos de Miravia (revisa la tabla canales_producto)</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" style="color:var(--gray-400);padding:20px;text-align:center">Sin productos de Miravia (revisa la tabla canales_producto)</td></tr>';
     return;
   }
 
+  const guion = '<span style="color:var(--gray-300)">\u2014</span>';
   tbody.innerHTML = filas.map(f => {
     const c = CANALES_MIRAVIA_MAP[f.id];
-    const chaseTag = f.es_chase ? ' <span style="background:#8b5cf6;color:white;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:4px">CHASE</span>' : '';
-    const inboundHtml = f.stock_inbound > 0
-      ? '<span style="color:var(--accent);font-weight:600">\ud83d\ude9a ' + f.stock_inbound + '</span>'
-      : '<span style="color:var(--gray-300)">\u2014</span>';
+    // Stock total en Moloka = almacen + mueble Miravia (lo que tienes para servir, es dropshipping)
+    const stockTotal = (f.stock_moloka || 0) + (f.stock_miravia || 0);
+    const pvdVal = (f.pvd != null) ? f.pvd.toFixed(2) : '';
+    const pvVal  = (c.precio_venta != null) ? c.precio_venta : '';
+    const comVal = (c.comision_pct != null) ? c.comision_pct : '';
+    const envVal = (c.envio != null) ? c.envio : '';            // SOLO tarifa real de la API (sin caja)
+    const almVal = (c.coste_almacen != null) ? c.coste_almacen : '';  // caja + protector + almacen (lo pone Fernando, se guarda)
+    // T7 / T30 = velocidad de Miravia (la rellena el notebook en canales_producto)
+    const t7  = (c.uds_7d  != null) ? c.uds_7d  : null;
+    const t30 = (c.uds_30d != null) ? c.uds_30d : null;
 
-    const almacen = (f.coste_almacen != null) ? f.coste_almacen : 0.15;
-    const pvdVal  = (f.pvd != null) ? f.pvd.toFixed(2) : '';
-    const pvVal   = (c.precio_venta != null) ? c.precio_venta : '';
-    const comVal  = (c.comision_pct != null) ? c.comision_pct : '';
-    // Envio precargado = tarifa Miravia + caja (0,30). El protector se suma a mano si el producto lo lleva.
-    const envVal  = (c.envio != null) ? +(parseFloat(c.envio) + COSTE_CAJA_MIRAVIA).toFixed(2) : COSTE_CAJA_MIRAVIA;
-
-    const calc = calcMargenMiravia(f.pvd, c.precio_venta, c.comision_pct, envVal, almacen, 21);
-    const margenHtml = renderMargenCelda(calc);
-    const tarifasHtml = renderTarifasCelda(calc);
+    const calc = calcMargenMiravia(f.pvd, c.precio_venta, c.comision_pct, envVal === '' ? 0 : envVal, almVal === '' ? 0 : almVal, 21);
 
     return '<tr>' +
       celdaProductoRot(f, 'MIRAVIA') +
-      '<td style="text-align:center;font-weight:' + (f.stock_moloka>0?'700':'400') + ';color:' + (f.stock_moloka>0?'var(--navy)':'var(--gray-400)') + '">' + f.stock_moloka + '</td>' +
-      '<td style="text-align:center;font-weight:' + (f.stock_fba>0?'700':'400') + ';color:' + (f.stock_fba>0?'var(--navy)':'var(--gray-400)') + '">' + f.stock_fba + '</td>' +
-      '<td style="text-align:center">' + inboundHtml + '</td>' +
-      '<td style="text-align:right;color:var(--gray-300)" title="Velocidad de Miravia pendiente">\u2014</td>' +
-      '<td style="text-align:right;color:var(--gray-300)">\u2014</td>' +
-      '<td style="text-align:right;color:' + (f.uds_30d>0?'var(--gray-500)':'var(--gray-300)') + '" title="ES + IT + FR (30 dias)">' + (f.uds_30d != null ? f.uds_30d : '\u2014') + '</td>' +
-      '<td style="text-align:right;color:var(--gray-300)" title="Demanda Keepa no aplica en Miravia">\u2014</td>' +
+      '<td style="text-align:center;font-weight:' + (stockTotal>0?'700':'400') + ';color:' + (stockTotal>0?'var(--navy)':'var(--gray-400)') + '" title="Almac\u00e9n ' + (f.stock_moloka||0) + ' + Miravia ' + (f.stock_miravia||0) + '">' + stockTotal + '</td>' +
+      '<td style="text-align:right;color:' + (t7?'var(--gray-600)':'var(--gray-300)') + '">' + (t7 != null ? t7 : guion) + '</td>' +
+      '<td style="text-align:right;color:' + (t30?'var(--gray-600)':'var(--gray-300)') + '">' + (t30 != null ? t30 : guion) + '</td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvdVal + '" placeholder="\u2014" id="rot-pvd-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvVal + '" placeholder="\u2014" id="rot-pv-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
-      '<td style="text-align:center;color:var(--gray-300)" title="Buy Box no disponible en Miravia">\u2014</td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.1" min="0" value="' + comVal + '" placeholder="\u2014" id="rot-com-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + envVal + '" placeholder="\u2014" id="rot-env-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
-      '<td style="text-align:center" id="rot-tar-' + f.id + '">' + tarifasHtml + '</td>' +
-      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + almacen + '" id="rot-alm-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
-      '<td style="text-align:right" id="rot-margen-' + f.id + '">' + margenHtml + '</td>' +
+      '<td style="text-align:center" id="rot-tar-' + f.id + '">' + renderTarifasCelda(calc) + '</td>' +
+      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + almVal + '" placeholder="0.15" title="Caja + protector + almac\u00e9n. Se guarda al salir del campo" id="rot-alm-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')" onchange="guardarAlmacenMiravia(\'' + f.id + '\', this.value)"></td>' +
+      '<td style="text-align:right" id="rot-margen-' + f.id + '">' + renderMargenCelda(calc) + '</td>' +
     '</tr>';
   }).join('');
+}
+
+// Guarda el coste de almacen (caja + protector + almacen) del canal Miravia en canales_producto.
+// Es el UNICO campo de la calculadora que persiste: el resto es simulacion.
+async function guardarAlmacenMiravia(productoId, valor) {
+  const v = (valor === '' || valor == null) ? null : parseFloat(valor);
+  if (valor !== '' && (isNaN(v) || v < 0)) { showToast('Valor de almac\u00e9n no v\u00e1lido', 'error'); return; }
+  try {
+    const { error } = await db.from('canales_producto')
+      .update({ coste_almacen: v })
+      .eq('canal', 'miravia').eq('producto_id', productoId);
+    if (error) throw error;
+    if (CANALES_MIRAVIA_MAP[productoId]) CANALES_MIRAVIA_MAP[productoId].coste_almacen = v;  // cache local al dia
+    showToast('Almac\u00e9n guardado', 'success');
+  } catch(e) {
+    console.error('guardarAlmacenMiravia:', e);
+    showToast('Error guardando almac\u00e9n: ' + e.message, 'error');
+  }
 }
 // Render de la tabla de Rotacion para los canales Amazon IT / FR.
 // Reutiliza ROTACION_DATOS (pvd, nombre, stocks, velocidad, buy_box) y le cruza
@@ -2498,11 +2564,49 @@ function toggleInvDetalle(productoId) {
   }
 }
 
+// --- PASO 3: edicion de ubicaciones con cantidad (estanterias Moloka) ---
+const ESTANTERIAS_MOLOKA = ['P', 'D-1', 'D-2', 'D-3', 'I-1', 'I-2'];
+
+function filaHuecoHTML(pid, loc, cant) {
+  const opts = ESTANTERIAS_MOLOKA.map(e =>
+    '<option value="' + e + '"' + (e === loc ? ' selected' : '') + '>' + e + '</option>').join('');
+  return '<div class="hueco-fila" style="display:flex;gap:6px;margin-bottom:4px;align-items:center">' +
+    '<select class="input hueco-loc" style="font-size:12px;width:84px;padding:4px 6px">' + opts + '</select>' +
+    '<input class="input hueco-cant" type="number" min="0" value="' + (cant != null ? cant : '') + '" placeholder="uds" style="font-size:12px;width:74px;padding:4px 6px" oninput="recalcSumaHuecos(\'' + pid + '\')">' +
+    '<button class="btn btn-ghost btn-sm" onclick="this.parentElement.remove();recalcSumaHuecos(\'' + pid + '\')" style="color:var(--red);padding:2px 8px" title="Quitar">\u2715</button>' +
+    '</div>';
+}
+
+function agregarHueco(pid) {
+  const cont = document.getElementById('ed-huecos-' + pid);
+  if (!cont) return;
+  cont.insertAdjacentHTML('beforeend', filaHuecoHTML(pid, 'P', ''));
+}
+
+// Recalcula y muestra el stock_moloka resultante (suma de huecos) en vivo
+function recalcSumaHuecos(pid) {
+  const cont = document.getElementById('ed-huecos-' + pid);
+  if (!cont) return;
+  let suma = 0;
+  cont.querySelectorAll('.hueco-fila').forEach(f => {
+    suma += parseInt(f.querySelector('.hueco-cant').value) || 0;
+  });
+  const lbl = document.getElementById('ed-huecos-suma-' + pid);
+  if (lbl) lbl.textContent = suma;
+}
+
 // Render del contenido del desplegable de un producto
 function renderInvDetalle(productoId) {
   const p = window._invCache[productoId];
   if (!p) return;
   const cont = document.getElementById('detalle-content-' + productoId);
+  // Huecos iniciales desde ubicaciones_cant (o fallback a P con el stock actual)
+  let huecosInicial = '';
+  const uc = p.ubicaciones_cant;
+  if (uc && typeof uc === 'object' && !Array.isArray(uc)) {
+    Object.keys(uc).forEach(loc => { if (loc !== 'REVISAR') huecosInicial += filaHuecoHTML(p.id, loc, uc[loc]); });
+  }
+  if (!huecosInicial && (p.stock_moloka || 0) > 0) huecosInicial = filaHuecoHTML(p.id, 'P', p.stock_moloka);
   cont.innerHTML = `
     <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:16px 24px;margin-bottom:16px" onclick="event.stopPropagation()">
       <div>
@@ -2519,7 +2623,7 @@ function renderInvDetalle(productoId) {
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
         <div><div class="inv-field-label">FNSKU</div><input class="input" id="ed-fnsku-${p.id}" value="${p.fnsku||''}" style="font-family:'DM Mono',monospace;font-size:12px"></div>
-        <div><div class="inv-field-label">Ubicación (separadas por coma)</div><input class="input" id="ed-ubics-${p.id}" value="${(p.ubicaciones||[]).join(', ')}" style="font-size:13px"></div>
+        <div></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
         <div><div class="inv-field-label">PVD (€)</div><input class="input" id="ed-pvd-${p.id}" type="number" step="0.0001" value="${p.pvd||''}" style="font-family:'DM Mono',monospace;font-size:12px"></div>
@@ -2530,6 +2634,15 @@ function renderInvDetalle(productoId) {
         <div><div class="inv-field-label">IVA (%)</div><input class="input" id="ed-iva-${p.id}" type="number" step="0.1" value="${p.iva_pct!=null?(p.iva_pct*100).toFixed(1):'21'}" style="font-size:13px"></div>
         <div><div class="inv-field-label">Comisión Amazon (%)</div><input class="input" id="ed-com-${p.id}" type="number" step="0.1" value="${p.comision_pct!=null?(p.comision_pct*100).toFixed(1):'15.5'}" style="font-size:13px"></div>
         <div><div class="inv-field-label">Coste almacén (€)</div><input class="input" id="ed-almacen-${p.id}" type="number" step="0.01" value="${p.coste_almacen!=null?p.coste_almacen:''}" placeholder="0.15" style="font-family:'DM Mono',monospace;font-size:12px"></div>
+      </div>
+      <div style="grid-column:1 / -1;border-top:1px dashed var(--gray-200);padding-top:12px">
+        <div class="inv-field-label">Ubicaciones en almacén Moloka (estantería + unidades)</div>
+        <div id="ed-huecos-${p.id}">${huecosInicial}</div>
+        <div style="display:flex;gap:12px;align-items:center;margin-top:6px;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" onclick="agregarHueco('${p.id}')" style="padding:3px 10px">+ Añadir estantería</button>
+          <span style="font-size:12px;color:var(--gray-500)">Stock Moloka (suma) = <strong style="color:var(--navy)" id="ed-huecos-suma-${p.id}">${p.stock_moloka || 0}</strong> uds</span>
+          ${(p.stock_miravia||0) > 0 ? `<span style="font-size:12px;color:#7c3aed">· Miravia (aparte): <strong>${p.stock_miravia}</strong> uds</span>` : ''}
+        </div>
       </div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--gray-200);padding-top:12px" onclick="event.stopPropagation()">
@@ -2550,8 +2663,20 @@ function renderInvDetalle(productoId) {
 async function guardarEdicionProducto(productoId) {
   try {
     const p = window._invCache[productoId];
-    const ubicsRaw = document.getElementById('ed-ubics-' + productoId).value;
-    const ubicsArr = ubicsRaw.split(',').map(s => s.trim()).filter(s => s.length > 0);
+    // Leer huecos (estanteria + cantidad). stock_moloka = suma de huecos.
+    // ubicaciones (array de claves) se mantiene por compatibilidad con codigo que aun lo usa.
+    const contHuecos = document.getElementById('ed-huecos-' + productoId);
+    const ubicCant = {};
+    let sumaMoloka = 0;
+    if (contHuecos) {
+      contHuecos.querySelectorAll('.hueco-fila').forEach(f => {
+        const loc = f.querySelector('.hueco-loc').value;
+        const cant = parseInt(f.querySelector('.hueco-cant').value) || 0;
+        if (cant > 0) { ubicCant[loc] = (ubicCant[loc] || 0) + cant; sumaMoloka += cant; }
+      });
+    }
+    const ubicsArr = Object.keys(ubicCant);
+    const sumaFinal = contHuecos ? sumaMoloka : (p.stock_moloka || 0);
     const ivaRaw = parseFloat(document.getElementById('ed-iva-' + productoId).value);
     const comRaw = parseFloat(document.getElementById('ed-com-' + productoId).value);
     const updates = {
@@ -2562,6 +2687,8 @@ async function guardarEdicionProducto(productoId) {
       marca: document.getElementById('ed-marca-' + productoId).value.trim() || null,
       fnsku: document.getElementById('ed-fnsku-' + productoId).value.trim() || null,
       ubicaciones: ubicsArr,
+      ubicaciones_cant: ubicCant,
+      stock_moloka: sumaFinal,
       pvd: parseFloat(document.getElementById('ed-pvd-' + productoId).value) || null,
       precio_venta: parseFloat(document.getElementById('ed-pvp-' + productoId).value) || null,
       stock_minimo: parseInt(document.getElementById('ed-smin-' + productoId).value) || null,
@@ -2979,24 +3106,27 @@ function aplicarProductoEntrada(p) {
   productoEnEdicion = p;
   document.getElementById('pf-name').textContent = p.nombre;
   document.getElementById('pf-meta').textContent = `EAN: ${p.ean||'—'} · ASIN: ${p.asin||'Sin ASIN'} · ${p.proveedor||'—'} · PVD: ${p.pvd?p.pvd.toFixed(2)+'€':'—'} · Stock actual: ${p.stock_moloka} ud`;
-  document.getElementById('entrada-loc').value = (p.ubicaciones||[]).join(', ');
   document.getElementById('product-found-area').style.display = 'block';
 }
 
 async function confirmarEntrada() {
   if (!productoEnEdicion) return;
   const qty = parseInt(document.getElementById('entrada-qty').value) || 1;
-  const loc = document.getElementById('entrada-loc').value.trim();
+  const loc = 'P'; // toda entrada de mercancia va a P (zona de paso); se recoloca luego en la ficha
   const btn = document.getElementById('btn-confirmar-entrada');
   btn.innerHTML = '<span class="loader"></span>';
   btn.disabled = true;
 
-  const nuevaUbicaciones = loc ? [...new Set([...(productoEnEdicion.ubicaciones||[]), ...loc.split(',').map(s=>s.trim()).filter(Boolean)])] : productoEnEdicion.ubicaciones;
-  const nuevoStock = productoEnEdicion.stock_moloka + qty;
+  // Sumar las unidades al hueco P y derivar stock_moloka de la suma de huecos
+  const ucBase = (productoEnEdicion.ubicaciones_cant && typeof productoEnEdicion.ubicaciones_cant === 'object' && !Array.isArray(productoEnEdicion.ubicaciones_cant)) ? {...productoEnEdicion.ubicaciones_cant} : {};
+  ucBase['P'] = (ucBase['P'] || 0) + qty;
+  const nuevaUbicaciones = Object.keys(ucBase);
+  const nuevoStock = (productoEnEdicion.stock_moloka || 0) + qty;
 
   const { error } = await db.from('productos').update({
     stock_moloka: nuevoStock,
     ubicaciones: nuevaUbicaciones,
+    ubicaciones_cant: ucBase,
     updated_at: new Date().toISOString()
   }).eq('id', productoEnEdicion.id);
 
@@ -3005,7 +3135,7 @@ async function confirmarEntrada() {
       producto_id: productoEnEdicion.id,
       tipo: 'entrada',
       cantidad: qty,
-      ubicacion: loc || null
+      ubicacion: loc
     });
   }
 
@@ -3036,7 +3166,7 @@ async function confirmarEntradaChase() {
     return;
   }
   const qty = parseInt(document.getElementById('entrada-qty').value) || 1;
-  const loc = document.getElementById('entrada-loc').value.trim();
+  const loc = 'P'; // toda entrada va a P; se recoloca luego en la ficha
 
   try {
     // 1. Buscar ficha CHASE existente con mismo EAN
@@ -3076,14 +3206,15 @@ async function confirmarEntradaChase() {
       creada = true;
     }
 
-    // 2. Sumar unidades a la ficha CHASE
+    // 2. Sumar unidades a la ficha CHASE (al hueco P; stock_moloka = suma de huecos)
     const nuevoStock = (chaseProd.stock_moloka || 0) + qty;
-    const nuevasUbicaciones = loc
-      ? [...new Set([...(chaseProd.ubicaciones || []), ...loc.split(',').map(s => s.trim()).filter(Boolean)])]
-      : (chaseProd.ubicaciones || []);
+    const ucChase = (chaseProd.ubicaciones_cant && typeof chaseProd.ubicaciones_cant === 'object' && !Array.isArray(chaseProd.ubicaciones_cant)) ? {...chaseProd.ubicaciones_cant} : {};
+    ucChase['P'] = (ucChase['P'] || 0) + qty;
+    const nuevasUbicaciones = Object.keys(ucChase);
     const { error: e3 } = await db.from('productos').update({
       stock_moloka: nuevoStock,
       ubicaciones: nuevasUbicaciones,
+      ubicaciones_cant: ucChase,
       updated_at: new Date().toISOString()
     }).eq('id', chaseProd.id);
     if (e3) throw e3;
@@ -3093,7 +3224,7 @@ async function confirmarEntradaChase() {
       producto_id: chaseProd.id,
       tipo: 'entrada',
       cantidad: qty,
-      ubicacion: loc || null
+      ubicacion: loc
     });
 
     // 4. UI
@@ -3116,7 +3247,7 @@ async function crearProductoYEntrada() {
   const nombre = document.getElementById('new-nombre').value.trim();
   if (!nombre) { showToast('El nombre es obligatorio', 'error'); return; }
   const qty = parseInt(document.getElementById('new-qty').value) || 1;
-  const loc = document.getElementById('new-loc').value.trim();
+  const loc = 'P'; // producto nuevo entra a P; se recoloca luego en la ficha
 
   const { data, error } = await db.from('productos').insert({
     nombre,
@@ -3127,12 +3258,13 @@ async function crearProductoYEntrada() {
     pvd: parseFloat(document.getElementById('new-pvd').value) || null,
     stock_moloka: qty,
     stock_minimo: parseInt(document.getElementById('new-min').value) || null,
-    ubicaciones: loc ? loc.split(',').map(s=>s.trim()).filter(Boolean) : [],
+    ubicaciones: ['P'],
+    ubicaciones_cant: { P: qty },
     estado: 'OK', activo: true
   }).select().single();
 
   if (error) { showToast('Error: ' + error.message, 'error'); return; }
-  await db.from('movimientos').insert({ producto_id: data.id, tipo: 'entrada', cantidad: qty, ubicacion: loc || null });
+  await db.from('movimientos').insert({ producto_id: data.id, tipo: 'entrada', cantidad: qty, ubicacion: loc });
 
   sesionEntradas.push({ nombre, qty, loc });
   renderSesion();
@@ -3355,9 +3487,117 @@ function cancelarCajasEnvio() {
   if (_resolverCajas) { _resolverCajas(null); _resolverCajas = null; }
 }
 
+// ----- Modal de reparto por estanteria (envio FBA con productos en varias estanterias) -----
+let _repartoItems = [];
+let _resolverReparto = null;
+function pedirRepartoEstanterias(itemsMulti) {
+  _repartoItems = itemsMulti.map(e => {
+    const uc = (e.ubicaciones_cant && typeof e.ubicaciones_cant === 'object' && !Array.isArray(e.ubicaciones_cant)) ? e.ubicaciones_cant : {};
+    const huecos = {};
+    ESTANTERIAS_MOLOKA.forEach(k => { if ((uc[k] || 0) > 0) huecos[k] = uc[k]; });
+    // Precarga: llenar por orden de estanteria hasta cubrir las uds enviadas
+    let restante = e.qty;
+    const reparto = {};
+    Object.keys(huecos).forEach(est => {
+      const coger = Math.min(restante, huecos[est]);
+      reparto[est] = coger;
+      restante -= coger;
+    });
+    return { id: e.id, nombre: e.nombre || 'Producto', qty: e.qty, huecos, reparto };
+  });
+  renderRepartoModal();
+  openModal('modal-reparto-est');
+  return new Promise(resolve => { _resolverReparto = resolve; });
+}
+function renderRepartoModal() {
+  const cont = document.getElementById('reparto-lista');
+  cont.innerHTML = _repartoItems.map((it, idx) => {
+    const filas = Object.keys(it.huecos).map(est =>
+      '<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px">' +
+        '<span style="font-size:12px;width:130px">' + est + ' <span style="color:var(--gray-400)">(' + it.huecos[est] + ' disp)</span></span>' +
+        '<input class="input" type="number" min="0" max="' + it.huecos[est] + '" value="' + (it.reparto[est] || 0) + '" oninput="actualizarReparto(' + idx + ',\'' + est + '\',this)" style="width:84px;font-size:12px;padding:4px 6px">' +
+      '</div>'
+    ).join('');
+    const suma = Object.values(it.reparto).reduce((s, x) => s + (x || 0), 0);
+    const cuadra = suma === it.qty;
+    return '<div style="border:1px solid var(--gray-200);border-radius:8px;padding:10px">' +
+      '<div style="font-size:13px;font-weight:600;margin-bottom:2px">' + it.nombre.substring(0, 46) + '</div>' +
+      '<div style="font-size:12px;color:var(--gray-500);margin-bottom:8px">Envías <strong>' + it.qty + '</strong> uds</div>' +
+      filas +
+      '<div id="reparto-suma-' + idx + '" style="font-size:12px;margin-top:6px;color:' + (cuadra ? 'var(--green)' : 'var(--red)') + '">Repartido: ' + suma + ' / ' + it.qty + (cuadra ? ' \u2713' : ' \u2717 no cuadra') + '</div>' +
+    '</div>';
+  }).join('');
+  recalcRepartoUI();
+}
+function actualizarReparto(idx, est, el) {
+  const it = _repartoItems[idx];
+  let n = parseInt(el.value) || 0;
+  if (n < 0) n = 0;
+  if (n > it.huecos[est]) { n = it.huecos[est]; el.value = n; }
+  it.reparto[est] = n;
+  recalcRepartoUI();
+}
+function recalcRepartoUI() {
+  let todoCuadra = true;
+  _repartoItems.forEach((it, idx) => {
+    const suma = Object.values(it.reparto).reduce((s, x) => s + (x || 0), 0);
+    const cuadra = suma === it.qty;
+    if (!cuadra) todoCuadra = false;
+    const lbl = document.getElementById('reparto-suma-' + idx);
+    if (lbl) {
+      lbl.textContent = 'Repartido: ' + suma + ' / ' + it.qty + (cuadra ? ' \u2713' : ' \u2717 no cuadra');
+      lbl.style.color = cuadra ? 'var(--green)' : 'var(--red)';
+    }
+  });
+  const btn = document.getElementById('reparto-confirmar-btn');
+  if (btn) btn.disabled = !todoCuadra;
+}
+function confirmarReparto() {
+  const todoCuadra = _repartoItems.every(it => Object.values(it.reparto).reduce((s, x) => s + (x || 0), 0) === it.qty);
+  if (!todoCuadra) { showToast('El reparto no cuadra con las unidades enviadas', 'error'); return; }
+  const resultado = {};
+  _repartoItems.forEach(it => {
+    const rep = {};
+    Object.keys(it.reparto).forEach(est => { if (it.reparto[est] > 0) rep[est] = it.reparto[est]; });
+    resultado[it.id] = rep;
+  });
+  closeModal('modal-reparto-est');
+  if (_resolverReparto) { _resolverReparto(resultado); _resolverReparto = null; }
+}
+function cancelarReparto() {
+  closeModal('modal-reparto-est');
+  if (_resolverReparto) { _resolverReparto(null); _resolverReparto = null; }
+}
+
 async function confirmarEnvioFBA() {
   if (!envioItems.length) { showToast('No hay productos en el envio', 'error'); return; }
   const totalUds = envioItems.reduce((s,e)=>s+e.qty, 0);
+
+  // --- PASO 4: reparto por estanteria ---
+  // Estanterias con stock de un item (en orden P,D-1..I-2; ignora REVISAR y vacios)
+  const huecosDe = (e) => {
+    const uc = e.ubicaciones_cant;
+    if (uc && typeof uc === 'object' && !Array.isArray(uc)) {
+      return ESTANTERIAS_MOLOKA.filter(k => (uc[k] || 0) > 0);
+    }
+    return [];
+  };
+  // Productos en VARIAS estanterias -> preguntar de cual sale. Una sola -> automatico.
+  const itemsMulti = envioItems.filter(e => huecosDe(e).length > 1);
+  let repartoUsuario = {};
+  if (itemsMulti.length > 0) {
+    repartoUsuario = await pedirRepartoEstanterias(itemsMulti);
+    if (repartoUsuario === null) return; // cancelado por el usuario
+  }
+  // Reparto final por producto: 1 estanteria -> toda la qty de ahi; varias -> lo indicado
+  const repartoFinal = {};
+  for (const e of envioItems) {
+    const hs = huecosDe(e);
+    if (hs.length === 1) repartoFinal[e.id] = { [hs[0]]: e.qty };
+    else if (hs.length > 1) repartoFinal[e.id] = repartoUsuario[e.id] || {};
+    else repartoFinal[e.id] = {}; // sin estanterias conocidas: no se toca ubicaciones_cant
+  }
+
   // Pedir pesos de cajas maestras via modal (sustituye al confirm nativo). null = cancelado.
   const cajasEnvio = await pedirPesosCajas(totalUds, envioItems.length);
   if (cajasEnvio === null) return;
@@ -3395,10 +3635,21 @@ async function confirmarEnvioFBA() {
     // que actualiza stock_inbound directamente (campo "inbound-quantity" del informe).
     // El silencio de 5 dias (bloque 4b) cubre la ventana de ~24h hasta que Amazon refleja el envio.
     for (const e of envioItems) {
-      await db.from('productos').update({
-        stock_moloka: e.stock_moloka - e.qty,
-        updated_at: fechaIso
-      }).eq('id', e.id);
+      const nuevoStockMoloka = e.stock_moloka - e.qty;
+      // Recalcular ubicaciones_cant restando lo que sale de cada estanteria en este envio
+      const ucBase = (e.ubicaciones_cant && typeof e.ubicaciones_cant === 'object' && !Array.isArray(e.ubicaciones_cant)) ? {...e.ubicaciones_cant} : {};
+      const rep = repartoFinal[e.id] || {};
+      Object.keys(rep).forEach(est => {
+        ucBase[est] = (ucBase[est] || 0) - rep[est];
+        if (ucBase[est] <= 0) delete ucBase[est];
+      });
+      const updateProd = { stock_moloka: nuevoStockMoloka, updated_at: fechaIso };
+      // Solo tocar ubicaciones si habia info de estanterias (no pisar con vacio a productos sin migrar)
+      if (Object.keys(rep).length > 0 || (e.ubicaciones_cant && Object.keys(e.ubicaciones_cant).length > 0)) {
+        updateProd.ubicaciones_cant = ucBase;
+        updateProd.ubicaciones = Object.keys(ucBase);
+      }
+      await db.from('productos').update(updateProd).eq('id', e.id);
       await db.from('movimientos').insert({
         producto_id: e.id,
         tipo: 'envio_fba',
