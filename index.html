@@ -2433,10 +2433,29 @@ async function cargarInventario() {
   }
 }
 
+// Muestra las estanterias CON cantidad (lee ubicaciones_cant jsonb) + el mueble Miravia aparte.
+// Solo lectura. Cae al formato viejo (array sin cantidad) por robustez si aun no hay ubicaciones_cant.
+function renderUbicacionesCant(p) {
+  const partes = [];
+  const uc = p.ubicaciones_cant;
+  if (uc && typeof uc === 'object' && !Array.isArray(uc)) {
+    Object.keys(uc).forEach(loc => {
+      if (loc === 'REVISAR') return;
+      partes.push('<span class="loc-tag">' + loc + ': ' + uc[loc] + '</span>');
+    });
+  } else if (Array.isArray(p.ubicaciones) && p.ubicaciones.length) {
+    p.ubicaciones.filter(l => l !== 'MIRAVIA').forEach(l => partes.push('<span class="loc-tag">' + l + '</span>'));
+  }
+  if ((p.stock_miravia || 0) > 0) {
+    partes.push('<span class="loc-tag" style="background:#ede9fe;color:#7c3aed;border-color:#ddd6fe">Miravia: ' + p.stock_miravia + '</span>');
+  }
+  return partes.length ? partes.join('') : '<span style="color:var(--gray-300)">\u2014</span>';
+}
+
 // Render de una fila del inventario (tabla limpia, sin botones inline)
 function renderInvFila(p) {
   const stockTotal = (p.stock_moloka || 0) + (p.stock_fba || 0);
-  const ubics = (p.ubicaciones || []).map(l => `<span class="loc-tag">${l}</span>`).join('') || '<span style="color:var(--gray-300)">—</span>';
+  const ubics = renderUbicacionesCant(p);
   const asinHtml = p.asin
     ? `<span class="td-asin">${p.asin}</span>`
     : `<span style="font-size:11px;color:var(--gray-400);font-style:italic">sin asin</span>`;
