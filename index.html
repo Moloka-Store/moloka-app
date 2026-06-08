@@ -2147,6 +2147,12 @@ function renderRotacionMiravia() {
   const cont = document.getElementById('rot-contador');
   if (cont) cont.textContent = filas.length + ' productos en Miravia';
 
+  // Mas vendidos primero (por T30; T7 de desempate). En Miravia el volumen semanal es bajo.
+  filas.sort((a, b) => {
+    const ca = CANALES_MIRAVIA_MAP[a.id] || {}, cb = CANALES_MIRAVIA_MAP[b.id] || {};
+    return (cb.uds_30d || 0) - (ca.uds_30d || 0) || (cb.uds_7d || 0) - (ca.uds_7d || 0);
+  });
+
   if (filas.length === 0) {
     tbody.innerHTML = '<tr><td colspan="11" style="color:var(--gray-400);padding:20px;text-align:center">Sin productos de Miravia (revisa la tabla canales_producto)</td></tr>';
     return;
