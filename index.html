@@ -1881,7 +1881,7 @@ async function cargarRotacion() {
     MIRAVIA_PRODUCTOS = {};
     try {
       const { data: canalesMrv } = await db.from('canales_producto')
-        .select('producto_id, precio_venta, comision_pct, envio, coste_almacen, uds_7d, uds_30d')
+        .select('producto_id, precio_venta, comision_pct, envio, coste_almacen, uds_7d, uds_30d, stock_canal')
         .eq('canal', 'miravia').eq('activo', true);
       if (canalesMrv) {
         canalesMrv.forEach(c => { CANALES_MIRAVIA_MAP[c.producto_id] = c; });
@@ -2022,6 +2022,7 @@ function renderCabeceraRotacion(canal) {
     thead.innerHTML = '<tr>' +
       '<th>Producto</th>' +
       '<th style="text-align:center" title="Stock total en Moloka (almac\u00e9n + mueble Miravia)">Stock Moloka</th>' +
+      '<th style="text-align:center" title="Stock publicado AHORA en Miravia. En rojo si est\u00e1 agotado y tienes stock en Moloka para reponer">Stock Miravia</th>' +
       '<th style="text-align:right" title="Unidades vendidas en Miravia (7 d\u00edas)">T7</th>' +
       '<th style="text-align:right" title="Unidades vendidas en Miravia (30 d\u00edas)">T30</th>' +
       '<th style="text-align:center">PVD</th>' +
@@ -2168,7 +2169,7 @@ function renderRotacionMiravia() {
   });
 
   if (filas.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="11" style="color:var(--gray-400);padding:20px;text-align:center">Sin productos de Miravia (revisa la tabla canales_producto)</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12" style="color:var(--gray-400);padding:20px;text-align:center">Sin productos de Miravia (revisa la tabla canales_producto)</td></tr>';
     return;
   }
 
@@ -2177,20 +2178,27 @@ function renderRotacionMiravia() {
     const c = CANALES_MIRAVIA_MAP[f.id];
     // Stock total en Moloka = almacen + mueble Miravia (lo que tienes para servir, es dropshipping)
     const stockTotal = (f.stock_moloka || 0) + (f.stock_miravia || 0);
+    // Stock publicado AHORA en Miravia (lo lleva el notebook desde la API). Lo gestiona Fernando a mano.
+    const stockMrv = (c.stock_canal != null) ? c.stock_canal : null;
+    const reponible = (stockMrv === 0 && stockTotal > 0);   // agotado en Miravia y hay stock para subir
     const pvdVal = (f.pvd != null) ? f.pvd.toFixed(2) : '';
     const pvVal  = (c.precio_venta != null) ? c.precio_venta : '';
     const comVal = (c.comision_pct != null) ? c.comision_pct : '';
     const envVal = (c.envio != null) ? c.envio : '';            // SOLO tarifa real de la API (sin caja)
-    const almVal = (c.coste_almacen != null) ? c.coste_almacen : '';  // caja + protector + almacen (lo pone Fernando, se guarda)
+    const almVal = (c.coste_almacen != null) ? c.coste_almacen : 0.30;  // por defecto 0,30 (caja); editable, se guarda
     // T7 / T30 = velocidad de Miravia (la rellena el notebook en canales_producto)
     const t7  = (c.uds_7d  != null) ? c.uds_7d  : null;
     const t30 = (c.uds_30d != null) ? c.uds_30d : null;
 
-    const calc = calcMargenMiravia(f.pvd, c.precio_venta, c.comision_pct, envVal === '' ? 0 : envVal, almVal === '' ? 0 : almVal, 21);
+    const calc = calcMargenMiravia(f.pvd, c.precio_venta, c.comision_pct, envVal === '' ? 0 : envVal, almVal, 21);
+
+    const colorMrv = reponible ? '#dc2626' : (stockMrv > 0 ? 'var(--navy)' : 'var(--gray-400)');
+    const tituloMrv = reponible ? 'Agotado en Miravia y tienes ' + stockTotal + ' en Moloka: puedes reponer' : 'Stock publicado en Miravia';
 
     return '<tr>' +
       celdaProductoRot(f, 'MIRAVIA') +
       '<td style="text-align:center;font-weight:' + (stockTotal>0?'700':'400') + ';color:' + (stockTotal>0?'var(--navy)':'var(--gray-400)') + '" title="Almac\u00e9n ' + (f.stock_moloka||0) + ' + Miravia ' + (f.stock_miravia||0) + '">' + stockTotal + '</td>' +
+      '<td style="text-align:center;font-weight:' + (stockMrv>0||reponible?'700':'400') + ';color:' + colorMrv + '" title="' + tituloMrv + '">' + (stockMrv != null ? stockMrv : guion) + (reponible ? ' \u26a0\ufe0f' : '') + '</td>' +
       '<td style="text-align:right;color:' + (t7?'var(--gray-600)':'var(--gray-300)') + '">' + (t7 != null ? t7 : guion) + '</td>' +
       '<td style="text-align:right;color:' + (t30?'var(--gray-600)':'var(--gray-300)') + '">' + (t30 != null ? t30 : guion) + '</td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvdVal + '" placeholder="\u2014" id="rot-pvd-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
@@ -2198,7 +2206,7 @@ function renderRotacionMiravia() {
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.1" min="0" value="' + comVal + '" placeholder="\u2014" id="rot-com-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + envVal + '" placeholder="\u2014" id="rot-env-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center" id="rot-tar-' + f.id + '">' + renderTarifasCelda(calc) + '</td>' +
-      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + almVal + '" placeholder="0.15" title="Caja + protector + almac\u00e9n. Se guarda al salir del campo" id="rot-alm-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')" onchange="guardarAlmacenMiravia(\'' + f.id + '\', this.value)"></td>' +
+      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + almVal + '" title="Caja + protector + almac\u00e9n. Por defecto 0,30. Se guarda al salir del campo" id="rot-alm-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')" onchange="guardarAlmacenMiravia(\'' + f.id + '\', this.value)"></td>' +
       '<td style="text-align:right" id="rot-margen-' + f.id + '">' + renderMargenCelda(calc) + '</td>' +
     '</tr>';
   }).join('');
