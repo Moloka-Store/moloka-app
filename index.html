@@ -1854,7 +1854,7 @@ async function cargarRotacion() {
   try {
     // Cargar en paralelo: productos activos + velocidades + rentabilidad
     const [prodResult, vel, rent] = await Promise.all([
-      db.from('productos').select('id, sku, asin, ean, nombre, stock_moloka, stock_fba, stock_inbound, proveedor, es_chase, pvd, precio_venta, comision_pct, comision_envio, iva_pct, coste_almacen, buy_box, buy_box_it, buy_box_fr, keepa_image, keepa_monthly_sold_es, keepa_monthly_sold_it, keepa_monthly_sold_fr').eq('activo', true).neq('estado', 'DESCATALOGADO'),
+      db.from('productos').select('id, sku, asin, ean, nombre, stock_moloka, stock_fba, stock_inbound, proveedor, es_chase, pvd, precio_venta, comision_pct, comision_envio, iva_pct, coste_almacen, buy_box, buy_box_it, buy_box_fr, comision_pct_it, comision_pct_fr, envio_it, envio_fr, keepa_image, keepa_monthly_sold_es, keepa_monthly_sold_it, keepa_monthly_sold_fr').eq('activo', true).neq('estado', 'DESCATALOGADO'),
       cargarVelocidades(),
       cargarRentData()
     ]);
@@ -1952,6 +1952,10 @@ async function cargarRotacion() {
         buy_box: (p.buy_box != null) ? p.buy_box : null,
         buy_box_it: (p.buy_box_it != null) ? p.buy_box_it : null,
         buy_box_fr: (p.buy_box_fr != null) ? p.buy_box_fr : null,
+        comision_pct_it: (p.comision_pct_it != null) ? p.comision_pct_it : null,
+        comision_pct_fr: (p.comision_pct_fr != null) ? p.comision_pct_fr : null,
+        envio_it: (p.envio_it != null) ? p.envio_it : null,
+        envio_fr: (p.envio_fr != null) ? p.envio_fr : null,
         keepa_image: p.keepa_image || null,
         keepa_monthly_sold_es: (p.keepa_monthly_sold_es != null) ? p.keepa_monthly_sold_es : null,
         keepa_monthly_sold_it: (p.keepa_monthly_sold_it != null) ? p.keepa_monthly_sold_it : null,
@@ -2197,10 +2201,20 @@ function renderRotacionAmazonCanal(canal) {
     const ivaCanal = (c.iva_pct != null) ? c.iva_pct : (canal === 'IT' ? 22 : 20);
     const pvdVal = (f.pvd != null) ? f.pvd.toFixed(2) : '';
     const pvVal  = (c.precio_venta != null) ? c.precio_venta : '';
-    const comVal = (c.comision_pct != null) ? c.comision_pct : '';
-    const envVal = (c.envio != null) ? c.envio : '';
+    // Comision y envio: dato REAL (de ventas) si existe; si no, ESTIMADO de Keepa (en rojo).
+    const comEst = (canal === 'IT') ? f.comision_pct_it : f.comision_pct_fr;
+    const envEst = (canal === 'IT') ? f.envio_it : f.envio_fr;
+    const comReal = (c.comision_pct != null);
+    const envReal = (c.envio != null);
+    const comUsar = comReal ? c.comision_pct : (comEst != null ? comEst : null);
+    const envUsar = envReal ? c.envio : (envEst != null ? envEst : null);
+    const comVal = (comUsar != null) ? comUsar : '';
+    const envVal = (envUsar != null) ? envUsar : '';
+    // Atributo de estilo: rojo + tooltip cuando el valor es estimado de Keepa (sin ventas reales aun)
+    const comStyleAttr = (!comReal && comEst != null) ? ' style="color:var(--red)" title="Comisi\u00f3n estimada por Keepa (sin ventas reales en ' + nombreCanal + ')"' : '';
+    const envStyleAttr = (!envReal && envEst != null) ? ' style="color:var(--red)" title="Log\u00edstica estimada por Keepa (sin ventas reales en ' + nombreCanal + ')"' : '';
 
-    const calc = calcMargenRot(f.pvd, c.precio_venta, c.comision_pct, c.envio, almacen, ivaCanal);
+    const calc = calcMargenRot(f.pvd, c.precio_venta, comUsar, envUsar, almacen, ivaCanal);
     const margenHtml = renderMargenCelda(calc);
     const tarifasHtml = renderTarifasCelda(calc);
     // Buy Box del canal (IT/FR) desde Keepa. Verde si tu precio es competitivo, rojo si te pasas.
@@ -2225,8 +2239,8 @@ function renderRotacionAmazonCanal(canal) {
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvdVal + '" placeholder="\u2014" id="rot-pvd-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvVal + '" placeholder="\u2014" id="rot-pv-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center" id="rot-bb-' + f.id + '">' + bbHtml + '</td>' +
-      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.1" min="0" value="' + comVal + '" placeholder="\u2014" id="rot-com-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
-      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + envVal + '" placeholder="\u2014" id="rot-env-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
+      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.1" min="0" value="' + comVal + '" placeholder="\u2014" id="rot-com-' + f.id + '"' + comStyleAttr + ' oninput="this.style.color=\'\';recalcularMargenFila(\'' + f.id + '\')"></td>' +
+      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + envVal + '" placeholder="\u2014" id="rot-env-' + f.id + '"' + envStyleAttr + ' oninput="this.style.color=\'\';recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center" id="rot-tar-' + f.id + '">' + tarifasHtml + '</td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + almacen + '" id="rot-alm-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:right" id="rot-margen-' + f.id + '">' + margenHtml + '</td>' +
