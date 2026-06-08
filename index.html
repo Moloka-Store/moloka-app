@@ -1799,7 +1799,8 @@ async function desSilenciar(silenciadoId) {
 let ROTACION_DATOS = null;
 let ROTACION_MAP = {};
 let ROTACION_CANAL = 'ES';
-let CANALES_MIRAVIA_MAP = {};          // producto_id -> { precio_venta, comision_pct, envio } (tabla canales_producto)
+let CANALES_MIRAVIA_MAP = {};          // producto_id -> { precio_venta, comision_pct, envio, coste_almacen, uds_7d, uds_30d }
+let MIRAVIA_PRODUCTOS = {};            // producto_id -> ficha de 'productos' (INCLUIDOS descatalogados/inactivos: si se vende en Miravia, sale)
 let CANALES_IT_MAP = {};               // producto_id -> { precio_venta, comision_pct, envio, iva_pct } (canal amazon_it)
 let CANALES_FR_MAP = {};               // producto_id -> { precio_venta, comision_pct, envio, iva_pct } (canal amazon_fr)
 const COSTE_CAJA_MIRAVIA = 0.30;       // coste fijo de caja por unidad en Miravia (el protector se suma a mano)
@@ -1877,11 +1878,23 @@ async function cargarRotacion() {
     // Canal Miravia: datos por producto (tabla canales_producto). Carga AISLADA:
     // si fallara, Amazon ES sigue funcionando con normalidad.
     CANALES_MIRAVIA_MAP = {};
+    MIRAVIA_PRODUCTOS = {};
     try {
       const { data: canalesMrv } = await db.from('canales_producto')
         .select('producto_id, precio_venta, comision_pct, envio, coste_almacen, uds_7d, uds_30d')
         .eq('canal', 'miravia').eq('activo', true);
-      if (canalesMrv) canalesMrv.forEach(c => { CANALES_MIRAVIA_MAP[c.producto_id] = c; });
+      if (canalesMrv) {
+        canalesMrv.forEach(c => { CANALES_MIRAVIA_MAP[c.producto_id] = c; });
+        // Cargar las fichas de ESOS productos SIN filtro de activo/estado: en Miravia se venden
+        // productos que en Amazon estan descatalogados (stock restante). Su universo es propio.
+        const idsMrv = canalesMrv.map(c => c.producto_id).filter(Boolean);
+        if (idsMrv.length) {
+          const { data: pm } = await db.from('productos')
+            .select('id, sku, asin, ean, nombre, stock_moloka, stock_miravia, stock_inbound, proveedor, es_chase, pvd, iva_pct, keepa_image, estado, activo')
+            .in('id', idsMrv);
+          if (pm) pm.forEach(p => { MIRAVIA_PRODUCTOS[p.id] = p; });
+        }
+      }
     } catch(e) { console.warn('No se pudo cargar canales_producto (Miravia):', e); }
 
     // Canales Amazon IT / FR: datos por producto (tabla canales_producto). Carga AISLADA:
@@ -2134,10 +2147,11 @@ function renderRotacion() {
 // Buy Box y velocidad (T7/T30) no aplican en Miravia -> se muestran como guion.
 function renderRotacionMiravia() {
   const tbody = document.getElementById('rot-tbody');
-  if (!ROTACION_DATOS) return;
   const buscar = (document.getElementById('rot-buscar').value || '').toLowerCase().trim();
 
-  let filas = ROTACION_DATOS.filter(f => CANALES_MIRAVIA_MAP[f.id]);
+  // Universo propio de Miravia: todos los productos con fila en canales_producto (incluidos
+  // descatalogados/inactivos en Amazon, que aqui se siguen vendiendo con el stock restante).
+  let filas = Object.keys(CANALES_MIRAVIA_MAP).map(id => MIRAVIA_PRODUCTOS[id]).filter(Boolean);
   if (buscar) {
     filas = filas.filter(f =>
       (f.nombre || '').toLowerCase().includes(buscar) ||
@@ -2373,7 +2387,7 @@ function renderTarifasCelda(calc) {
 
 // Recalcula SOLO la celda de margen de una fila (no re-renderiza -> no pierde el foco al escribir)
 function recalcularMargenFila(id) {
-  const f = ROTACION_MAP[id];
+  const f = ROTACION_MAP[id] || MIRAVIA_PRODUCTOS[id];
   if (!f) return;
   const pvd = document.getElementById('rot-pvd-' + id).value;
   const pv  = document.getElementById('rot-pv-' + id).value;
