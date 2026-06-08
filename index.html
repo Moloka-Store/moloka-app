@@ -3658,31 +3658,61 @@ async function confirmarEnvioFBA() {
     });
     if (errIns) throw errIns;
 
-    // 4. Actualizar stocks de productos (uno por uno)
-    // NOTA: stock_inbound NO se modifica aqui. La fuente de verdad es el informe FBA de Amazon,
-    // que actualiza stock_inbound directamente (campo "inbound-quantity" del informe).
-    // El silencio de 5 dias (bloque 4b) cubre la ventana de ~24h hasta que Amazon refleja el envio.
+    // 4. Actualizar stocks de productos (uno por uno).
+    // CRITICO (bug 8-jun): el descuento de stock va PRIMERO, AISLADO y comprobando error.
+    // Antes el stock y las ubicaciones iban en el mismo update; si las ubicaciones lo hacian
+    // fallar, el update entero se caia EN SILENCIO -> el movimiento se insertaba pero el stock
+    // NO bajaba. Ahora: 1) releer stock real, 2) descontar stock (con control de error),
+    // 3) registrar movimiento solo si bajo, 4) ubicaciones en update aparte (no critico).
+    // stock_inbound NO se toca aqui (lo gobierna el informe FBA de Amazon).
+    const fallosStock = [];
     for (const e of envioItems) {
-      const nuevoStockMoloka = e.stock_moloka - e.qty;
-      // Recalcular ubicaciones_cant restando lo que sale de cada estanteria en este envio
-      const ucBase = (e.ubicaciones_cant && typeof e.ubicaciones_cant === 'object' && !Array.isArray(e.ubicaciones_cant)) ? {...e.ubicaciones_cant} : {};
-      const rep = repartoFinal[e.id] || {};
-      Object.keys(rep).forEach(est => {
-        ucBase[est] = (ucBase[est] || 0) - rep[est];
-        if (ucBase[est] <= 0) delete ucBase[est];
-      });
-      const updateProd = { stock_moloka: nuevoStockMoloka, updated_at: fechaIso };
-      // Solo tocar ubicaciones si habia info de estanterias (no pisar con vacio a productos sin migrar)
-      if (Object.keys(rep).length > 0 || (e.ubicaciones_cant && Object.keys(e.ubicaciones_cant).length > 0)) {
-        updateProd.ubicaciones_cant = ucBase;
-        updateProd.ubicaciones = Object.keys(ucBase);
+      // Releer stock real y ubicaciones de la ficha justo antes de descontar (no fiarse del valor
+      // en memoria: pudo quedar desactualizado si se confirman varios envios del mismo producto).
+      let stockActual = (typeof e.stock_moloka === 'number') ? e.stock_moloka : 0;
+      let ucActual = e.ubicaciones_cant;
+      try {
+        const { data: fresco } = await db.from('productos')
+          .select('stock_moloka, ubicaciones_cant').eq('id', e.id).single();
+        if (fresco) {
+          if (typeof fresco.stock_moloka === 'number') stockActual = fresco.stock_moloka;
+          ucActual = fresco.ubicaciones_cant;
+        }
+      } catch (errLeer) { console.warn('[confirmarEnvioFBA] no se pudo releer', e.id, errLeer); }
+
+      const nuevoStockMoloka = Math.max(0, stockActual - e.qty);
+
+      // 4a. DESCUENTO DE STOCK (critico) -> update aislado y comprobado.
+      const { error: errStock } = await db.from('productos')
+        .update({ stock_moloka: nuevoStockMoloka, updated_at: fechaIso })
+        .eq('id', e.id);
+      if (errStock) {
+        console.error('[confirmarEnvioFBA] ERROR descontando stock de', e.nombre, errStock);
+        fallosStock.push(e.nombre || e.id);
+        continue;  // sin movimiento: si el stock no baja, no dejamos un movimiento huerfano
       }
-      await db.from('productos').update(updateProd).eq('id', e.id);
-      await db.from('movimientos').insert({
-        producto_id: e.id,
-        tipo: 'envio_fba',
-        cantidad: -e.qty
-      });
+
+      // 4b. Movimiento de salida (solo si el stock bajo bien).
+      await db.from('movimientos').insert({ producto_id: e.id, tipo: 'envio_fba', cantidad: -e.qty });
+
+      // 4c. UBICACIONES (no critico) -> update SEPARADO. Si falla, se loguea pero NO afecta al stock.
+      const rep = repartoFinal[e.id] || {};
+      const ucBase = (ucActual && typeof ucActual === 'object' && !Array.isArray(ucActual)) ? {...ucActual} : {};
+      if (Object.keys(rep).length > 0 || Object.keys(ucBase).length > 0) {
+        Object.keys(rep).forEach(est => {
+          ucBase[est] = (ucBase[est] || 0) - rep[est];
+          if (ucBase[est] <= 0) delete ucBase[est];
+        });
+        try {
+          const { error: errUbic } = await db.from('productos')
+            .update({ ubicaciones_cant: ucBase, ubicaciones: Object.keys(ucBase) })
+            .eq('id', e.id);
+          if (errUbic) console.error('[confirmarEnvioFBA] ubicaciones no actualizadas para', e.nombre, errUbic);
+        } catch (errUbicCatch) { console.error('[confirmarEnvioFBA] ubicaciones catch', errUbicCatch); }
+      }
+    }
+    if (fallosStock.length) {
+      showToast('\u26a0\ufe0f No se pudo descontar stock de: ' + fallosStock.join(', ') + '. Av\u00edsame.', 'error');
     }
 
     // 4b. Silenciar alertas "mandar_fba" Y "pedir_proveedor" 5 dias para los productos enviados
