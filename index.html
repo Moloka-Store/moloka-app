@@ -285,6 +285,9 @@
     <div class="nav-item" data-page="devoluciones" onclick="showPage('devoluciones',this)">
       <span class="nav-icon">📦</span> Devoluciones
     </div>
+    <div class="nav-item" data-page="movimientos" onclick="showPage('movimientos',this)">
+      <span class="nav-icon">🧾</span> Movimientos
+    </div>
   </nav>
   <div class="sidebar-footer" id="conn-status">Conectando...</div>
 </aside>
@@ -663,6 +666,54 @@
     <div class="info-box" style="margin-top:16px">ℹ️ Datos de los 4 informes de devoluciones Amazon: customer returns, removal orders, removal shipments y reimbursements. Importes SIN IVA (indemnización Amazon).</div>
   </div>
 
+  <div class="page" id="page-movimientos">
+    <div class="page-header">
+      <div><div class="page-title">🧾 Movimientos</div><div class="page-sub" id="mov-count">Cargando...</div></div>
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:flex-end">
+      <div style="flex:1;min-width:200px">
+        <div class="inv-field-label">Buscar producto</div>
+        <input class="input" id="mov-search" placeholder="Nombre o EAN..." oninput="renderMovimientos()">
+      </div>
+      <div>
+        <div class="inv-field-label">Tipo</div>
+        <select class="input" id="mov-filtro-tipo" onchange="renderMovimientos()">
+          <option value="">Todos</option>
+          <option value="entrada">📥 Entradas</option>
+          <option value="envio_fba">🚚 Envíos FBA</option>
+          <option value="ajuste">🔧 Ajustes</option>
+          <option value="venta_otros">🛒 Ventas otros canales</option>
+          <option value="consolidacion">🔗 Consolidaciones</option>
+        </select>
+      </div>
+      <div>
+        <div class="inv-field-label">Desde</div>
+        <input class="input" id="mov-desde" type="date" onchange="renderMovimientos()">
+      </div>
+      <div>
+        <div class="inv-field-label">Hasta</div>
+        <input class="input" id="mov-hasta" type="date" onchange="renderMovimientos()">
+      </div>
+      <button class="btn btn-ghost" onclick="cargarMovimientos()">🔄 Refrescar</button>
+    </div>
+    <div class="card" style="padding:0">
+      <div class="table-wrap" style="max-height:640px;overflow-y:auto">
+        <table>
+          <thead><tr>
+            <th>Fecha</th>
+            <th>Producto</th>
+            <th>Tipo</th>
+            <th style="text-align:center">Cantidad</th>
+            <th style="text-align:center">Balda</th>
+            <th>Motivo</th>
+          </tr></thead>
+          <tbody id="mov-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="info-box" style="margin-top:14px">ℹ️ Registro de entradas (mercancía y factura), envíos a FBA, ajustes y ventas de otros canales. La cantidad va en + (entra) o − (sale), con la balda implicada. Se muestran los últimos 400 movimientos.</div>
+  </div>
+
 </main>
 
 <!-- MODALES -->
@@ -953,16 +1004,19 @@
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
       <div>
         <div class="inv-field-label">Aplicar a</div>
-        <select class="input" id="ajst-campo" onchange="actualizarPreviewAjuste()">
-          <option value="stock_moloka">Stock Almacén Moloka</option>
-          <option value="stock_fba">Stock Amazon FBA</option>
-          <option value="stock_miravia">Stock Miravia</option>
+        <select class="input" id="ajst-campo" onchange="onCambioCampoAjuste()">
+          <option value="stock_moloka">Almacén Moloka (por balda)</option>
+          <option value="stock_fba">Amazon FBA</option>
         </select>
       </div>
-      <div>
-        <div class="inv-field-label">Nueva cantidad</div>
-        <input class="input" id="ajst-cantidad-nueva" type="number" min="0" oninput="actualizarPreviewAjuste()">
+      <div id="ajst-balda-wrap">
+        <div class="inv-field-label">Balda</div>
+        <select class="input" id="ajst-balda" onchange="onCambioBaldaAjuste()"></select>
       </div>
+    </div>
+    <div style="margin-bottom:12px">
+      <div class="inv-field-label" id="ajst-cant-label">Nueva cantidad en esta balda</div>
+      <input class="input" id="ajst-cantidad-nueva" type="number" min="0" oninput="actualizarPreviewAjuste()">
     </div>
     <div style="font-size:13px;margin-bottom:14px"><strong>Cambio:</strong> <span id="ajst-preview">—</span></div>
     <div style="margin-bottom:12px">
@@ -974,6 +1028,7 @@
         <option value="error_conteo">Error de conteo</option>
         <option value="reclamacion_proveedor">Reclamación proveedor</option>
         <option value="venta_fuera_amazon">Venta fuera de Amazon</option>
+        <option value="venta_miravia">Venta en Miravia</option>
         <option value="otro">Otro</option>
       </select>
     </div>
@@ -1078,6 +1133,81 @@ function showPage(id, el) {
   if (id === 'rentabilidad') verRentabilidad('acumulado');
   if (id === 'devoluciones') verDevoluciones('acumulado');
   if (id === 'envios-historial') cargarEnviosHistorial();
+  if (id === 'movimientos') cargarMovimientos();
+}
+
+// ============================================================
+// MOVIMIENTOS (auditoria de entradas/salidas) — solo lectura
+// ============================================================
+let _movCache = [];
+let _movProductos = {};
+async function cargarMovimientos() {
+  const tbody = document.getElementById('mov-tbody');
+  tbody.innerHTML = '<tr><td colspan="6" style="padding:20px;text-align:center"><div class="big-loader"></div></td></tr>';
+  try {
+    // Intentar ordenar por 'fecha'; si esa columna no existe, caer a created_at, luego a id.
+    let movs = null, error = null;
+    ({ data: movs, error } = await db.from('movimientos').select('*').order('fecha', { ascending: false }).limit(400));
+    if (error) {
+      ({ data: movs, error } = await db.from('movimientos').select('*').order('created_at', { ascending: false }).limit(400));
+    }
+    if (error) {
+      ({ data: movs, error } = await db.from('movimientos').select('*').order('id', { ascending: false }).limit(400));
+    }
+    if (error) throw error;
+    _movCache = movs || [];
+    // Cargar nombre/EAN de los productos implicados (sin depender de relaciones FK)
+    _movProductos = {};
+    const ids = [...new Set(_movCache.map(function(m){ return m.producto_id; }).filter(Boolean))];
+    if (ids.length) {
+      const { data: prods } = await db.from('productos').select('id, nombre, ean, es_chase').in('id', ids);
+      (prods || []).forEach(function(p){ _movProductos[p.id] = p; });
+    }
+    renderMovimientos();
+  } catch (e) {
+    console.error('[cargarMovimientos]', e);
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:20px;color:var(--red);text-align:center">Error cargando movimientos: ' + (e.message || e) + '</td></tr>';
+  }
+}
+function renderMovimientos() {
+  const texto = (document.getElementById('mov-search').value || '').toLowerCase().trim();
+  const tipoF = document.getElementById('mov-filtro-tipo').value;
+  const desde = document.getElementById('mov-desde').value;
+  const hasta = document.getElementById('mov-hasta').value;
+  const tipoLabel = { entrada: '📥 Entrada', envio_fba: '🚚 Envío FBA', ajuste: '🔧 Ajuste', venta_otros: '🛒 Venta otros', consolidacion: '🔗 Consolidación' };
+  const filas = _movCache.filter(function(m){
+    if (tipoF && m.tipo !== tipoF) return false;
+    const f = (m.fecha || m.created_at || '').substring(0, 10);
+    if (desde && f && f < desde) return false;
+    if (hasta && f && f > hasta) return false;
+    if (texto) {
+      const p = _movProductos[m.producto_id] || {};
+      const hay = ((p.nombre || '') + ' ' + (p.ean || '')).toLowerCase();
+      if (hay.indexOf(texto) === -1) return false;
+    }
+    return true;
+  });
+  document.getElementById('mov-count').textContent = filas.length + ' movimiento' + (filas.length !== 1 ? 's' : '');
+  const tbody = document.getElementById('mov-tbody');
+  if (!filas.length) { tbody.innerHTML = '<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--gray-400)">Sin movimientos con esos filtros</td></tr>'; return; }
+  tbody.innerHTML = filas.map(function(m){
+    const p = _movProductos[m.producto_id] || {};
+    const fechaTxt = (m.fecha || m.created_at) ? new Date(m.fecha || m.created_at).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+    const cant = m.cantidad || 0;
+    const cantColor = cant > 0 ? 'var(--green)' : (cant < 0 ? 'var(--red)' : 'var(--gray-400)');
+    const cantTxt = (cant > 0 ? '+' : '') + cant;
+    const nombre = (p.nombre || '(producto sin ficha)') + (p.es_chase ? ' ·CHASE' : '');
+    const eanLine = p.ean ? '<div style="font-size:10px;color:var(--gray-400);font-family:monospace">' + p.ean + '</div>' : '';
+    const motivoTxt = (m.motivo || '') + (m.nota ? ' · ' + m.nota : '') + (m.usuario ? ' <span style="color:var(--gray-400)">(' + m.usuario + ')</span>' : '');
+    return '<tr>' +
+      '<td style="font-size:11px;white-space:nowrap">' + fechaTxt + '</td>' +
+      '<td style="font-size:12px">' + nombre.substring(0, 46) + eanLine + '</td>' +
+      '<td style="font-size:12px;white-space:nowrap">' + (tipoLabel[m.tipo] || m.tipo) + '</td>' +
+      '<td style="font-family:\'DM Mono\',monospace;font-weight:600;text-align:center;color:' + cantColor + '">' + cantTxt + '</td>' +
+      '<td style="font-size:12px;text-align:center">' + (m.ubicacion || '—') + '</td>' +
+      '<td style="font-size:11px;color:var(--gray-500)">' + motivoTxt + '</td>' +
+    '</tr>';
+  }).join('');
 }
 
 // ============================================================
@@ -2176,11 +2306,12 @@ function renderRotacionMiravia() {
   const guion = '<span style="color:var(--gray-300)">\u2014</span>';
   tbody.innerHTML = filas.map(f => {
     const c = CANALES_MIRAVIA_MAP[f.id];
-    // Stock total en Moloka = almacen + mueble Miravia (lo que tienes para servir, es dropshipping)
-    const stockTotal = (f.stock_moloka || 0) + (f.stock_miravia || 0);
+    // Stock Moloka = TODO el fisico del local (P/D/I + mueble Miravia, un solo numero).
+    // El campo manual stock_miravia esta DEPRECADO (desincronizado) y NO se suma: stock_moloka ya es el total.
+    const stockTotal = (f.stock_moloka || 0);
     // Stock publicado AHORA en Miravia (lo lleva el notebook desde la API). Lo gestiona Fernando a mano.
     const stockMrv = (c.stock_canal != null) ? c.stock_canal : null;
-    const reponible = (stockMrv === 0 && stockTotal > 0);   // agotado en Miravia y hay stock para subir
+    const reponible = (stockMrv === 0 && stockTotal > 0);   // agotado en Miravia y hay stock fisico para subir
     const pvdVal = (f.pvd != null) ? f.pvd.toFixed(2) : '';
     const pvVal  = (c.precio_venta != null) ? c.precio_venta : '';
     const comVal = (c.comision_pct != null) ? c.comision_pct : '';
@@ -2197,7 +2328,7 @@ function renderRotacionMiravia() {
 
     return '<tr>' +
       celdaProductoRot(f, 'MIRAVIA') +
-      '<td style="text-align:center;font-weight:' + (stockTotal>0?'700':'400') + ';color:' + (stockTotal>0?'var(--navy)':'var(--gray-400)') + '" title="Almac\u00e9n ' + (f.stock_moloka||0) + ' + Miravia ' + (f.stock_miravia||0) + '">' + stockTotal + '</td>' +
+      '<td style="text-align:center;font-weight:' + (stockTotal>0?'700':'400') + ';color:' + (stockTotal>0?'var(--navy)':'var(--gray-400)') + '" title="Stock f\u00edsico total en el local">' + stockTotal + '</td>' +
       '<td style="text-align:center;font-weight:' + (stockMrv>0||reponible?'700':'400') + ';color:' + colorMrv + '" title="' + tituloMrv + '">' + (stockMrv != null ? stockMrv : guion) + (reponible ? ' \u26a0\ufe0f' : '') + '</td>' +
       '<td style="text-align:right;color:' + (t7?'var(--gray-600)':'var(--gray-300)') + '">' + (t7 != null ? t7 : guion) + '</td>' +
       '<td style="text-align:right;color:' + (t30?'var(--gray-600)':'var(--gray-300)') + '">' + (t30 != null ? t30 : guion) + '</td>' +
@@ -2527,7 +2658,7 @@ async function cargarInventario() {
   }
 }
 
-// Muestra las estanterias CON cantidad (lee ubicaciones_cant jsonb) + el mueble Miravia aparte.
+// Muestra las baldas CON cantidad (lee ubicaciones_cant jsonb). Miravia es una balda mas.
 // Solo lectura. Cae al formato viejo (array sin cantidad) por robustez si aun no hay ubicaciones_cant.
 function renderUbicacionesCant(p) {
   const partes = [];
@@ -2539,9 +2670,6 @@ function renderUbicacionesCant(p) {
     });
   } else if (Array.isArray(p.ubicaciones) && p.ubicaciones.length) {
     p.ubicaciones.filter(l => l !== 'MIRAVIA').forEach(l => partes.push('<span class="loc-tag">' + l + '</span>'));
-  }
-  if ((p.stock_miravia || 0) > 0) {
-    partes.push('<span class="loc-tag" style="background:#ede9fe;color:#7c3aed;border-color:#ddd6fe">Miravia: ' + p.stock_miravia + '</span>');
   }
   return partes.length ? partes.join('') : '<span style="color:var(--gray-300)">\u2014</span>';
 }
@@ -2593,7 +2721,7 @@ function toggleInvDetalle(productoId) {
 }
 
 // --- PASO 3: edicion de ubicaciones con cantidad (estanterias Moloka) ---
-const ESTANTERIAS_MOLOKA = ['P', 'D-1', 'D-2', 'D-3', 'I-1', 'I-2'];
+const ESTANTERIAS_MOLOKA = ['P', 'D-1', 'D-2', 'D-3', 'I-1', 'I-2', 'Miravia'];
 
 function filaHuecoHTML(pid, loc, cant) {
   const opts = ESTANTERIAS_MOLOKA.map(e =>
@@ -2669,7 +2797,6 @@ function renderInvDetalle(productoId) {
         <div style="display:flex;gap:12px;align-items:center;margin-top:6px;flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" onclick="agregarHueco('${p.id}')" style="padding:3px 10px">+ Añadir estantería</button>
           <span style="font-size:12px;color:var(--gray-500)">Stock Moloka (suma) = <strong style="color:var(--navy)" id="ed-huecos-suma-${p.id}">${p.stock_moloka || 0}</strong> uds</span>
-          ${(p.stock_miravia||0) > 0 ? `<span style="font-size:12px;color:#7c3aed">· Miravia (aparte): <strong>${p.stock_miravia}</strong> uds</span>` : ''}
         </div>
       </div>
     </div>
@@ -2744,33 +2871,81 @@ function abrirAjusteStock(productoId) {
   document.getElementById('ajst-stock-moloka-actual').textContent = p.stock_moloka || 0;
   document.getElementById('ajst-stock-fba-actual').textContent = p.stock_fba || 0;
   document.getElementById('ajst-campo').value = 'stock_moloka';
-  document.getElementById('ajst-cantidad-nueva').value = p.stock_moloka || 0;
   document.getElementById('ajst-motivo').value = 'rotura';
   document.getElementById('ajst-notas').value = '';
-  actualizarPreviewAjuste();
+  onCambioCampoAjuste();   // rellena baldas y cantidad segun el campo
   openModal('modal-ajuste-stock');
 }
 
-// Cuando cambia el campo o cantidad, actualizar el preview de la diferencia
+// Devuelve el objeto ubicaciones_cant del producto (o {})
+function _ucDe(p) {
+  return (p && p.ubicaciones_cant && typeof p.ubicaciones_cant === 'object' && !Array.isArray(p.ubicaciones_cant)) ? p.ubicaciones_cant : {};
+}
+
+// Al cambiar "Aplicar a": Moloka -> selector de balda visible; FBA -> oculto
+function onCambioCampoAjuste() {
+  const productoId = document.getElementById('ajst-prod-id').value;
+  const p = window._invCache[productoId];
+  if (!p) return;
+  const campo = document.getElementById('ajst-campo').value;
+  const baldaWrap = document.getElementById('ajst-balda-wrap');
+  const lbl = document.getElementById('ajst-cant-label');
+  if (campo === 'stock_moloka') {
+    baldaWrap.style.display = '';
+    lbl.textContent = 'Nueva cantidad en esta balda';
+    const uc = _ucDe(p);
+    const sel = document.getElementById('ajst-balda');
+    sel.innerHTML = ESTANTERIAS_MOLOKA.map(function(b) {
+      return '<option value="' + b + '">' + b + ' (' + (uc[b] || 0) + ')</option>';
+    }).join('');
+    sel.value = ESTANTERIAS_MOLOKA[0];
+    onCambioBaldaAjuste();
+  } else {
+    baldaWrap.style.display = 'none';
+    lbl.textContent = 'Nueva cantidad (FBA)';
+    document.getElementById('ajst-cantidad-nueva').value = p.stock_fba || 0;
+    actualizarPreviewAjuste();
+  }
+}
+
+// Al cambiar de balda, precargar su cantidad actual
+function onCambioBaldaAjuste() {
+  const productoId = document.getElementById('ajst-prod-id').value;
+  const p = window._invCache[productoId];
+  if (!p) return;
+  const balda = document.getElementById('ajst-balda').value;
+  const uc = _ucDe(p);
+  document.getElementById('ajst-cantidad-nueva').value = uc[balda] || 0;
+  actualizarPreviewAjuste();
+}
+
+// Preview de la diferencia segun el campo/balda elegido
 function actualizarPreviewAjuste() {
   const productoId = document.getElementById('ajst-prod-id').value;
   const p = window._invCache[productoId];
   if (!p) return;
   const campo = document.getElementById('ajst-campo').value;
-  const actual = (campo === 'stock_moloka') ? (p.stock_moloka || 0) : ((campo === 'stock_fba') ? (p.stock_fba || 0) : (p.stock_miravia || 0));
+  let actual;
+  if (campo === 'stock_moloka') {
+    const balda = document.getElementById('ajst-balda').value;
+    actual = _ucDe(p)[balda] || 0;
+  } else {
+    actual = p.stock_fba || 0;
+  }
   const nueva = parseInt(document.getElementById('ajst-cantidad-nueva').value) || 0;
   const diff = nueva - actual;
   const elPrev = document.getElementById('ajst-preview');
   if (diff === 0) {
     elPrev.innerHTML = '<span style="color:var(--gray-400)">Sin cambios</span>';
   } else if (diff > 0) {
-    elPrev.innerHTML = `<span style="color:var(--green)">+${diff} unidades (entrada)</span>`;
+    elPrev.innerHTML = '<span style="color:var(--green)">+' + diff + ' unidades (entra)</span>';
   } else {
-    elPrev.innerHTML = `<span style="color:var(--red)">${diff} unidades (salida)</span>`;
+    elPrev.innerHTML = '<span style="color:var(--red)">' + diff + ' unidades (sale)</span>';
   }
 }
 
-// Confirmar ajuste de stock: actualiza producto + crea registro en ajustes_stock
+// Confirmar ajuste: por balda (Moloka) o directo (FBA). stock_moloka se recalcula
+// desde las baldas y todo queda registrado en movimientos (+ ajustes_stock).
 async function confirmarAjusteStock() {
   try {
     const productoId = document.getElementById('ajst-prod-id').value;
@@ -2779,28 +2954,58 @@ async function confirmarAjusteStock() {
     const campo = document.getElementById('ajst-campo').value;
     const cantidadNueva = parseInt(document.getElementById('ajst-cantidad-nueva').value);
     if (isNaN(cantidadNueva) || cantidadNueva < 0) { showToast('Cantidad no valida', 'error'); return; }
-    const cantidadAntes = (campo === 'stock_moloka') ? (p.stock_moloka || 0) : ((campo === 'stock_fba') ? (p.stock_fba || 0) : (p.stock_miravia || 0));
-    if (cantidadAntes === cantidadNueva) { showToast('Sin cambios que aplicar', 'error'); return; }
     const motivo = document.getElementById('ajst-motivo').value;
     const notas = document.getElementById('ajst-notas').value.trim() || null;
+    const fecha = new Date().toISOString();
 
-    // Actualizar producto
-    const updProd = { updated_at: new Date().toISOString() };
-    updProd[campo] = cantidadNueva;
-    const { error: e1 } = await db.from('productos').update(updProd).eq('id', productoId);
-    if (e1) throw e1;
-
-    // Registrar en ajustes_stock
-    const { error: e2 } = await db.from('ajustes_stock').insert({
-      producto_id: productoId,
-      campo_ajustado: campo,
-      cantidad_antes: cantidadAntes,
-      cantidad_despues: cantidadNueva,
-      motivo: motivo,
-      notas: notas,
-      usuario: localStorage.getItem('moloka_usuario') || 'desconocido'
-    });
-    if (e2) throw e2;
+    if (campo === 'stock_moloka') {
+      // Ajuste por BALDA. Releer ubicaciones frescas para no pisar cambios recientes.
+      const balda = document.getElementById('ajst-balda').value;
+      let ucActual = _ucDe(p);
+      try {
+        const { data: fresco } = await db.from('productos').select('ubicaciones_cant').eq('id', productoId).single();
+        if (fresco && fresco.ubicaciones_cant && typeof fresco.ubicaciones_cant === 'object' && !Array.isArray(fresco.ubicaciones_cant)) ucActual = fresco.ubicaciones_cant;
+      } catch (errLeer) { console.warn('[ajuste] no se pudo releer ubicaciones', errLeer); }
+      const cantidadAntes = ucActual[balda] || 0;
+      if (cantidadAntes === cantidadNueva) { showToast('Sin cambios que aplicar en ' + balda, 'error'); return; }
+      const uc = {...ucActual};
+      if (cantidadNueva > 0) uc[balda] = cantidadNueva; else delete uc[balda];
+      const nuevoStock = Object.values(uc).reduce(function(s, x){ return s + (x || 0); }, 0);
+      const { error: e1 } = await db.from('productos').update({
+        ubicaciones_cant: uc,
+        ubicaciones: Object.keys(uc),
+        stock_moloka: nuevoStock,
+        updated_at: fecha
+      }).eq('id', productoId);
+      if (e1) throw e1;
+      const diff = cantidadNueva - cantidadAntes;
+      const tipoMov = (motivo === 'venta_miravia' || motivo === 'venta_fuera_amazon') ? 'venta_otros' : 'ajuste';
+      await registrarMovimiento(productoId, tipoMov, diff, balda, { motivo: motivo, nota: notas });
+      try {
+        await db.from('ajustes_stock').insert({
+          producto_id: productoId, campo_ajustado: 'stock_moloka',
+          cantidad_antes: cantidadAntes, cantidad_despues: cantidadNueva,
+          motivo: motivo, notas: (notas ? notas + ' ' : '') + '[balda ' + balda + ']',
+          usuario: localStorage.getItem('moloka_usuario') || 'desconocido'
+        });
+      } catch (errAj) { console.warn('[ajuste] ajustes_stock', errAj); }
+    } else {
+      // Ajuste directo de FBA (correccion manual puntual; lo normal lo gobierna Amazon).
+      const cantidadAntes = p.stock_fba || 0;
+      if (cantidadAntes === cantidadNueva) { showToast('Sin cambios que aplicar', 'error'); return; }
+      const { error: e1 } = await db.from('productos').update({ stock_fba: cantidadNueva, updated_at: fecha }).eq('id', productoId);
+      if (e1) throw e1;
+      const diff = cantidadNueva - cantidadAntes;
+      await registrarMovimiento(productoId, 'ajuste', diff, 'FBA', { motivo: motivo, nota: notas });
+      try {
+        await db.from('ajustes_stock').insert({
+          producto_id: productoId, campo_ajustado: 'stock_fba',
+          cantidad_antes: cantidadAntes, cantidad_despues: cantidadNueva,
+          motivo: motivo, notas: notas,
+          usuario: localStorage.getItem('moloka_usuario') || 'desconocido'
+        });
+      } catch (errAj) { console.warn('[ajuste] ajustes_stock', errAj); }
+    }
 
     showToast('Ajuste registrado', 'success');
     closeModal('modal-ajuste-stock');
@@ -3137,6 +3342,32 @@ function aplicarProductoEntrada(p) {
   document.getElementById('product-found-area').style.display = 'block';
 }
 
+// ============================================================
+// AUDITORIA DE MOVIMIENTOS — registro unico de toda entrada/salida de stock.
+// Deja rastro consultable (producto, tipo, cantidad +/-, balda, motivo, usuario).
+// Robusto: si falla el registro, se loguea pero NUNCA rompe el flujo de stock.
+// tipo: 'entrada' | 'envio_fba' | 'ajuste' | 'venta_otros' | 'consolidacion'
+// cantidad: positiva si entra, negativa si sale.
+// ============================================================
+async function registrarMovimiento(productoId, tipo, cantidad, ubicacion, opts) {
+  opts = opts || {};
+  try {
+    const { error } = await db.from('movimientos').insert({
+      producto_id: productoId,
+      tipo: tipo,
+      cantidad: cantidad,
+      ubicacion: ubicacion || null,
+      motivo: opts.motivo || null,
+      nota: opts.nota || null,
+      referencia: opts.referencia || null,
+      usuario: localStorage.getItem('moloka_usuario') || 'desconocido'
+    });
+    if (error) console.error('[registrarMovimiento]', error, { productoId, tipo, cantidad });
+  } catch (e) {
+    console.error('[registrarMovimiento] excepcion', e);
+  }
+}
+
 async function confirmarEntrada() {
   if (!productoEnEdicion) return;
   const qty = parseInt(document.getElementById('entrada-qty').value) || 1;
@@ -3159,12 +3390,7 @@ async function confirmarEntrada() {
   }).eq('id', productoEnEdicion.id);
 
   if (!error) {
-    await db.from('movimientos').insert({
-      producto_id: productoEnEdicion.id,
-      tipo: 'entrada',
-      cantidad: qty,
-      ubicacion: loc
-    });
+    await registrarMovimiento(productoEnEdicion.id, 'entrada', qty, loc, { motivo: 'entrada_mercancia' });
   }
 
   btn.innerHTML = '✅ Confirmar entrada'; btn.disabled = false;
@@ -3248,12 +3474,7 @@ async function confirmarEntradaChase() {
     if (e3) throw e3;
 
     // 3. Registrar movimiento
-    await db.from('movimientos').insert({
-      producto_id: chaseProd.id,
-      tipo: 'entrada',
-      cantidad: qty,
-      ubicacion: loc
-    });
+    await registrarMovimiento(chaseProd.id, 'entrada', qty, loc, { motivo: 'entrada_mercancia', nota: 'CHASE' });
 
     // 4. UI
     sesionEntradas.push({ nombre: chaseProd.nombre, qty, loc });
@@ -3292,7 +3513,7 @@ async function crearProductoYEntrada() {
   }).select().single();
 
   if (error) { showToast('Error: ' + error.message, 'error'); return; }
-  await db.from('movimientos').insert({ producto_id: data.id, tipo: 'entrada', cantidad: qty, ubicacion: loc });
+  await registrarMovimiento(data.id, 'entrada', qty, loc, { motivo: 'alta_producto' });
 
   sesionEntradas.push({ nombre, qty, loc });
   renderSesion();
@@ -3626,6 +3847,33 @@ async function confirmarEnvioFBA() {
     else repartoFinal[e.id] = {}; // sin estanterias conocidas: no se toca ubicaciones_cant
   }
 
+  // BARRERA NO-NEGATIVOS: validar contra el stock FRESCO de baldas ANTES de tocar nada.
+  // Un envio nunca puede dejar una balda en negativo ni mandar lo que no esta localizado.
+  const erroresEnvio = [];
+  const ucFresco = {};
+  for (const e of envioItems) {
+    let uc = {};
+    try {
+      const { data } = await db.from('productos').select('ubicaciones_cant').eq('id', e.id).single();
+      if (data && data.ubicaciones_cant && typeof data.ubicaciones_cant === 'object' && !Array.isArray(data.ubicaciones_cant)) uc = data.ubicaciones_cant;
+    } catch (errLeer) { console.warn('[envio] releer', e.id, errLeer); }
+    ucFresco[e.id] = uc;
+    const rep = repartoFinal[e.id] || {};
+    const sumaRep = Object.values(rep).reduce(function(s, x){ return s + (x || 0); }, 0);
+    const localizado = Object.values(uc).reduce(function(s, x){ return s + (x || 0); }, 0);
+    if (sumaRep !== e.qty) {
+      erroresEnvio.push((e.nombre || e.id).substring(0, 30) + ': sin localizar de donde salen ' + e.qty + ' uds (localizado: ' + localizado + ')');
+      continue;
+    }
+    Object.keys(rep).forEach(function(b){
+      if ((rep[b] || 0) > (uc[b] || 0)) erroresEnvio.push((e.nombre || e.id).substring(0, 30) + ': pides ' + rep[b] + ' de ' + b + ' pero solo hay ' + (uc[b] || 0));
+    });
+  }
+  if (erroresEnvio.length) {
+    showToast('No se puede enviar (revisa ubicaciones): ' + erroresEnvio.join(' \u00b7 '), 'error');
+    return;
+  }
+
   // Pedir pesos de cajas maestras via modal (sustituye al confirm nativo). null = cancelado.
   const cajasEnvio = await pedirPesosCajas(totalUds, envioItems.length);
   if (cajasEnvio === null) return;
@@ -3667,49 +3915,29 @@ async function confirmarEnvioFBA() {
     // stock_inbound NO se toca aqui (lo gobierna el informe FBA de Amazon).
     const fallosStock = [];
     for (const e of envioItems) {
-      // Releer stock real y ubicaciones de la ficha justo antes de descontar (no fiarse del valor
-      // en memoria: pudo quedar desactualizado si se confirman varios envios del mismo producto).
-      let stockActual = (typeof e.stock_moloka === 'number') ? e.stock_moloka : 0;
-      let ucActual = e.ubicaciones_cant;
-      try {
-        const { data: fresco } = await db.from('productos')
-          .select('stock_moloka, ubicaciones_cant').eq('id', e.id).single();
-        if (fresco) {
-          if (typeof fresco.stock_moloka === 'number') stockActual = fresco.stock_moloka;
-          ucActual = fresco.ubicaciones_cant;
-        }
-      } catch (errLeer) { console.warn('[confirmarEnvioFBA] no se pudo releer', e.id, errLeer); }
+      const rep = repartoFinal[e.id] || {};
+      // Partimos de las ubicaciones frescas ya releidas en la validacion de no-negativos.
+      const ucBase = {...(ucFresco[e.id] || {})};
+      Object.keys(rep).forEach(function(est){
+        ucBase[est] = (ucBase[est] || 0) - rep[est];
+        if (ucBase[est] <= 0) delete ucBase[est];
+      });
+      const nuevoStockMoloka = Object.values(ucBase).reduce(function(s, x){ return s + (x || 0); }, 0);
 
-      const nuevoStockMoloka = Math.max(0, stockActual - e.qty);
-
-      // 4a. DESCUENTO DE STOCK (critico) -> update aislado y comprobado.
+      // DESCUENTO (critico): baldas + stock_moloka derivado en un unico update comprobado.
+      // En el modelo por baldas, lo que baja el stock REAL es ubicaciones_cant; por eso aqui es critico.
       const { error: errStock } = await db.from('productos')
-        .update({ stock_moloka: nuevoStockMoloka, updated_at: fechaIso })
+        .update({ ubicaciones_cant: ucBase, ubicaciones: Object.keys(ucBase), stock_moloka: nuevoStockMoloka, updated_at: fechaIso })
         .eq('id', e.id);
       if (errStock) {
-        console.error('[confirmarEnvioFBA] ERROR descontando stock de', e.nombre, errStock);
+        console.error('[confirmarEnvioFBA] ERROR descontando', e.nombre, errStock);
         fallosStock.push(e.nombre || e.id);
-        continue;  // sin movimiento: si el stock no baja, no dejamos un movimiento huerfano
+        continue;  // si el stock no baja, no dejamos movimiento huerfano
       }
 
-      // 4b. Movimiento de salida (solo si el stock bajo bien).
-      await db.from('movimientos').insert({ producto_id: e.id, tipo: 'envio_fba', cantidad: -e.qty });
-
-      // 4c. UBICACIONES (no critico) -> update SEPARADO. Si falla, se loguea pero NO afecta al stock.
-      const rep = repartoFinal[e.id] || {};
-      const ucBase = (ucActual && typeof ucActual === 'object' && !Array.isArray(ucActual)) ? {...ucActual} : {};
-      if (Object.keys(rep).length > 0 || Object.keys(ucBase).length > 0) {
-        Object.keys(rep).forEach(est => {
-          ucBase[est] = (ucBase[est] || 0) - rep[est];
-          if (ucBase[est] <= 0) delete ucBase[est];
-        });
-        try {
-          const { error: errUbic } = await db.from('productos')
-            .update({ ubicaciones_cant: ucBase, ubicaciones: Object.keys(ucBase) })
-            .eq('id', e.id);
-          if (errUbic) console.error('[confirmarEnvioFBA] ubicaciones no actualizadas para', e.nombre, errUbic);
-        } catch (errUbicCatch) { console.error('[confirmarEnvioFBA] ubicaciones catch', errUbicCatch); }
-      }
+      // Movimiento de salida con la balda de origen (auditoria).
+      const baldaOrigen = Object.keys(rep).join('+') || null;
+      await registrarMovimiento(e.id, 'envio_fba', -e.qty, baldaOrigen, { motivo: 'envio_fba', referencia: referencia });
     }
     if (fallosStock.length) {
       showToast('\u26a0\ufe0f No se pudo descontar stock de: ' + fallosStock.join(', ') + '. Av\u00edsame.', 'error');
@@ -6223,6 +6451,19 @@ async function confirmarFactura() {
 // ----------------------------------------------------------------
 // 11. PROCESAR UNA LINEA: actualizar producto + crear compras
 // ----------------------------------------------------------------
+// Suma 'unidades' a la balda P de un producto leyendo ubicaciones_cant FRESCO de BD
+// (las facturas entran por P, igual que el escaneo manual). Devuelve {uc, stock}.
+async function _sumarABaldaP(productoId, unidades) {
+  let uc = {};
+  try {
+    const { data } = await db.from('productos').select('ubicaciones_cant').eq('id', productoId).single();
+    if (data && data.ubicaciones_cant && typeof data.ubicaciones_cant === 'object' && !Array.isArray(data.ubicaciones_cant)) uc = {...data.ubicaciones_cant};
+  } catch (e) { console.warn('[_sumarABaldaP]', e); }
+  uc['P'] = (uc['P'] || 0) + unidades;
+  const stock = Object.values(uc).reduce(function(s, x){ return s + (x || 0); }, 0);
+  return { uc: uc, stock: stock };
+}
+
 async function procesarLineaFactura(linea, facturaId, fecha, eanCache) {
   const resultado = { creadas: 0, actualizado: false, nuevo: false, consolidado: false, repartido: false };
   // Cache es opcional para retrocompatibilidad. Si no se pasa, se crea uno vacio.
@@ -6265,8 +6506,11 @@ async function procesarLineaFactura(linea, facturaId, fecha, eanCache) {
       }
       pvdDespues = Math.round(pvdDespues * 10000) / 10000;
       const ucAntes = ficha.unidades_compradas || 0;
+      const _bR = await _sumarABaldaP(r.producto_id, udsFis);
       await db.from('productos').update({
-        stock_moloka: stockDespues,
+        ubicaciones_cant: _bR.uc,
+        ubicaciones: Object.keys(_bR.uc),
+        stock_moloka: _bR.stock,
         pvd: pvdDespues,
         proveedor: _facturaActual.proveedor,
         unidades_compradas: ucAntes + udsFis,
@@ -6274,6 +6518,7 @@ async function procesarLineaFactura(linea, facturaId, fecha, eanCache) {
         estado: 'OK',
         updated_at: new Date().toISOString()
       }).eq('id', r.producto_id);
+      if (udsFis > 0) await registrarMovimiento(r.producto_id, 'entrada', udsFis, 'P', { motivo: 'factura', referencia: _facturaActual.numero || null });
       // Compra: queda registrada con uds facturadas y precio facturado (auditoria 1:1 contra factura)
       await db.from('compras').insert({
         factura_id: facturaId,
@@ -6371,8 +6616,11 @@ async function procesarLineaFactura(linea, facturaId, fecha, eanCache) {
     }
     pvdDespues = Math.round(pvdDespues * 10000) / 10000;
     const ucAntes = productoActual.unidades_compradas || 0;
+    const _bReg = await _sumarABaldaP(productoId, unidades);
     await db.from('productos').update({
-      stock_moloka: stockDespues,
+      ubicaciones_cant: _bReg.uc,
+      ubicaciones: Object.keys(_bReg.uc),
+      stock_moloka: _bReg.stock,
       pvd: pvdDespues,
       proveedor: _facturaActual.proveedor,
       unidades_compradas: ucAntes + unidades,
@@ -6381,6 +6629,7 @@ async function procesarLineaFactura(linea, facturaId, fecha, eanCache) {
       updated_at: new Date().toISOString()
     }).eq('id', productoId);
     resultado.actualizado = true;
+    if (unidades > 0) await registrarMovimiento(productoId, 'entrada', unidades, 'P', { motivo: 'factura', referencia: _facturaActual.numero || null });
     // Compra regular
     await db.from('compras').insert({
       factura_id: facturaId,
@@ -6457,8 +6706,11 @@ async function procesarLineaFactura(linea, facturaId, fecha, eanCache) {
     }
     pvdDespuesC = Math.round(pvdDespuesC * 10000) / 10000;
     const ucAntesC = productoChaseActual.unidades_compradas || 0;
+    const _bC = await _sumarABaldaP(productoChaseId, unidadesC);
     await db.from('productos').update({
-      stock_moloka: stockDespuesC,
+      ubicaciones_cant: _bC.uc,
+      ubicaciones: Object.keys(_bC.uc),
+      stock_moloka: _bC.stock,
       pvd: pvdDespuesC,
       proveedor: _facturaActual.proveedor,
       unidades_compradas: ucAntesC + unidadesC,
@@ -6466,6 +6718,7 @@ async function procesarLineaFactura(linea, facturaId, fecha, eanCache) {
       estado: 'OK',
       updated_at: new Date().toISOString()
     }).eq('id', productoChaseId);
+    if (unidadesC > 0) await registrarMovimiento(productoChaseId, 'entrada', unidadesC, 'P', { motivo: 'factura', nota: 'CHASE', referencia: _facturaActual.numero || null });
     // Compra CHASE
     await db.from('compras').insert({
       factura_id: facturaId,
@@ -6497,28 +6750,48 @@ async function consolidarDuplicados(productos) {
   productos.sort((a, b) => (b.unidades_compradas || 0) - (a.unidades_compradas || 0));
   const principal = productos[0];
   const secundarios = productos.slice(1);
-  // Sumar a principal: stock_moloka, stock_miravia, unidades_compradas, enviado_fba
-  let stockMolokaTotal = principal.stock_moloka || 0;
+  // Releer ubicaciones frescas de la principal para fusionar encima
+  let ucPrincipal = {};
+  try {
+    const { data } = await db.from('productos').select('ubicaciones_cant, unidades_compradas').eq('id', principal.id).single();
+    if (data) {
+      if (data.ubicaciones_cant && typeof data.ubicaciones_cant === 'object' && !Array.isArray(data.ubicaciones_cant)) ucPrincipal = {...data.ubicaciones_cant};
+      if (typeof data.unidades_compradas === 'number') principal.unidades_compradas = data.unidades_compradas;
+    }
+  } catch (e) { console.warn('[consolidar] releer principal', e); }
   let unidadesCompradasTotal = principal.unidades_compradas || 0;
   for (const sec of secundarios) {
-    stockMolokaTotal += sec.stock_moloka || 0;
-    unidadesCompradasTotal += sec.unidades_compradas || 0;
-    // Desactivar: marcar como CONSOLIDADO (no DESCATALOGADO) para distinguir de descatalogadas reales
+    // Releer ubicaciones de la secundaria para sumarlas a la principal
+    let ucSec = {};
+    try {
+      const { data } = await db.from('productos').select('ubicaciones_cant, unidades_compradas').eq('id', sec.id).single();
+      if (data) {
+        if (data.ubicaciones_cant && typeof data.ubicaciones_cant === 'object' && !Array.isArray(data.ubicaciones_cant)) ucSec = data.ubicaciones_cant;
+        unidadesCompradasTotal += (data.unidades_compradas || 0);
+      }
+    } catch (e) { console.warn('[consolidar] releer secundaria', e); }
+    Object.keys(ucSec).forEach(function(b){ ucPrincipal[b] = (ucPrincipal[b] || 0) + (ucSec[b] || 0); });
+    // Desactivar secundaria: vaciar SOLO el almacen local y marcar CONSOLIDADO.
+    // NO se toca stock_fba (lo gobierna Amazon) ni proveedor/pvd (trazabilidad de compra).
     await db.from('productos').update({
       activo: false,
       estado: 'CONSOLIDADO',
       stock_moloka: 0,
-      stock_fba: 0,
+      ubicaciones_cant: {},
+      ubicaciones: [],
       updated_at: new Date().toISOString()
     }).eq('id', sec.id);
   }
-  // Actualizar principal con totales (el resto del update lo hace procesarLineaFactura)
+  // Actualizar principal con las baldas fusionadas (el resto del update lo hace procesarLineaFactura)
+  const stockTotal = Object.values(ucPrincipal).reduce(function(s, x){ return s + (x || 0); }, 0);
   await db.from('productos').update({
-    stock_moloka: stockMolokaTotal,
+    stock_moloka: stockTotal,
+    ubicaciones_cant: ucPrincipal,
+    ubicaciones: Object.keys(ucPrincipal),
     unidades_compradas: unidadesCompradasTotal
   }).eq('id', principal.id);
-  // Devolver el principal con datos actualizados para que el caller use stock correcto
-  principal.stock_moloka = stockMolokaTotal;
+  principal.stock_moloka = stockTotal;
+  principal.ubicaciones_cant = ucPrincipal;
   principal.unidades_compradas = unidadesCompradasTotal;
   return principal.id;
 }
