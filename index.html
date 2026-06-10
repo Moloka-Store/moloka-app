@@ -580,6 +580,10 @@
       <div><div class="page-title">📊 Rentabilidad</div><div class="page-sub" id="rent-sub">Cargando...</div></div>
     </div>
 
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+      <span style="font-size:12px;font-weight:600;color:var(--gray-500)">CANAL:</span>
+      <div id="rent-canal-botones" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+    </div>
     <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;align-items:center">
       <span style="font-size:12px;font-weight:600;color:var(--gray-500)">VER:</span>
       <div id="rent-meses-botones" style="display:flex;gap:8px;flex-wrap:wrap"></div>
@@ -1104,6 +1108,12 @@ const SUPABASE_KEY = 'sb_publishable_72BOqeDR2K7qlDuC6oWegA_4d128UUj';
 const { createClient } = supabase;
 const db = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// Estado de la pestana Rentabilidad (declarado arriba para evitar TDZ: lo usan helpers de Rotacion)
+var RENT_DATA = null;           // cache rentabilidad.json (ES en raiz + por_pais IT/FR)
+var RENT_MIRAVIA = null;        // cache rentabilidad_miravia.json (aparte)
+var RENT_CANAL_ACTUAL = 'ES';   // canal seleccionado en la pestana
+var RENT_ORDEN_MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+
 // ============================================================
 // ESTADO GLOBAL
 // ============================================================
@@ -1130,7 +1140,7 @@ function showPage(id, el) {
   if (id === 'facturas') cargarFacturas();
   if (id === 'tareas') cargarTareas();
   if (id === 'rotacion') cargarRotacion();
-  if (id === 'rentabilidad') verRentabilidad('acumulado');
+  if (id === 'rentabilidad') verRentabilidad('acumulado', 'ES');
   if (id === 'devoluciones') verDevoluciones('acumulado');
   if (id === 'envios-historial') cargarEnviosHistorial();
   if (id === 'movimientos') cargarMovimientos();
@@ -4744,7 +4754,7 @@ function calcularBuyBox() {
 // ============================================================
 // RENTABILIDAD (carga datos desde rentabilidad.json)
 // ============================================================
-let RENT_DATA = null;
+// RENT_DATA se declara al inicio del script (evita TDZ con helpers de Rotacion)
 
 async function cargarRentData() {
   if (RENT_DATA) return RENT_DATA;
@@ -4810,25 +4820,142 @@ async function cargarValorExistencias() {
   }
 }
 
-async function verRentabilidad(periodo) {
-  // Refrescar valor de existencias cada vez que entras en la pestana
-  cargarValorExistencias();
+// ============================================================
+// RENTABILIDAD MULTICANAL  (ES / IT / FR / Miravia / Total)
+// ES no se toca: misma logica de siempre (con devoluciones).
+// IT/FR salen de RENT_DATA.por_pais. Miravia de RENT_MIRAVIA (json aparte).
+// Total = SUMA LITERAL de lo que muestra cada pestana (en el navegador),
+//   para que nunca difiera de la suma de canales.
+// ============================================================
+// RENT_MIRAVIA y RENT_CANAL_ACTUAL se declaran al inicio del script.
 
+async function cargarMiraviaData() {
+  if (RENT_MIRAVIA !== null) return RENT_MIRAVIA;
+  try {
+    const r = await fetch('rentabilidad_miravia.json');
+    if (!r.ok) { RENT_MIRAVIA = false; return false; }
+    RENT_MIRAVIA = await r.json();
+    return RENT_MIRAVIA;
+  } catch(e) {
+    RENT_MIRAVIA = false;
+    return false;
+  }
+}
+
+// RENT_ORDEN_MESES se declara al inicio del script.
+
+// Devuelve {meses:[...], tieneDevoluciones:bool, soloTotales:bool, sinDatos:bool}
+// para el canal pedido, normalizado para que el render sea identico en todos.
+function rentMesesDeCanal(canal, data, miravia) {
+  if (canal === 'ES') {
+    return { meses: (data && data.meses) || [], tieneDevoluciones: true, soloTotales: false, sinDatos: !(data && data.meses && data.meses.length) };
+  }
+  if (canal === 'IT' || canal === 'FR') {
+    const bloque = data && data.por_pais && data.por_pais[canal];
+    const meses = (bloque && bloque.meses) || [];
+    return { meses, tieneDevoluciones: false, soloTotales: false, sinDatos: meses.length === 0 };
+  }
+  if (canal === 'MIRAVIA') {
+    if (!miravia || !miravia.meses) return { meses: [], tieneDevoluciones: false, soloTotales: false, sinDatos: true };
+    return { meses: miravia.meses, tieneDevoluciones: false, soloTotales: false, sinDatos: miravia.meses.length === 0 };
+  }
+  if (canal === 'TOTAL') {
+    // Sumar mes a mes lo que muestra cada pestana: ES(con devol.) + IT + FR + Miravia.
+    // ES aporta beneficio_neto_real si existe (es lo que se ve en su pestana).
+    const acum = {};  // mesNombre -> agregado
+    const sumaCanal = (meses, usarReal) => {
+      (meses || []).forEach(m => {
+        const k = m.mes;
+        if (!acum[k]) acum[k] = {
+          mes: k, facturacion_iva:0, facturacion_sin_iva:0, unidades:0,
+          comision_amazon:0, logistica_fba:0, otras_tarifas:0,
+          coste_pvd:0, coste_almacen:0, coste_total:0, beneficio_neto:0
+        };
+        const ben = usarReal ? (m.beneficio_neto_real ?? m.beneficio_neto) : m.beneficio_neto;
+        acum[k].facturacion_iva     += m.facturacion_iva || 0;
+        acum[k].facturacion_sin_iva += m.facturacion_sin_iva || 0;
+        acum[k].unidades            += m.unidades || 0;
+        acum[k].comision_amazon     += m.comision_amazon || 0;
+        acum[k].logistica_fba       += m.logistica_fba || 0;
+        acum[k].otras_tarifas       += m.otras_tarifas || 0;
+        acum[k].coste_pvd           += m.coste_pvd || 0;
+        acum[k].coste_almacen       += m.coste_almacen || 0;
+        acum[k].coste_total         += m.coste_total || 0;
+        acum[k].beneficio_neto      += ben || 0;
+      });
+    };
+    sumaCanal((data && data.meses) || [], true);  // ES con devoluciones
+    if (data && data.por_pais) {
+      sumaCanal((data.por_pais.IT && data.por_pais.IT.meses) || [], false);
+      sumaCanal((data.por_pais.FR && data.por_pais.FR.meses) || [], false);
+    }
+    sumaCanal((miravia && miravia.meses) || [], false);
+    const meses = Object.values(acum).map(m => {
+      m.margen_pct = m.facturacion_iva > 0 ? +(m.beneficio_neto / m.facturacion_iva * 100).toFixed(1) : 0;
+      return m;
+    });
+    return { meses, tieneDevoluciones: true, soloTotales: true, sinDatos: meses.length === 0 };
+  }
+  return { meses: [], tieneDevoluciones:false, soloTotales:false, sinDatos:true };
+}
+
+async function verRentabilidad(periodo, canal) {
   const data = await cargarRentData();
+  const miravia = await cargarMiraviaData();
+
+  // Canal: si no se pasa, mantener el actual
+  if (canal) RENT_CANAL_ACTUAL = canal;
+  canal = RENT_CANAL_ACTUAL;
+
   if (!data) {
     document.getElementById('rent-sub').textContent = 'Datos no disponibles todavía';
     document.getElementById('rent-kpis').innerHTML = '<div class="empty-state"><p>Datos de rentabilidad no disponibles. Actualiza rentabilidad.json en GitHub.</p></div>';
     return;
   }
 
-  // ---- Construir botones de meses dinamicamente segun los datos ----
-  // Acumulado siempre + un boton por cada mes presente en el JSON, en orden
-  const ORDEN_MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-  const mesesDisponibles = data.meses.map(m => m.mes).sort((a,b) => ORDEN_MESES.indexOf(a) - ORDEN_MESES.indexOf(b));
-  // Si el periodo solicitado no existe, caer a acumulado
-  if (periodo !== 'acumulado' && !mesesDisponibles.includes(periodo)) {
-    periodo = 'acumulado';
+  // Valor de existencias (Supabase, pan-europeo): solo tiene sentido en ES y Total
+  const elDetalleView = document.getElementById('rent-detalle-view');
+  const mostrarValorStock = (canal === 'ES' || canal === 'TOTAL');
+
+  // ---- Botones de CANAL ----
+  const CANALES = [
+    {key:'ES', label:'Amazon ES'},
+    {key:'IT', label:'Amazon IT'},
+    {key:'FR', label:'Amazon FR'},
+    {key:'MIRAVIA', label:'Miravia'},
+    {key:'TOTAL', label:'Total'},
+  ];
+  const contCanal = document.getElementById('rent-canal-botones');
+  if (contCanal) {
+    contCanal.innerHTML = CANALES.map(c => {
+      const cls = (c.key === canal) ? 'btn-primary' : 'btn-ghost';
+      return '<button class="btn ' + cls + ' btn-sm" onclick="verRentabilidad(\'acumulado\',\'' + c.key + '\')">' + c.label + '</button>';
+    }).join('');
   }
+
+  // ---- Datos del canal ----
+  const info = rentMesesDeCanal(canal, data, miravia);
+
+  if (info.sinDatos) {
+    document.getElementById('rent-meses-botones').innerHTML = '';
+    document.getElementById('rent-kpis').innerHTML = '';
+    if (elDetalleView) {
+      let msg = 'No hay datos de rentabilidad para este canal todavía.';
+      if (canal === 'MIRAVIA') msg = 'Miravia: pendiente de generar datos. Ejecuta la celda 8c del notebook (rentabilidad_miravia.json) y súbelo a GitHub.';
+      if (canal === 'IT' || canal === 'FR') msg = 'Sin ventas registradas en este canal en el periodo cargado.';
+      elDetalleView.innerHTML = '<div class="empty-state"><p>' + msg + '</p></div>';
+    }
+    const labelCanal = (CANALES.find(c => c.key === canal) || {}).label || canal;
+    document.getElementById('rent-sub').textContent = labelCanal;
+    const infoEl0 = document.getElementById('rent-info-actualizacion');
+    if (infoEl0) infoEl0.style.display = 'none';
+    return;
+  }
+
+  // ---- Meses disponibles para ESTE canal ----
+  const mesesDisponibles = info.meses.map(m => m.mes).sort((a,b) => RENT_ORDEN_MESES.indexOf(a) - RENT_ORDEN_MESES.indexOf(b));
+  if (periodo !== 'acumulado' && !mesesDisponibles.includes(periodo)) periodo = 'acumulado';
+
   const cont = document.getElementById('rent-meses-botones');
   if (cont) {
     const botones = [{key:'acumulado', label:'Acumulado'}].concat(
@@ -4840,121 +4967,132 @@ async function verRentabilidad(periodo) {
     }).join('');
   }
 
-  // ---- Texto "Datos actualizados hasta ..." ----
-  // Calcular el ultimo dia con datos: leemos data.fecha_hasta si existe, o lo derivamos del ultimo mes
+  // ---- Texto informativo segun canal ----
   const infoEl = document.getElementById('rent-info-actualizacion');
   if (infoEl) {
-    let fechaTxt = '';
-    if (data.fecha_hasta) {
-      // Esperamos formato YYYY-MM-DD
-      const partes = String(data.fecha_hasta).split('-');
-      if (partes.length === 3) {
-        const dd = partes[2], mm = partes[1], yyyy = partes[0];
-        const nombreMes = ORDEN_MESES[parseInt(mm,10)-1] || '';
-        fechaTxt = parseInt(dd,10) + ' de ' + nombreMes + ' de ' + yyyy;
-      } else {
-        fechaTxt = data.fecha_hasta;
+    infoEl.style.display = 'block';
+    let txt;
+    if (canal === 'ES') {
+      let fechaTxt = '';
+      if (data.fecha_hasta) {
+        const p = String(data.fecha_hasta).split('-');
+        if (p.length === 3) fechaTxt = parseInt(p[2],10) + ' de ' + (RENT_ORDEN_MESES[parseInt(p[1],10)-1]||'') + ' de ' + p[0];
       }
+      txt = 'ℹ️ España: datos reales de Moloka SL' + (fechaTxt ? ' hasta el <strong>' + fechaTxt + '</strong>' : '') + ', con devoluciones aplicadas.';
+    } else if (canal === 'IT' || canal === 'FR') {
+      txt = 'ℹ️ ' + (canal==='IT'?'Italia':'Francia') + ': beneficio neto sin devoluciones (el cálculo de devoluciones de IT/FR está pendiente de desarrollar).';
+    } else if (canal === 'MIRAVIA') {
+      txt = 'ℹ️ Miravia: solo ventas <strong>liquidadas</strong> por Miravia (las recientes aún sin liquidar irán apareciendo). Comisión y envío sin IVA; sin 3% de servicios digitales. Sin devoluciones (pendiente).';
+    } else {
+      txt = 'ℹ️ Total: suma de España + Italia + Francia + Miravia. Las devoluciones solo están aplicadas a España (IT/FR/Miravia: pendientes de desarrollar).';
     }
-    infoEl.innerHTML = 'ℹ️ Datos reales de Moloka SL' + (fechaTxt ? ' actualizados hasta el <strong>' + fechaTxt + '</strong>' : '') + '. Comisiones Amazon y FBA extraídas de los informes de transacciones.';
+    infoEl.innerHTML = txt;
   }
 
-  if (periodo === 'semanal') {
-    // Vista semanal eliminada: caer a acumulado
-    periodo = 'acumulado';
-  }
+  if (elDetalleView) elDetalleView.style.display = 'block';
 
-  document.getElementById('rent-detalle-view').style.display = 'block';
-
+  // ---- Construir mesData (acumulado o mes concreto) ----
   let mesData;
+  const labelCanal = (CANALES.find(c => c.key === canal) || {}).label || canal;
   if (periodo === 'acumulado') {
     mesData = {
-      facturacion_iva: data.meses.reduce((s,m) => s + m.facturacion_iva, 0),
-      coste_total: data.meses.reduce((s,m) => s + m.coste_total, 0),
-      beneficio_neto: data.meses.reduce((s,m) => s + (m.beneficio_neto_real ?? m.beneficio_neto), 0),
-      unidades: data.meses.reduce((s,m) => s + m.unidades, 0),
-      coste_pvd: data.meses.reduce((s,m) => s + m.coste_pvd, 0),
-      comision_amazon: data.meses.reduce((s,m) => s + m.comision_amazon, 0),
-      logistica_fba: data.meses.reduce((s,m) => s + m.logistica_fba, 0),
-      coste_almacen: data.meses.reduce((s,m) => s + m.coste_almacen, 0),
+      facturacion_iva: info.meses.reduce((s,m) => s + (m.facturacion_iva||0), 0),
+      coste_total:     info.meses.reduce((s,m) => s + (m.coste_total||0), 0),
+      beneficio_neto:  info.meses.reduce((s,m) => s + (info.tieneDevoluciones && canal==='ES' ? (m.beneficio_neto_real ?? m.beneficio_neto) : m.beneficio_neto), 0),
+      unidades:        info.meses.reduce((s,m) => s + (m.unidades||0), 0),
+      coste_pvd:       info.meses.reduce((s,m) => s + (m.coste_pvd||0), 0),
+      comision_amazon: info.meses.reduce((s,m) => s + (m.comision_amazon||0), 0),
+      logistica_fba:   info.meses.reduce((s,m) => s + (m.logistica_fba||0), 0),
+      coste_almacen:   info.meses.reduce((s,m) => s + (m.coste_almacen||0), 0),
     };
     mesData.margen_pct = mesData.facturacion_iva > 0 ? (mesData.beneficio_neto / mesData.facturacion_iva * 100).toFixed(1) : 0;
-    document.getElementById('rent-sub').textContent = 'Acumulado 2026';
-    // Combinar productos de todos los meses
-    const acumProd = {};
-    data.meses.forEach(m => m.productos.forEach(p => {
-      const key = p.asin || p.nombre;
-      if (!acumProd[key]) acumProd[key] = {...p};
-      else {
-        acumProd[key].unidades += p.unidades;
-        acumProd[key].facturado_iva += p.facturado_iva;
-        acumProd[key].facturado_sin_iva += p.facturado_sin_iva;
-        acumProd[key].coste_pvd += p.coste_pvd;
-        acumProd[key].beneficio += p.beneficio;
-        acumProd[key].comision_amazon += p.comision_amazon;
-        acumProd[key].logistica_fba += p.logistica_fba;
-      }
-    }));
-    Object.values(acumProd).forEach(p => {
-      p.roi = p.coste_pvd > 0 ? (p.beneficio / p.coste_pvd * 100).toFixed(1) : null;
-      p.margen = p.facturado_iva > 0 ? (p.beneficio / p.facturado_iva * 100).toFixed(1) : null;
-    });
-    mesData.productos = Object.values(acumProd);
-  } else {
-    mesData = data.meses.find(m => m.mes === periodo);
-    if (!mesData) return;
-    // Usar cifras reales con devoluciones aplicadas si estan disponibles
-    if (mesData.beneficio_neto_real !== undefined) {
-      mesData = {...mesData,
-        beneficio_neto: mesData.beneficio_neto_real,
-        margen_pct: mesData.margen_real_pct ?? mesData.margen_pct
-      };
+    document.getElementById('rent-sub').textContent = labelCanal + ' · Acumulado 2026';
+    // Combinar productos (solo si el canal los trae)
+    if (!info.soloTotales) {
+      const acumProd = {};
+      info.meses.forEach(m => (m.productos||[]).forEach(p => {
+        const key = p.asin || p.sku || p.item_id || p.nombre;
+        if (!acumProd[key]) acumProd[key] = {...p};
+        else {
+          acumProd[key].unidades += p.unidades;
+          acumProd[key].facturado_iva += p.facturado_iva;
+          acumProd[key].facturado_sin_iva += (p.facturado_sin_iva||0);
+          acumProd[key].coste_pvd += (p.coste_pvd||0);
+          acumProd[key].beneficio += p.beneficio;
+          acumProd[key].comision_amazon += (p.comision_amazon||0);
+          acumProd[key].logistica_fba += (p.logistica_fba||0);
+        }
+      }));
+      Object.values(acumProd).forEach(p => {
+        p.roi = p.coste_pvd > 0 ? (p.beneficio / p.coste_pvd * 100).toFixed(1) : null;
+        p.margen = p.facturado_iva > 0 ? (p.beneficio / p.facturado_iva * 100).toFixed(1) : null;
+      });
+      mesData.productos = Object.values(acumProd);
+    } else {
+      mesData.productos = [];
     }
-    document.getElementById('rent-sub').textContent = periodo.charAt(0).toUpperCase() + periodo.slice(1) + ' 2026';
+  } else {
+    const m = info.meses.find(x => x.mes === periodo);
+    if (!m) return;
+    mesData = {...m};
+    // ES: usar cifras reales con devoluciones si estan
+    if (canal === 'ES' && m.beneficio_neto_real !== undefined) {
+      mesData.beneficio_neto = m.beneficio_neto_real;
+      mesData.margen_pct = m.margen_real_pct ?? m.margen_pct;
+    }
+    if (info.soloTotales) mesData.productos = [];
+    document.getElementById('rent-sub').textContent = labelCanal + ' · ' + periodo.charAt(0).toUpperCase() + periodo.slice(1) + ' 2026';
   }
 
-  // KPIs
+  // ---- KPIs ----
   const benColor = mesData.beneficio_neto >= 0 ? 'var(--green)' : 'var(--red)';
+  const subBen = (canal === 'ES' || canal === 'TOTAL') ? 'Con devoluciones (solo ES)' : 'Sin devoluciones';
   document.getElementById('rent-kpis').innerHTML = `
     <div class="stat-card"><div class="stat-label">Facturación c/IVA</div><div class="stat-value">${mesData.facturacion_iva.toFixed(0)}€</div><div class="stat-sub">${mesData.unidades} unidades</div></div>
     <div class="stat-card"><div class="stat-label">Costes totales</div><div class="stat-value">${mesData.coste_total.toFixed(0)}€</div><div class="stat-sub">PVD + comisiones + envío</div></div>
-    <div class="stat-card"><div class="stat-label">Beneficio neto</div><div class="stat-value" style="color:${benColor}">${mesData.beneficio_neto.toFixed(0)}€</div><div class="stat-sub">Real</div></div>
+    <div class="stat-card"><div class="stat-label">Beneficio neto</div><div class="stat-value" style="color:${benColor}">${mesData.beneficio_neto.toFixed(0)}€</div><div class="stat-sub">${subBen}</div></div>
     <div class="stat-card"><div class="stat-label">Margen</div><div class="stat-value" style="color:${benColor}">${mesData.margen_pct}%</div><div class="stat-sub">sobre facturación</div></div>
   `;
 
-  // Productos por beneficio (todos)
-  const productos = (mesData.productos || []).slice();
-  const conBen = productos.filter(p => p.beneficio >= 0).sort((a,b) => b.beneficio - a.beneficio);
-  const enPerdidas = productos.filter(p => p.beneficio < 0).sort((a,b) => a.beneficio - b.beneficio);
-  const todos = [...conBen, ...enPerdidas];
-  document.getElementById('rent-top-tbody').innerHTML = todos.map(p => {
-    const enPerd = p.beneficio < 0;
-    const roi = p.roi !== null && p.roi !== undefined ? p.roi : '—';
-    const margen = p.margen !== null && p.margen !== undefined ? p.margen : '—';
-    const roiClass = roi >= 15 ? 'var(--green)' : roi >= 0 ? 'var(--amber)' : 'var(--red)';
-    const margenColor = margen >= 10 ? 'var(--green)' : margen >= 0 ? 'var(--amber)' : 'var(--red)';
-    return `<tr style="${enPerd?'background:var(--red-light)':''}">
-      <td><div class="td-main">${enPerd?'🔴 ':''}${(p.nombre||'').substring(0,40)}${(p.nombre||'').length>40?'...':''}</div><div class="td-sub td-mono">${p.asin || ''}</div></td>
-      <td style="text-align:center;font-weight:600">${p.unidades}</td>
-      <td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px">${p.facturado_iva.toFixed(0)}€</td>
-      <td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;color:${p.beneficio>=0?'var(--green)':'var(--red)'}">${p.beneficio.toFixed(0)}€</td>
-      <td style="text-align:right;color:${roiClass};font-weight:600;font-size:12px">${roi}%</td>
-      <td style="text-align:right;color:${margenColor};font-weight:600;font-size:12px">${margen}%</td>
-    </tr>`;
-  }).join('');
+  // ---- Tabla de productos ----
+  const tbody = document.getElementById('rent-top-tbody');
+  if (info.soloTotales) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--gray-400);padding:24px">El Total agrega los importes de cada canal; el detalle por producto se ve en cada pestaña (España, Italia, Francia, Miravia).</td></tr>';
+  } else {
+    const productos = (mesData.productos || []).slice();
+    const conBen = productos.filter(p => p.beneficio >= 0).sort((a,b) => b.beneficio - a.beneficio);
+    const enPerdidas = productos.filter(p => p.beneficio < 0).sort((a,b) => a.beneficio - b.beneficio);
+    const todos = [...conBen, ...enPerdidas];
+    tbody.innerHTML = todos.map(p => {
+      const enPerd = p.beneficio < 0;
+      const roi = p.roi !== null && p.roi !== undefined ? p.roi : '—';
+      const margen = p.margen !== null && p.margen !== undefined ? p.margen : '—';
+      const roiClass = roi >= 15 ? 'var(--green)' : roi >= 0 ? 'var(--amber)' : 'var(--red)';
+      const margenColor = margen >= 10 ? 'var(--green)' : margen >= 0 ? 'var(--amber)' : 'var(--red)';
+      return `<tr style="${enPerd?'background:var(--red-light)':''}">
+        <td><div class="td-main">${enPerd?'🔴 ':''}${(p.nombre||'').substring(0,40)}${(p.nombre||'').length>40?'...':''}</div><div class="td-sub td-mono">${p.asin || p.sku || ''}</div></td>
+        <td style="text-align:center;font-weight:600">${p.unidades}</td>
+        <td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px">${p.facturado_iva.toFixed(0)}€</td>
+        <td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;color:${p.beneficio>=0?'var(--green)':'var(--red)'}">${p.beneficio.toFixed(0)}€</td>
+        <td style="text-align:right;color:${roiClass};font-weight:600;font-size:12px">${roi}%</td>
+        <td style="text-align:right;color:${margenColor};font-weight:600;font-size:12px">${margen}%</td>
+      </tr>`;
+    }).join('');
+  }
 
-  // Desglose costes
+  // ---- Desglose de costes ----
+  const etiquetaEnvio = (canal === 'MIRAVIA') ? '🚚 Envío Miravia' : '🚚 Logística FBA';
   document.getElementById('rent-costes-detalle').innerHTML = `
     <div style="display:flex;justify-content:space-between;padding:12px 14px;background:var(--gray-50);border-radius:8px;margin-bottom:8px">
       <span style="font-size:13px">📦 Coste de producto (PVD)</span>
       <strong style="font-family:'DM Mono',monospace">${mesData.coste_pvd.toFixed(0)}€</strong>
     </div>
     <div style="display:flex;justify-content:space-between;padding:12px 14px;background:var(--gray-50);border-radius:8px;margin-bottom:8px">
-      <span style="font-size:13px">🛒 Comisión Amazon</span>
+      <span style="font-size:13px">🛒 Comisión${canal==='MIRAVIA'?' Miravia':' Amazon'}</span>
       <strong style="font-family:'DM Mono',monospace">${mesData.comision_amazon.toFixed(0)}€</strong>
     </div>
     <div style="display:flex;justify-content:space-between;padding:12px 14px;background:var(--gray-50);border-radius:8px;margin-bottom:8px">
-      <span style="font-size:13px">🚚 Logística FBA</span>
+      <span style="font-size:13px">${etiquetaEnvio}</span>
       <strong style="font-family:'DM Mono',monospace">${mesData.logistica_fba.toFixed(0)}€</strong>
     </div>
     <div style="display:flex;justify-content:space-between;padding:12px 14px;background:var(--gray-50);border-radius:8px;margin-bottom:8px">
@@ -4966,7 +5104,26 @@ async function verRentabilidad(periodo) {
       <strong style="font-family:'DM Mono',monospace;font-size:15px">${mesData.beneficio_neto.toFixed(0)}€</strong>
     </div>
   `;
+
+  // ---- Valor de existencias: solo ES/Total (Supabase pan-europeo) ----
+  const cardsValor = document.querySelectorAll('#rent-detalle-view .card');
+  // Refrescar solo cuando aplica
+  if (mostrarValorStock) {
+    cargarValorExistencias();
+  }
+  // Mostrar/ocultar las dos tarjetas de valor de stock
+  const elFBABlock = document.getElementById('rent-valor-fba');
+  const elMolokaBlock = document.getElementById('rent-valor-moloka');
+  if (elFBABlock) {
+    const cardFBA = elFBABlock.closest('.card');
+    if (cardFBA) cardFBA.style.display = mostrarValorStock ? 'block' : 'none';
+  }
+  if (elMolokaBlock) {
+    const cardMoloka = elMolokaBlock.closest('.card');
+    if (cardMoloka) cardMoloka.style.display = mostrarValorStock ? 'block' : 'none';
+  }
 }
+
 
 // ============================================================
 // DEVOLUCIONES (lee devoluciones de Supabase + cruza con rentabilidad.json)
