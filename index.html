@@ -2040,9 +2040,12 @@ async function cargarAlertasComprobar() {
           const keepaCom = merc === 'ES' ? ficha.comision_pct_keepa_es : (merc === 'IT' ? ficha.comision_pct_it : ficha.comision_pct_fr);
           const difEnvio = (keepaEnvio != null && envioReal != null) ? +(envioReal - keepaEnvio).toFixed(2) : null;
           const difCom = (keepaCom != null && comPctReal != null) ? +(comPctReal - keepaCom).toFixed(2) : null;
-          // Avisar ante cualquier diferencia (umbral minimo 0.01 para ignorar redondeos)
-          const saltaEnvio = difEnvio != null && Math.abs(difEnvio) >= 0.01;
-          const saltaCom = difCom != null && Math.abs(difCom) >= 0.01;
+          // Avisar SOLO si nos cobran DE MAS por encima de un margen (lo que esta a nuestro
+          // favor o es ruido de redondeo no se reclama):
+          //   envio: nos cobran > 0,15 EUR mas que Keepa
+          //   comision: nos cobran > 0,5 puntos porcentuales mas que Keepa
+          const saltaEnvio = difEnvio != null && difEnvio > 0.15;
+          const saltaCom = difCom != null && difCom > 0.5;
           if (saltaEnvio || saltaCom) {
             const key = 'comprobar_keepa|' + pid + '|' + merc;
             if (!silSet.has(key)) aKeepa.push({
@@ -2112,13 +2115,13 @@ async function cargarAlertasComprobar() {
       html += '<div style="font-size:12px;font-weight:700;color:#b06800;margin:14px 0 8px">📐 Costes que no cuadran con Keepa (' + aKeepa.length + ') — posible categoría o Cubiscan</div>';
       html += aKeepa.map(p => {
         let det = [];
-        if (p.difEnvio != null && Math.abs(p.difEnvio) >= 0.01) det.push('Envío ' + p.envioReal.toFixed(2) + '€ vs Keepa ' + (p.keepaEnvio!=null?p.keepaEnvio.toFixed(2):'?') + '€ (' + (p.difEnvio>0?'+':'') + p.difEnvio.toFixed(2) + ')');
-        if (p.difCom != null && Math.abs(p.difCom) >= 0.01) det.push('Comisión ' + p.comPctReal.toFixed(1) + '% vs Keepa ' + (p.keepaCom!=null?p.keepaCom.toFixed(1):'?') + '% (' + (p.difCom>0?'+':'') + p.difCom.toFixed(1) + ')');
-        const peor = (p.difEnvio != null) ? p.difEnvio : 0;
+        if (p.difEnvio != null && p.difEnvio > 0.15) det.push('Envío ' + p.envioReal.toFixed(2) + '€ vs Keepa ' + (p.keepaEnvio!=null?p.keepaEnvio.toFixed(2):'?') + '€ (+' + p.difEnvio.toFixed(2) + ')');
+        if (p.difCom != null && p.difCom > 0.5) det.push('Comisión ' + p.comPctReal.toFixed(1) + '% vs Keepa ' + (p.keepaCom!=null?p.keepaCom.toFixed(1):'?') + '% (+' + p.difCom.toFixed(1) + ')');
+        const peor = (p.difEnvio != null && p.difEnvio > 0.15) ? p.difEnvio : 0;
         return tarjeta(
           '<div style="font-weight:600;font-size:13px">' + p.nombre.substring(0,55) + '</div>'
           + '<div style="font-size:11px;color:var(--gray-500)">' + badge(p.merc) + ' · ' + det.join(' · ') + '</div>',
-          '<div style="font-weight:700;color:' + (peor>0.5?'var(--red)':'#b06800') + ';font-size:13px">' + (peor>0?'+':'') + (p.difEnvio!=null?p.difEnvio.toFixed(2)+'€':'') + '</div><div style="font-size:10px;color:var(--gray-400)">dif. envío</div>',
+          '<div style="font-weight:700;color:' + (peor>0.5?'var(--red)':'#b06800') + ';font-size:13px">' + (peor>0?'+'+peor.toFixed(2)+'€':'') + '</div><div style="font-size:10px;color:var(--gray-400)">dif. envío</div>',
           btnComprobado('comprobar_keepa', p.pid, p.merc, p.nombre)
         );
       }).join('');
