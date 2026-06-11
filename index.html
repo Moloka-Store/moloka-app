@@ -322,6 +322,11 @@
       <div class="section-header"><div class="section-title">💤 Sin movimiento — Capital inmovilizado</div></div>
       <div id="alertas-sin-movimiento"><div class="loading-state"><div class="big-loader"></div></div></div>
     </div>
+    <div style="margin-top:24px">
+      <div class="section-header"><div class="section-title">🔎 Comprobar — Productos con algo raro</div></div>
+      <div class="info-box" style="margin-bottom:14px;font-size:12px">ℹ️ Productos que conviene revisar. De momento: <strong>productos en pérdidas</strong> (beneficio negativo el último mes en algún mercado). Pulsa <strong>✅ Comprobado</strong> para silenciar la alerta 30 días.</div>
+      <div id="alertas-comprobar"><div class="loading-state"><div class="big-loader"></div></div></div>
+    </div>
     <div style="margin-top:24px;display:none" id="seccion-estancados">
       <div class="section-header">
         <div class="section-title">🔍 Productos estancados — Vendían pero ahora no</div>
@@ -493,7 +498,10 @@
   <div class="page" id="page-facturas">
     <div class="page-header">
       <div><div class="page-title">📄 Archivo de Facturas</div><div class="page-sub">Busca por EAN o producto para reclamaciones Amazon</div></div>
-      <button class="btn btn-primary btn-sm" onclick="abrirSubirFactura()">📄 Subir factura PDF</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost btn-sm" onclick="abrirFacturaManual()" title="Crear una factura a mano para proveedores sin formato reconocido (KaffeKapslen, etc.)">📝 Factura manual</button>
+        <button class="btn btn-primary btn-sm" onclick="abrirSubirFactura()">📄 Subir factura PDF</button>
+      </div>
     </div>
     <div class="card" style="margin-bottom:16px">
       <div class="input-label" style="margin-bottom:8px">Buscar facturas por EAN, producto o proveedor</div>
@@ -946,14 +954,26 @@
     <div id="rev-contenido" style="display:none">
       <div class="modal-title">📄 Revisar factura antes de guardar</div>
 
-      <!-- Cabecera factura -->
-      <div style="background:var(--gray-50);border-radius:8px;padding:12px;margin-bottom:14px">
+      <!-- Cabecera factura (modo PARSER: solo lectura) -->
+      <div id="rev-cabecera-auto" style="background:var(--gray-50);border-radius:8px;padding:12px;margin-bottom:14px">
         <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:12px;font-size:13px">
           <div><div style="font-size:11px;color:var(--gray-500);text-transform:uppercase">Proveedor</div><div style="font-weight:600" id="rev-proveedor">—</div></div>
           <div><div style="font-size:11px;color:var(--gray-500);text-transform:uppercase">Nº Factura</div><div style="font-weight:600" id="rev-numero">—</div></div>
           <div><div style="font-size:11px;color:var(--gray-500);text-transform:uppercase">Fecha</div><div style="font-weight:600" id="rev-fecha">—</div></div>
           <div><div style="font-size:11px;color:var(--gray-500);text-transform:uppercase">Total factura</div><div style="font-weight:600" id="rev-total">—</div></div>
         </div>
+      </div>
+
+      <!-- Cabecera factura (modo MANUAL: editable) -->
+      <div id="rev-cabecera-manual" style="display:none;background:#eef4ff;border:1px solid #b8d0ff;border-radius:8px;padding:12px;margin-bottom:14px">
+        <div style="font-size:12px;font-weight:600;color:#1a4fa0;margin-bottom:8px">📝 Factura manual — rellena los datos de cabecera</div>
+        <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:12px;font-size:13px">
+          <div><div style="font-size:11px;color:var(--gray-500);text-transform:uppercase">Proveedor</div><input class="input" id="man-proveedor" placeholder="KaffeKapslen" style="font-size:13px;padding:5px 8px"></div>
+          <div><div style="font-size:11px;color:var(--gray-500);text-transform:uppercase">Nº Factura</div><input class="input" id="man-numero" placeholder="13001698176" style="font-size:13px;padding:5px 8px"></div>
+          <div><div style="font-size:11px;color:var(--gray-500);text-transform:uppercase">Fecha</div><input class="input" type="date" id="man-fecha" style="font-size:13px;padding:5px 8px"></div>
+          <div><div style="font-size:11px;color:var(--gray-500);text-transform:uppercase">PDF (recomendado)</div><input type="file" id="man-pdf" accept="application/pdf" style="font-size:11px" onchange="onAdjuntarPDFManual(this.files[0])"></div>
+        </div>
+        <div style="font-size:11px;color:#7a4f00;margin-top:6px" id="man-pdf-aviso">⚠️ Sin PDF la factura se guardará igual, pero no podrás verla luego desde el producto.</div>
       </div>
 
       <!-- Bloque gastos de envio (visible solo si hay gastos detectados) -->
@@ -972,7 +992,10 @@
 
       <!-- Lineas (tabla con cards editables) -->
       <div style="margin-bottom:14px">
-        <div style="font-size:12px;color:var(--gray-600);margin-bottom:8px;text-transform:uppercase;font-weight:600">Líneas detectadas</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="font-size:12px;color:var(--gray-600);text-transform:uppercase;font-weight:600">Líneas detectadas</div>
+          <button class="btn btn-ghost btn-sm" id="rev-btn-add-linea" onclick="anadirLineaManual()" style="display:none">➕ Añadir línea</button>
+        </div>
         <table style="width:100%">
           <tbody id="rev-lineas-tbody"></tbody>
         </table>
@@ -1644,6 +1667,9 @@ async function cargarAlertas() {
     renderEstancados(estancados);
     ESTANCADOS_COUNT = estancados.length;
 
+    // Bloque "Comprobar" (productos en perdidas) — usa rentabilidad.json, no bloquea el resto
+    cargarAlertasComprobar();
+
     // Badge sidebar (solo manda + pide, no sin movimiento porque no es urgente)
     const badge = document.getElementById('badge-alertas');
     const totalUrgentes = mandaFba.length + pideProveedor.length;
@@ -1896,6 +1922,126 @@ async function marcarComoPedido(productoId, proveedor, nombreProducto) {
     cargarAlertas();
   } catch(e) {
     console.error('[marcarComoPedido]', e);
+    showToast('Error: ' + (e.message || 'no se pudo silenciar'), 'error');
+  }
+}
+
+// ----------------------------------------------------------------
+// BLOQUE "COMPROBAR": productos en perdidas (beneficio negativo ultimo mes)
+// Lee RENT_DATA (rentabilidad.json), recorre el ultimo mes de ES/IT/FR.
+// ----------------------------------------------------------------
+async function cargarAlertasComprobar() {
+  const el = document.getElementById('alertas-comprobar');
+  if (!el) return;
+  try {
+    const rent = await cargarRentData();
+    if (!rent) { el.innerHTML = '<div class="info-box" style="font-size:12px">No se pudo cargar rentabilidad.json</div>'; return; }
+
+    // Recolectar productos en perdidas del ULTIMO mes de cada mercado
+    // Estructura: ES en raiz (rent.meses), IT/FR en rent.por_pais.{IT,FR}.meses
+    const perdidas = [];  // {asin, sku, nombre, mercado, beneficio, unidades}
+    const meterDeMercado = (meses, mercado) => {
+      if (!Array.isArray(meses) || meses.length === 0) return;
+      const ultimo = meses[meses.length - 1];
+      if (!ultimo || !Array.isArray(ultimo.productos)) return;
+      ultimo.productos.forEach(p => {
+        if (typeof p.beneficio === 'number' && p.beneficio < 0) {
+          perdidas.push({
+            asin: p.asin || '', sku: p.sku || '', nombre: p.nombre || '(sin nombre)',
+            mercado: mercado, beneficio: p.beneficio, unidades: p.unidades || 0,
+            mes: ultimo.mes || ''
+          });
+        }
+      });
+    };
+    meterDeMercado(rent.meses, 'ES');
+    if (rent.por_pais) {
+      if (rent.por_pais.IT) meterDeMercado(rent.por_pais.IT.meses, 'IT');
+      if (rent.por_pais.FR) meterDeMercado(rent.por_pais.FR.meses, 'FR');
+    }
+
+    if (perdidas.length === 0) {
+      el.innerHTML = '<div class="info-box" style="font-size:12px;background:#e8f5e9;border-color:#a5d6a7">✅ Ningún producto en pérdidas el último mes. Todo correcto.</div>';
+      return;
+    }
+
+    // Mapear asin -> producto_id (Supabase) para poder silenciar. Solo los ASIN en perdidas.
+    const asins = [...new Set(perdidas.map(p => p.asin).filter(Boolean))];
+    const asinToId = {};
+    if (asins.length > 0) {
+      const { data: prods } = await db.from('productos').select('id, asin').in('asin', asins);
+      (prods || []).forEach(pr => { if (pr.asin) asinToId[pr.asin] = pr.id; });
+    }
+
+    // Filtrar las silenciadas (tipo comprobar_perdidas), clave producto_id|mercado
+    const ahoraIso = new Date().toISOString();
+    const { data: sil } = await db.from('alertas_silenciadas')
+      .select('producto_id, tipo_alerta, motivo, silenciado_hasta')
+      .eq('tipo_alerta', 'comprobar_perdidas').gt('silenciado_hasta', ahoraIso);
+    const silSet = new Set();
+    (sil || []).forEach(s => {
+      // motivo guarda el mercado para distinguir ES/IT/FR del mismo producto
+      silSet.add(s.producto_id + '|' + (s.motivo || ''));
+    });
+
+    // Construir tarjetas (ocultando las silenciadas)
+    const visibles = perdidas.filter(p => {
+      const pid = asinToId[p.asin];
+      if (!pid) return true; // sin id no se puede silenciar, se muestra igual
+      return !silSet.has(pid + '|' + p.mercado);
+    });
+
+    if (visibles.length === 0) {
+      el.innerHTML = '<div class="info-box" style="font-size:12px;background:#e8f5e9;border-color:#a5d6a7">✅ Todas las alertas de pérdidas están comprobadas (silenciadas).</div>';
+      return;
+    }
+
+    // Ordenar por pérdida (más negativo primero)
+    visibles.sort((a, b) => a.beneficio - b.beneficio);
+
+    el.innerHTML = visibles.map(p => {
+      const pid = asinToId[p.asin] || '';
+      const perdidaUd = p.unidades > 0 ? (p.beneficio / p.unidades) : p.beneficio;
+      const btn = pid
+        ? '<button class="btn btn-ghost btn-sm" style="color:var(--green);flex-shrink:0" onclick="marcarComprobado(\'' + pid + '\',\'' + p.mercado + '\',\'' + (p.nombre || '').replace(/'/g, '').substring(0, 40) + '\')">✅ Comprobado</button>'
+        : '<span style="font-size:11px;color:var(--gray-400)">sin ficha en BD</span>';
+      return '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--gray-200);border-radius:8px;margin-bottom:8px;background:#fff5f5">'
+        + '<div style="min-width:0;flex:1">'
+          + '<div style="font-weight:600;font-size:13px">' + p.nombre.substring(0, 55) + '</div>'
+          + '<div style="font-size:11px;color:var(--gray-500)">'
+            + '<span style="background:var(--navy);color:white;padding:1px 6px;border-radius:3px;font-weight:600">Amazon ' + p.mercado + '</span> · '
+            + 'ASIN ' + (p.asin || '?') + ' · ' + p.unidades + ' uds'
+          + '</div>'
+        + '</div>'
+        + '<div style="text-align:right;flex-shrink:0">'
+          + '<div style="font-weight:700;color:var(--red);font-size:14px">' + p.beneficio.toFixed(2) + '€</div>'
+          + '<div style="font-size:10px;color:var(--red)">' + perdidaUd.toFixed(2) + '€/ud</div>'
+        + '</div>'
+        + btn
+      + '</div>';
+    }).join('');
+  } catch (e) {
+    console.error('[cargarAlertasComprobar]', e);
+    el.innerHTML = '<div class="info-box" style="font-size:12px">Error cargando alertas de comprobación: ' + (e.message || '') + '</div>';
+  }
+}
+
+async function marcarComprobado(productoId, mercado, nombre) {
+  if (!confirm('¿Marcar "' + (nombre || 'este producto') + '" (Amazon ' + mercado + ') como comprobado?\n\nLa alerta de pérdidas se silenciará 30 días.')) return;
+  try {
+    const silenciadoHasta = new Date();
+    silenciadoHasta.setDate(silenciadoHasta.getDate() + 30);
+    const { error } = await db.from('alertas_silenciadas').insert({
+      producto_id: productoId,
+      tipo_alerta: 'comprobar_perdidas',
+      silenciado_hasta: silenciadoHasta.toISOString(),
+      motivo: mercado   // guardamos el mercado en motivo para distinguir ES/IT/FR
+    });
+    if (error) throw error;
+    showToast('Comprobado ✅ — silenciado 30 días', 'success');
+    cargarAlertasComprobar();
+  } catch (e) {
+    console.error('[marcarComprobado]', e);
     showToast('Error: ' + (e.message || 'no se pudo silenciar'), 'error');
   }
 }
@@ -2239,7 +2385,7 @@ function renderRotacion() {
     } else if (vpES) {
       tendES = 'sin_ventas';
     }
-    const tendIcon = tendES === 'subiendo' ? ' <span title="Subiendo">\ud83d\udcc8</span>' : (tendES === 'bajando' ? ' <span title="Bajando">\ud83d\udcc9</span>' : '');
+    const tendIcon = tendES === 'subiendo' ? ' <span title="Subiendo">\ud83d\udcc8</span>' : (tendES === 'bajando' ? ' <span title="Bajando">\ud83d\udcc9</span>' : (tendES === 'estable' ? ' <span title="Estable">\u27a1\ufe0f</span>' : ''));
     const inboundHtml = f.stock_inbound > 0
       ? '<span style="color:var(--accent);font-weight:600">\ud83d\ude9a ' + f.stock_inbound + '</span>'
       : '<span style="color:var(--gray-300)">\u2014</span>';
@@ -2570,39 +2716,53 @@ function cambiarCanalRotacion(canal) {
 
 // Exporta a Excel los productos cuyo precio de venta se ha cambiado respecto al original
 function exportarCambiosPrecios() {
-  if (ROTACION_CANAL !== 'ES') { showToast('Solo disponible en Amazon ES por ahora', 'warning'); return; }
+  if (ROTACION_CANAL === 'MIRAVIA') { showToast('La exportación de cambios es para Amazon (ES/IT/FR)', 'warning'); return; }
   if (!ROTACION_DATOS) return;
+  const canal = ROTACION_CANAL;  // 'ES' | 'IT' | 'FR'
   const cambios = [];
   ROTACION_DATOS.forEach(f => {
     const inp = document.getElementById('rot-pv-' + f.id);
     if (!inp) return;
     const nuevo = parseFloat(inp.value);
     if (isNaN(nuevo)) return;
-    const original = (f.precio_venta_original != null) ? f.precio_venta_original : null;
+    // Precio "anterior" segun canal: ES usa precio_venta_original; IT/FR usan su Buy Box
+    let original;
+    if (canal === 'IT') original = (f.buy_box_it != null) ? f.buy_box_it : null;
+    else if (canal === 'FR') original = (f.buy_box_fr != null) ? f.buy_box_fr : null;
+    else original = (f.precio_venta_original != null) ? f.precio_venta_original : null;
     if (original == null || Math.abs(nuevo - original) >= 0.01) {
       const pvd = parseFloat(document.getElementById('rot-pvd-' + f.id).value);
       const com = parseFloat(document.getElementById('rot-com-' + f.id).value);
       const env = parseFloat(document.getElementById('rot-env-' + f.id).value);
       const alm = parseFloat(document.getElementById('rot-alm-' + f.id).value);
-      const calc = calcMargenRot(pvd, nuevo, com, env, alm, f.iva_pct);
+      // IVA del canal para el calculo de margen (igual que recalcularMargenFila)
+      let ivaCanal;
+      if (canal === 'IT' || canal === 'FR') {
+        const cCanal = (canal === 'IT') ? CANALES_IT_MAP[f.id] : CANALES_FR_MAP[f.id];
+        ivaCanal = (cCanal && cCanal.iva_pct != null) ? cCanal.iva_pct : (canal === 'IT' ? 22 : 20);
+      } else {
+        ivaCanal = f.iva_pct;
+      }
+      const calc = calcMargenRot(pvd, nuevo, com, env, alm, ivaCanal);
       cambios.push({
         Producto: f.nombre,
         ASIN: f.asin || '',
         SKU: f.sku || '',
         EAN: f.ean || '',
+        Mercado: 'Amazon ' + canal,
         'Precio anterior': (original != null) ? original.toFixed(2) : '(sin precio)',
         'Precio nuevo': nuevo.toFixed(2),
         'Margen nuevo': calc ? calc.margen.toFixed(1) + '%' : '\u2014'
       });
     }
   });
-  if (cambios.length === 0) { showToast('No has cambiado ningun precio', 'warning'); return; }
+  if (cambios.length === 0) { showToast('No has cambiado ningun precio en Amazon ' + canal, 'warning'); return; }
   const ws = XLSX.utils.json_to_sheet(cambios);
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Cambios precio');
+  XLSX.utils.book_append_sheet(wb, ws, 'Cambios precio ' + canal);
   const hoy = new Date().toISOString().slice(0, 10);
-  XLSX.writeFile(wb, 'Cambios_precio_ES_' + hoy + '.xlsx');
-  showToast(cambios.length + ' cambio(s) exportado(s)', 'success');
+  XLSX.writeFile(wb, 'Cambios_precio_' + canal + '_' + hoy + '.xlsx');
+  showToast(cambios.length + ' cambio(s) exportado(s) para Amazon ' + canal, 'success');
 }
 
 // ============================================================
@@ -5384,6 +5544,7 @@ let _facturaLineas = [];          // Lineas con su estado de matching/edicion
 let _facturaPDFFile = null;       // Archivo PDF para subir al final a Storage
 let _facturaTextoCrudo = '';      // Para debug
 let _facturaAplicarEnvio = true;  // Si true, los gastos de envio se reparten en el precio efectivo
+let _facturaModoManual = false;   // true cuando la factura se crea a mano (sin parser)
 
 // ----------------------------------------------------------------
 // HELPER GENERICO: Reparto LINEAL de gastos de envio sobre las lineas
@@ -6060,10 +6221,125 @@ function abrirSubirFactura() {
   _facturaLineas = [];
   _facturaPDFFile = null;
   _facturaTextoCrudo = '';
+  _facturaModoManual = false;
   // Disparar selector de archivo
   const inp = document.getElementById('input-subir-factura-pdf');
   if (inp) inp.value = '';
   inp.click();
+}
+
+// ----------------------------------------------------------------
+// 3b. FLUJO DE FACTURA MANUAL (proveedores sin parser, ej. KaffeKapslen)
+// Reutiliza el modal de revision, pero arranca vacio: el usuario rellena
+// cabecera y lineas a mano, busca cada producto por EAN/SKU/nombre.
+// ----------------------------------------------------------------
+function _nuevaLineaManualVacia() {
+  return {
+    descripcion: '',
+    ean_raw: null,
+    ean_alt_12: null,
+    ref_proveedor: null,
+    cantidad: 1,
+    cantidad_facturada: 1,
+    precio_efectivo: 0,
+    precio_efectivo_sin_envio: 0,
+    envio_repercutido: 0,
+    es_case_chase: false,
+    es_surtido: false,
+    n_surtido: 1,
+    menciona_chase: false,
+    // campos editables/estado:
+    ean_editado: '',
+    cantidad_editada: 1,
+    precio_editado: 0,
+    match_estado: 'no_encontrado',
+    match_productos: [],
+    producto_id_seleccionado: null,
+    chase_reparto: 'sin_chase',
+    chase_unidades_regular: 1,
+    chase_unidades_chase: 0
+  };
+}
+
+function abrirFacturaManual() {
+  // Reset estado en modo manual
+  _facturaModoManual = true;
+  _facturaPDFFile = null;
+  _facturaTextoCrudo = '';
+  _facturaAplicarEnvio = false;   // en manual el precio que metes ya es el efectivo
+  _facturaActual = {
+    proveedor: '',
+    numero: '',
+    fecha: new Date().toISOString().slice(0, 10),
+    total_con_iva: null,
+    total_sin_iva: null,
+    iva_pct: 0,
+    gastos_envio: 0,
+    lineas: []
+  };
+  _facturaLineas = [ _nuevaLineaManualVacia() ];
+  // Mostrar modal directamente en contenido (sin loading)
+  openModal('modal-revision-factura');
+  document.getElementById('rev-loading').style.display = 'none';
+  document.getElementById('rev-contenido').style.display = 'block';
+  // Alternar cabeceras: ocultar la auto, mostrar la manual
+  document.getElementById('rev-cabecera-auto').style.display = 'none';
+  document.getElementById('rev-cabecera-manual').style.display = 'block';
+  document.getElementById('rev-btn-add-linea').style.display = 'inline-flex';
+  // Reset inputs de cabecera manual
+  document.getElementById('man-proveedor').value = '';
+  document.getElementById('man-numero').value = '';
+  document.getElementById('man-fecha').value = _facturaActual.fecha;
+  const inpPdf = document.getElementById('man-pdf');
+  if (inpPdf) inpPdf.value = '';
+  document.getElementById('man-pdf-aviso').style.display = 'block';
+  renderRevision();
+}
+
+function onAdjuntarPDFManual(file) {
+  if (!file) { _facturaPDFFile = null; return; }
+  if (file.type !== 'application/pdf') { showToast('Solo se admiten PDF', 'error'); return; }
+  if (file.size > 10 * 1024 * 1024) { showToast('PDF demasiado grande (max 10MB)', 'error'); return; }
+  _facturaPDFFile = file;
+  document.getElementById('man-pdf-aviso').textContent = '✅ PDF adjuntado: ' + file.name;
+  document.getElementById('man-pdf-aviso').style.color = 'var(--green)';
+}
+
+function anadirLineaManual() {
+  _facturaLineas.push(_nuevaLineaManualVacia());
+  renderRevision();
+}
+
+function borrarLineaFactura(idx) {
+  if (_facturaLineas.length <= 1 && _facturaModoManual) {
+    // En manual, dejar al menos una linea vacia
+    _facturaLineas = [ _nuevaLineaManualVacia() ];
+  } else {
+    _facturaLineas.splice(idx, 1);
+  }
+  renderRevision();
+}
+
+// Sincroniza la cabecera manual (inputs) con _facturaActual antes de guardar
+function _leerCabeceraManual() {
+  const f = _facturaActual;
+  f.proveedor = (document.getElementById('man-proveedor').value || '').trim();
+  f.numero = (document.getElementById('man-numero').value || '').trim();
+  f.fecha = document.getElementById('man-fecha').value || new Date().toISOString().slice(0, 10);
+  // En manual, cada linea es "sin CHASE": las uds regulares = cantidad, CHASE = 0.
+  // Asi la validacion CHASE de confirmarFactura cuadra automaticamente.
+  _facturaLineas.forEach(l => {
+    if (l.chase_reparto === 'sin_chase' || !l.chase_reparto) {
+      l.chase_unidades_regular = l.cantidad_editada || 0;
+      l.chase_unidades_chase = 0;
+    }
+  });
+  // Total = suma de lineas (en manual no hay total de PDF que validar)
+  let totalLineas = 0;
+  _facturaLineas.forEach(l => { totalLineas += (l.cantidad_editada || 0) * (l.precio_editado || 0); });
+  f.total_sin_iva = +totalLineas.toFixed(2);
+  f.total_con_iva = +totalLineas.toFixed(2);  // PVD sin IVA; en manual no desglosamos IVA
+  f.iva_pct = 0;
 }
 
 // ----------------------------------------------------------------
@@ -6131,6 +6407,10 @@ async function onSeleccionarFacturaPDF(file) {
     }
     document.getElementById('rev-loading').style.display = 'none';
     document.getElementById('rev-contenido').style.display = 'block';
+    // Flujo PDF con parser: cabecera auto visible, manual oculta, sin boton add-linea
+    document.getElementById('rev-cabecera-auto').style.display = 'block';
+    document.getElementById('rev-cabecera-manual').style.display = 'none';
+    document.getElementById('rev-btn-add-linea').style.display = 'none';
     renderRevision();
   } catch (err) {
     console.error('Error procesando PDF:', err);
@@ -6341,7 +6621,12 @@ function renderLinea(l, idx) {
 
   return ''
     + '<td style="padding:10px;vertical-align:top">'
-      + '<div style="font-weight:600;font-size:13px;margin-bottom:4px">' + (idx + 1) + '. ' + (l.descripcion || '?').substring(0, 75) + (l.descripcion && l.descripcion.length > 75 ? '...' : '') + '</div>'
+      + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'
+        + (_facturaModoManual
+            ? '<input class="input" style="font-weight:600;font-size:13px;margin-bottom:4px;flex:1" placeholder="Descripción del producto" value="' + (l.descripcion || '').replace(/"/g, '&quot;') + '" oninput="actualizarLineaDescripcion(' + idx + ', this.value)">'
+            : '<div style="font-weight:600;font-size:13px;margin-bottom:4px">' + (idx + 1) + '. ' + (l.descripcion || '?').substring(0, 75) + (l.descripcion && l.descripcion.length > 75 ? '...' : '') + '</div>')
+        + '<button class="btn btn-ghost btn-sm" title="Borrar esta línea (úsalo para recargos, portes o conceptos que no son producto)" onclick="borrarLineaFactura(' + idx + ')" style="color:var(--red);flex-shrink:0;padding:2px 8px">🗑</button>'
+      + '</div>'
       + refProvLabel
       + casoEspecial
       + '<div style="display:grid;grid-template-columns:160px 80px 110px;gap:8px;margin-bottom:8px">'
@@ -6464,21 +6749,44 @@ function actualizarValidaciones() {
 // ----------------------------------------------------------------
 // 9. BUSCAR PRODUCTO MANUAL (cuando EAN no encuentra match)
 // ----------------------------------------------------------------
+function actualizarLineaDescripcion(idx, valor) {
+  if (_facturaLineas[idx]) _facturaLineas[idx].descripcion = valor;
+}
+
 async function buscarProductoManual(idx) {
-  const q = prompt('Buscar producto por nombre (al menos 3 caracteres):');
-  if (!q || q.length < 3) return;
-  const { data } = await db.from('productos').select('id, ean, asin, nombre, proveedor, pvd, activo')
-    .ilike('nombre', '%' + q + '%').eq('activo', true).limit(20);
-  if (!data || data.length === 0) {
-    alert('No se encontro ningun producto con "' + q + '"');
+  const q = prompt('Buscar producto por EAN, SKU o nombre (al menos 3 caracteres):');
+  if (!q || q.trim().length < 3) return;
+  const term = q.trim();
+  // Buscar por EAN o SKU exactos, o por nombre parcial. Unimos resultados sin duplicar.
+  const resultados = {};
+  const meter = (arr) => { (arr || []).forEach(p => { resultados[p.id] = p; }); };
+  try {
+    const sel = 'id, ean, sku, asin, nombre, proveedor, pvd, activo';
+    // EAN exacto (y por contains, por si lleva ceros)
+    const r1 = await db.from('productos').select(sel).eq('activo', true).eq('ean', term).limit(20);
+    meter(r1.data);
+    // SKU exacto
+    const r2 = await db.from('productos').select(sel).eq('activo', true).eq('sku', term).limit(20);
+    meter(r2.data);
+    // Nombre parcial
+    const r3 = await db.from('productos').select(sel).eq('activo', true).ilike('nombre', '%' + term + '%').limit(20);
+    meter(r3.data);
+  } catch (e) {
+    alert('Error buscando: ' + e.message);
     return;
   }
-  // Mostrar lista simple en prompt
-  let texto = 'Selecciona un producto (escribe el numero):\n\n';
+  const data = Object.values(resultados);
+  if (data.length === 0) {
+    alert('No se encontró ningún producto con "' + term + '" (probé EAN, SKU y nombre)');
+    return;
+  }
+  let texto = 'Selecciona un producto (escribe el número):\n\n';
   data.forEach((p, i) => {
-    texto += (i + 1) + '. ' + (p.nombre || '?').substring(0, 50) + ' \u2014 EAN ' + (p.ean || '?') + ' \u2014 PVD ' + (p.pvd != null ? p.pvd.toFixed(2) : '?') + '\u20ac\n';
+    texto += (i + 1) + '. ' + (p.nombre || '?').substring(0, 45)
+      + '\n     EAN ' + (p.ean || '?') + ' · SKU ' + (p.sku || '?')
+      + ' · PVD ' + (p.pvd != null ? p.pvd.toFixed(2) : '?') + '€\n\n';
   });
-  texto += '\n0. Cancelar';
+  texto += '0. Cancelar';
   const sel = prompt(texto);
   const n = parseInt(sel);
   if (!n || n < 1 || n > data.length) return;
@@ -6487,6 +6795,7 @@ async function buscarProductoManual(idx) {
   _facturaLineas[idx].match_productos = [seleccionado];
   _facturaLineas[idx].producto_id_seleccionado = seleccionado.id;
   _facturaLineas[idx].ean_editado = seleccionado.ean || _facturaLineas[idx].ean_editado;
+  if (!_facturaLineas[idx].descripcion) _facturaLineas[idx].descripcion = seleccionado.nombre || '';
   renderRevision();
 }
 
@@ -6564,6 +6873,27 @@ function actualizarReparto(idxLinea, idxFicha, campo, valor) {
 async function confirmarFactura() {
   const f = _facturaActual;
   if (!f) return;
+
+  // --- MODO MANUAL: leer cabecera de los inputs y validar lo minimo ---
+  if (_facturaModoManual) {
+    _leerCabeceraManual();
+    if (!f.proveedor) { showToast('Indica el proveedor', 'error'); return; }
+    if (!f.numero) { showToast('Indica el número de factura', 'error'); return; }
+    // Quitar lineas totalmente vacias (sin producto asignado y sin descripcion)
+    _facturaLineas = _facturaLineas.filter(l =>
+      l.producto_id_seleccionado || (l.descripcion && l.descripcion.trim()) || l.match_estado === 'unico');
+    if (_facturaLineas.length === 0) { showToast('Añade al menos una línea con producto', 'error'); return; }
+    // Todas las lineas deben tener un producto asignado (match unico)
+    const sinProducto = _facturaLineas.filter(l => l.match_estado !== 'unico' || !l.producto_id_seleccionado);
+    if (sinProducto.length > 0) {
+      showToast('Hay ' + sinProducto.length + ' línea(s) sin producto asignado. Usa "Buscar producto en BD".', 'error');
+      return;
+    }
+    // Validar cantidades/precios
+    const malImporte = _facturaLineas.filter(l => !(l.cantidad_editada > 0) || !(l.precio_editado >= 0));
+    if (malImporte.length > 0) { showToast('Revisa cantidades y precios de las líneas', 'error'); return; }
+  }
+
   // Validacion final
   const sumaChaseOk = _facturaLineas.every(l => (l.chase_unidades_regular + l.chase_unidades_chase) === l.cantidad_editada);
   if (!sumaChaseOk) {
@@ -6598,11 +6928,14 @@ async function confirmarFactura() {
   btn.disabled = true;
   btn.textContent = 'Guardando...';
   try {
-    // 1. Subir PDF a Storage
-    const fechaParts = f.fecha ? f.fecha.split('-') : [String(new Date().getFullYear()), String(new Date().getMonth() + 1).padStart(2, '0')];
-    const pdfPath = fechaParts[0] + '/' + fechaParts[1] + '/' + f.proveedor + '_' + f.numero + '.pdf';
-    const { error: upError } = await db.storage.from('facturas-pdfs').upload(pdfPath, _facturaPDFFile, { upsert: true, contentType: 'application/pdf' });
-    if (upError) throw new Error('Subiendo PDF: ' + upError.message);
+    // 1. Subir PDF a Storage (opcional: en modo manual puede no haber PDF)
+    let pdfPath = null;
+    if (_facturaPDFFile) {
+      const fechaParts = f.fecha ? f.fecha.split('-') : [String(new Date().getFullYear()), String(new Date().getMonth() + 1).padStart(2, '0')];
+      pdfPath = fechaParts[0] + '/' + fechaParts[1] + '/' + f.proveedor + '_' + f.numero + '.pdf';
+      const { error: upError } = await db.storage.from('facturas-pdfs').upload(pdfPath, _facturaPDFFile, { upsert: true, contentType: 'application/pdf' });
+      if (upError) throw new Error('Subiendo PDF: ' + upError.message);
+    }
     // 2. Crear registro de factura
     const { data: factCreada, error: factError } = await db.from('facturas').insert({
       numero: f.numero,
