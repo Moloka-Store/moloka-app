@@ -319,13 +319,13 @@
       </div>
     </div>
     <div style="margin-top:24px">
-      <div class="section-header"><div class="section-title">💤 Sin movimiento — Capital inmovilizado</div></div>
-      <div id="alertas-sin-movimiento"><div class="loading-state"><div class="big-loader"></div></div></div>
+      <div class="section-header"><div class="section-title">🔎 Comprobar — Productos con algo raro</div></div>
+      <div class="info-box" style="margin-bottom:14px;font-size:12px">ℹ️ Productos que conviene revisar: <strong>vendiendo a pérdida</strong> (el precio actual no cubre costes), <strong>costes que no cuadran con Keepa</strong> (comisión o envío — posible Cubiscan) y <strong>devoluciones altas</strong> (proporción elevada sobre ventas). Cada aviso se silencia 30 días con su botón.</div>
+      <div id="alertas-comprobar"><div class="loading-state"><div class="big-loader"></div></div></div>
     </div>
     <div style="margin-top:24px">
-      <div class="section-header"><div class="section-title">🔎 Comprobar — Productos con algo raro</div></div>
-      <div class="info-box" style="margin-bottom:14px;font-size:12px">ℹ️ Productos que conviene revisar. De momento: <strong>productos en pérdidas</strong> (beneficio negativo el último mes en algún mercado). Pulsa <strong>✅ Comprobado</strong> para silenciar la alerta 30 días.</div>
-      <div id="alertas-comprobar"><div class="loading-state"><div class="big-loader"></div></div></div>
+      <div class="section-header"><div class="section-title">💤 Sin movimiento — Capital inmovilizado</div></div>
+      <div id="alertas-sin-movimiento"><div class="loading-state"><div class="big-loader"></div></div></div>
     </div>
     <div style="margin-top:24px;display:none" id="seccion-estancados">
       <div class="section-header">
@@ -1926,10 +1926,23 @@ async function marcarComoPedido(productoId, proveedor, nombreProducto) {
   }
 }
 
-// ----------------------------------------------------------------
-// BLOQUE "COMPROBAR": productos en perdidas (beneficio negativo ultimo mes)
-// Lee RENT_DATA (rentabilidad.json), recorre el ultimo mes de ES/IT/FR.
-// ----------------------------------------------------------------
+// ============================================================
+// BLOQUE "COMPROBAR": 3 alertas que cruzan rentabilidad.json + devoluciones + Keepa
+//   A1 - Vendiendo a perdida (rentabilidad ESTANDAR al precio actual, por mercado)
+//   A2 - Costes que no cuadran con Keepa (comision y/o envio, por mercado)
+//   A3 - Devoluciones relativas altas (>=10% de las ventas, min 2 dev, 60 dias, global)
+// Cada alerta se silencia 30 dias con su boton (clave tipo|asin|mercado).
+// ============================================================
+
+// Helper: rentabilidad estandar por unidad (misma formula que Rotacion)
+//   base = pv/(1+iva/100); comision = %com*pv*1.03 (3% digitales SOLO Amazon); benef = base - pvd - com - envio - almacen
+function _rentEstandarUd(pv, pvd, comPct, envio, almacen, iva) {
+  if (pv == null || pvd == null || comPct == null) return null;
+  const base = pv / (1 + (iva || 21) / 100);
+  const com = (comPct / 100) * pv * 1.03;
+  return base - pvd - (envio || 0) - com - (almacen || 0);
+}
+
 async function cargarAlertasComprobar() {
   const el = document.getElementById('alertas-comprobar');
   if (!el) return;
@@ -1937,114 +1950,219 @@ async function cargarAlertasComprobar() {
     const rent = await cargarRentData();
     if (!rent) { el.innerHTML = '<div class="info-box" style="font-size:12px">No se pudo cargar rentabilidad.json</div>'; return; }
 
-    // Recolectar productos en perdidas del ULTIMO mes de cada mercado
-    // Estructura: ES en raiz (rent.meses), IT/FR en rent.por_pais.{IT,FR}.meses
-    const perdidas = [];  // {asin, sku, nombre, mercado, beneficio, unidades}
-    const meterDeMercado = (meses, mercado) => {
-      if (!Array.isArray(meses) || meses.length === 0) return;
-      const ultimo = meses[meses.length - 1];
-      if (!ultimo || !Array.isArray(ultimo.productos)) return;
-      ultimo.productos.forEach(p => {
-        if (typeof p.beneficio === 'number' && p.beneficio < 0) {
-          perdidas.push({
-            asin: p.asin || '', sku: p.sku || '', nombre: p.nombre || '(sin nombre)',
-            mercado: mercado, beneficio: p.beneficio, unidades: p.unidades || 0,
-            mes: ultimo.mes || ''
-          });
-        }
-      });
+    // ---- 1) Reunir ASINs implicados (ultimo mes de cada mercado) y datos del producto en BD ----
+    const ultMesPais = {
+      ES: (rent.meses && rent.meses.length) ? rent.meses[rent.meses.length - 1] : null,
+      IT: (rent.por_pais && rent.por_pais.IT && rent.por_pais.IT.meses && rent.por_pais.IT.meses.length) ? rent.por_pais.IT.meses[rent.por_pais.IT.meses.length - 1] : null,
+      FR: (rent.por_pais && rent.por_pais.FR && rent.por_pais.FR.meses && rent.por_pais.FR.meses.length) ? rent.por_pais.FR.meses[rent.por_pais.FR.meses.length - 1] : null
     };
-    meterDeMercado(rent.meses, 'ES');
-    if (rent.por_pais) {
-      if (rent.por_pais.IT) meterDeMercado(rent.por_pais.IT.meses, 'IT');
-      if (rent.por_pais.FR) meterDeMercado(rent.por_pais.FR.meses, 'FR');
-    }
+    const asinsSet = new Set();
+    ['ES','IT','FR'].forEach(m => { if (ultMesPais[m]) ultMesPais[m].productos.forEach(p => { if (p.asin) asinsSet.add(p.asin); }); });
+    const asins = [...asinsSet];
+    if (asins.length === 0) { el.innerHTML = '<div class="info-box" style="font-size:12px;background:#e8f5e9;border-color:#a5d6a7">✅ Sin datos de ventas recientes para comprobar.</div>'; return; }
 
-    if (perdidas.length === 0) {
-      el.innerHTML = '<div class="info-box" style="font-size:12px;background:#e8f5e9;border-color:#a5d6a7">✅ Ningún producto en pérdidas el último mes. Todo correcto.</div>';
-      return;
-    }
+    // Datos de producto desde BD: id, pvd, coste_almacen, comisiones/envios Keepa
+    const prodPorAsin = {};   // asin -> ficha BD (cogemos la primera por asin)
+    const { data: prods } = await db.from('productos')
+      .select('id, asin, sku, nombre, pvd, coste_almacen, iva_pct, comision_pct, comision_pct_it, comision_pct_fr, comision_pct_keepa_es, envio_it, envio_fr, keepa_fba_fee_es, keepa_fba_fee_it, keepa_fba_fee_fr, activo')
+      .in('asin', asins);
+    (prods || []).forEach(p => { if (p.asin && !prodPorAsin[p.asin]) prodPorAsin[p.asin] = p; });
 
-    // Mapear asin -> producto_id (Supabase) para poder silenciar. Solo los ASIN en perdidas.
-    const asins = [...new Set(perdidas.map(p => p.asin).filter(Boolean))];
-    const asinToId = {};
-    if (asins.length > 0) {
-      const { data: prods } = await db.from('productos').select('id, asin').in('asin', asins);
-      (prods || []).forEach(pr => { if (pr.asin) asinToId[pr.asin] = pr.id; });
-    }
+    // ---- 2) Devoluciones ultimos 60 dias por asin (global) ----
+    const hace60 = new Date(); hace60.setDate(hace60.getDate() - 60);
+    const { data: devs } = await db.from('devoluciones')
+      .select('asin, cantidad, tipo, fecha')
+      .eq('tipo', 'customer_return').gte('fecha', hace60.toISOString());
+    const devPorAsin = {};
+    (devs || []).forEach(d => { if (d.asin) devPorAsin[d.asin] = (devPorAsin[d.asin] || 0) + (d.cantidad || 1); });
 
-    // Filtrar las silenciadas (tipo comprobar_perdidas), clave producto_id|mercado
+    // Ventas EU 60d aprox: sumamos unidades del ultimo mes de los 3 mercados (proxy)
+    const ventasEU = {};
+    ['ES','IT','FR'].forEach(m => { if (ultMesPais[m]) ultMesPais[m].productos.forEach(p => { if (p.asin) ventasEU[p.asin] = (ventasEU[p.asin] || 0) + (p.unidades || 0); }); });
+
+    // ---- 3) Silenciadas activas (tipo empieza por 'comprobar_') ----
     const ahoraIso = new Date().toISOString();
     const { data: sil } = await db.from('alertas_silenciadas')
       .select('producto_id, tipo_alerta, motivo, silenciado_hasta')
-      .eq('tipo_alerta', 'comprobar_perdidas').gt('silenciado_hasta', ahoraIso);
+      .gt('silenciado_hasta', ahoraIso);
     const silSet = new Set();
-    (sil || []).forEach(s => {
-      // motivo guarda el mercado para distinguir ES/IT/FR del mismo producto
-      silSet.add(s.producto_id + '|' + (s.motivo || ''));
+    (sil || []).forEach(s => { if (s.tipo_alerta && s.tipo_alerta.indexOf('comprobar_') === 0) silSet.add(s.tipo_alerta + '|' + s.producto_id + '|' + (s.motivo || '')); });
+
+    // ---- 4) Construir las 3 listas de alertas ----
+    const aPerdida = [];   // A1
+    const aKeepa = [];     // A2
+    const aDevol = [];     // A3
+
+    // venta_actual (solo ES) para precio/comision/envio reales ES
+    const va = rent.venta_actual || {};
+
+    ['ES','IT','FR'].forEach(merc => {
+      const mes = ultMesPais[merc];
+      if (!mes) return;
+      mes.productos.forEach(p => {
+        const asin = p.asin; if (!asin) return;
+        const ficha = prodPorAsin[asin];
+        const pid = ficha ? ficha.id : null;
+        const uds = p.unidades || 0;
+        if (uds <= 0) return;
+        const pvdUd = (p.coste_pvd != null && uds) ? (p.coste_pvd / uds) : (ficha ? ficha.pvd : null);
+        const almUd = (p.coste_almacen != null && uds) ? (p.coste_almacen / uds) : (ficha && ficha.coste_almacen != null ? ficha.coste_almacen : 0.15);
+        // IVA por mercado. En ES usamos el iva_pct REAL del producto (10% infusiones/alimentación,
+        // 21% Funkos, etc.) que viene como fraccion (0.10/0.21). En IT/FR, el del pais.
+        let iva;
+        if (merc === 'ES') {
+          iva = (ficha && ficha.iva_pct != null) ? +(ficha.iva_pct * 100).toFixed(2) : 21;
+        } else {
+          iva = merc === 'IT' ? 22 : 20;
+        }
+
+        // --- Precio/comision/envio ACTUALES por mercado ---
+        let pv = null, comPctReal = null, envioReal = null;
+        if (merc === 'ES') {
+          const v = va[asin];
+          if (v) { pv = v.precio_ultima_venta; comPctReal = v.comision_pct_mediana; envioReal = v.envio_mediana; }
+        }
+        // Fallback (y IT/FR): derivar del mes
+        if (pv == null && uds) pv = +(p.facturado_iva / uds).toFixed(2);
+        if (comPctReal == null && p.facturado_iva) comPctReal = +(p.comision_amazon / p.facturado_iva * 100).toFixed(2);
+        if (envioReal == null && uds) envioReal = +(p.logistica_fba / uds).toFixed(2);
+
+        // ===== A1: vendiendo a perdida (rentabilidad estandar) =====
+        const rentUd = _rentEstandarUd(pv, pvdUd, comPctReal, envioReal, almUd, iva);
+        if (rentUd != null && rentUd < 0) {
+          const key = 'comprobar_perdida|' + pid + '|' + merc;
+          if (!silSet.has(key)) aPerdida.push({ asin, pid, nombre: p.nombre || asin, merc, rentUd, pv, uds });
+        }
+
+        // ===== A2: costes que no cuadran con Keepa =====
+        if (ficha) {
+          const keepaEnvio = merc === 'ES' ? ficha.keepa_fba_fee_es : (merc === 'IT' ? ficha.keepa_fba_fee_it : ficha.keepa_fba_fee_fr);
+          const keepaCom = merc === 'ES' ? ficha.comision_pct_keepa_es : (merc === 'IT' ? ficha.comision_pct_it : ficha.comision_pct_fr);
+          const difEnvio = (keepaEnvio != null && envioReal != null) ? +(envioReal - keepaEnvio).toFixed(2) : null;
+          const difCom = (keepaCom != null && comPctReal != null) ? +(comPctReal - keepaCom).toFixed(2) : null;
+          // Avisar ante cualquier diferencia (umbral minimo 0.01 para ignorar redondeos)
+          const saltaEnvio = difEnvio != null && Math.abs(difEnvio) >= 0.01;
+          const saltaCom = difCom != null && Math.abs(difCom) >= 0.01;
+          if (saltaEnvio || saltaCom) {
+            const key = 'comprobar_keepa|' + pid + '|' + merc;
+            if (!silSet.has(key)) aKeepa.push({
+              asin, pid, nombre: p.nombre || asin, merc,
+              envioReal, keepaEnvio, difEnvio,
+              comPctReal, keepaCom, difCom
+            });
+          }
+        }
+      });
     });
 
-    // Construir tarjetas (ocultando las silenciadas)
-    const visibles = perdidas.filter(p => {
-      const pid = asinToId[p.asin];
-      if (!pid) return true; // sin id no se puede silenciar, se muestra igual
-      return !silSet.has(pid + '|' + p.mercado);
+    // ===== A3: devoluciones relativas (global por asin) =====
+    Object.keys(devPorAsin).forEach(asin => {
+      const ndev = devPorAsin[asin];
+      const nventas = ventasEU[asin] || 0;
+      if (ndev < 2) return;                 // min 2 devoluciones
+      if (nventas <= 0) return;
+      const ratio = ndev / nventas;
+      if (ratio >= 0.10) {                  // umbral 10%
+        const ficha = prodPorAsin[asin];
+        const pid = ficha ? ficha.id : null;
+        const nombre = ficha ? ficha.nombre : asin;
+        const key = 'comprobar_devol|' + pid + '|global';
+        if (!silSet.has(key)) aDevol.push({ asin, pid, nombre: nombre || asin, ndev, nventas, ratio });
+      }
     });
 
-    if (visibles.length === 0) {
-      el.innerHTML = '<div class="info-box" style="font-size:12px;background:#e8f5e9;border-color:#a5d6a7">✅ Todas las alertas de pérdidas están comprobadas (silenciadas).</div>';
+    // ---- 5) Render ----
+    aPerdida.sort((a,b) => a.rentUd - b.rentUd);
+    aKeepa.sort((a,b) => Math.abs(b.difEnvio||0) - Math.abs(a.difEnvio||0));
+    aDevol.sort((a,b) => b.ratio - a.ratio);
+
+    const total = aPerdida.length + aKeepa.length + aDevol.length;
+    if (total === 0) {
+      el.innerHTML = '<div class="info-box" style="font-size:12px;background:#e8f5e9;border-color:#a5d6a7">✅ Nada que comprobar ahora mismo. Todo en orden (o ya revisado).</div>';
       return;
     }
 
-    // Ordenar por pérdida (más negativo primero)
-    visibles.sort((a, b) => a.beneficio - b.beneficio);
+    const tarjeta = (contenido, derecha, btn) =>
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--gray-200);border-radius:8px;margin-bottom:8px;background:var(--gray-50)">'
+      + '<div style="min-width:0;flex:1">' + contenido + '</div>'
+      + '<div style="text-align:right;flex-shrink:0">' + derecha + '</div>'
+      + btn + '</div>';
 
-    el.innerHTML = visibles.map(p => {
-      const pid = asinToId[p.asin] || '';
-      const perdidaUd = p.unidades > 0 ? (p.beneficio / p.unidades) : p.beneficio;
-      const btn = pid
-        ? '<button class="btn btn-ghost btn-sm" style="color:var(--green);flex-shrink:0" onclick="marcarComprobado(\'' + pid + '\',\'' + p.mercado + '\',\'' + (p.nombre || '').replace(/'/g, '').substring(0, 40) + '\')">✅ Comprobado</button>'
-        : '<span style="font-size:11px;color:var(--gray-400)">sin ficha en BD</span>';
-      return '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--gray-200);border-radius:8px;margin-bottom:8px;background:#fff5f5">'
-        + '<div style="min-width:0;flex:1">'
-          + '<div style="font-weight:600;font-size:13px">' + p.nombre.substring(0, 55) + '</div>'
-          + '<div style="font-size:11px;color:var(--gray-500)">'
-            + '<span style="background:var(--navy);color:white;padding:1px 6px;border-radius:3px;font-weight:600">Amazon ' + p.mercado + '</span> · '
-            + 'ASIN ' + (p.asin || '?') + ' · ' + p.unidades + ' uds'
-          + '</div>'
-        + '</div>'
-        + '<div style="text-align:right;flex-shrink:0">'
-          + '<div style="font-weight:700;color:var(--red);font-size:14px">' + p.beneficio.toFixed(2) + '€</div>'
-          + '<div style="font-size:10px;color:var(--red)">' + perdidaUd.toFixed(2) + '€/ud</div>'
-        + '</div>'
-        + btn
-      + '</div>';
-    }).join('');
+    const btnComprobado = (tipo, pid, merc, nombre) => pid
+      ? '<button class="btn btn-ghost btn-sm" style="color:var(--green);flex-shrink:0" onclick="marcarComprobado(\'' + tipo + '\',\'' + pid + '\',\'' + merc + '\',\'' + (nombre||'').replace(/['\\]/g,'').substring(0,40) + '\')">' + (tipo==='comprobar_keepa'?'✅ Reclamado':'✅ Comprobado') + '</button>'
+      : '<span style="font-size:11px;color:var(--gray-400)">sin ficha</span>';
+
+    const badge = (m) => '<span style="background:var(--navy);color:white;padding:1px 6px;border-radius:3px;font-weight:600">Amazon ' + m + '</span>';
+
+    let html = '';
+
+    // A1 - Vendiendo a perdida
+    if (aPerdida.length) {
+      html += '<div style="font-size:12px;font-weight:700;color:var(--red);margin:4px 0 8px">💸 Vendiendo a pérdida (' + aPerdida.length + ') — el precio actual no cubre costes</div>';
+      html += aPerdida.map(p => tarjeta(
+        '<div style="font-weight:600;font-size:13px">' + p.nombre.substring(0,55) + '</div>'
+        + '<div style="font-size:11px;color:var(--gray-500)">' + badge(p.merc) + ' · precio ' + (p.pv!=null?p.pv.toFixed(2):'?') + '€ · ASIN ' + p.asin + '</div>',
+        '<div style="font-weight:700;color:var(--red);font-size:14px">' + p.rentUd.toFixed(2) + '€/ud</div><div style="font-size:10px;color:var(--gray-400)">rent. estándar</div>',
+        btnComprobado('comprobar_perdida', p.pid, p.merc, p.nombre)
+      )).join('');
+    }
+
+    // A2 - Costes vs Keepa
+    if (aKeepa.length) {
+      html += '<div style="font-size:12px;font-weight:700;color:#b06800;margin:14px 0 8px">📐 Costes que no cuadran con Keepa (' + aKeepa.length + ') — posible categoría o Cubiscan</div>';
+      html += aKeepa.map(p => {
+        let det = [];
+        if (p.difEnvio != null && Math.abs(p.difEnvio) >= 0.01) det.push('Envío ' + p.envioReal.toFixed(2) + '€ vs Keepa ' + (p.keepaEnvio!=null?p.keepaEnvio.toFixed(2):'?') + '€ (' + (p.difEnvio>0?'+':'') + p.difEnvio.toFixed(2) + ')');
+        if (p.difCom != null && Math.abs(p.difCom) >= 0.01) det.push('Comisión ' + p.comPctReal.toFixed(1) + '% vs Keepa ' + (p.keepaCom!=null?p.keepaCom.toFixed(1):'?') + '% (' + (p.difCom>0?'+':'') + p.difCom.toFixed(1) + ')');
+        const peor = (p.difEnvio != null) ? p.difEnvio : 0;
+        return tarjeta(
+          '<div style="font-weight:600;font-size:13px">' + p.nombre.substring(0,55) + '</div>'
+          + '<div style="font-size:11px;color:var(--gray-500)">' + badge(p.merc) + ' · ' + det.join(' · ') + '</div>',
+          '<div style="font-weight:700;color:' + (peor>0.5?'var(--red)':'#b06800') + ';font-size:13px">' + (peor>0?'+':'') + (p.difEnvio!=null?p.difEnvio.toFixed(2)+'€':'') + '</div><div style="font-size:10px;color:var(--gray-400)">dif. envío</div>',
+          btnComprobado('comprobar_keepa', p.pid, p.merc, p.nombre)
+        );
+      }).join('');
+    }
+
+    // A3 - Devoluciones relativas
+    if (aDevol.length) {
+      html += '<div style="font-size:12px;font-weight:700;color:#7a4f00;margin:14px 0 8px">↩️ Devoluciones altas (' + aDevol.length + ') — proporción elevada sobre ventas (60 días)</div>';
+      html += aDevol.map(p => tarjeta(
+        '<div style="font-weight:600;font-size:13px">' + p.nombre.substring(0,55) + '</div>'
+        + '<div style="font-size:11px;color:var(--gray-500)">' + p.ndev + ' devoluciones / ' + p.nventas + ' ventas · ASIN ' + p.asin + '</div>',
+        '<div style="font-weight:700;color:#7a4f00;font-size:14px">' + (p.ratio*100).toFixed(0) + '%</div><div style="font-size:10px;color:var(--gray-400)">tasa devol.</div>',
+        btnComprobado('comprobar_devol', p.pid, 'global', p.nombre)
+      )).join('');
+    }
+
+    el.innerHTML = html;
   } catch (e) {
     console.error('[cargarAlertasComprobar]', e);
     el.innerHTML = '<div class="info-box" style="font-size:12px">Error cargando alertas de comprobación: ' + (e.message || '') + '</div>';
   }
 }
 
-async function marcarComprobado(productoId, mercado, nombre) {
-  if (!confirm('¿Marcar "' + (nombre || 'este producto') + '" (Amazon ' + mercado + ') como comprobado?\n\nLa alerta de pérdidas se silenciará 30 días.')) return;
+async function marcarComprobado(tipo, productoId, mercado, nombre) {
+  const accion = tipo === 'comprobar_keepa' ? 'reclamado' : 'comprobado';
+  if (!confirm('¿Marcar "' + (nombre || 'este producto') + '" como ' + accion + '?\n\nLa alerta se silenciará 30 días.')) return;
   try {
     const silenciadoHasta = new Date();
     silenciadoHasta.setDate(silenciadoHasta.getDate() + 30);
     const { error } = await db.from('alertas_silenciadas').insert({
       producto_id: productoId,
-      tipo_alerta: 'comprobar_perdidas',
+      tipo_alerta: tipo,
       silenciado_hasta: silenciadoHasta.toISOString(),
-      motivo: mercado   // guardamos el mercado en motivo para distinguir ES/IT/FR
+      motivo: mercado
     });
     if (error) throw error;
-    showToast('Comprobado ✅ — silenciado 30 días', 'success');
+    showToast('Silenciado 30 días ✅', 'success');
     cargarAlertasComprobar();
   } catch (e) {
     console.error('[marcarComprobado]', e);
     showToast('Error: ' + (e.message || 'no se pudo silenciar'), 'error');
   }
 }
+
 
 async function marcarNoInteresaReponer(productoId, nombreProducto) {
   if (!confirm('Marcar "' + (nombreProducto || 'este producto') + '" como "no interesa reponer"?\n\nLa alerta se silenciara durante 30 dias.\nEl producto seguira activo y vendiendose normal. A los 30 dias volvera a aparecer si sigue cumpliendo el umbral de cobertura.')) return;
@@ -2418,12 +2536,12 @@ function renderRotacion() {
       '<td style="text-align:right;color:' + (uds30EU>0?'var(--gray-500)':'var(--gray-300)') + '" title="ES + IT + FR (30 dias)">' + uds30EU + '</td>' +
       '<td style="text-align:right;color:' + (f.keepa_monthly_sold_es>0?'var(--navy)':'var(--gray-300)') + '" title="Demanda mensual del mercado segun Keepa (todos los vendedores)">' + (f.keepa_monthly_sold_es != null ? f.keepa_monthly_sold_es : '\u2014') + '</td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvdVal + '" placeholder="\u2014" id="rot-pvd-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
-      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvVal + '" placeholder="\u2014" id="rot-pv-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
+      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvVal + '" data-pv-ini="' + pvVal + '" placeholder="\u2014" id="rot-pv-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center" id="rot-bb-' + f.id + '">' + bbHtml + '</td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.1" min="0" value="' + comVal + '" placeholder="\u2014" id="rot-com-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + envVal + '" placeholder="\u2014" id="rot-env-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center" id="rot-tar-' + f.id + '">' + tarifasHtml + '</td>' +
-      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + almacen + '" id="rot-alm-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
+      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + almacen + '" id="rot-alm-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')" onchange="guardarAlmacenProducto(\'' + f.id + '\', this.value)"></td>' +
       '<td style="text-align:right" id="rot-margen-' + f.id + '">' + margenHtml + '</td>' +
     '</tr>';
   }).join('');
@@ -2489,7 +2607,7 @@ function renderRotacionMiravia() {
       '<td style="text-align:right;color:' + (t7?'var(--gray-600)':'var(--gray-300)') + '">' + (t7 != null ? t7 : guion) + '</td>' +
       '<td style="text-align:right;color:' + (t30?'var(--gray-600)':'var(--gray-300)') + '">' + (t30 != null ? t30 : guion) + '</td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvdVal + '" placeholder="\u2014" id="rot-pvd-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
-      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvVal + '" placeholder="\u2014" id="rot-pv-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
+      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvVal + '" data-pv-ini="' + pvVal + '" placeholder="\u2014" id="rot-pv-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.1" min="0" value="' + comVal + '" placeholder="\u2014" id="rot-com-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + envVal + '" placeholder="\u2014" id="rot-env-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center" id="rot-tar-' + f.id + '">' + renderTarifasCelda(calc) + '</td>' +
@@ -2513,6 +2631,29 @@ async function guardarAlmacenMiravia(productoId, valor) {
     showToast('Almac\u00e9n guardado', 'success');
   } catch(e) {
     console.error('guardarAlmacenMiravia:', e);
+    showToast('Error guardando almac\u00e9n: ' + e.message, 'error');
+  }
+}
+
+// Coste de almacen para Amazon (ES/IT/FR). Es UNO por producto (stock pan-europeo
+// compartido), asi que se guarda en productos.coste_almacen y aplica a los 3 mercados.
+async function guardarAlmacenProducto(productoId, valor) {
+  const v = (valor === '' || valor == null) ? null : parseFloat(valor);
+  if (valor !== '' && (isNaN(v) || v < 0)) { showToast('Valor de almac\u00e9n no v\u00e1lido', 'error'); return; }
+  try {
+    const { error } = await db.from('productos')
+      .update({ coste_almacen: v })
+      .eq('id', productoId);
+    if (error) throw error;
+    // Mantener al dia las caches locales para que el recalculo no use un valor viejo
+    if (ROTACION_DATOS) {
+      const f = ROTACION_DATOS.find(function(x){ return x.id === productoId; });
+      if (f) f.coste_almacen = v;
+    }
+    if (window._invCache && window._invCache[productoId]) window._invCache[productoId].coste_almacen = v;
+    showToast('Almac\u00e9n guardado (ES/IT/FR)', 'success');
+  } catch(e) {
+    console.error('guardarAlmacenProducto:', e);
     showToast('Error guardando almac\u00e9n: ' + e.message, 'error');
   }
 }
@@ -2618,12 +2759,12 @@ function renderRotacionAmazonCanal(canal) {
       '<td style="text-align:right;color:' + (f.uds_30d>0?'var(--gray-500)':'var(--gray-300)') + '" title="ES + IT + FR (30 dias)">' + f.uds_30d + '</td>' +
       '<td style="text-align:right;color:' + (mesKeepa>0?'var(--navy)':'var(--gray-300)') + '" title="Demanda mensual del mercado segun Keepa (todos los vendedores)">' + (mesKeepa != null ? mesKeepa : '\u2014') + '</td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvdVal + '" placeholder="\u2014" id="rot-pvd-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
-      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvVal + '" placeholder="\u2014" id="rot-pv-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
+      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + pvVal + '" data-pv-ini="' + pvVal + '" placeholder="\u2014" id="rot-pv-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center" id="rot-bb-' + f.id + '">' + bbHtml + '</td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.1" min="0" value="' + comVal + '" placeholder="\u2014" id="rot-com-' + f.id + '"' + comStyleAttr + ' oninput="this.style.color=\'\';recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + envVal + '" placeholder="\u2014" id="rot-env-' + f.id + '"' + envStyleAttr + ' oninput="this.style.color=\'\';recalcularMargenFila(\'' + f.id + '\')"></td>' +
       '<td style="text-align:center" id="rot-tar-' + f.id + '">' + tarifasHtml + '</td>' +
-      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + almacen + '" id="rot-alm-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')"></td>' +
+      '<td style="text-align:center"><input class="rot-calc-input" type="number" step="0.01" min="0" value="' + almacen + '" id="rot-alm-' + f.id + '" oninput="recalcularMargenFila(\'' + f.id + '\')" onchange="guardarAlmacenProducto(\'' + f.id + '\', this.value)"></td>' +
       '<td style="text-align:right" id="rot-margen-' + f.id + '">' + margenHtml + '</td>' +
     '</tr>';
   }).join('');
@@ -2725,12 +2866,15 @@ function exportarCambiosPrecios() {
     if (!inp) return;
     const nuevo = parseFloat(inp.value);
     if (isNaN(nuevo)) return;
-    // Precio "anterior" segun canal: ES usa precio_venta_original; IT/FR usan su Buy Box
-    let original;
-    if (canal === 'IT') original = (f.buy_box_it != null) ? f.buy_box_it : null;
-    else if (canal === 'FR') original = (f.buy_box_fr != null) ? f.buy_box_fr : null;
-    else original = (f.precio_venta_original != null) ? f.precio_venta_original : null;
-    if (original == null || Math.abs(nuevo - original) >= 0.01) {
+    // Detectar cambio REAL: comparar el valor actual contra el valor con el que se PINTO
+    // la casilla (data-pv-ini), no contra el Buy Box. Asi solo exporta lo que TU cambiaste,
+    // funcione el canal que funcione (ES/IT/FR rellenan el input con valores distintos).
+    const iniRaw = inp.getAttribute('data-pv-ini');
+    const inicial = (iniRaw !== null && iniRaw !== '') ? parseFloat(iniRaw) : null;
+    const huboCambio = (inicial == null) ? true : (Math.abs(nuevo - inicial) >= 0.01);
+    if (huboCambio) {
+      // Precio "anterior" a efectos informativos del Excel: el valor inicial de la casilla
+      const original = (inicial != null) ? inicial : null;
       const pvd = parseFloat(document.getElementById('rot-pvd-' + f.id).value);
       const com = parseFloat(document.getElementById('rot-com-' + f.id).value);
       const env = parseFloat(document.getElementById('rot-env-' + f.id).value);
