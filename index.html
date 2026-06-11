@@ -7228,7 +7228,17 @@ async function procesarLineaFactura(linea, facturaId, fecha, eanCache) {
   }
   // Caso B: hay duplicados, consolidar
   else if (linea.match_estado === 'duplicados') {
-    const principalId = await consolidarDuplicados(linea.match_productos);
+    // FIX BUG CHASE: la consolidacion NUNCA debe fusionar una ficha CHASE con una
+    // regular. CHASE y regular son productos DISTINTOS que comparten EAN a proposito.
+    // Si se mezclan, consolidarDuplicados marca la ficha CHASE como CONSOLIDADO a 0 y
+    // vuelca su stock a la regular; luego el bloque de unidades CHASE no la encuentra
+    // (esta desactivada) y crea una ficha CHASE nueva -> se perdia el stock CHASE.
+    // Solucion: consolidar SOLO entre fichas del mismo tipo. Las regulares se
+    // consolidan entre si; la(s) CHASE se dejan intactas para que el bloque de
+    // unidades CHASE de mas abajo las localice por EAN+es_chase+activo.
+    const regulares = linea.match_productos.filter(function(p){ return p.es_chase !== true; });
+    const aConsolidar = regulares.length > 0 ? regulares : linea.match_productos;
+    const principalId = await consolidarDuplicados(aConsolidar);
     productoId = principalId;
     productoActual = linea.match_productos.find(p => p.id === principalId);
     resultado.consolidado = true;
