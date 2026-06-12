@@ -1,0 +1,5 @@
+supabase
+keepa
+requests
+python-dateutil
+tzdata
