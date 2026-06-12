@@ -2822,3 +2822,30 @@ if sin_ficha_items:
 
 
 # (celda 24 "comision ES suelta" ELIMINADA: su dato ya lo trae la pasada ES de la celda 17)
+
+# ============================================================
+# SUBIR LOS JSON A app_datos  (la app los lee de Supabase, no de GitHub)
+# Lee los ficheros ya generados en OUT_JSON y los vuelca a la tabla app_datos.
+# Claves que espera la app: rentabilidad / velocidades / rentabilidad_miravia.
+# ============================================================
+_MAP_APP = {
+    'rentabilidad.json': 'rentabilidad',
+    'velocidades.json': 'velocidades',
+    'rentabilidad_miravia.json': 'rentabilidad_miravia',
+}
+print("\n=== Subiendo JSON a app_datos (Supabase) ===")
+for _fname, _clave in _MAP_APP.items():
+    _ruta = f'{OUT_JSON}/{_fname}'
+    if not os.path.exists(_ruta):
+        print(f"  AVISO: no existe {_fname}; no se sube '{_clave}'")
+        continue
+    try:
+        with open(_ruta, encoding='utf-8') as _f:
+            _cont = json.load(_f)
+        sb.table('app_datos').upsert(
+            {'clave': _clave, 'contenido': _cont,
+             'actualizado': datetime.now().astimezone().isoformat()},
+            on_conflict='clave').execute()
+        print(f"  app_datos OK: '{_clave}' ({len(json.dumps(_cont))} bytes)")
+    except Exception as _e:
+        print(f"  ERROR app_datos '{_clave}': {_e}")
