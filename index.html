@@ -291,6 +291,9 @@
     <div class="nav-item" data-page="actualizar" onclick="showPage('actualizar',this)">
       <span class="nav-icon">☁️</span> Actualizar datos
     </div>
+    <div class="nav-item" data-page="escanear" onclick="showPage('escanear',this)">
+      <span class="nav-icon">🔍</span> Escanear proveedor
+    </div>
   </nav>
   <div class="sidebar-footer" id="conn-status">Conectando...</div>
 </aside>
@@ -764,6 +767,52 @@
     </div>
   </div>
 
+  <!-- ESCANEAR PROVEEDOR (maqueta) -->
+  <div class="page" id="page-escanear">
+    <div class="page-header">
+      <div><div class="page-title">🔍 Escanear proveedor</div><div class="page-sub">Busca oportunidades rentables en un catálogo</div></div>
+    </div>
+
+    <div class="info-box" style="margin-bottom:16px;border-left:3px solid #ba7517">
+      ⚠️ <strong>Maqueta — todavía no funciona.</strong> Esta pantalla es para decidir los botones. El escaneo real (que correrá en la nube y dejará el resultado en la app) se enchufa en el siguiente paso.
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="form-row">
+        <div class="input-group">
+          <div class="input-label">Proveedor</div>
+          <select class="input" id="esc-proveedor">
+            <option>TCG</option><option>BEMS</option><option>DBLine</option>
+            <option>Ociostock</option><option>HEO</option><option>Zentrada</option><option>Dinotoys</option>
+          </select>
+        </div>
+        <div class="input-group">
+          <div class="input-label">Rank máximo</div>
+          <input class="input" id="esc-rank" type="number" value="30000" min="1">
+        </div>
+      </div>
+      <div class="input-group" style="margin-top:6px">
+        <div class="input-label">Modo</div>
+        <label style="display:block;margin-bottom:6px;cursor:pointer"><input type="radio" name="esc-modo" value="todo" checked> <strong>Todo</strong> — escanea el catálogo entero</label>
+        <label style="display:block;cursor:pointer"><input type="radio" name="esc-modo" value="nuevos"> <strong>Nuevos</strong> — solo lo nuevo o que cambió de precio</label>
+      </div>
+      <label style="display:block;margin-top:12px;cursor:pointer"><input type="checkbox" id="esc-sinrank"> Buscar también productos sin rank de Keepa</label>
+    </div>
+
+    <div class="card">
+      <div class="inv-field-label" style="margin-bottom:8px">Catálogo del proveedor (Excel o CSV)</div>
+      <label id="esc-drop" style="display:block;border:2px dashed #b4b2a9;border-radius:10px;padding:28px;text-align:center;cursor:pointer">
+        <input type="file" id="esc-file" style="display:none">
+        <div style="color:#888780">Arrastra aquí el catálogo o haz clic para elegir</div>
+        <div class="inv-field-label" id="esc-sel" style="margin-top:6px">ningún fichero seleccionado</div>
+      </label>
+      <div style="margin-top:14px">
+        <button class="btn" id="esc-go" onclick="lanzarEscaneo()">🔍 Escanear</button>
+      </div>
+      <div id="esc-log" style="margin-top:14px"></div>
+    </div>
+  </div>
+
 </main>
 
 <!-- MODALES -->
@@ -1206,6 +1255,34 @@ function showPage(id, el) {
   if (id === 'envios-historial') cargarEnviosHistorial();
   if (id === 'movimientos') cargarMovimientos();
   if (id === 'actualizar') initActualizar();
+  if (id === 'escanear') initEscanear();
+}
+
+// ============================================================
+// ESCANEAR PROVEEDOR (maqueta) — solo recoge la config; el motor en la nube se enchufa luego
+// ============================================================
+let _escInit = false;
+function initEscanear() {
+  if (_escInit) return; _escInit = true;
+  const fi = document.getElementById('esc-file');
+  const drop = document.getElementById('esc-drop');
+  const sel = document.getElementById('esc-sel');
+  if (!fi) return;
+  fi.addEventListener('change', e => { sel.textContent = e.target.files.length ? e.target.files[0].name : 'ningún fichero seleccionado'; });
+  ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.style.borderColor = '#185fa5'; }));
+  ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.style.borderColor = '#b4b2a9'; }));
+  drop.addEventListener('drop', e => { e.preventDefault(); drop.style.borderColor = '#b4b2a9'; if (e.dataTransfer.files.length) { fi.files = e.dataTransfer.files; sel.textContent = e.dataTransfer.files[0].name; } });
+}
+function lanzarEscaneo() {
+  const prov = document.getElementById('esc-proveedor').value;
+  const rank = document.getElementById('esc-rank').value;
+  const modo = document.querySelector('input[name="esc-modo"]:checked').value;
+  const sinrank = document.getElementById('esc-sinrank').checked;
+  const cat = (document.getElementById('esc-file').files[0] || {}).name || '(sin catálogo)';
+  document.getElementById('esc-log').innerHTML =
+    '<div class="info-box">🚧 Maqueta: aquí se lanzaría el escaneo de <strong>' + prov + '</strong> · rank ≤ ' + rank +
+    ' · modo ' + modo + (sinrank ? ' · incluye sin rank' : '') + ' · catálogo: ' + cat +
+    '.<br><span style="color:#888780">El motor en la nube se enchufa en el siguiente paso.</span></div>';
 }
 
 // ============================================================
