@@ -33,9 +33,25 @@ MESES_NOMBRE = ['enero','febrero','marzo','abril','mayo','junio',
 
 sb = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- Descargar informes del buzon (Supabase Storage) y leer el modo ---
+# --- Recado (patron buzon): el _solicitud.json es la senal de "hay trabajo".
+#     Asomada automatica (schedule) SIN recado -> salir sin gastar nada.
+#     Lanzamiento manual (workflow_dispatch / local) -> procesa siempre (para pruebas). ---
 BUCKET, CARPETA_BUZON = 'informes', 'entrada'
 SOLICITUD_MODO = 'rapida'
+EVENTO = os.environ.get('GITHUB_EVENT_NAME', 'manual')
+try:
+    _chk = sb.storage.from_(BUCKET).list(CARPETA_BUZON) or []
+    HAY_RECADO = any(o.get('name') == '_solicitud.json' for o in _chk)
+except Exception as _e:
+    HAY_RECADO = False
+    print('AVISO al comprobar recado:', _e)
+if EVENTO == 'schedule' and not HAY_RECADO:
+    print('Asomada automatica: sin recado en el buzon, nada que hacer. Fin.')
+    import sys; sys.exit(0)
+print(f"Evento={EVENTO} | recado={'SI' if HAY_RECADO else 'NO'} -> se procesa")
+
+# --- Descargar informes del buzon a INPUTS y leer el modo ---
+_descargados = []
 try:
     objs = sb.storage.from_(BUCKET).list(CARPETA_BUZON) or []
     n_inf = 0
@@ -54,6 +70,7 @@ try:
         d = sb.storage.from_(BUCKET).download(ruta)
         with open(f'{INPUTS}/{nombre}', 'wb') as _f:
             _f.write(d)
+        _descargados.append(nombre)
         n_inf += 1
     print(f'Buzon: {n_inf} informe(s) descargado(s). Modo solicitado: {SOLICITUD_MODO}')
 except Exception as _ex:
@@ -2849,3 +2866,16 @@ for _fname, _clave in _MAP_APP.items():
         print(f"  app_datos OK: '{_clave}' ({len(json.dumps(_cont))} bytes)")
     except Exception as _e:
         print(f"  ERROR app_datos '{_clave}': {_e}")
+
+# ============================================================
+# RECADO CONSUMIDO: limpiar el buzon (recado + informes procesados)
+# Asi la proxima asomada automatica no reprocesa lo viejo.
+# Si el script peto antes de aqui, el buzon queda intacto y se reintenta (seguro).
+# ============================================================
+try:
+    _borrar = [f'{CARPETA_BUZON}/_solicitud.json'] + [f'{CARPETA_BUZON}/{_n}' for _n in _descargados]
+    if _borrar:
+        sb.storage.from_(BUCKET).remove(_borrar)
+        print(f"Buzon limpiado: {len(_borrar)} fichero(s) (recado + informes procesados).")
+except Exception as _e:
+    print('AVISO al limpiar el buzon:', _e)
