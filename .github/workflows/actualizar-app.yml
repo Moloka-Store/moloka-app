@@ -1,0 +1,49 @@
+# ============================================================
+# Moloka - Actualizar App en la nube
+# Ubicacion en el repo: .github/workflows/actualizar-app.yml
+#
+# Lanza moloka_actualizar_nube.py en un runner de GitHub.
+# El script descarga los informes del buzon (Supabase Storage 'informes/entrada'),
+# lee el modo del _solicitud.json (rapida / completa) y vuelca todo a Supabase.
+#
+# ANTES DE USAR hay que crear los Secrets del repo
+# (Settings -> Secrets and variables -> Actions -> New repository secret):
+#   SUPABASE_KEY            (la publishable key)
+#   KEEPA_API_KEY
+#   MIRAVIA_APP_KEY
+#   MIRAVIA_APP_SECRET
+#   MIRAVIA_ACCESS_TOKEN
+#   SUPABASE_URL            (opcional; el script ya trae la URL por defecto)
+# ============================================================
+name: Moloka - Actualizar App
+
+on:
+  workflow_dispatch:        # se lanza a mano desde la pestana Actions, o desde la app via API
+  # schedule:               # opcional: descomentar para una pasada automatica diaria
+  #   - cron: '0 6 * * *'   # 06:00 UTC cada dia
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120     # la COMPLETA puede tardar ~1h; margen de sobra
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Ejecutar actualizacion
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:         ${{ secrets.SUPABASE_KEY }}
+          KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}
+          MIRAVIA_APP_KEY:      ${{ secrets.MIRAVIA_APP_KEY }}
+          MIRAVIA_APP_SECRET:   ${{ secrets.MIRAVIA_APP_SECRET }}
+          MIRAVIA_ACCESS_TOKEN: ${{ secrets.MIRAVIA_ACCESS_TOKEN }}
+        run: python moloka_actualizar_nube.py
