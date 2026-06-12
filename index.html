@@ -288,6 +288,9 @@
     <div class="nav-item" data-page="movimientos" onclick="showPage('movimientos',this)">
       <span class="nav-icon">🧾</span> Movimientos
     </div>
+    <div class="nav-item" data-page="actualizar" onclick="showPage('actualizar',this)">
+      <span class="nav-icon">☁️</span> Actualizar datos
+    </div>
   </nav>
   <div class="sidebar-footer" id="conn-status">Conectando...</div>
 </aside>
@@ -724,6 +727,41 @@
       </div>
     </div>
     <div class="info-box" style="margin-top:14px">ℹ️ Registro de entradas (mercancía y factura), envíos a FBA, ajustes y ventas de otros canales. La cantidad va en + (entra) o − (sale), con la balda implicada. Se muestran los últimos 400 movimientos.</div>
+  </div>
+
+  <!-- ACTUALIZAR DATOS -->
+  <div class="page" id="page-actualizar">
+    <div class="page-header">
+      <div><div class="page-title">☁️ Actualizar datos</div><div class="page-sub">Sube los informes del Seller al buzón en la nube</div></div>
+    </div>
+
+    <div class="info-box" style="margin-bottom:16px;border-left:3px solid #ba7517">
+      ⚠️ <strong>En construcción.</strong> Por ahora esto solo deja los informes en el buzón de la nube. El procesado automático (recalcular y refrescar la app) se activará en el siguiente paso. De momento, tras subir, ejecuta el notebook como siempre.
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="inv-field-label" style="margin-bottom:8px">Tipo de actualización</div>
+      <label style="display:block;margin-bottom:8px;cursor:pointer">
+        <input type="radio" name="act-modo" value="rapida" checked> <strong>Rápida</strong> — rentabilidad, velocidades y Buy Box de España (~20 min).
+      </label>
+      <label style="display:block;cursor:pointer">
+        <input type="radio" name="act-modo" value="completa"> <strong>Completa</strong> — además IT/FR e imágenes, Keepa los 3 países (~1 h).
+      </label>
+    </div>
+
+    <div class="card">
+      <div class="inv-field-label" style="margin-bottom:8px">Informes del Seller (arrastra o haz clic)</div>
+      <label id="act-drop" style="display:block;border:2px dashed #b4b2a9;border-radius:10px;padding:28px;text-align:center;cursor:pointer">
+        <input type="file" id="act-file" multiple style="display:none">
+        <div style="color:#888780">Arrastra aquí los CSV / .txt o haz clic para elegir</div>
+        <div class="inv-field-label" id="act-sel" style="margin-top:6px">ningún fichero seleccionado</div>
+      </label>
+      <div style="margin-top:14px">
+        <button class="btn" id="act-up" disabled onclick="subirInformes()">☁️ Subir informes al buzón</button>
+        <button class="btn btn-ghost" onclick="verBuzon()">Ver qué hay en el buzón</button>
+      </div>
+      <div id="act-log" style="margin-top:14px"></div>
+    </div>
   </div>
 
 </main>
@@ -1167,6 +1205,73 @@ function showPage(id, el) {
   if (id === 'devoluciones') verDevoluciones('acumulado');
   if (id === 'envios-historial') cargarEnviosHistorial();
   if (id === 'movimientos') cargarMovimientos();
+  if (id === 'actualizar') initActualizar();
+}
+
+// ============================================================
+// ACTUALIZAR DATOS — sube los informes del Seller al buzón (Supabase Storage)
+// Paso 2 del flujo. El procesado (paso 4, GitHub Actions) se enchufa despues.
+// ============================================================
+let _actInit = false;
+function initActualizar() {
+  if (_actInit) return; _actInit = true;
+  const fi = document.getElementById('act-file');
+  const drop = document.getElementById('act-drop');
+  const sel = document.getElementById('act-sel');
+  const up = document.getElementById('act-up');
+  function setF(files) {
+    window._actFiles = Array.from(files);
+    sel.textContent = window._actFiles.length ? window._actFiles.map(f => f.name).join(', ') : 'ningún fichero seleccionado';
+    up.disabled = window._actFiles.length === 0;
+  }
+  fi.addEventListener('change', e => setF(e.target.files));
+  ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.style.borderColor = '#185fa5'; }));
+  ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.style.borderColor = '#b4b2a9'; }));
+  drop.addEventListener('drop', e => setF(e.dataTransfer.files));
+}
+
+async function subirInformes() {
+  const files = window._actFiles || [];
+  if (!files.length) return;
+  const modo = document.querySelector('input[name="act-modo"]:checked').value;
+  const up = document.getElementById('act-up');
+  const log = document.getElementById('act-log');
+  up.disabled = true;
+  log.innerHTML = '<div class="info-box">Subiendo ' + files.length + ' fichero(s) al buzón…</div>';
+  let okN = 0; const errs = [];
+  for (const f of files) {
+    try {
+      const { error } = await db.storage.from('informes').upload('entrada/' + f.name, f, { upsert: true });
+      if (error) errs.push(f.name + ': ' + error.message); else okN++;
+    } catch (e) { errs.push(f.name + ': ' + e.message); }
+  }
+  try {
+    const blob = new Blob([JSON.stringify({ modo: modo, fecha: new Date().toISOString() })], { type: 'application/json' });
+    await db.storage.from('informes').upload('entrada/_solicitud.json', blob, { upsert: true });
+  } catch (e) {}
+  let html = '<div class="info-box">✅ Subidos ' + okN + '/' + files.length + ' al buzón (modo ' + modo + ').';
+  if (errs.length) html += '<br>⚠️ Errores: ' + errs.join('; ');
+  html += '<br><span style="color:#888780">El procesado automático llegará en el siguiente paso; por ahora ejecuta el notebook como siempre.</span></div>';
+  log.innerHTML = html;
+  up.disabled = false;
+}
+
+async function verBuzon() {
+  const log = document.getElementById('act-log');
+  log.innerHTML = '<div class="info-box">Mirando el buzón…</div>';
+  try {
+    const { data, error } = await db.storage.from('informes').list('entrada', { limit: 100 });
+    if (error) { log.innerHTML = '<div class="info-box">Error: ' + error.message + '</div>'; return; }
+    const items = (data || []).filter(o => o.name !== '_solicitud.json');
+    if (!items.length) { log.innerHTML = '<div class="info-box">El buzón está vacío.</div>'; return; }
+    let html = '<div class="info-box">En el buzón:<ul style="margin:6px 0 0 18px">';
+    for (const o of items) {
+      const kb = o.metadata && o.metadata.size ? ' (' + (o.metadata.size/1024).toFixed(1) + ' KB)' : '';
+      html += '<li>' + o.name + kb + '</li>';
+    }
+    html += '</ul></div>';
+    log.innerHTML = html;
+  } catch (e) { log.innerHTML = '<div class="info-box">Error: ' + e.message + '</div>'; }
 }
 
 // ============================================================
