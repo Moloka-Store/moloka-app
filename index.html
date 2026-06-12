@@ -1328,7 +1328,7 @@ async function subirInformes() {
   } catch (e) {}
   let html = '<div class="info-box">✅ Subidos ' + okN + '/' + files.length + ' al buzón (modo ' + modo + ').';
   if (errs.length) html += '<br>⚠️ Errores: ' + errs.join('; ');
-  html += '<br><span style="color:#888780">El procesado automático llegará en el siguiente paso; por ahora ejecuta el notebook como siempre.</span></div>';
+  html += '<br><span style="color:#888780">La nube lo procesará en su próxima pasada (unos minutos). Vuelve a la app en un rato y verás los datos actualizados.</span></div>';
   log.innerHTML = html;
   up.disabled = false;
 }
