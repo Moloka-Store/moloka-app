@@ -1373,17 +1373,24 @@ function obtenerLeadTimeProveedor(proveedor) {
 
 let VELOCIDADES_DATA = null;
 
+// Lee un JSON de la app desde Supabase (tabla app_datos.contenido).
+// Si aun no esta en Supabase, cae al fichero de GitHub (retrocompatibilidad: nunca queda roto).
+async function cargarDatoApp(clave, ficheroFallback) {
+  try {
+    const { data, error } = await db.from('app_datos').select('contenido').eq('clave', clave).maybeSingle();
+    if (!error && data && data.contenido) return data.contenido;
+  } catch (e) { console.warn('app_datos no disponible para', clave, e); }
+  try {
+    const r = await fetch(ficheroFallback);
+    if (r.ok) return await r.json();
+  } catch (e) {}
+  return null;
+}
+
 async function cargarVelocidades() {
   if (VELOCIDADES_DATA) return VELOCIDADES_DATA;
-  try {
-    const r = await fetch('velocidades.json');
-    if (!r.ok) throw new Error('No se pudo cargar velocidades.json');
-    VELOCIDADES_DATA = await r.json();
-    return VELOCIDADES_DATA;
-  } catch(e) {
-    console.error('Error cargando velocidades:', e);
-    return null;
-  }
+  VELOCIDADES_DATA = await cargarDatoApp('velocidades', 'velocidades.json');
+  return VELOCIDADES_DATA;
 }
 
 // Estado global de silenciadas (para que el desplegable las pueda renderizar)
@@ -5065,15 +5072,8 @@ function calcularBuyBox() {
 
 async function cargarRentData() {
   if (RENT_DATA) return RENT_DATA;
-  try {
-    const r = await fetch('rentabilidad.json');
-    if (!r.ok) throw new Error('No se pudo cargar rentabilidad.json');
-    RENT_DATA = await r.json();
-    return RENT_DATA;
-  } catch(e) {
-    console.error('Error cargando rentabilidad:', e);
-    return null;
-  }
+  RENT_DATA = await cargarDatoApp('rentabilidad', 'rentabilidad.json');
+  return RENT_DATA;
 }
 
 async function cargarValorExistencias() {
@@ -5138,15 +5138,9 @@ async function cargarValorExistencias() {
 
 async function cargarMiraviaData() {
   if (RENT_MIRAVIA !== null) return RENT_MIRAVIA;
-  try {
-    const r = await fetch('rentabilidad_miravia.json');
-    if (!r.ok) { RENT_MIRAVIA = false; return false; }
-    RENT_MIRAVIA = await r.json();
-    return RENT_MIRAVIA;
-  } catch(e) {
-    RENT_MIRAVIA = false;
-    return false;
-  }
+  const d = await cargarDatoApp('rentabilidad_miravia', 'rentabilidad_miravia.json');
+  RENT_MIRAVIA = d || false;
+  return RENT_MIRAVIA;
 }
 
 // RENT_ORDEN_MESES se declara al inicio del script.
@@ -5463,12 +5457,8 @@ async function cargarDevoluciones() {
 
 async function cargarRentabilidadParaDev() {
   if (DEV_RENTABILIDAD_DATA) return DEV_RENTABILIDAD_DATA;
-  try {
-    const r = await fetch('rentabilidad.json');
-    if (!r.ok) return null;
-    DEV_RENTABILIDAD_DATA = await r.json();
-    return DEV_RENTABILIDAD_DATA;
-  } catch (e) { return null; }
+  DEV_RENTABILIDAD_DATA = await cargarDatoApp('rentabilidad', 'rentabilidad.json');
+  return DEV_RENTABILIDAD_DATA;
 }
 
 async function verDevoluciones(periodo) {
