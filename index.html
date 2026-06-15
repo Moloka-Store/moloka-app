@@ -768,24 +768,30 @@
     </div>
   </div>
 
-  <!-- ESCANEAR PROVEEDOR (maqueta) -->
+  <!-- ESCANEAR PROVEEDOR -->
   <div class="page" id="page-escanear">
     <div class="page-header">
       <div><div class="page-title">🔍 Escanear proveedor</div><div class="page-sub">Busca oportunidades rentables en un catálogo</div></div>
     </div>
 
-    <div class="info-box" style="margin-bottom:16px;border-left:3px solid #ba7517">
-      ⚠️ <strong>Maqueta — todavía no funciona.</strong> Esta pantalla es para decidir los botones. El escaneo real (que correrá en la nube y dejará el resultado en la app) se enchufa en el siguiente paso.
+    <div class="info-box" style="margin-bottom:16px;border-left:3px solid #2e7d32">
+      🔍 Elige el proveedor y sube su catálogo (para <strong>MOLOKA</strong> no hace falta: lee tu propio inventario). El escaneo corre en la nube y deja el Excel en la biblioteca de abajo. El modo <strong>«todo»</strong> puede tardar (hasta ~3-4 h en TCG); el <strong>«nuevos»</strong> son minutos.
     </div>
 
     <div class="card" style="margin-bottom:16px">
       <div class="form-row">
         <div class="input-group">
           <div class="input-label">Proveedor</div>
-          <select class="input" id="esc-proveedor">
-            <option>TCG</option><option>BEMS</option><option>DBLine</option>
-            <option>Ociostock</option><option>HEO</option><option>Zentrada</option><option>Dinotoys</option>
+          <select class="input" id="esc-proveedor" onchange="escToggleCatalogo()">
+            <option value="TCG">TCG</option>
+            <option value="BEMS">BEMS</option>
+            <option value="DBLINE">DBLine</option>
+            <option value="MOLOKA">MOLOKA (mi inventario)</option>
           </select>
+        </div>
+        <div class="input-group">
+          <div class="input-label">Marca (o TODAS)</div>
+          <input class="input" id="esc-marca" type="text" value="Funko" placeholder="Funko, TODAS…">
         </div>
         <div class="input-group">
           <div class="input-label">Rank máximo</div>
@@ -795,22 +801,29 @@
       <div class="input-group" style="margin-top:6px">
         <div class="input-label">Modo</div>
         <label style="display:block;margin-bottom:6px;cursor:pointer"><input type="radio" name="esc-modo" value="todo" checked> <strong>Todo</strong> — escanea el catálogo entero</label>
-        <label style="display:block;cursor:pointer"><input type="radio" name="esc-modo" value="nuevos"> <strong>Nuevos</strong> — solo lo nuevo o que cambió de precio</label>
+        <label style="display:block;cursor:pointer"><input type="radio" name="esc-modo" value="nuevos"> <strong>Nuevos</strong> — solo lo nuevo, reaparecido o que cambió de precio</label>
       </div>
       <label style="display:block;margin-top:12px;cursor:pointer"><input type="checkbox" id="esc-sinrank"> Buscar también productos sin rank de Keepa</label>
     </div>
 
-    <div class="card">
+    <div class="card" id="esc-card-catalogo">
       <div class="inv-field-label" style="margin-bottom:8px">Catálogo del proveedor (Excel o CSV)</div>
       <label id="esc-drop" style="display:block;border:2px dashed #b4b2a9;border-radius:10px;padding:28px;text-align:center;cursor:pointer">
         <input type="file" id="esc-file" style="display:none">
         <div style="color:#888780">Arrastra aquí el catálogo o haz clic para elegir</div>
         <div class="inv-field-label" id="esc-sel" style="margin-top:6px">ningún fichero seleccionado</div>
       </label>
-      <div style="margin-top:14px">
-        <button class="btn" id="esc-go" onclick="lanzarEscaneo()">🔍 Escanear</button>
-      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <button class="btn" id="esc-go" onclick="lanzarEscaneo()">🔍 Escanear</button>
+      <button class="btn btn-ghost" onclick="cargarBibliotecaEscaneos()">🔄 Refrescar biblioteca</button>
       <div id="esc-log" style="margin-top:14px"></div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="inv-field-label" style="margin-bottom:8px">📚 Biblioteca de escaneos</div>
+      <div id="esc-biblioteca"><span style="color:#888780">Cargando…</span></div>
     </div>
   </div>
 
@@ -1260,7 +1273,7 @@ function showPage(id, el) {
 }
 
 // ============================================================
-// ESCANEAR PROVEEDOR (maqueta) — solo recoge la config; el motor en la nube se enchufa luego
+// ESCANEAR PROVEEDOR — sube catálogo + recado al buzón y dispara el escáner en la nube
 // ============================================================
 let _escInit = false;
 function initEscanear() {
@@ -1268,22 +1281,112 @@ function initEscanear() {
   const fi = document.getElementById('esc-file');
   const drop = document.getElementById('esc-drop');
   const sel = document.getElementById('esc-sel');
-  if (!fi) return;
-  fi.addEventListener('change', e => { sel.textContent = e.target.files.length ? e.target.files[0].name : 'ningún fichero seleccionado'; });
-  ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.style.borderColor = '#185fa5'; }));
-  ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.style.borderColor = '#b4b2a9'; }));
-  drop.addEventListener('drop', e => { e.preventDefault(); drop.style.borderColor = '#b4b2a9'; if (e.dataTransfer.files.length) { fi.files = e.dataTransfer.files; sel.textContent = e.dataTransfer.files[0].name; } });
+  if (fi) {
+    fi.addEventListener('change', e => { sel.textContent = e.target.files.length ? e.target.files[0].name : 'ningún fichero seleccionado'; });
+    ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.style.borderColor = '#185fa5'; }));
+    ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.style.borderColor = '#b4b2a9'; }));
+    drop.addEventListener('drop', e => { e.preventDefault(); drop.style.borderColor = '#b4b2a9'; if (e.dataTransfer.files.length) { fi.files = e.dataTransfer.files; sel.textContent = e.dataTransfer.files[0].name; } });
+  }
+  escToggleCatalogo();
+  cargarBibliotecaEscaneos();
 }
-function lanzarEscaneo() {
+
+// MOLOKA lee de Supabase: oculta la zona de subir catálogo
+function escToggleCatalogo() {
   const prov = document.getElementById('esc-proveedor').value;
-  const rank = document.getElementById('esc-rank').value;
+  const card = document.getElementById('esc-card-catalogo');
+  if (card) card.style.display = (prov === 'MOLOKA') ? 'none' : '';
+}
+
+async function lanzarEscaneo() {
+  const prov = document.getElementById('esc-proveedor').value;
+  const marca = (document.getElementById('esc-marca').value || 'Funko').trim() || 'Funko';
+  const rank = parseInt(document.getElementById('esc-rank').value || '30000', 10);
   const modo = document.querySelector('input[name="esc-modo"]:checked').value;
   const sinrank = document.getElementById('esc-sinrank').checked;
-  const cat = (document.getElementById('esc-file').files[0] || {}).name || '(sin catálogo)';
-  document.getElementById('esc-log').innerHTML =
-    '<div class="info-box">🚧 Maqueta: aquí se lanzaría el escaneo de <strong>' + prov + '</strong> · rank ≤ ' + rank +
-    ' · modo ' + modo + (sinrank ? ' · incluye sin rank' : '') + ' · catálogo: ' + cat +
-    '.<br><span style="color:#888780">El motor en la nube se enchufa en el siguiente paso.</span></div>';
+  const file = (document.getElementById('esc-file').files || [])[0];
+  const log = document.getElementById('esc-log');
+  const go = document.getElementById('esc-go');
+  if (prov !== 'MOLOKA' && !file) {
+    log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">⚠️ Sube el catálogo de ' + prov + ' antes de escanear.</div>';
+    return;
+  }
+  go.disabled = true;
+  log.innerHTML = '<div class="info-box">Preparando el escaneo de ' + prov + '…</div>';
+  try {
+    // 1) Vaciar el buzón del escáner (por si quedó un catálogo o recado viejo)
+    try {
+      const { data: viejos } = await db.storage.from('informes').list('escaner', { limit: 100 });
+      const borrar = (viejos || []).filter(o => !o.name.startsWith('.')).map(o => 'escaner/' + o.name);
+      if (borrar.length) await db.storage.from('informes').remove(borrar);
+    } catch (e) {}
+    // 2) Subir el catálogo (los de fichero; MOLOKA no)
+    if (prov !== 'MOLOKA' && file) {
+      const { error } = await db.storage.from('informes').upload('escaner/' + file.name, file, { upsert: true });
+      if (error) throw new Error('subiendo el catálogo: ' + error.message);
+    }
+    // 3) Dejar el recado con la configuración
+    const recado = { proveedor: prov, marca: marca, modo: modo, rank_maximo: rank, incluir_sin_rank: sinrank, fecha: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(recado)], { type: 'application/json' });
+    const { error: e2 } = await db.storage.from('informes').upload('escaner/_solicitud_escaner.json', blob, { upsert: true });
+    if (e2) throw new Error('dejando el recado: ' + e2.message);
+    // 4) Disparar el workflow del escáner
+    const resp = await fetch('/api/disparar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secreto: DISPARO_SECRET, workflow: 'escaner-app.yml' })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      const espera = (modo === 'todo') ? 'puede tardar bastante (hasta 3-4 h en catálogos grandes)' : 'suele ser cosa de minutos';
+      log.innerHTML = '<div class="info-box" style="border-left:3px solid #2e7d32">✅ Escaneo de ' + prov + ' lanzado en la nube (modo ' + modo + ').<br><span style="color:#888780">Como es modo ' + modo + ', ' + espera + '. Cuando termine aparecerá abajo (pulsa «Refrescar biblioteca»).</span></div>';
+    } else if (resp.status === 409) {
+      log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">⏳ ' + (data.error || 'Ya hay un escaneo en marcha.') + '</div>';
+    } else {
+      log.innerHTML = '<div class="info-box" style="border-left:3px solid #b00020">⚠️ No se pudo lanzar: ' + (data.error || ('HTTP ' + resp.status)) + '.</div>';
+    }
+  } catch (e) {
+    log.innerHTML = '<div class="info-box" style="border-left:3px solid #b00020">⚠️ Error: ' + e.message + '</div>';
+  }
+  go.disabled = false;
+}
+
+async function cargarBibliotecaEscaneos() {
+  const cont = document.getElementById('esc-biblioteca');
+  if (!cont) return;
+  cont.innerHTML = '<span style="color:#888780">Cargando…</span>';
+  try {
+    const { data, error } = await db.from('escaner_resultados').select('*').order('fecha', { ascending: false }).limit(30);
+    if (error) { cont.innerHTML = 'Error: ' + error.message; return; }
+    if (!data || !data.length) { cont.innerHTML = '<span style="color:#888780">Aún no hay escaneos. Lanza uno arriba.</span>'; return; }
+    let html = '<table style="width:100%;border-collapse:collapse;font-size:13px"><tr style="text-align:left;border-bottom:1px solid #ddd">' +
+      '<th style="padding:4px">Fecha</th><th>Prov.</th><th>Marca</th><th>Modo</th><th>Prod.</th><th>COMPRAR</th><th>Nuev/Reap/Camb</th><th>Agot.</th><th></th></tr>';
+    for (const r of data) {
+      const f = new Date(r.fecha).toLocaleString('es-ES', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+      const desc = r.fichero
+        ? '<button class="btn btn-ghost" style="padding:3px 9px" onclick="descargarEscaneo(\'' + r.fichero + '\')">⬇️ Excel</button>'
+        : '<span style="color:#888780">—</span>';
+      html += '<tr style="border-bottom:1px solid #eee">' +
+        '<td style="padding:4px">' + f + '</td><td>' + (r.proveedor||'') + '</td><td>' + (r.marca||'') + '</td><td>' + (r.modo||'') + '</td>' +
+        '<td>' + (r.n_productos!=null?r.n_productos:'') + '</td><td><strong style="color:#2e7d32">' + (r.n_comprar!=null?r.n_comprar:'') + '</strong></td>' +
+        '<td>' + (r.n_nuevos||0) + '/' + (r.n_reaparecidos||0) + '/' + (r.n_cambios||0) + '</td><td>' + (r.n_agotados||0) + '</td>' +
+        '<td>' + desc + '</td></tr>';
+    }
+    html += '</table>';
+    cont.innerHTML = html;
+  } catch (e) { cont.innerHTML = 'Error: ' + e.message; }
+}
+
+async function descargarEscaneo(ruta) {
+  try {
+    const { data, error } = await db.storage.from('informes').download(ruta);
+    if (error) { alert('No se pudo descargar: ' + error.message); return; }
+    const url = URL.createObjectURL(data);
+    const a = document.createElement('a');
+    a.href = url; a.download = ruta.split('/').pop();
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  } catch (e) { alert('Error: ' + e.message); }
 }
 
 // ============================================================
