@@ -4,29 +4,26 @@
 #
 # Lanza moloka_actualizar_nube.py en un runner de GitHub.
 # El script descarga los informes del buzon (Supabase Storage 'informes/entrada'),
-# lee el modo del _solicitud.json (rapida / completa) y vuelca todo a Supabase.
+# lee el modo (rapida/completa) del _solicitud.json que deja la app, y vuelca todo a Supabase.
 #
-# ANTES DE USAR hay que crear los Secrets del repo
-# (Settings -> Secrets and variables -> Actions -> New repository secret):
-#   SUPABASE_KEY            (la publishable key)
-#   KEEPA_API_KEY
-#   MIRAVIA_APP_KEY
-#   MIRAVIA_APP_SECRET
-#   MIRAVIA_ACCESS_TOKEN
-#   SUPABASE_URL            (opcional; el script ya trae la URL por defecto)
+# >>> SIN RELOJ <<<  Solo se ejecuta cuando TU lo lanzas:
+#   - A mano: pestana Actions -> "Run workflow".
+#   - En el futuro: boton en la app (via Edge Function que llama a workflow_dispatch).
+# No hay 'schedule': nada se dispara solo, no se vacian tokens sin querer.
+#
+# Secrets del repo necesarios (Settings -> Secrets and variables -> Actions):
+#   SUPABASE_KEY  KEEPA_API_KEY  MIRAVIA_APP_KEY  MIRAVIA_APP_SECRET
+#   MIRAVIA_ACCESS_TOKEN  SUPABASE_URL (opcional)
 # ============================================================
 name: Moloka - Actualizar App
 
 on:
-  workflow_dispatch:        # lanzamiento manual (boton Run en Actions): procesa SIEMPRE
-  schedule:
-    - cron: '*/15 * * * *'  # asomada automatica cada ~15 min. Si no hay recado, sale sin hacer nada.
-                            # OJO: GitHub encola los schedule, NO son exactos (pueden retrasarse).
+  workflow_dispatch:        # SOLO disparo manual / por boton. SIN reloj (schedule eliminado).
 
 jobs:
   actualizar:
     runs-on: ubuntu-latest
-    timeout-minutes: 120     # la COMPLETA puede tardar ~1h; margen de sobra
+    timeout-minutes: 240     # la COMPLETA (~1h45 por el goteo de Keepa) cabe de sobra; antes 120 la mataba
     steps:
       - name: Descargar el repo
         uses: actions/checkout@v4
