@@ -470,7 +470,7 @@ for item in infos:
     registros.append(item)
 
 registros.sort(key=lambda x: x['_margen_es'] if x['_margen_es'] is not None else -10**9, reverse=True)
-n_mandar = sum(1 for it in registros for d in it['_paises_calc'].values() if d['decision'].endswith('COMPRAR'))
+n_mandar = sum(1 for it in registros for d in it['_paises_calc'].values() if d['decision'] == 'COMPRAR')
 print(f"Productos: {len(registros)} | filas COMPRAR (algun pais): {n_mandar}")
 
 # ============================================================
