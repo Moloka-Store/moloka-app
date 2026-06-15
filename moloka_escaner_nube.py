@@ -534,26 +534,29 @@ for c in range(1,len(COLS)+1):
 anchos = {'Nombre':50,'EAN':14,'ASIN':12,'Marca':12,'En mi BD':20,'Decisión':15}
 for nm,w in anchos.items(): ws.column_dimensions[L[nm]].width = w
 
-tab = Table(displayName='T_Analisis', ref=f"A1:{get_column_letter(len(COLS))}{last}")
-tab.tableStyleInfo = TableStyleInfo(name='TableStyleMedium2', showRowStripes=False,
-                                    showColumnStripes=False, showFirstColumn=False, showLastColumn=False)
-ws.add_table(tab)
 ws.freeze_panes = 'A2'
 
 def _cf_fill(hexcolor): return PatternFill(start_color=hexcolor, end_color=hexcolor, fill_type='solid')
-dec = L['Decisión']; rng_dec = f'{dec}2:{dec}{last}'
-ws.conditional_formatting.add(rng_dec, FormulaRule(formula=[f'ISNUMBER(SEARCH("NO COMPRAR",{dec}2))'],
-    fill=_cf_fill('FFC7CE'), font=Font(color='9C0006'), stopIfTrue=True))
-ws.conditional_formatting.add(rng_dec, FormulaRule(formula=[f'ISNUMBER(SEARCH("VALORAR",{dec}2))'],
-    fill=_cf_fill('FFEB9C'), font=Font(color='9C6500'), stopIfTrue=True))
-ws.conditional_formatting.add(rng_dec, FormulaRule(formula=[f'ISNUMBER(SEARCH("COMPRAR",{dec}2))'],
-    fill=_cf_fill('C6EFCE'), font=Font(color='006100'), stopIfTrue=True))
-ws.conditional_formatting.add(rng_dec, FormulaRule(formula=[f'ISNUMBER(SEARCH("Sin datos",{dec}2))'],
-    fill=_cf_fill('E7E6E6'), font=Font(color='808080'), stopIfTrue=True))
-ws.conditional_formatting.add(f"{L['Margen']}2:{L['Margen']}{last}",
-    CellIsRule(operator='greaterThan', formula=['0.1'], font=Font(color='006100')))
-ws.conditional_formatting.add(f'A2:{get_column_letter(len(COLS))}{last}',
-    FormulaRule(formula=['ISODD(INT((ROW()-2)/3))'], fill=_cf_fill('D9D9D9')))
+# Tabla + semaforo SOLO si hay al menos una fila de datos. Un escaneo 'nuevos' sin
+# novedades deja registros vacio -> last=1 -> rango invertido (U2:U1) que PETA openpyxl.
+if last >= 2:
+    tab = Table(displayName='T_Analisis', ref=f"A1:{get_column_letter(len(COLS))}{last}")
+    tab.tableStyleInfo = TableStyleInfo(name='TableStyleMedium2', showRowStripes=False,
+                                        showColumnStripes=False, showFirstColumn=False, showLastColumn=False)
+    ws.add_table(tab)
+    dec = L['Decisión']; rng_dec = f'{dec}2:{dec}{last}'
+    ws.conditional_formatting.add(rng_dec, FormulaRule(formula=[f'ISNUMBER(SEARCH("NO COMPRAR",{dec}2))'],
+        fill=_cf_fill('FFC7CE'), font=Font(color='9C0006'), stopIfTrue=True))
+    ws.conditional_formatting.add(rng_dec, FormulaRule(formula=[f'ISNUMBER(SEARCH("VALORAR",{dec}2))'],
+        fill=_cf_fill('FFEB9C'), font=Font(color='9C6500'), stopIfTrue=True))
+    ws.conditional_formatting.add(rng_dec, FormulaRule(formula=[f'ISNUMBER(SEARCH("COMPRAR",{dec}2))'],
+        fill=_cf_fill('C6EFCE'), font=Font(color='006100'), stopIfTrue=True))
+    ws.conditional_formatting.add(rng_dec, FormulaRule(formula=[f'ISNUMBER(SEARCH("Sin datos",{dec}2))'],
+        fill=_cf_fill('E7E6E6'), font=Font(color='808080'), stopIfTrue=True))
+    ws.conditional_formatting.add(f"{L['Margen']}2:{L['Margen']}{last}",
+        CellIsRule(operator='greaterThan', formula=['0.1'], font=Font(color='006100')))
+    ws.conditional_formatting.add(f'A2:{get_column_letter(len(COLS))}{last}',
+        FormulaRule(formula=['ISODD(INT((ROW()-2)/3))'], fill=_cf_fill('D9D9D9')))
 
 def hoja(nombre, regs):
     w = wb.create_sheet(nombre)
@@ -614,14 +617,20 @@ for f in filas_hoy:
     regs.append({'proveedor':PROVEEDOR, 'ean':f['core'], 'es_case':bool(f['es_chase']),
                  'marca':MARCA, 'pa': float(f['pa']) if f['pa'] is not None else None,
                  'presente':True, 'fecha':ahora})
-for (ean_norm, es_case), info in ausentes:
-    k = (PROVEEDOR, ean_norm, es_case)
-    if k in vistos_up: continue
-    vistos_up.add(k)
-    pa_ant = info.get('pa')
-    regs.append({'proveedor':PROVEEDOR, 'ean':info['ean_db'], 'es_case':es_case,
-                 'marca':MARCA, 'pa': float(pa_ant) if pa_ant is not None else None,
-                 'presente':False, 'fecha':ahora})
+# Agotados SOLO si el catalogo de hoy trajo productos. Si vino vacio (fichero
+# equivocado, marca que no existe...), NO marcar todo como agotado: seria un
+# falso vaciado que ensucia la memoria. Mejor no tocar nada.
+if filas_hoy:
+    for (ean_norm, es_case), info in ausentes:
+        k = (PROVEEDOR, ean_norm, es_case)
+        if k in vistos_up: continue
+        vistos_up.add(k)
+        pa_ant = info.get('pa')
+        regs.append({'proveedor':PROVEEDOR, 'ean':info['ean_db'], 'es_case':es_case,
+                     'marca':MARCA, 'pa': float(pa_ant) if pa_ant is not None else None,
+                     'presente':False, 'fecha':ahora})
+else:
+    print("Catalogo vacio (0 productos): NO se marcan agotados (evita falso vaciado de la memoria).")
 if not regs:
     print("Memoria sin cambios.")
 else:
