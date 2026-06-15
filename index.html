@@ -738,8 +738,8 @@
       <div><div class="page-title">☁️ Actualizar datos</div><div class="page-sub">Sube los informes del Seller al buzón en la nube</div></div>
     </div>
 
-    <div class="info-box" style="margin-bottom:16px;border-left:3px solid #ba7517">
-      ⚠️ <strong>En construcción.</strong> Por ahora esto solo deja los informes en el buzón de la nube. El procesado automático (recalcular y refrescar la app) se activará en el siguiente paso. De momento, tras subir, ejecuta el notebook como siempre.
+    <div class="info-box" style="margin-bottom:16px;border-left:3px solid #2e7d32">
+      ☁️ Sube los informes del Seller y pulsa <strong>Subir y procesar</strong>. La nube recalcula y refresca la app sola (rápida ~20 min · completa ~1 h). No hace falta tener el ordenador encendido ni ejecutar nada más.
     </div>
 
     <div class="card" style="margin-bottom:16px">
@@ -760,7 +760,8 @@
         <div class="inv-field-label" id="act-sel" style="margin-top:6px">ningún fichero seleccionado</div>
       </label>
       <div style="margin-top:14px">
-        <button class="btn" id="act-up" disabled onclick="subirInformes()">☁️ Subir informes al buzón</button>
+        <button class="btn" id="act-up" disabled onclick="subirInformes()">☁️ Subir y procesar</button>
+        <button class="btn btn-ghost" id="act-run" onclick="lanzarProcesado()">🚀 Procesar lo que ya hay en el buzón</button>
         <button class="btn btn-ghost" onclick="verBuzon()">Ver qué hay en el buzón</button>
       </div>
       <div id="act-log" style="margin-top:14px"></div>
@@ -1322,15 +1323,50 @@ async function subirInformes() {
       if (error) errs.push(f.name + ': ' + error.message); else okN++;
     } catch (e) { errs.push(f.name + ': ' + e.message); }
   }
+  let html = '<div class="info-box">✅ Subidos ' + okN + '/' + files.length + ' al buzón (modo ' + modo + ').';
+  if (errs.length) html += '<br>⚠️ Errores: ' + errs.join('; ');
+  log.innerHTML = html + '</div>';
+  if (okN === 0) { up.disabled = false; return; }   // si no subió nada, no se procesa
+  await lanzarProcesado(modo);
+  up.disabled = false;
+}
+
+// Dispara el procesado en la nube llamando a la función intermediaria de Vercel
+// (que guarda la llave de GitHub escondida). "Dispara y olvida": no espera a que
+// termine la corrida (~20 min rápida / ~1 h completa).
+const DISPARO_SECRET = 'hbj9lNd5iv4OtcIG89PkoUcRxTZ1-nbB';
+async function lanzarProcesado(modo) {
+  const log = document.getElementById('act-log');
+  const runBtn = document.getElementById('act-run');
+  if (runBtn) runBtn.disabled = true;
+  if (!modo) modo = document.querySelector('input[name="act-modo"]:checked').value;
+  const prev = log.innerHTML;
+  log.innerHTML = prev + '<div class="info-box">🚀 Lanzando el procesado en la nube…</div>';
+  // El modo viaja en el recado del buzón; lo (re)escribimos con el modo elegido ahora
+  // para que valga también al "Procesar lo que ya hay en el buzón" sin re-subir.
   try {
     const blob = new Blob([JSON.stringify({ modo: modo, fecha: new Date().toISOString() })], { type: 'application/json' });
     await db.storage.from('informes').upload('entrada/_solicitud.json', blob, { upsert: true });
   } catch (e) {}
-  let html = '<div class="info-box">✅ Subidos ' + okN + '/' + files.length + ' al buzón (modo ' + modo + ').';
-  if (errs.length) html += '<br>⚠️ Errores: ' + errs.join('; ');
-  html += '<br><span style="color:#888780">La nube lo procesará en su próxima pasada (unos minutos). Vuelve a la app en un rato y verás los datos actualizados.</span></div>';
-  log.innerHTML = html;
-  up.disabled = false;
+  try {
+    const resp = await fetch('/api/disparar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secreto: DISPARO_SECRET })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      const espera = (modo === 'completa') ? '~1 hora' : '~20 minutos';
+      log.innerHTML = prev + '<div class="info-box" style="border-left:3px solid #2e7d32">✅ Procesado lanzado en la nube (modo ' + modo + ').<br><span style="color:#888780">Tarda ' + espera + '. Puedes cerrar la app; cuando vuelvas, los datos estarán actualizados. No hace falta volver a pulsar.</span></div>';
+    } else if (resp.status === 409) {
+      log.innerHTML = prev + '<div class="info-box" style="border-left:3px solid #ba7517">⏳ ' + (data.error || 'Ya hay una actualización en marcha.') + '</div>';
+    } else {
+      log.innerHTML = prev + '<div class="info-box" style="border-left:3px solid #b00020">⚠️ No se pudo lanzar: ' + (data.error || ('HTTP ' + resp.status)) + '.<br><span style="color:#888780">Los informes están a salvo en el buzón. Puedes lanzarlo a mano desde GitHub → Actions → Run workflow.</span></div>';
+    }
+  } catch (e) {
+    log.innerHTML = prev + '<div class="info-box" style="border-left:3px solid #b00020">⚠️ Error de red al lanzar: ' + e.message + '.<br><span style="color:#888780">Los informes están en el buzón; puedes lanzarlo a mano desde GitHub → Actions.</span></div>';
+  }
+  if (runBtn) runBtn.disabled = false;
 }
 
 async function verBuzon() {
