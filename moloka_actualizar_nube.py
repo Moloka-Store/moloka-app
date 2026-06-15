@@ -52,9 +52,9 @@ print(f"Evento={EVENTO} | recado={'SI' if HAY_RECADO else 'NO'} -> se procesa")
 
 # --- Descargar informes del buzon a INPUTS y leer el modo ---
 _descargados = []
+n_inf = 0
 try:
     objs = sb.storage.from_(BUCKET).list(CARPETA_BUZON) or []
-    n_inf = 0
     for o in objs:
         nombre = o['name']
         if not nombre or nombre.startswith('.'):   # placeholder de carpeta vacia u ocultos
@@ -75,6 +75,15 @@ try:
     print(f'Buzon: {n_inf} informe(s) descargado(s). Modo solicitado: {SOLICITUD_MODO}')
 except Exception as _ex:
     print('AVISO buzon (sin informes nuevos?):', _ex)
+
+# GUARDADO ANTI-VACIO: sin informes no se procesa NADA (evita machacar los JSON
+# buenos de app_datos con datos vacios, como paso el 12-jun). No toca la app ni
+# el buzon; sale limpio para que subas los informes y vuelvas a lanzar.
+if n_inf == 0:
+    print('Buzon SIN informes: no hay nada que procesar. No se ha tocado la app ni el '
+          'buzon. Sube los informes al buzon y vuelve a lanzar.')
+    import sys; sys.exit(0)
+
 
 # --- Cargar productos desde Supabase (igual que el notebook) ---
 print('=== Cargando productos desde Supabase ===')
@@ -2859,23 +2868,67 @@ for _fname, _clave in _MAP_APP.items():
     try:
         with open(_ruta, encoding='utf-8') as _f:
             _cont = json.load(_f)
+        # GUARDADO ANTI-ENCOGIMIENTO: no machacar un JSON bueno con uno mucho mas
+        # pequeno (caso 12-jun: faltaba un informe y rentabilidad cayo 230KB -> 15KB).
+        _nuevo_bytes = len(json.dumps(_cont))
+        try:
+            _prev = sb.table('app_datos').select('contenido').eq('clave', _clave).execute()
+            _prev_bytes = len(json.dumps(_prev.data[0]['contenido'])) if _prev.data else 0
+        except Exception:
+            _prev_bytes = 0
+        if _prev_bytes > 5000 and _nuevo_bytes < _prev_bytes * 0.5:
+            print(f"  ATENCION: '{_clave}' nuevo ({_nuevo_bytes} bytes) es menos de la mitad "
+                  f"del actual ({_prev_bytes} bytes). NO se sobreescribe (posible informe "
+                  f"incompleto). Revisa que subiste TODOS los informes y vuelve a lanzar.")
+            continue
         sb.table('app_datos').upsert(
             {'clave': _clave, 'contenido': _cont,
              'actualizado': datetime.now().astimezone().isoformat()},
             on_conflict='clave').execute()
-        print(f"  app_datos OK: '{_clave}' ({len(json.dumps(_cont))} bytes)")
+        print(f"  app_datos OK: '{_clave}' ({_nuevo_bytes} bytes)")
     except Exception as _e:
         print(f"  ERROR app_datos '{_clave}': {_e}")
 
 # ============================================================
 # RECADO CONSUMIDO: limpiar el buzon (recado + informes procesados)
-# Asi la proxima asomada automatica no reprocesa lo viejo.
-# Si el script peto antes de aqui, el buzon queda intacto y se reintenta (seguro).
+# ROBUSTO: borra TODO lo real del buzon y VERIFICA re-listando. No se fia de
+# remove() (que puede fallar en silencio con nombres con espacios/parentesis):
+# comprueba que el buzon queda vacio de verdad; si no, reintenta y, si aun asi
+# queda algo, AVISA con la verdad en vez de fingir exito.
 # ============================================================
-try:
-    _borrar = [f'{CARPETA_BUZON}/_solicitud.json'] + [f'{CARPETA_BUZON}/{_n}' for _n in _descargados]
-    if _borrar:
-        sb.storage.from_(BUCKET).remove(_borrar)
-        print(f"Buzon limpiado: {len(_borrar)} fichero(s) (recado + informes procesados).")
-except Exception as _e:
-    print('AVISO al limpiar el buzon:', _e)
+def _buzon_pendiente():
+    """Ficheros reales del buzon (ignora placeholders y ocultos). None si no se pudo listar."""
+    try:
+        objs = sb.storage.from_(BUCKET).list(CARPETA_BUZON) or []
+        return [o['name'] for o in objs if o.get('name') and not o['name'].startswith('.')]
+    except Exception as _e:
+        print('AVISO al listar el buzon:', _e)
+        return None
+
+def _limpiar_buzon():
+    pendientes = _buzon_pendiente()
+    if pendientes is None:
+        print('AVISO: no se pudo listar el buzon; se reintentara en la proxima corrida.')
+        return
+    if not pendientes:
+        print('Buzon ya estaba vacio.')
+        return
+    total = len(pendientes)
+    for intento in (1, 2, 3):
+        try:
+            sb.storage.from_(BUCKET).remove([f'{CARPETA_BUZON}/{n}' for n in pendientes])
+        except Exception as _e:
+            print(f'AVISO en remove del buzon (intento {intento}):', _e)
+        restantes = _buzon_pendiente()                 # VERIFICAR de verdad, no fiarse de remove()
+        if restantes is None:
+            print('AVISO: no se pudo verificar la limpieza del buzon.')
+            return
+        if not restantes:
+            print(f'Buzon limpiado y VERIFICADO: {total} fichero(s) borrado(s).')
+            return
+        pendientes = restantes                          # reintentar solo lo que aun queda
+    print(f'ATENCION: el buzon NO quedo limpio tras 3 intentos. Siguen {len(pendientes)} '
+          f'fichero(s): {pendientes}. Borralos a mano en Supabase Storage para que la '
+          f'proxima corrida no los reprocese.')
+
+_limpiar_buzon()
