@@ -790,8 +790,8 @@
           </select>
         </div>
         <div class="input-group">
-          <div class="input-label">Marca (o TODAS)</div>
-          <input class="input" id="esc-marca" type="text" value="Funko" placeholder="Funko, TODAS…">
+          <div class="input-label">Marca</div>
+          <select class="input" id="esc-marca"><option value="TODAS">TODAS — sube el catálogo para ver marcas</option></select>
         </div>
         <div class="input-group">
           <div class="input-label">Rank máximo</div>
@@ -1282,20 +1282,108 @@ function initEscanear() {
   const drop = document.getElementById('esc-drop');
   const sel = document.getElementById('esc-sel');
   if (fi) {
-    fi.addEventListener('change', e => { sel.textContent = e.target.files.length ? e.target.files[0].name : 'ningún fichero seleccionado'; });
+    fi.addEventListener('change', e => {
+      const f = e.target.files[0];
+      sel.textContent = f ? f.name : 'ningún fichero seleccionado';
+      if (f) escCargarMarcasFichero(f, document.getElementById('esc-proveedor').value);
+    });
     ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.style.borderColor = '#185fa5'; }));
     ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.style.borderColor = '#b4b2a9'; }));
-    drop.addEventListener('drop', e => { e.preventDefault(); drop.style.borderColor = '#b4b2a9'; if (e.dataTransfer.files.length) { fi.files = e.dataTransfer.files; sel.textContent = e.dataTransfer.files[0].name; } });
+    drop.addEventListener('drop', e => { e.preventDefault(); drop.style.borderColor = '#b4b2a9'; if (e.dataTransfer.files.length) { fi.files = e.dataTransfer.files; sel.textContent = e.dataTransfer.files[0].name; escCargarMarcasFichero(e.dataTransfer.files[0], document.getElementById('esc-proveedor').value); } });
   }
   escToggleCatalogo();
   cargarBibliotecaEscaneos();
 }
 
-// MOLOKA lee de Supabase: oculta la zona de subir catálogo
-function escToggleCatalogo() {
+// Al cambiar de proveedor: MOLOKA oculta el catálogo y lee marcas de Supabase;
+// los de fichero esperan a que subas el catálogo para listar sus marcas.
+async function escToggleCatalogo() {
   const prov = document.getElementById('esc-proveedor').value;
   const card = document.getElementById('esc-card-catalogo');
+  const sm = document.getElementById('esc-marca');
   if (card) card.style.display = (prov === 'MOLOKA') ? 'none' : '';
+  if (prov === 'MOLOKA') {
+    sm.innerHTML = '<option>Cargando marcas de tu inventario…</option>'; sm.disabled = true;
+    try { escPoblarMarcas(await escLeerMarcasMoloka()); }
+    catch (e) { sm.innerHTML = '<option value="TODAS">TODAS</option>'; sm.disabled = false; }
+  } else {
+    const f = (document.getElementById('esc-file').files || [])[0];
+    if (f) { escCargarMarcasFichero(f, prov); }
+    else { sm.innerHTML = '<option value="TODAS">TODAS — sube el catálogo para ver marcas</option>'; sm.disabled = false; }
+  }
+}
+
+// Rellena el desplegable de marcas (ordenadas por nº de productos, con su conteo)
+function escPoblarMarcas(marcas) {
+  const sm = document.getElementById('esc-marca');
+  const total = [...marcas.values()].reduce((a, b) => a + b, 0);
+  const arr = [...marcas.entries()].sort((a, b) => b[1] - a[1]);
+  let html = '<option value="TODAS">TODAS (' + total + ' productos)</option>';
+  for (const [m, n] of arr) {
+    const safe = m.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+    html += '<option value="' + safe + '">' + safe + ' (' + n + ')</option>';
+  }
+  sm.innerHTML = html; sm.disabled = false;
+}
+
+async function escCargarMarcasFichero(file, prov) {
+  const sm = document.getElementById('esc-marca');
+  sm.innerHTML = '<option>Leyendo marcas del catálogo…</option>'; sm.disabled = true;
+  try { escPoblarMarcas(await escLeerMarcasFichero(file, prov)); }
+  catch (e) { sm.innerHTML = '<option value="TODAS">TODAS</option>'; sm.disabled = false; alert('No pude leer las marcas del catálogo: ' + e.message); }
+}
+
+// Lee el catálogo con la misma lógica que el escáner (hoja/cabecera/columna por
+// proveedor) y cuenta productos por marca, solo los con stock>0 (y estado OK en TCG).
+async function escLeerMarcasFichero(file, prov) {
+  const marcas = new Map();
+  const buf = await file.arrayBuffer();
+  const add = (m) => { m = String(m || '').trim(); if (m) marcas.set(m, (marcas.get(m) || 0) + 1); };
+  const num = (x) => { const v = parseFloat(String(x == null ? '' : x).replace(',', '.')); return isNaN(v) ? null : v; };
+  if (prov === 'BEMS') {
+    const txt = new TextDecoder('utf-8').decode(buf);
+    const lineas = txt.split(/\r?\n/).filter(l => l.trim());
+    if (!lineas.length) return marcas;
+    const head = lineas[0].split(';').map(s => s.trim());
+    const iM = head.indexOf('FABRICANT'), iS = head.indexOf('STOCK');
+    for (let k = 1; k < lineas.length; k++) {
+      const c = lineas[k].split(';');
+      if (iS >= 0) { const s = num(c[iS]); if (!(s > 0)) continue; }
+      add(c[iM]);
+    }
+  } else {
+    const wb = XLSX.read(buf, { type: 'array' });
+    let rows, colM, colS, colE = null, okE = null;
+    if (prov === 'TCG') {
+      const ws = wb.Sheets['Catálogo'] || wb.Sheets[wb.SheetNames[0]];
+      rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      colM = 'Marca'; colS = 'Stock'; colE = 'Estado producto'; okE = ['Disponible','Oferta','Saldo'];
+    } else { // DBLINE: cabecera en la fila 3
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      rows = XLSX.utils.sheet_to_json(ws, { range: 2, defval: '' });
+      colM = 'Publisher'; colS = 'Disponibili';
+    }
+    for (const r of rows) {
+      if (colE && okE && !okE.includes(String(r[colE] || '').trim())) continue;
+      if (colS) { const s = num(r[colS]); if (!(s > 0)) continue; }
+      add(r[colM]);
+    }
+  }
+  return marcas;
+}
+
+// Para MOLOKA: marcas de tu inventario (Supabase), paginando
+async function escLeerMarcasMoloka() {
+  const marcas = new Map();
+  let d = 0;
+  while (true) {
+    const { data, error } = await db.from('productos').select('marca').eq('activo', true).range(d, d + 999);
+    if (error || !data || !data.length) break;
+    for (const p of data) { const m = String(p.marca || '').trim(); if (m) marcas.set(m, (marcas.get(m) || 0) + 1); }
+    if (data.length < 1000) break;
+    d += 1000;
+  }
+  return marcas;
 }
 
 async function lanzarEscaneo() {
