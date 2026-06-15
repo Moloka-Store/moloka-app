@@ -1427,7 +1427,9 @@ async function lanzarEscaneo() {
     const data = await resp.json().catch(() => ({}));
     if (resp.ok) {
       const espera = (modo === 'todo') ? 'puede tardar bastante (hasta 3-4 h en catálogos grandes)' : 'suele ser cosa de minutos';
-      log.innerHTML = '<div class="info-box" style="border-left:3px solid #2e7d32">✅ Escaneo de ' + prov + ' lanzado en la nube (modo ' + modo + ').<br><span style="color:#888780">Como es modo ' + modo + ', ' + espera + '. Cuando termine aparecerá abajo (pulsa «Refrescar biblioteca»).</span></div>';
+      log.innerHTML = '<div class="info-box" style="border-left:3px solid #2e7d32">✅ Escaneo de ' + prov + ' lanzado en la nube (modo ' + modo + ').<br><span style="color:#888780">Como es modo ' + modo + ', ' + espera + '. La biblioteca de abajo se irá actualizando sola y te avisaré aquí cuando termine (deja esta pestaña abierta).</span></div>';
+      await cargarBibliotecaEscaneos();
+      escArrancarPolling();
     } else if (resp.status === 409) {
       log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">⏳ ' + (data.error || 'Ya hay un escaneo en marcha.') + '</div>';
     } else {
@@ -1442,27 +1444,62 @@ async function lanzarEscaneo() {
 async function cargarBibliotecaEscaneos() {
   const cont = document.getElementById('esc-biblioteca');
   if (!cont) return;
-  cont.innerHTML = '<span style="color:#888780">Cargando…</span>';
   try {
     const { data, error } = await db.from('escaner_resultados').select('*').order('fecha', { ascending: false }).limit(30);
     if (error) { cont.innerHTML = 'Error: ' + error.message; return; }
+    window._escMaxId = (data || []).reduce((m, r) => Math.max(m, r.id || 0), 0);
     if (!data || !data.length) { cont.innerHTML = '<span style="color:#888780">Aún no hay escaneos. Lanza uno arriba.</span>'; return; }
     let html = '<table style="width:100%;border-collapse:collapse;font-size:13px"><tr style="text-align:left;border-bottom:1px solid #ddd">' +
-      '<th style="padding:4px">Fecha</th><th>Prov.</th><th>Marca</th><th>Modo</th><th>Prod.</th><th>COMPRAR</th><th>Nuev/Reap/Camb</th><th>Agot.</th><th></th></tr>';
+      '<th style="padding:4px">Fecha</th><th>Prov.</th><th>Marca</th><th>Modo</th><th>Prod.</th><th>COMPRAR</th><th>Nuev/Reap/Camb</th><th>Agot.</th><th></th><th></th></tr>';
     for (const r of data) {
       const f = new Date(r.fecha).toLocaleString('es-ES', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
       const desc = r.fichero
         ? '<button class="btn btn-ghost" style="padding:3px 9px" onclick="descargarEscaneo(\'' + r.fichero + '\')">⬇️ Excel</button>'
         : '<span style="color:#888780">—</span>';
+      const del = '<button class="btn btn-ghost" style="padding:3px 9px" title="Borrar este escaneo" onclick="borrarEscaneo(' + r.id + ', ' + (r.fichero ? '\'' + r.fichero + '\'' : 'null') + ')">🗑</button>';
       html += '<tr style="border-bottom:1px solid #eee">' +
         '<td style="padding:4px">' + f + '</td><td>' + (r.proveedor||'') + '</td><td>' + (r.marca||'') + '</td><td>' + (r.modo||'') + '</td>' +
         '<td>' + (r.n_productos!=null?r.n_productos:'') + '</td><td><strong style="color:#2e7d32">' + (r.n_comprar!=null?r.n_comprar:'') + '</strong></td>' +
         '<td>' + (r.n_nuevos||0) + '/' + (r.n_reaparecidos||0) + '/' + (r.n_cambios||0) + '</td><td>' + (r.n_agotados||0) + '</td>' +
-        '<td>' + desc + '</td></tr>';
+        '<td>' + desc + '</td><td>' + del + '</td></tr>';
     }
     html += '</table>';
     cont.innerHTML = html;
   } catch (e) { cont.innerHTML = 'Error: ' + e.message; }
+}
+
+async function borrarEscaneo(id, fichero) {
+  if (!confirm('¿Borrar este escaneo? Se elimina el Excel y la fila de la biblioteca (no se puede deshacer).')) return;
+  try {
+    if (fichero) {
+      const { error: eS } = await db.storage.from('informes').remove([fichero]);
+      if (eS) { alert('No se pudo borrar el Excel: ' + eS.message); return; }
+    }
+    const { error: eT } = await db.from('escaner_resultados').delete().eq('id', id);
+    if (eT) { alert('No se pudo borrar la fila: ' + eT.message + '\n(¿falta el permiso DELETE en la tabla?)'); return; }
+    await cargarBibliotecaEscaneos();   // refresca y confirma que desapareció
+  } catch (e) { alert('Error al borrar: ' + e.message); }
+}
+
+// Autorrefresco: tras lanzar, refresca la biblioteca cada 30s hasta que aparezca
+// el resultado nuevo (id mayor que el de antes); entonces para y avisa.
+let _escPollTimer = null;
+function escPararPolling() { if (_escPollTimer) { clearInterval(_escPollTimer); _escPollTimer = null; } }
+function escArrancarPolling() {
+  escPararPolling();
+  const baseline = window._escMaxId || 0;
+  let ciclos = 0;
+  _escPollTimer = setInterval(async () => {
+    ciclos++;
+    await cargarBibliotecaEscaneos();
+    if ((window._escMaxId || 0) > baseline) {
+      escPararPolling();
+      const log = document.getElementById('esc-log');
+      if (log) log.innerHTML = '<div class="info-box" style="border-left:3px solid #2e7d32">✅ El escaneo ha terminado y ya está en la biblioteca de abajo.</div>';
+    } else if (ciclos > 720) {   // ~6 h de tope de seguridad
+      escPararPolling();
+    }
+  }, 30000);
 }
 
 async function descargarEscaneo(ruta) {
