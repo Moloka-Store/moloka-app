@@ -1,0 +1,38 @@
+# ============================================================
+# Moloka - Escaner solo-Keepa en la nube
+# Ubicacion en el repo: .github/workflows/escaner-app.yml
+#
+# Lanza moloka_escaner_nube.py en un runner de GitHub. Lee el recado y el
+# catalogo del buzon (informes/escaner/), escanea con Keepa, sube el Excel a
+# Storage (informes/resultados/) y lo registra en la tabla escaner_resultados.
+#
+# >>> SIN RELOJ <<<  Solo se ejecuta cuando TU lo lanzas (Run workflow o boton).
+# timeout 350 min: el "todo" de TCG son 3-4h; el "nuevos" diario es de minutos.
+# ============================================================
+name: Moloka - Escaner
+
+on:
+  workflow_dispatch:        # SOLO disparo manual / por boton. SIN reloj.
+
+jobs:
+  escanear:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350     # margen para un "todo" largo (GitHub corta a 360)
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install keepa supabase openpyxl pandas
+
+      - name: Ejecutar escaner
+        env:
+          SUPABASE_URL:  ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:  ${{ secrets.SUPABASE_KEY }}
+          KEEPA_API_KEY: ${{ secrets.KEEPA_API_KEY }}
+        run: python moloka_escaner_nube.py
