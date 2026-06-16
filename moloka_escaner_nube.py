@@ -164,6 +164,98 @@ if PROVEEDOR not in PERFILES:
     sys.exit(0)
 PERFIL = PERFILES[PROVEEDOR]
 
+# ============================================================
+# BEMS POR API (cliente integrado)
+# ------------------------------------------------------------
+# BEMS no se sube como fichero: se baja de su API. Cuando el proveedor es BEMS
+# y NO hay catalogo en el buzon, pedimos a la API de BEMS los productos
+# DISPONIBLES (AVAILABLE=1) de la marca elegida y los dejamos en un CSV temporal
+# con EXACTAMENTE las columnas que el perfil BEMS ya espera
+# (FABRICANT;EAN;TITRE UK;PA;STOCK). Asi el resto del motor (2 fases, calculo,
+# Excel, memoria) NO cambia nada: BEMS pasa a comportarse como MOLOKA.
+# Si SI hay fichero en el buzon (CSV manual antiguo), se respeta y NO se baja
+# por API (compatibilidad hacia atras).
+# Credenciales por entorno: BEMS_LOGIN, BEMS_PASSWORD, BEMS_SECRET_KEY.
+# Mapeo API -> columnas del perfil BEMS:
+#   FABRICANT <- NAME_MAN | EAN <- EAN | TITRE UK <- NAME_PRODUCT
+#   PA        <- PRICE    | STOCK <- STOCK
+# ============================================================
+def descargar_catalogo_bems(marca, ruta_csv):
+    """Baja de BEMS los productos DISPONIBLES de 'marca' (o de todo el catalogo si
+    marca == 'TODAS') y los escribe como CSV ';' con las columnas del perfil BEMS.
+    Devuelve el nº de productos escritos, o -1 si hubo error."""
+    import csv as _csv
+    try:
+        from curl_cffi import requests as _curl
+    except Exception as ex:
+        print("ERROR BEMS: curl_cffi no disponible:", ex); return -1
+    base = "https://www.probems.be/API"; imp = "chrome120"
+    login = os.environ.get("BEMS_LOGIN"); pwd = os.environ.get("BEMS_PASSWORD"); sk = os.environ.get("BEMS_SECRET_KEY")
+    if not (login and pwd and sk):
+        print("ERROR BEMS: faltan credenciales BEMS_* en el entorno."); return -1
+    # 1) token (24h, no cuesta tokens)
+    try:
+        rt = _curl.post(f"{base}/TOKEN",
+                        data={"login": login, "password": pwd, "secret_key": sk},
+                        headers={"Content-Type": "application/x-www-form-urlencoded"},
+                        impersonate=imp, timeout=30)
+    except Exception as ex:
+        print("ERROR BEMS token (red):", ex); return -1
+    tok = rt.json().get("access_token") if rt.status_code == 200 else None
+    if not tok:
+        print("ERROR BEMS token:", rt.status_code, (rt.text or "")[:150]); return -1
+    H = {"accept": "application/json", "authorization": f"Bearer {tok}"}
+    # 2) lista de productos DISPONIBLES de la marca (DETAILS=1 trae EAN/precio/nombre;
+    #    LIMIT=0 = sin limite). Si marca == TODAS, no filtramos por fabricante.
+    params = {"AVAILABLE": "1", "DETAILS": "1", "LIMIT": "0"}
+    if marca and marca.strip().upper() != "TODAS":
+        params["MANUFACTURER"] = marca.strip()
+    try:
+        r = _curl.get(f"{base}/PRODUCT-LIST-FILTER", params=params,
+                      headers=H, impersonate=imp, timeout=180)
+    except Exception as ex:
+        print("ERROR BEMS PRODUCT-LIST-FILTER (red):", ex); return -1
+    if r.status_code != 200:
+        print("ERROR BEMS lista:", r.status_code, (r.text or "")[:150]); return -1
+    try:
+        prods = r.json()
+    except Exception as ex:
+        print("ERROR BEMS: respuesta no es JSON:", ex); return -1
+    if not isinstance(prods, list):
+        print("ERROR BEMS: respuesta no es una lista:", str(prods)[:150]); return -1
+    # 3) escribir el CSV con el formato del perfil BEMS
+    n = 0
+    with open(ruta_csv, "w", newline="", encoding="utf-8") as fp:
+        w = _csv.writer(fp, delimiter=";", quoting=_csv.QUOTE_MINIMAL)
+        w.writerow(["FABRICANT", "EAN", "TITRE UK", "PA", "STOCK"])
+        for p in prods:
+            ean = str(p.get("EAN") or "").strip()
+            if not ean:
+                continue
+            w.writerow([
+                str(p.get("NAME_MAN") or "").strip(),
+                ean,
+                str(p.get("NAME_PRODUCT") or "").strip(),
+                str(p.get("PRICE") or "").strip(),
+                str(p.get("STOCK") or "").strip(),
+            ])
+            n += 1
+    return n
+
+if PROVEEDOR == 'BEMS' and not catalogo_local:
+    _ruta_bems = f'/tmp/BEMS_{MARCA}_{datetime.now().strftime("%Y%m%d_%H%M")}.csv'
+    print(f">>> BEMS por API: bajando '{MARCA}' (solo disponible)...")
+    _n_bems = descargar_catalogo_bems(MARCA, _ruta_bems)
+    if _n_bems is None or _n_bems < 0:
+        print("ERROR: no se pudo bajar el catalogo de BEMS por API. Fin.")
+        sys.exit(1)
+    if _n_bems == 0:
+        print(f"BEMS: la marca '{MARCA}' no devolvio productos disponibles. Nada que escanear. Fin.")
+        sys.exit(0)
+    catalogo_local = _ruta_bems
+    catalogo_nombre = os.path.basename(_ruta_bems)
+    print(f">>> BEMS por API: {_n_bems} productos disponibles -> CSV temporal listo.")
+
 if PROVEEDOR != 'MOLOKA' and not catalogo_local:
     print(f'Falta el catalogo de {PROVEEDOR} en el buzon. Sube el fichero y vuelve a lanzar. Fin.')
     sys.exit(0)
