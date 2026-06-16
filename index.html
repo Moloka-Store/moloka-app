@@ -1312,8 +1312,8 @@ async function escToggleCatalogo() {
   } else if (prov === 'BEMS') {
     sm.innerHTML = '<option>Cargando marcas de BEMS…</option>'; sm.disabled = true;
     try {
-      const m = await escLeerMarcasBems();
-      if (m.size) escPoblarMarcas(m);
+      const arr = await escLeerMarcasBems();
+      if (arr.length) escPoblarMarcasBems(arr);
       else { sm.innerHTML = '<option value="TODAS">TODAS</option>'; sm.disabled = false; }
     } catch (e) { sm.innerHTML = '<option value="TODAS">TODAS</option>'; sm.disabled = false; }
   } else {
@@ -1416,18 +1416,33 @@ async function escLeerMarcasMoloka() {
 
 // BEMS via API: las marcas no se leen de un fichero (el navegador no puede llamar a
 // BEMS), sino de app_datos['bems_marcas'], que se rellena con el workflow "Sembrar
-// marcas BEMS". El conteo es del catalogo TOTAL de la marca (disponibles + preventas);
-// al escanear solo se piden los DISPONIBLES, asi que el nº real escaneado sera menor.
+// marcas BEMS". Cada marca es [nombre_visible, conteo, id_man].
+// 🔒 La API de BEMS filtra por ID_MAN, NO por el nombre. Coinciden casi siempre
+// (Funko=Funko) pero NO en todas ('Pyramid' tiene id_man 'Pyramid Int.'). Por eso el
+// desplegable MUESTRA el nombre pero MANDA el id_man como valor.
+// El conteo es del catalogo TOTAL de la marca (disponibles + preventas); al escanear
+// solo se piden los DISPONIBLES, asi que el nº real escaneado sera menor.
 async function escLeerMarcasBems() {
-  const marcas = new Map();
   const d = await cargarDatoApp('bems_marcas', null);
-  const arr = (d && Array.isArray(d.marcas)) ? d.marcas : [];
-  for (const par of arr) {
-    const nombre = String((par && par[0]) || '').trim();
-    const n = parseInt((par && par[1]) || 0, 10) || 0;
-    if (nombre) marcas.set(nombre, n);
+  return (d && Array.isArray(d.marcas)) ? d.marcas : [];
+}
+
+// Pinta el desplegable de marcas BEMS: texto = "nombre (conteo)", value = id_man.
+// Tolera el formato viejo [nombre, conteo] (sin id_man): cae al nombre como value.
+function escPoblarMarcasBems(arr) {
+  const sm = document.getElementById('esc-marca');
+  const ordenadas = [...arr].sort((a, b) => (b[1] || 0) - (a[1] || 0));
+  const total = ordenadas.reduce((a, m) => a + (m[1] || 0), 0);
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  let html = '<option value="TODAS">TODAS (' + total + ' productos)</option>';
+  for (const m of ordenadas) {
+    const nombre = String(m[0] || '').trim();
+    const n = m[1] || 0;
+    const idman = String(m[2] || nombre).trim();   // value real para la API
+    if (!nombre) continue;
+    html += '<option value="' + esc(idman) + '">' + esc(nombre) + ' (' + n + ')</option>';
   }
-  return marcas;
+  sm.innerHTML = html; sm.disabled = false;
 }
 
 async function lanzarEscaneo() {
