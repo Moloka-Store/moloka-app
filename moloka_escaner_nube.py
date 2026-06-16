@@ -216,7 +216,17 @@ def descargar_catalogo_bems(marca, ruta_csv):
     except Exception as ex:
         print("ERROR BEMS PRODUCT-LIST-FILTER (red):", ex); return -1
     if r.status_code != 200:
-        print("ERROR BEMS lista:", r.status_code, (r.text or "")[:150]); return -1
+        # BEMS devuelve 400 {"error":"NO RESULT"} cuando la marca no tiene productos
+        # (o el filtro no casa). NO es un fallo del escaner: es "0 productos".
+        # Lo tratamos como vacio limpio (return 0), no como error fatal.
+        txt = (r.text or "")
+        if "NO RESULT" in txt.upper():
+            print(f"BEMS: '{marca}' sin resultados (NO RESULT). Se trata como 0 productos.")
+            # escribir CSV solo con cabecera para que el flujo siga limpio
+            with open(ruta_csv, "w", newline="", encoding="utf-8") as fp:
+                _csv.writer(fp, delimiter=";").writerow(["FABRICANT", "EAN", "TITRE UK", "PA", "STOCK"])
+            return 0
+        print("ERROR BEMS lista:", r.status_code, txt[:150]); return -1
     try:
         prods = r.json()
     except Exception as ex:
