@@ -27,12 +27,25 @@ from supabase import create_client
 from datetime import datetime, timezone
 from collections import Counter
 
+# Salida SIN BUFFER: que cada print aparezca en el log de Actions al instante
+# (antes los print quedaban atrapados en el buffer y el log parecia "mudo";
+#  solo se veian los 'Waiting...' de la libreria keepa, que van por otro canal).
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+except Exception:
+    pass
+
 # ============================================================
 # CREDENCIALES (entorno, no Colab)
 # ============================================================
+print(">>> ARRANCANDO escaner. Creando cliente Keepa...", flush=True)
 api = keepa.Keepa(os.environ['KEEPA_API_KEY'])
+print(">>> Cliente Keepa creado. Conectando a Supabase...", flush=True)
 sb  = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
-print("Tokens Keepa:", api.tokens_left)
+print(">>> Supabase conectado. Consultando saldo real de tokens...", flush=True)
+api.update_status()   # consulta el saldo REAL al servidor (el cliente nace con 0)
+print(f">>> Tokens Keepa disponibles AHORA: {api.tokens_left}", flush=True)
 
 # ============================================================
 # LLAMADA ROBUSTA A KEEPA (reintentos + backoff)
