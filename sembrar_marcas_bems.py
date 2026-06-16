@@ -46,14 +46,19 @@ raw = r.json()
 if not isinstance(raw, list) or not raw:
     print("ERROR: respuesta inesperada:", str(raw)[:200]); sys.exit(1)
 
-# Construir [ [NAME_MAN, count], ... ] ordenado por count desc, solo marcas con conteo>0
+# Construir [ [NAME_MAN_visible, count, ID_MAN_filtro], ... ] ordenado por count desc.
+# CLAVE: la API de PRODUCT-LIST-FILTER filtra por ID_MAN, NO por NAME_MAN.
+# Para la mayoria coinciden (Funko=Funko), pero NO siempre (NAME_MAN 'Pyramid' tiene
+# ID_MAN 'Pyramid Int.'). Por eso guardamos AMBOS: el nombre bonito para mostrar y el
+# ID_MAN para mandar a la API. Si falta ID_MAN, caemos al nombre.
 marcas = []
 for m in raw:
     nombre = str(m.get("NAME_MAN") or "").strip()
+    id_man = str(m.get("ID_MAN") or "").strip() or nombre
     try: n = int(m.get("COUNT_PRODUCT_IN_MAN") or 0)
     except Exception: n = 0
     if nombre and n > 0:
-        marcas.append([nombre, n])
+        marcas.append([nombre, n, id_man])
 marcas.sort(key=lambda x: x[1], reverse=True)
 print(f">>> {len(marcas)} marcas con productos. Top 5: {marcas[:5]}")
 
