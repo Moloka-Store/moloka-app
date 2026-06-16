@@ -1302,11 +1302,20 @@ async function escToggleCatalogo() {
   const prov = document.getElementById('esc-proveedor').value;
   const card = document.getElementById('esc-card-catalogo');
   const sm = document.getElementById('esc-marca');
-  if (card) card.style.display = (prov === 'MOLOKA') ? 'none' : '';
+  // MOLOKA y BEMS no suben fichero: leen sus marcas de Supabase (BEMS via API ya
+  // tiene sus marcas sembradas en app_datos['bems_marcas']).
+  if (card) card.style.display = (prov === 'MOLOKA' || prov === 'BEMS') ? 'none' : '';
   if (prov === 'MOLOKA') {
     sm.innerHTML = '<option>Cargando marcas de tu inventario…</option>'; sm.disabled = true;
     try { escPoblarMarcas(await escLeerMarcasMoloka()); }
     catch (e) { sm.innerHTML = '<option value="TODAS">TODAS</option>'; sm.disabled = false; }
+  } else if (prov === 'BEMS') {
+    sm.innerHTML = '<option>Cargando marcas de BEMS…</option>'; sm.disabled = true;
+    try {
+      const m = await escLeerMarcasBems();
+      if (m.size) escPoblarMarcas(m);
+      else { sm.innerHTML = '<option value="TODAS">TODAS</option>'; sm.disabled = false; }
+    } catch (e) { sm.innerHTML = '<option value="TODAS">TODAS</option>'; sm.disabled = false; }
   } else {
     const f = (document.getElementById('esc-file').files || [])[0];
     if (f) { escCargarMarcasFichero(f, prov); }
@@ -1405,6 +1414,22 @@ async function escLeerMarcasMoloka() {
   return marcas;
 }
 
+// BEMS via API: las marcas no se leen de un fichero (el navegador no puede llamar a
+// BEMS), sino de app_datos['bems_marcas'], que se rellena con el workflow "Sembrar
+// marcas BEMS". El conteo es del catalogo TOTAL de la marca (disponibles + preventas);
+// al escanear solo se piden los DISPONIBLES, asi que el nº real escaneado sera menor.
+async function escLeerMarcasBems() {
+  const marcas = new Map();
+  const d = await cargarDatoApp('bems_marcas', null);
+  const arr = (d && Array.isArray(d.marcas)) ? d.marcas : [];
+  for (const par of arr) {
+    const nombre = String((par && par[0]) || '').trim();
+    const n = parseInt((par && par[1]) || 0, 10) || 0;
+    if (nombre) marcas.set(nombre, n);
+  }
+  return marcas;
+}
+
 async function lanzarEscaneo() {
   const prov = document.getElementById('esc-proveedor').value;
   const marca = (document.getElementById('esc-marca').value || 'Funko').trim() || 'Funko';
@@ -1414,7 +1439,7 @@ async function lanzarEscaneo() {
   const file = (document.getElementById('esc-file').files || [])[0];
   const log = document.getElementById('esc-log');
   const go = document.getElementById('esc-go');
-  if (prov !== 'MOLOKA' && !file) {
+  if (!['MOLOKA', 'BEMS'].includes(prov) && !file) {
     log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">⚠️ Sube el catálogo de ' + prov + ' antes de escanear.</div>';
     return;
   }
