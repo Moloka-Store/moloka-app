@@ -786,6 +786,7 @@
             <option value="TCG">TCG</option>
             <option value="BEMS">BEMS</option>
             <option value="DBLINE">DBLine</option>
+            <option value="OSMA">OSMA</option>
             <option value="MOLOKA">MOLOKA (mi inventario)</option>
           </select>
         </div>
@@ -1340,6 +1341,24 @@ async function escLeerMarcasFichero(file, prov) {
   const buf = await file.arrayBuffer();
   const add = (m) => { m = String(m || '').trim(); if (m) marcas.set(m, (marcas.get(m) || 0) + 1); };
   const num = (x) => { const v = parseFloat(String(x == null ? '' : x).replace(',', '.')); return isNaN(v) ? null : v; };
+  // OSMA: drogueria multimarca SIN columna de marca limpia (la marca va dentro del
+  // nombre). Se escanea siempre en modo TODAS -> contamos los productos con stock>0
+  // y devolvemos una unica entrada 'TODAS'. El stock viene como numero, '>3.000' o '0'.
+  if (prov === 'OSMA') {
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    const stkOsma = (x) => {
+      let s = String(x == null ? '' : x).trim();
+      if (!s) return null;
+      s = s.replace(/^>/, '').trim().replace(/\./g, '');   // '>3.000' -> '3000'
+      const v = parseFloat(s); return isNaN(v) ? null : v;
+    };
+    let n = 0;
+    for (const r of rows) { const s = stkOsma(r['verfügbar']); if (s > 0) n++; }
+    if (n > 0) marcas.set('TODAS', n);
+    return marcas;
+  }
   if (prov === 'BEMS') {
     const txt = new TextDecoder('utf-8').decode(buf);
     const lineas = txt.split(/\r?\n/).filter(l => l.trim());
