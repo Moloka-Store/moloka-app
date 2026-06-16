@@ -1,29 +1,23 @@
 # ============================================================
-# Moloka - Actualizar App en la nube
-# Ubicacion en el repo: .github/workflows/actualizar-app.yml
+# Moloka - Escaner solo-Keepa en la nube
+# Ubicacion en el repo: .github/workflows/escaner-app.yml
 #
-# Lanza moloka_actualizar_nube.py en un runner de GitHub.
-# El script descarga los informes del buzon (Supabase Storage 'informes/entrada'),
-# lee el modo (rapida/completa) del _solicitud.json que deja la app, y vuelca todo a Supabase.
+# Lanza moloka_escaner_nube.py en un runner de GitHub. Lee el recado y el
+# catalogo del buzon (informes/escaner/), escanea con Keepa, sube el Excel a
+# Storage (informes/resultados/) y lo registra en la tabla escaner_resultados.
 #
-# >>> SIN RELOJ <<<  Solo se ejecuta cuando TU lo lanzas:
-#   - A mano: pestana Actions -> "Run workflow".
-#   - En el futuro: boton en la app (via Edge Function que llama a workflow_dispatch).
-# No hay 'schedule': nada se dispara solo, no se vacian tokens sin querer.
-#
-# Secrets del repo necesarios (Settings -> Secrets and variables -> Actions):
-#   SUPABASE_KEY  KEEPA_API_KEY  MIRAVIA_APP_KEY  MIRAVIA_APP_SECRET
-#   MIRAVIA_ACCESS_TOKEN  SUPABASE_URL (opcional)
+# >>> SIN RELOJ <<<  Solo se ejecuta cuando TU lo lanzas (Run workflow o boton).
+# timeout 350 min: el "todo" de TCG son 3-4h; el "nuevos" diario es de minutos.
 # ============================================================
-name: Moloka - Actualizar App
+name: Moloka - Escaner
 
 on:
-  workflow_dispatch:        # SOLO disparo manual / por boton. SIN reloj (schedule eliminado).
+  workflow_dispatch:        # SOLO disparo manual / por boton. SIN reloj.
 
 jobs:
-  actualizar:
+  escanear:
     runs-on: ubuntu-latest
-    timeout-minutes: 240     # la COMPLETA (~1h45 por el goteo de Keepa) cabe de sobra; antes 120 la mataba
+    timeout-minutes: 350     # margen para un "todo" largo (GitHub corta a 360)
     steps:
       - name: Descargar el repo
         uses: actions/checkout@v4
@@ -34,14 +28,11 @@ jobs:
           python-version: '3.11'
 
       - name: Instalar dependencias
-        run: pip install -r requirements.txt
+        run: pip install keepa supabase openpyxl pandas xlrd   # xlrd: leer .xls de OSMA (formato Excel viejo)
 
-      - name: Ejecutar actualizacion
+      - name: Ejecutar escaner
         env:
-          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY:         ${{ secrets.SUPABASE_KEY }}
-          KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}
-          MIRAVIA_APP_KEY:      ${{ secrets.MIRAVIA_APP_KEY }}
-          MIRAVIA_APP_SECRET:   ${{ secrets.MIRAVIA_APP_SECRET }}
-          MIRAVIA_ACCESS_TOKEN: ${{ secrets.MIRAVIA_ACCESS_TOKEN }}
-        run: python moloka_actualizar_nube.py
+          SUPABASE_URL:  ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:  ${{ secrets.SUPABASE_KEY }}
+          KEEPA_API_KEY: ${{ secrets.KEEPA_API_KEY }}
+        run: python -u moloka_escaner_nube.py    # -u = sin buffer: el log se ve EN VIVO (no atrapado)
