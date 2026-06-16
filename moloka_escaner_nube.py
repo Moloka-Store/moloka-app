@@ -234,6 +234,11 @@ def descargar_catalogo_bems(marca, ruta_csv):
     if not isinstance(prods, list):
         print("ERROR BEMS: respuesta no es una lista:", str(prods)[:150]); return -1
     # 3) escribir el CSV con el formato del perfil BEMS
+    # OJO: el motor, tras leer el CSV, VUELVE a filtrar por marca sobre la columna
+    # FABRICANT (contains). Como ya filtramos por marca en la propia API, ponemos en
+    # FABRICANT el MISMO valor que pedimos (el id de marca) para que ese 2º filtro pase
+    # trivialmente. En modo TODAS no se filtra, asi que conservamos el NAME_MAN real.
+    fab_fijo = marca.strip() if (marca and marca.strip().upper() != "TODAS") else None
     n = 0
     with open(ruta_csv, "w", newline="", encoding="utf-8") as fp:
         w = _csv.writer(fp, delimiter=";", quoting=_csv.QUOTE_MINIMAL)
@@ -243,7 +248,7 @@ def descargar_catalogo_bems(marca, ruta_csv):
             if not ean:
                 continue
             w.writerow([
-                str(p.get("NAME_MAN") or "").strip(),
+                fab_fijo if fab_fijo else str(p.get("NAME_MAN") or "").strip(),
                 ean,
                 str(p.get("NAME_PRODUCT") or "").strip(),
                 str(p.get("PRICE") or "").strip(),
