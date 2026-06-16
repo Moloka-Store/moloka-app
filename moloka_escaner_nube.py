@@ -35,6 +35,38 @@ sb  = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
 print("Tokens Keepa:", api.tokens_left)
 
 # ============================================================
+# LLAMADA ROBUSTA A KEEPA (reintentos + backoff)
+# ------------------------------------------------------------
+# Keepa a veces tiene un hipo (Read timed out, corte de red, 5xx). Antes una
+# sola peticion fallida mataba TODA la corrida (caso 15-jun: timeout en Fase 2
+# a los 44 min -> exit code 1, corrida entera perdida).
+# Aqui reintentamos hasta KEEPA_MAX_INTENTOS veces con esperas crecientes.
+# Si tras todos los intentos sigue fallando, devolvemos None y el llamador
+# decide: Fase 2 SALTA ese producto; Fase 1 SALTA ese lote. NUNCA se mata la
+# corrida entera por un fallo transitorio.
+# progress_bar=False -> no ensucia el log de Actions con barras 0%|.
+# ============================================================
+KEEPA_MAX_INTENTOS = 4
+KEEPA_ESPERAS = [5, 15, 40, 90]   # segundos entre intentos (backoff)
+
+def keepa_query(items, **kwargs):
+    """Llama a api.query con reintentos. Devuelve la lista de productos, o None
+    si tras KEEPA_MAX_INTENTOS sigue fallando (el llamador lo gestiona)."""
+    kwargs.setdefault('progress_bar', False)
+    for intento in range(KEEPA_MAX_INTENTOS):
+        try:
+            return api.query(items, **kwargs) or []
+        except Exception as ex:
+            if intento < KEEPA_MAX_INTENTOS - 1:
+                espera = KEEPA_ESPERAS[intento]
+                print(f"  [Keepa] intento {intento+1}/{KEEPA_MAX_INTENTOS} fallo: {ex} "
+                      f"-> reintento en {espera}s")
+                time.sleep(espera)
+            else:
+                print(f"  [Keepa] AGOTADOS {KEEPA_MAX_INTENTOS} intentos: {ex} -> se salta")
+    return None
+
+# ============================================================
 # BUZON DEL ESCANER: leer recado + descargar catalogo
 # ============================================================
 BUCKET = 'informes'
@@ -362,10 +394,10 @@ if filas:
         vistos = set()
         print(f"{etiqueta}: {len(pool)} productos, {len(codigos)} codigos, {len(lotes)} lotes")
         for n,lote in enumerate(lotes,1):
-            try: prods = api.query(lote, product_code_is_asin=False, domain='ES', stats=90, history=0) or []
-            except Exception as ex:
-                print(f"  lote {n} err: {ex} (reintento)"); time.sleep(30)
-                prods = api.query(lote, product_code_is_asin=False, domain='ES', stats=90, history=0) or []
+            prods = keepa_query(lote, product_code_is_asin=False, domain='ES', stats=90, history=0)
+            if prods is None:
+                print(f"  lote {n}/{len(lotes)} NO resuelto tras reintentos -> se salta este lote")
+                continue
             for prod in prods: registra(prod, pool, vistos)
             print(f"  lote {n}/{len(lotes)} | tokens {api.tokens_left}")
         return vistos
@@ -397,10 +429,7 @@ print(f"\nCon ASIN: {len(candidatos)} | PASAN: {len(pasan)} | sin rank: {len(sin
 # Celda 7 - FASE 2: informe ES/IT/FR (3 tok/pais, buybox sin offers)
 # ============================================================
 def datos_pais(asin, dom):
-    try: res = api.query([asin], product_code_is_asin=True, domain=dom, stats=90, history=0, buybox=True)
-    except Exception:
-        time.sleep(20)
-        res = api.query([asin], product_code_is_asin=True, domain=dom, stats=90, history=0, buybox=True)
+    res = keepa_query([asin], product_code_is_asin=True, domain=dom, stats=90, history=0, buybox=True)
     if not res: return None
     p = res[0]; st = p.get('stats') or {}
     cur, a90 = st.get('current') or [], st.get('avg90') or []
