@@ -28,11 +28,14 @@ jobs:
           python-version: '3.11'
 
       - name: Instalar dependencias
-        run: pip install keepa supabase openpyxl pandas xlrd   # xlrd: leer .xls de OSMA (formato Excel viejo)
+        run: pip install keepa supabase openpyxl pandas xlrd curl_cffi   # xlrd: .xls OSMA | curl_cffi: API BEMS (pasa Cloudflare)
 
       - name: Ejecutar escaner
         env:
           SUPABASE_URL:  ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY:  ${{ secrets.SUPABASE_KEY }}
           KEEPA_API_KEY: ${{ secrets.KEEPA_API_KEY }}
-        run: python moloka_escaner_nube.py
+          BEMS_LOGIN:      ${{ secrets.BEMS_LOGIN }}
+          BEMS_PASSWORD:   ${{ secrets.BEMS_PASSWORD }}
+          BEMS_SECRET_KEY: ${{ secrets.BEMS_SECRET_KEY }}
+        run: python -u moloka_escaner_nube.py
