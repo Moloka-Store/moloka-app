@@ -1,0 +1,27 @@
+name: Explorar BEMS API
+
+on:
+  workflow_dispatch:
+
+jobs:
+  explorar-bems:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install curl_cffi
+        run: pip install curl_cffi
+
+      - name: Run BEMS API explorer
+        env:
+          BEMS_LOGIN: ${{ secrets.BEMS_LOGIN }}
+          BEMS_PASSWORD: ${{ secrets.BEMS_PASSWORD }}
+          BEMS_SECRET_KEY: ${{ secrets.BEMS_SECRET_KEY }}
+        run: python -u explorar_bems.py
