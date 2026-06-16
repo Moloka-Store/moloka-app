@@ -1,0 +1,29 @@
+name: Sembrar marcas BEMS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sembrar-marcas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install curl_cffi supabase
+
+      - name: Run BEMS brand seeder
+        env:
+          BEMS_LOGIN: ${{ secrets.BEMS_LOGIN }}
+          BEMS_PASSWORD: ${{ secrets.BEMS_PASSWORD }}
+          BEMS_SECRET_KEY: ${{ secrets.BEMS_SECRET_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python -u sembrar_marcas_bems.py
