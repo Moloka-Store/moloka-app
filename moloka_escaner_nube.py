@@ -132,6 +132,18 @@ PERFILES = {
         'col_marca':'FABRICANT', 'col_ean':'EAN', 'col_nombre':'TITRE UK',
         'col_pa':'PA', 'col_stock':'STOCK', 'col_estado':None, 'estados_ok':None,
     },
+    'OSMA': {
+        # Mayorista aleman de drogueria/cosmetica (primera necesidad Moloka).
+        # Excel .xls, cabecera fila 1 (header=0). Precio UNITARIO con coma decimal
+        # alemana (1,099 = 1,099 EUR). Stock 'verfügbar' a veces viene como '>3.000'
+        # (punto de MILLAR, no decimal) -> trato especial via stock_especial.
+        # Sin filtro de estado (todo lo que tenga stock>0 entra). CHASE no aplica.
+        'tipo':'excel', 'sheet':0, 'header':0,
+        'col_marca':'Bezeichnung', 'col_ean':'EAN 1', 'col_nombre':'Bezeichnung',
+        'col_pa':'Preis_', 'col_stock':'verfügbar', 'col_estado':None, 'estados_ok':None,
+        'stock_especial':'osma',        # usa _stock_osma() para parsear '>3.000'
+        'col_extra_liq':'wird ausgelistet',   # 'wird ausverkauft' = se liquida (info de compra)
+    },
     'MOLOKA': {'tipo':'supabase'},   # inventario propio: se lee de la tabla productos
 }
 if PROVEEDOR not in PERFILES:
@@ -183,6 +195,16 @@ def variantes_ean(core):
 def norm(code): return str(code).strip().lstrip('0')
 def _num(x):
     try: return float(str(x).replace(',', '.').strip())
+    except Exception: return None
+
+def _stock_osma(x):
+    """Stock de OSMA: numeros normales (910), '>3.000' (punto de MILLAR, 112) y '0' (42).
+    '>3.000' -> 3000 (mas de 3000 unidades). El punto es separador de millar, NO decimal."""
+    s = str(x).strip()
+    if not s: return None
+    s = s.lstrip('>').strip()       # quita el '>' de '>3.000'
+    s = s.replace('.', '')          # quita el punto de millar: '3.000' -> '3000'
+    try: return float(s)
     except Exception: return None
 
 # ============================================================
@@ -247,7 +269,7 @@ else:
         if PERFIL.get('estados_ok'):
             if str(row.get(PERFIL['col_estado'], '')).strip() not in PERFIL['estados_ok']:
                 fuera_disp += 1; continue
-        stock = _num(row.get(cS, ''))
+        stock = _stock_osma(row.get(cS, '')) if PERFIL.get('stock_especial')=='osma' else _num(row.get(cS, ''))
         if stock is None or stock <= 0:
             fuera_disp += 1; continue
         ean_in = str(row[cE]).strip()
