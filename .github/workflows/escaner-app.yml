@@ -28,7 +28,7 @@ jobs:
           python-version: '3.11'
 
       - name: Instalar dependencias
-        run: pip install keepa supabase openpyxl pandas
+        run: pip install keepa supabase openpyxl pandas xlrd   # xlrd: leer .xls de OSMA (formato Excel viejo)
 
       - name: Ejecutar escaner
         env:
