@@ -171,6 +171,23 @@ PERFILES = {
         'col_marca':'Marca', 'col_ean':'EAN', 'col_nombre':'Nombre',
         'col_pa':'Precio', 'col_stock':'Stock', 'col_estado':None, 'estados_ok':None,
     },
+    'ZENTRADA': {
+        # Marketplace mayorista (extracto manual via Claude-in-Chrome). CSV separado
+        # por COMA, con BOM, campos de texto entrecomillados. Columnas:
+        # N°, Rango Original, Nombre del Producto, Precio de Compra, EAN, Proveedor.
+        # 🔒 Particularidades que NO trae el motor de serie:
+        #   - Precio viene como '1,77 EUR' -> precio_especial='eur' (quita el sufijo).
+        #   - NO hay columna de stock -> sin_columna_stock=True (se asume disponible;
+        #     es un top de bestsellers, estan todos a la venta).
+        #   - NO hay columna de marca limpia (va en el nombre) -> se escanea TODAS;
+        #     col_marca apunta al nombre por si se quiere filtrar por texto (ej 'Funko').
+        # CHASE no aplica (todo suelto).
+        'tipo':'csv', 'sep':',', 'header':0,
+        'col_marca':'Nombre del Producto', 'col_ean':'EAN', 'col_nombre':'Nombre del Producto',
+        'col_pa':'Precio de Compra', 'col_stock':None, 'col_estado':None, 'estados_ok':None,
+        'precio_especial':'eur',       # '1,77 EUR' -> 1.77
+        'sin_columna_stock':True,      # bestsellers sin columna stock -> disponible
+    },
     'MOLOKA': {'tipo':'supabase'},   # inventario propio: se lee de la tabla productos
 }
 if PROVEEDOR not in PERFILES:
@@ -331,6 +348,11 @@ def _num(x):
     try: return float(str(x).replace(',', '.').strip())
     except Exception: return None
 
+def _num_eur(x):
+    """Precio tipo '1,77 EUR' o '2.01 €' (ZENTRADA) -> float. Quita el sufijo de moneda."""
+    s = str(x).upper().replace('EUR', '').replace('€', '').strip()
+    return _num(s)
+
 def _stock_osma(x):
     """Stock de OSMA: numeros normales (910), '>3.000' (punto de MILLAR, 112) y '0' (42).
     '>3.000' -> 3000 (mas de 3000 unidades). El punto es separador de millar, NO decimal."""
@@ -403,7 +425,12 @@ else:
         if PERFIL.get('estados_ok'):
             if str(row.get(PERFIL['col_estado'], '')).strip() not in PERFIL['estados_ok']:
                 fuera_disp += 1; continue
-        stock = _stock_osma(row.get(cS, '')) if PERFIL.get('stock_especial')=='osma' else _num(row.get(cS, ''))
+        if PERFIL.get('sin_columna_stock'):
+            stock = 1.0     # ZENTRADA: sin columna de stock (bestsellers) -> disponible
+        elif PERFIL.get('stock_especial') == 'osma':
+            stock = _stock_osma(row.get(cS, ''))
+        else:
+            stock = _num(row.get(cS, ''))
         if stock is None or stock <= 0:
             fuera_disp += 1; continue
         ean_in = str(row[cE]).strip()
@@ -411,7 +438,7 @@ else:
         if (not core.isdigit()) or len(core) not in (12, 13):
             problematicos.append({'EAN':ean_in, 'Cabecera':row.get(cN,''),
                                   'Motivo':f'EAN forma rara (len={len(core)})'}); continue
-        pa = _num(row.get(cP, ''))
+        pa = _num_eur(row.get(cP, '')) if PERFIL.get('precio_especial')=='eur' else _num(row.get(cP, ''))
         if PERFIL.get('col_pa_promo'):                    # DBLine: promo si >0, si no Listino
             promo = _num(row.get(PERFIL['col_pa_promo'], ''))
             if promo and promo > 0: pa = promo
