@@ -787,6 +787,7 @@
             <option value="BEMS">BEMS</option>
             <option value="DBLINE">DBLine</option>
             <option value="OSMA">OSMA</option>
+            <option value="DINOTOYS">Dinotoys</option>
             <option value="MOLOKA">MOLOKA (mi inventario)</option>
           </select>
         </div>
@@ -1386,6 +1387,12 @@ async function escLeerMarcasFichero(file, prov) {
       const ws = wb.Sheets['Catálogo'] || wb.Sheets[wb.SheetNames[0]];
       rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
       colM = 'Marca'; colS = 'Stock'; colE = 'Estado producto'; okE = ['Disponible','Oferta','Saldo'];
+    } else if (prov === 'DINOTOYS') {
+      // Dinotoys: Excel limpio (primera hoja), columnas Marca/EAN/Nombre/Precio/Stock.
+      // El Stock viene siempre como '1' (disponible si/no), asi que todos cuentan.
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      colM = 'Marca'; colS = 'Stock';
     } else { // DBLINE: cabecera en la fila 3
       const ws = wb.Sheets[wb.SheetNames[0]];
       rows = XLSX.utils.sheet_to_json(ws, { range: 2, defval: '' });
