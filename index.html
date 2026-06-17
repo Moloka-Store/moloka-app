@@ -789,6 +789,7 @@
             <option value="OSMA">OSMA</option>
             <option value="DINOTOYS">Dinotoys</option>
             <option value="ZENTRADA">Zentrada</option>
+            <option value="HEO">HEO</option>
             <option value="MOLOKA">MOLOKA (mi inventario)</option>
           </select>
         </div>
@@ -1370,14 +1371,51 @@ async function escLeerMarcasFichero(file, prov) {
     if (n > 0) marcas.set('TODAS', n);
     return marcas;
   }
-  if (prov === 'ZENTRADA') {
-    // CSV de bestsellers (separado por coma, con BOM). No tiene columna de stock
-    // ni de marca limpia -> se escanea siempre TODAS. Contamos las filas de datos
-    // (orientativo, igual que OSMA). El motor luego aparta los que no tengan EAN.
-    const txt = new TextDecoder('utf-8').decode(buf).replace(/^\uFEFF/, '');
-    const lineas = txt.split(/\r?\n/).filter(l => l.trim());
-    const n = Math.max(0, lineas.length - 1);   // menos la cabecera
-    if (n > 0) marcas.set('TODAS', n);
+  // Proveedores de Claude-in-Chrome (formato variable): ZENTRADA, HEO, DINOTOYS.
+  // Detectamos el formato por los bytes ('PK' = xlsx) y las columnas por su contenido,
+  // igual que el motor: EAN = columna con números de 12-13 díg; marca = por nombre.
+  // Si hay columna de marca, poblamos marcas; si no, una sola entrada 'TODAS (N)'.
+  if (prov === 'ZENTRADA' || prov === 'HEO' || prov === 'DINOTOYS') {
+    const splitCsv = (line) => {       // CSV que respeta comillas y comas internas
+      const out = []; let cur = '', q = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (q) { if (ch === '"') { if (line[i+1] === '"') { cur += '"'; i++; } else q = false; } else cur += ch; }
+        else { if (ch === '"') q = true; else if (ch === ',') { out.push(cur); cur = ''; } else cur += ch; }
+      }
+      out.push(cur); return out;
+    };
+    let rows = [];
+    const bytes = new Uint8Array(buf);
+    const esXlsx = bytes.length >= 2 && bytes[0] === 0x50 && bytes[1] === 0x4B;
+    if (esXlsx) {
+      const wb = XLSX.read(buf, { type: 'array' });
+      rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+    } else {
+      const txt = new TextDecoder('utf-8').decode(buf).replace(/^\uFEFF/, '');
+      const lineas = txt.split(/\r?\n/).filter(l => l.trim());
+      if (lineas.length) {
+        const head = splitCsv(lineas[0]).map(s => s.trim());
+        rows = lineas.slice(1).map(l => { const c = splitCsv(l); const o = {}; head.forEach((h, i) => o[h] = (c[i] ?? '')); return o; });
+      }
+    }
+    if (!rows.length) return marcas;
+    const cols = Object.keys(rows[0]);
+    const low = {}; cols.forEach(c => low[c] = String(c).trim().toLowerCase());
+    const esEan = (s) => { s = String(s == null ? '' : s).trim(); return /^\d+$/.test(s) && (s.length === 12 || s.length === 13); };
+    let colEan = cols.find(c => ['ean','gtin','barcode','upc','código de barras','codigo de barras'].some(k => low[c].includes(k)));
+    if (!colEan) {
+      let best = null, bestSc = 0;
+      for (const c of cols) { const sc = rows.filter(r => esEan(r[c])).length / rows.length; if (sc > bestSc) { best = c; bestSc = sc; } }
+      if (bestSc >= 0.30) colEan = best;
+    }
+    const colMarca = cols.find(c => ['marca','brand','licencia','license','licens','fabricante','manufacturer','publisher','fabricant'].some(k => low[c].includes(k)));
+    if (colMarca) {
+      for (const r of rows) { if (colEan && !esEan(r[colEan])) continue; add(r[colMarca]); }
+    } else {
+      let n = 0; for (const r of rows) { if (!colEan || esEan(r[colEan])) n++; }
+      if (n > 0) marcas.set('TODAS', n);
+    }
     return marcas;
   }
   if (prov === 'BEMS') {
@@ -1398,12 +1436,6 @@ async function escLeerMarcasFichero(file, prov) {
       const ws = wb.Sheets['Catálogo'] || wb.Sheets[wb.SheetNames[0]];
       rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
       colM = 'Marca'; colS = 'Stock'; colE = 'Estado producto'; okE = ['Disponible','Oferta','Saldo'];
-    } else if (prov === 'DINOTOYS') {
-      // Dinotoys: Excel limpio (primera hoja), columnas Marca/EAN/Nombre/Precio/Stock.
-      // El Stock viene siempre como '1' (disponible si/no), asi que todos cuentan.
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
-      colM = 'Marca'; colS = 'Stock';
     } else { // DBLINE: cabecera en la fila 3
       const ws = wb.Sheets[wb.SheetNames[0]];
       rows = XLSX.utils.sheet_to_json(ws, { range: 2, defval: '' });
