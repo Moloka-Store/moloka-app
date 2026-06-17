@@ -1,23 +1,25 @@
 # ============================================================
-# Moloka - Escaner solo-Keepa en la nube
-# Ubicacion en el repo: .github/workflows/escaner-app.yml
+# Moloka - ActualizarApp en la nube
+# Ubicacion en el repo: .github/workflows/actualizar-app.yml
 #
-# Lanza moloka_escaner_nube.py en un runner de GitHub. Lee el recado y el
-# catalogo del buzon (informes/escaner/), escanea con Keepa, sube el Excel a
-# Storage (informes/resultados/) y lo registra en la tabla escaner_resultados.
+# Lanza moloka_actualizar_nube.py en un runner de GitHub. Lee los informes del
+# Seller del buzon (informes/entrada/), recalcula rentabilidad/velocidades/Buy
+# Box y vuelca los 3 JSON a Supabase (app_datos). El modo (rapida/completa)
+# viaja en el recado _solicitud.json que deja la app.
 #
-# >>> SIN RELOJ <<<  Solo se ejecuta cuando TU lo lanzas (Run workflow o boton).
-# timeout 350 min: el "todo" de TCG son 3-4h; el "nuevos" diario es de minutos.
+# >>> SIN RELOJ <<<  Solo se ejecuta cuando TU lo lanzas (boton de la app o Run
+# workflow). Se quito el schedule (causaba recados zombi y completas fantasma).
+# timeout 240 min: una completa tarda ~1h45 por el goteo de Keepa.
 # ============================================================
-name: Moloka - Escaner
+name: Moloka - ActualizarApp
 
 on:
   workflow_dispatch:        # SOLO disparo manual / por boton. SIN reloj.
 
 jobs:
-  escanear:
+  actualizar:
     runs-on: ubuntu-latest
-    timeout-minutes: 350     # margen para un "todo" largo (GitHub corta a 360)
+    timeout-minutes: 240
     steps:
       - name: Descargar el repo
         uses: actions/checkout@v4
@@ -28,11 +30,14 @@ jobs:
           python-version: '3.11'
 
       - name: Instalar dependencias
-        run: pip install keepa supabase openpyxl pandas xlrd   # xlrd: leer .xls de OSMA (formato Excel viejo)
+        run: pip install -r requirements.txt
 
-      - name: Ejecutar escaner
+      - name: Ejecutar ActualizarApp
         env:
-          SUPABASE_URL:  ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY:  ${{ secrets.SUPABASE_KEY }}
-          KEEPA_API_KEY: ${{ secrets.KEEPA_API_KEY }}
-        run: python -u moloka_escaner_nube.py    # -u = sin buffer: el log se ve EN VIVO (no atrapado)
+          SUPABASE_URL:          ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:          ${{ secrets.SUPABASE_KEY }}
+          KEEPA_API_KEY:         ${{ secrets.KEEPA_API_KEY }}
+          MIRAVIA_APP_KEY:       ${{ secrets.MIRAVIA_APP_KEY }}
+          MIRAVIA_APP_SECRET:    ${{ secrets.MIRAVIA_APP_SECRET }}
+          MIRAVIA_ACCESS_TOKEN:  ${{ secrets.MIRAVIA_ACCESS_TOKEN }}
+        run: python -u moloka_actualizar_nube.py    # -u = log en vivo (sin buffer)
