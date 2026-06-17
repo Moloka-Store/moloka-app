@@ -157,37 +157,20 @@ PERFILES = {
         'stock_especial':'osma',        # usa _stock_osma() para parsear '>3.000'
         'col_extra_liq':'wird ausgelistet',   # 'wird ausverkauft' = se liquida (info de compra)
     },
-    'DINOTOYS': {
-        # Mayorista holandes (Logic4) generalista: ~85% bazar / ~15% licencia.
-        # Catalogo extraido a mano via Claude-in-Chrome a Excel .xlsx con columnas
-        # limpias (Marca, EAN, Nombre, Precio, Stock). Precio con PUNTO decimal
-        # (no coma alemana). EAN-13 y UPC-12 mezclados (la normalizacion los casa).
-        # 🔒 OJO: el Stock viene siempre como '1' (la extraccion solo marco
-        # "disponible si/no", NO la cantidad real) -> todos pasan el filtro stock>0,
-        # que es correcto (no descarta nada y no estorba). CHASE no aplica (todo suelto).
-        # Se usa la PRIMERA hoja (sheet=0) por robustez ante cambios de nombre de hoja
-        # en futuras extracciones.
-        'tipo':'excel', 'sheet':0, 'header':0,
-        'col_marca':'Marca', 'col_ean':'EAN', 'col_nombre':'Nombre',
-        'col_pa':'Precio', 'col_stock':'Stock', 'col_estado':None, 'estados_ok':None,
-    },
-    'ZENTRADA': {
-        # Marketplace mayorista (extracto manual via Claude-in-Chrome). CSV separado
-        # por COMA, con BOM, campos de texto entrecomillados. Columnas:
-        # N°, Rango Original, Nombre del Producto, Precio de Compra, EAN, Proveedor.
-        # 🔒 Particularidades que NO trae el motor de serie:
-        #   - Precio viene como '1,77 EUR' -> precio_especial='eur' (quita el sufijo).
-        #   - NO hay columna de stock -> sin_columna_stock=True (se asume disponible;
-        #     es un top de bestsellers, estan todos a la venta).
-        #   - NO hay columna de marca limpia (va en el nombre) -> se escanea TODAS;
-        #     col_marca apunta al nombre por si se quiere filtrar por texto (ej 'Funko').
-        # CHASE no aplica (todo suelto).
-        'tipo':'csv', 'sep':',', 'header':0,
-        'col_marca':'Nombre del Producto', 'col_ean':'EAN', 'col_nombre':'Nombre del Producto',
-        'col_pa':'Precio de Compra', 'col_stock':None, 'col_estado':None, 'estados_ok':None,
-        'precio_especial':'eur',       # '1,77 EUR' -> 1.77
-        'sin_columna_stock':True,      # bestsellers sin columna stock -> disponible
-    },
+    # ============================================================
+    # PROVEEDORES DE CLAUDE-IN-CHROME (formato VARIABLE) -> DETECCION TOLERANTE
+    # ------------------------------------------------------------
+    # Estos catalogos se extraen a mano y cada extraccion puede salir con columnas
+    # distintas (nombres, orden, xlsx/csv). En vez de fijar nombres de columna, se
+    # usa 'deteccion':'tolerante': el motor detecta solo la columna de EAN (numeros
+    # de 12-13 digitos), la de precio (importe, con o sin 'EUR'), la de nombre (texto
+    # largo) y, si existen, marca y stock. EAN no-12/13 -> a descartados (NO se
+    # inventan EANs). Stock ausente -> se asume disponible. CHASE no aplica.
+    # Anadir un proveedor nuevo de Claude-in-Chrome = una linea aqui + el desplegable.
+    # ============================================================
+    'DINOTOYS': {'tipo':'auto', 'deteccion':'tolerante'},   # mayorista holandes (Logic4)
+    'ZENTRADA': {'tipo':'auto', 'deteccion':'tolerante'},   # marketplace mayorista (xlsx/csv)
+    'HEO':      {'tipo':'auto', 'deteccion':'tolerante'},   # B2B aleman (Funko via API interna)
     'MOLOKA': {'tipo':'supabase'},   # inventario propio: se lee de la tabla productos
 }
 if PROVEEDOR not in PERFILES:
@@ -353,6 +336,82 @@ def _num_eur(x):
     s = str(x).upper().replace('EUR', '').replace('€', '').strip()
     return _num(s)
 
+def _es_ean_valido(s):
+    """True si s es un EAN/UPC utilizable: 12 o 13 digitos."""
+    s = str(s).strip()
+    return s.isdigit() and len(s) in (12, 13)
+
+def _parse_precio_libre(x):
+    """Precio en cualquier formato razonable: '1,77 EUR', '2.01 €', '8,62', '11.34'."""
+    s = str(x)
+    tiene_moneda = ('eur' in s.lower()) or ('€' in s)
+    return _num_eur(x) if tiene_moneda else _num(x)
+
+def detectar_columnas(cat):
+    """Detecta por NOMBRE (pistas multiidioma) y, si falla, por CONTENIDO las columnas
+    de ean / precio / nombre / marca / stock en un catalogo de formato desconocido
+    (ficheros de Claude-in-Chrome). Devuelve los nombres REALES de columna (o None).
+    No inventa nada: si no encuentra EAN o precio con confianza, el llamante aborta."""
+    cols = list(cat.columns)
+    low  = {c: str(c).strip().lower() for c in cols}
+
+    def por_nombre(claves, excluir=()):
+        for c in cols:
+            if c in excluir:
+                continue
+            if any(k in low[c] for k in claves):
+                return c
+        return None
+
+    # ---- EAN: nombre primero, si no, columna con mas valores de 12-13 digitos ----
+    ean = por_nombre(['ean', 'gtin', 'barcode', 'codigo de barras', 'código de barras', 'upc'])
+    if ean is None:
+        mejor, mejor_score = None, 0.0
+        for c in cols:
+            score = cat[c].astype(str).str.strip().apply(_es_ean_valido).mean()
+            if score > mejor_score:
+                mejor, mejor_score = c, score
+        if mejor_score >= 0.30:          # al menos 30% parecen EAN reales
+            ean = mejor
+
+    # ---- PRECIO: nombre primero, si no, columna 'tipo importe' (con decimales/moneda) ----
+    precio = por_nombre(['precio', 'price', 'preis', 'prezzo', 'pvd', 'coste', 'cost', 'tarifa', 'eur', '€'],
+                        excluir=(ean,))
+    if precio is None:
+        mejor, mejor_score = None, 0.0
+        for c in cols:
+            if c == ean:
+                continue
+            vals = cat[c].astype(str)
+            parseables   = vals.apply(lambda v: _parse_precio_libre(v) is not None).mean()
+            con_decimal  = vals.apply(lambda v: (',' in v or '.' in v or 'eur' in v.lower() or '€' in v)).mean()
+            score = parseables * (0.4 + 0.6 * con_decimal)   # premia decimales/moneda (evita indices N°)
+            if score > mejor_score:
+                mejor, mejor_score = c, score
+        if mejor_score >= 0.50:
+            precio = mejor
+
+    # ---- NOMBRE: nombre primero, si no, columna de texto mas largo ----
+    nombre = por_nombre(['nombre', 'name', 'descrip', 'titre', 'title', 'producto', 'product',
+                         'bezeichnung', 'articolo', 'artikel', 'designation'], excluir=(ean, precio))
+    if nombre is None:
+        mejor, mejor_len = None, 0.0
+        for c in cols:
+            if c in (ean, precio):
+                continue
+            avg = cat[c].astype(str).str.len().mean()
+            if avg > mejor_len:
+                mejor, mejor_len = c, avg
+        nombre = mejor
+
+    # ---- MARCA y STOCK: opcionales (solo por nombre) ----
+    marca = por_nombre(['marca', 'brand', 'licencia', 'license', 'licens', 'fabricante',
+                        'manufacturer', 'publisher', 'fabricant'], excluir=(ean, precio, nombre))
+    stock = por_nombre(['stock', 'disponib', 'verfüg', 'verfug', 'qty', 'cantidad', 'quantity', 'quantità'],
+                       excluir=(ean, precio, nombre, marca))
+
+    return {'ean': ean, 'precio': precio, 'nombre': nombre, 'marca': marca, 'stock': stock}
+
 def _stock_osma(x):
     """Stock de OSMA: numeros normales (910), '>3.000' (punto de MILLAR, 112) y '0' (42).
     '>3.000' -> 3000 (mas de 3000 unidades). El punto es separador de millar, NO decimal."""
@@ -400,7 +459,22 @@ if PROVEEDOR == 'MOLOKA':
     print(f"A escanear: {len(filas)} | EAN problematicos: {len(problematicos)} | "
           f"CHASE: {sum(f['es_chase'] for f in filas)}")
 else:
-    if PERFIL['tipo'] == 'excel':
+    if PERFIL['tipo'] == 'auto':
+        # ZENTRADA: el extracto puede llegar como .xlsx o como .csv. Se detecta por
+        # los bytes (un .xlsx es un ZIP -> empieza por 'PK'); el resto se trata como
+        # CSV. Asi no depende del nombre ni de la extension del fichero subido.
+        try:
+            with open(catalogo_local, 'rb') as _fp:
+                _es_excel = _fp.read(2) == b'PK'
+        except Exception:
+            _es_excel = False
+        if _es_excel:
+            cat = pd.read_excel(catalogo_local, sheet_name=PERFIL.get('sheet', 0),
+                                header=PERFIL.get('header', 0), dtype=str).fillna('')
+        else:
+            cat = pd.read_csv(catalogo_local, sep=PERFIL.get('sep', ','), dtype=str,
+                              encoding='utf-8-sig', on_bad_lines='skip').fillna('')
+    elif PERFIL['tipo'] == 'excel':
         cat = pd.read_excel(catalogo_local, sheet_name=PERFIL['sheet'],
                             header=PERFIL['header'], dtype=str).fillna('')
     else:
@@ -409,11 +483,24 @@ else:
     cat.columns = [str(c).strip() for c in cat.columns]   # BEMS trae espacios en los nombres
     print(f"Catalogo crudo: {len(cat)} filas")
 
-    cM, cE, cN, cP, cS = (PERFIL['col_marca'], PERFIL['col_ean'], PERFIL['col_nombre'],
-                          PERFIL['col_pa'], PERFIL['col_stock'])
+    if PERFIL.get('deteccion') == 'tolerante':
+        det = detectar_columnas(cat)
+        print(f"Deteccion tolerante -> EAN={det['ean']!r} precio={det['precio']!r} "
+              f"nombre={det['nombre']!r} marca={det['marca']!r} stock={det['stock']!r}")
+        if not det['ean'] or not det['precio']:
+            print("ERROR: no pude detectar la columna de EAN o de precio en este fichero.")
+            print("Revisa el catalogo (o pasaselo a Claude para normalizarlo). Fin.")
+            sys.exit(0)
+        cM, cE, cN, cP, cS = (det['marca'], det['ean'], det['nombre'] or det['ean'],
+                              det['precio'], det['stock'])
+        _tolerante = True
+    else:
+        cM, cE, cN, cP, cS = (PERFIL['col_marca'], PERFIL['col_ean'], PERFIL['col_nombre'],
+                              PERFIL['col_pa'], PERFIL['col_stock'])
+        _tolerante = False
 
-    # filtro 1: marca ('TODAS' o vacio = NO filtra)
-    if MARCA and MARCA.strip().upper() != 'TODAS':
+    # filtro 1: marca ('TODAS' o vacio o sin columna de marca = NO filtra)
+    if MARCA and MARCA.strip().upper() != 'TODAS' and cM is not None:
         sel = cat[cat[cM].str.contains(MARCA, case=False, na=False)].copy()
         print(f"Marca '{MARCA}': {len(sel)} filas")
     else:
@@ -425,8 +512,8 @@ else:
         if PERFIL.get('estados_ok'):
             if str(row.get(PERFIL['col_estado'], '')).strip() not in PERFIL['estados_ok']:
                 fuera_disp += 1; continue
-        if PERFIL.get('sin_columna_stock'):
-            stock = 1.0     # ZENTRADA: sin columna de stock (bestsellers) -> disponible
+        if PERFIL.get('sin_columna_stock') or (_tolerante and cS is None):
+            stock = 1.0     # sin columna de stock -> se asume disponible
         elif PERFIL.get('stock_especial') == 'osma':
             stock = _stock_osma(row.get(cS, ''))
         else:
@@ -438,7 +525,12 @@ else:
         if (not core.isdigit()) or len(core) not in (12, 13):
             problematicos.append({'EAN':ean_in, 'Cabecera':row.get(cN,''),
                                   'Motivo':f'EAN forma rara (len={len(core)})'}); continue
-        pa = _num_eur(row.get(cP, '')) if PERFIL.get('precio_especial')=='eur' else _num(row.get(cP, ''))
+        if _tolerante:
+            pa = _parse_precio_libre(row.get(cP, ''))
+        elif PERFIL.get('precio_especial') == 'eur':
+            pa = _num_eur(row.get(cP, ''))
+        else:
+            pa = _num(row.get(cP, ''))
         if PERFIL.get('col_pa_promo'):                    # DBLine: promo si >0, si no Listino
             promo = _num(row.get(PERFIL['col_pa_promo'], ''))
             if promo and promo > 0: pa = promo
