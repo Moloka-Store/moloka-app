@@ -1,0 +1,33 @@
+name: Moloka - Demo Fichas BEMS
+
+# Se lanza A MANO desde la pestaña Actions con el botón "Run workflow".
+on:
+  workflow_dispatch:
+
+jobs:
+  demo-fichas:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias
+        run: pip install -U curl_cffi
+
+      - name: Generar fichas desde BEMS
+        env:
+          BEMS_LOGIN: ${{ secrets.BEMS_LOGIN }}
+          BEMS_PASSWORD: ${{ secrets.BEMS_PASSWORD }}
+          BEMS_SECRET_KEY: ${{ secrets.BEMS_SECRET_KEY }}
+        run: python -u moloka_demo_fichas.py
+
+      - name: Subir el HTML como artifact descargable
+        uses: actions/upload-artifact@v4
+        with:
+          name: moloka-fichas-demo
+          path: moloka_fichas_demo.html
