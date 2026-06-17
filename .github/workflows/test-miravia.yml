@@ -1,0 +1,27 @@
+name: Moloka - Test Miravia Fotos
+
+# Se lanza A MANO desde Actions con "Run workflow".
+on:
+  workflow_dispatch:
+
+jobs:
+  test-miravia:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias
+        run: pip install -U requests
+
+      - name: Preguntar a Miravia si da imágenes
+        env:
+          MIRAVIA_APP_KEY: ${{ secrets.MIRAVIA_APP_KEY }}
+          MIRAVIA_APP_SECRET: ${{ secrets.MIRAVIA_APP_SECRET }}
+          MIRAVIA_ACCESS_TOKEN: ${{ secrets.MIRAVIA_ACCESS_TOKEN }}
+        run: python -u moloka_test_miravia.py
