@@ -1,0 +1,50 @@
+# ============================================================
+# Moloka - Repaso SEMANAL de BEMS (jueves de madrugada)
+# Ubicacion: .github/workflows/semanal-bems.yml
+#
+# QUE HACE: lanza moloka_semanal_bems.py, que escanea las marcas vigiladas de
+# BEMS ENTERAS (modo "todo"), una tras otra, reutilizando el escaner normal.
+# Cada marca deja su Excel en la biblioteca de la app.
+#
+# HORARIO: jueves a las 00:00 UTC == 02:00 hora peninsular (verano).
+#   (en invierno seria la 01:00 local; da igual, es de madrugada).
+# El script encadena las marcas: puede tardar VARIAS HORAS por el goteo de Keepa,
+# pero es de madrugada y nadie espera. Cuando Fernando se levante, los Excels
+# estaran en la biblioteca.
+#
+# timeout-minutes: 720 (12h) -> margen de sobra para 3 marcas grandes encadenadas.
+# concurrency: que no se solape con otra ejecucion del propio semanal.
+# ============================================================
+name: Moloka - Repaso semanal BEMS
+
+on:
+  schedule:
+    - cron: '0 0 * * 4'      # jueves 00:00 UTC = 02:00 peninsular (verano)
+  workflow_dispatch:          # disparo manual para probar
+
+concurrency:
+  group: semanal-bems
+  cancel-in-progress: false
+
+jobs:
+  repaso-semanal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 720      # 12h: margen para 3 marcas grandes encadenadas
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install supabase requests
+
+      - name: Ejecutar repaso semanal
+        env:
+          SUPABASE_URL:    ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:    ${{ secrets.SUPABASE_KEY }}
+          DISPARO_SECRET:  ${{ secrets.DISPARO_SECRET }}
+        run: python -u moloka_semanal_bems.py
