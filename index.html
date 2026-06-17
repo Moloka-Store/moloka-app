@@ -788,6 +788,7 @@
             <option value="DBLINE">DBLine</option>
             <option value="OSMA">OSMA</option>
             <option value="DINOTOYS">Dinotoys</option>
+            <option value="ZENTRADA">Zentrada</option>
             <option value="MOLOKA">MOLOKA (mi inventario)</option>
           </select>
         </div>
@@ -1366,6 +1367,16 @@ async function escLeerMarcasFichero(file, prov) {
     };
     let n = 0;
     for (const r of rows) { const s = stkOsma(r['verfügbar']); if (s > 0) n++; }
+    if (n > 0) marcas.set('TODAS', n);
+    return marcas;
+  }
+  if (prov === 'ZENTRADA') {
+    // CSV de bestsellers (separado por coma, con BOM). No tiene columna de stock
+    // ni de marca limpia -> se escanea siempre TODAS. Contamos las filas de datos
+    // (orientativo, igual que OSMA). El motor luego aparta los que no tengan EAN.
+    const txt = new TextDecoder('utf-8').decode(buf).replace(/^\uFEFF/, '');
+    const lineas = txt.split(/\r?\n/).filter(l => l.trim());
+    const n = Math.max(0, lineas.length - 1);   // menos la cabecera
     if (n > 0) marcas.set('TODAS', n);
     return marcas;
   }
