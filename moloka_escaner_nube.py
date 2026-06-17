@@ -157,6 +157,20 @@ PERFILES = {
         'stock_especial':'osma',        # usa _stock_osma() para parsear '>3.000'
         'col_extra_liq':'wird ausgelistet',   # 'wird ausverkauft' = se liquida (info de compra)
     },
+    'DINOTOYS': {
+        # Mayorista holandes (Logic4) generalista: ~85% bazar / ~15% licencia.
+        # Catalogo extraido a mano via Claude-in-Chrome a Excel .xlsx con columnas
+        # limpias (Marca, EAN, Nombre, Precio, Stock). Precio con PUNTO decimal
+        # (no coma alemana). EAN-13 y UPC-12 mezclados (la normalizacion los casa).
+        # 🔒 OJO: el Stock viene siempre como '1' (la extraccion solo marco
+        # "disponible si/no", NO la cantidad real) -> todos pasan el filtro stock>0,
+        # que es correcto (no descarta nada y no estorba). CHASE no aplica (todo suelto).
+        # Se usa la PRIMERA hoja (sheet=0) por robustez ante cambios de nombre de hoja
+        # en futuras extracciones.
+        'tipo':'excel', 'sheet':0, 'header':0,
+        'col_marca':'Marca', 'col_ean':'EAN', 'col_nombre':'Nombre',
+        'col_pa':'Precio', 'col_stock':'Stock', 'col_estado':None, 'estados_ok':None,
+    },
     'MOLOKA': {'tipo':'supabase'},   # inventario propio: se lee de la tabla productos
 }
 if PROVEEDOR not in PERFILES:
