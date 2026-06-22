@@ -2004,7 +2004,10 @@ async function cargarAlertas() {
     const ahoraIso = new Date().toISOString();
     const [vel, prodResult, silResult] = await Promise.all([
       cargarVelocidades(),
-      db.from('productos').select('*').eq('activo', true).neq('estado', 'DESCATALOGADO'),
+      // Incluye DESCATALOGADO a proposito: necesario para la alerta "manda a FBA" (stock local
+      // que ya tienes y NO puedes reponer del proveedor -> interesa colocarlo en FBA cuanto antes).
+      // Las ramas "pide proveedor", "sin movimiento" y "estancados" excluyen DESCATALOGADO mas abajo.
+      db.from('productos').select('*').eq('activo', true),
       db.from('alertas_silenciadas').select('*').gt('silenciado_hasta', ahoraIso)
     ]);
     if (prodResult.error) throw prodResult.error;
@@ -2091,7 +2094,7 @@ async function cargarAlertas() {
       // Requiere: vel_7d=0 AND vel_30d>0.07 (≈2u/mes) AND stock_fba>0 (excluye rupturas)
       // Es informativo, no genera alerta urgente. El producto puede estar tambien en
       // otras categorias (pedir_proveedor si cob<lead, sin_movimiento si v30 es 0).
-      if (v && v.vel_diaria_7d === 0 && v.vel_diaria_30d > 0.07 && stockFba > 0) {
+      if (v && v.vel_diaria_7d === 0 && v.vel_diaria_30d > 0.07 && stockFba > 0 && p.estado !== 'DESCATALOGADO') {
         estancados.push({
           ...p,
           vel_30d: v.vel_diaria_30d,
@@ -2111,7 +2114,8 @@ async function cargarAlertas() {
       // Logica acordada
       if (velDiaria === 0) {
         // Sin movimiento: solo si tiene stock acumulado (problema de capital parado)
-        if (stockFba + stockMoloka >= 4) {
+        // DESCATALOGADO excluido: si no vende, no hay accion util (ni se repone ni se manda a FBA)
+        if (stockFba + stockMoloka >= 4 && p.estado !== 'DESCATALOGADO') {
           sinMovimiento.push({
             ...p,
             uds_30d: uds30d,
@@ -2170,7 +2174,8 @@ async function cargarAlertas() {
       const leadTotal = obtenerLeadTotal(p.proveedor);
       const coberturaObjetivoTrasRecibir = esLIL ? LIL_COBERTURA_OBJETIVO : 30;
       const umbralPedirProveedor = esLIL ? (leadTotal + coberturaObjetivoTrasRecibir) : leadTotal;
-      if (cobTotal < umbralPedirProveedor) {
+      // DESCATALOGADO excluido: no se puede reponer del proveedor, no tiene sentido pedir mas.
+      if (cobTotal < umbralPedirProveedor && p.estado !== 'DESCATALOGADO') {
         // Calculo de cantidad a pedir:
         // - Las ventas durante el lead time del proveedor (sino entras en LIL fee)
         // - + el objetivo de cobertura tras recibir
@@ -2274,6 +2279,7 @@ async function cargarAlertas() {
               (p.ean ? '<span style="font-family:\'DM Mono\',monospace;font-size:11px;background:rgba(0,0,0,0.08);padding:2px 6px;border-radius:4px;cursor:pointer" onclick="navigator.clipboard.writeText(\'' + p.ean + '\');showToast(\'EAN copiado\',\'success\')" title="Clic para copiar">' + p.ean + ' \ud83d\udccb</span>' : '') +
               (p.asin ? '<span style="font-family:\'DM Mono\',monospace;font-size:11px;color:var(--accent)">' + p.asin + '</span>' : '') +
               '<span style="font-size:11px;color:var(--gray-500)">' + (p.proveedor || '\u2014') + '</span>' +
+              (p.estado === 'DESCATALOGADO' ? '<span style="font-size:10px;font-weight:700;background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:4px" title="Descatalogado: no reponible del proveedor. Es stock final, colocalo en FBA mientras se venda.">\u26d4 Stock final</span>' : '') +
             '</div>' +
             '<div class="alert-detail">FBA: <strong>' + (p.stock_fba||0) + 'u</strong>' + inboundTxt + ' \u00b7 Moloka: <strong>' + (p.stock_moloka||0) + 'u</strong> \u00b7 Vel: ' + p.vel_diaria.toFixed(2) + '/dia ' + tendIcon + '</div>' +
             '<div class="alert-detail">Cobertura FBA: <strong>' + cobTxt + '</strong> \u00b7 Vendidas T30: ' + p.uds_30d + 'u</div>' +
@@ -4879,18 +4885,55 @@ async function confirmarEnvioFBA() {
       }
       const filasSilencio = [];
       const insuficientes = []; // top sellers con envio insuficiente
+
+      // FIX A (20-jun): el silencio debe ver TODOS los envios recientes del producto, no solo
+      // el de esta confirmacion. Si Elena manda un top seller en varias cajas (p.ej. 36+36),
+      // cada envio se registra por separado y el stock_fba/inbound NO se actualiza localmente
+      // (lo gobierna Amazon ~24h despues), asi que cada caja evaluada en aislado se queda corta
+      // y NO silencia, dejando la alerta colgada aunque en total se haya enviado de sobra.
+      // Solucion: sumar los movimientos 'envio_fba' del producto en las ultimas 12h (incluye
+      // el de ahora, ya insertado en el paso 4). 12h agrupa las cajas del mismo turno y queda
+      // por debajo de las ~24h que tarda Amazon en reflejar el inbound -> no hay doble conteo.
+      const VENTANA_ENVIO_MS = 12 * 3600 * 1000;
+      const ahoraMs = Date.now();
+      const enviadoRecientePorProd = {};
+      try {
+        const idsEnvio = envioItems.map(function(e){ return e.id; });
+        const { data: movsRecientes } = await db.from('movimientos')
+          .select('*')
+          .in('producto_id', idsEnvio)
+          .eq('tipo', 'envio_fba')
+          .order('id', { ascending: false })
+          .limit(300);
+        (movsRecientes || []).forEach(function(m){
+          const ts = m.fecha || m.created_at;
+          if (!ts) return;
+          if (ahoraMs - new Date(ts).getTime() > VENTANA_ENVIO_MS) return;
+          enviadoRecientePorProd[m.producto_id] = (enviadoRecientePorProd[m.producto_id] || 0) + Math.abs(m.cantidad || 0);
+        });
+      } catch (errMovs) {
+        console.warn('[confirmarEnvioFBA] no se pudieron leer envios recientes; uso solo qty actual', errMovs);
+      }
+
       for (const e of envioItems) {
         // envioItems contiene la ficha completa del producto al hacer spread (...p)
         // Por tanto tiene sku, stock_fba, stock_inbound, stock_moloka, nombre
         const v = e.sku ? velMap[e.sku] : null;
         const velDiaria = calcularVelocidadEfectivaGlobal(v);
         const esLIL = esLILEligible(velDiaria);
-        // Stock FBA + inbound proyectado tras este envio
-        const stockFbaProyectado = (e.stock_fba || 0) + (e.stock_inbound || 0) + e.qty;
-        const coberturaProyectada = velDiaria > 0 ? stockFbaProyectado / velDiaria : 999;
         const umbralSilencio = esLIL ? LIL_COBERTURA_MINIMA : ALERT_COBERTURA_OBJETIVO;
-        // Si el envio NO cubre el umbral, NO silenciar mandar_fba (alerta sigue activa)
-        const envioSuficiente = coberturaProyectada >= umbralSilencio;
+        // A: enviado reciente = max(suma movimientos 12h, qty de este envio).
+        // El max es un cinturon de seguridad: si la consulta fallara, al menos cuenta el envio actual.
+        const enviadoReciente = Math.max(enviadoRecientePorProd[e.id] || 0, e.qty);
+        // Stock FBA + inbound + lo enviado recientemente (aun no reflejado por Amazon)
+        const stockFbaProyectado = (e.stock_fba || 0) + (e.stock_inbound || 0) + enviadoReciente;
+        const coberturaProyectada = velDiaria > 0 ? stockFbaProyectado / velDiaria : 999;
+        // FIX C (20-jun): comparar en UNIDADES contra el mismo objetivo redondeado que usa la
+        // alerta (objetivoUds = round(umbral * vel)), no la cobertura en dias con >=. Asi se
+        // elimina el desajuste de frontera: enviar justo lo que la alerta pide ya silencia
+        // (antes 357/8.93 = 39.98 < 40 dejaba la alerta viva pese a enviar lo pedido).
+        const objetivoUds = Math.round(umbralSilencio * velDiaria);
+        const envioSuficiente = velDiaria > 0 ? (stockFbaProyectado >= objetivoUds) : true;
         if (envioSuficiente) {
           filasSilencio.push({
             producto_id: e.id,
@@ -4902,7 +4945,7 @@ async function confirmarEnvioFBA() {
           // Top seller con envio insuficiente: registrar para avisar
           insuficientes.push({
             nombre: e.nombre || 'Producto',
-            enviado: e.qty,
+            enviado: enviadoReciente,
             cobertura_proyectada: coberturaProyectada,
             umbral: umbralSilencio,
             vel: velDiaria
