@@ -2,9 +2,10 @@
 // Moloka - Funcion intermediaria (Vercel) para disparar workflows de GitHub
 // Ruta en la app: POST  https://moloka-app.vercel.app/api/disparar
 //
-// Sirve para DOS workflows (lista blanca):
-//   - actualizar-app.yml  (procesar informes -> refrescar la app)   [por defecto]
-//   - escaner-app.yml     (escanear catalogo de proveedor)
+// Sirve para TRES workflows (lista blanca):
+//   - actualizar-app.yml   (procesar informes -> refrescar la app)   [por defecto]
+//   - escaner-app.yml      (escanear catalogo de proveedor)
+//   - fabrica-preparar.yml (robot PREPARAR de la fabrica de fichas)
 // La app elige cual con el campo "workflow" del body. Si no lo manda, va el de
 // actualizar (compatibilidad con el boton que ya existia).
 //
@@ -15,7 +16,7 @@
 // ============================================================
 
 const REPO = 'Moloka-Store/moloka-app';
-const WORKFLOWS_OK = ['actualizar-app.yml', 'escaner-app.yml'];   // lista blanca
+const WORKFLOWS_OK = ['actualizar-app.yml', 'escaner-app.yml', 'fabrica-preparar.yml'];   // lista blanca
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
