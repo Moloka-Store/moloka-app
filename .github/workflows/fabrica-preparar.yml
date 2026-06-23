@@ -1,0 +1,29 @@
+name: Moloka - Fabrica Preparar
+
+on:
+  workflow_dispatch:
+
+jobs:
+  preparar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Dependencia del sistema (zbar, para leer codigos de barras)
+        run: sudo apt-get update && sudo apt-get install -y libzbar0
+
+      - name: Dependencias Python
+        run: pip install keepa supabase pyzbar pillow
+
+      - name: Robot PREPARAR
+        env:
+          KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:         ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python -u robot_preparar.py
