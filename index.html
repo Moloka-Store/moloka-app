@@ -355,8 +355,24 @@
     <!-- Sub-pestañas de la Fábrica -->
     <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
       <button id="fabtab-nueva"   class="btn btn-primary btn-sm" onclick="fabSubTab('nueva')">➕ Nueva ficha</button>
+      <button id="fabtab-elegir"  class="btn btn-ghost btn-sm"   onclick="fabSubTab('elegir')">🖼️ Elegir fotos</button>
       <button id="fabtab-precios" class="btn btn-ghost btn-sm"   onclick="fabSubTab('precios')">🏷️ Precios web</button>
     </div>
+
+    <!-- ====================== SUB-PESTAÑA: ELEGIR FOTOS ====================== -->
+    <div id="fab-sub-elegir" style="display:none">
+      <div class="card" style="padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:220px">
+          <div style="font-weight:600">Fichas preparadas, listas para elegir fotos</div>
+          <div style="font-size:13px;color:var(--gray-500)">Marca en cada una cuál es la <b>Caja</b> (la que tiene el número) y cuál el <b>Recorte</b> (la figura sola). Confirma, y cuando tengas las que quieras, dale a Generar.</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="cargarSeleccion()">🔄 Refrescar</button>
+        <button id="sel-generar-btn" class="btn btn-primary" onclick="fabGenerarPublicar()">🚀 Generar y publicar las confirmadas</button>
+      </div>
+      <div id="sel-generar-log" style="margin-bottom:14px"></div>
+      <div id="sel-cont"></div>
+    </div>
+
 
     <!-- ====================== SUB-PESTAÑA: NUEVA FICHA ====================== -->
     <div id="fab-sub-nueva">
@@ -1360,12 +1376,146 @@ function showPage(id, el) {
 // FÁBRICA WEB — sub-pestañas (Nueva ficha / Precios)
 // ============================================================
 function fabSubTab(cual) {
-  const esNueva = (cual === 'nueva');
-  document.getElementById('fab-sub-nueva').style.display   = esNueva ? 'block' : 'none';
-  document.getElementById('fab-sub-precios').style.display = esNueva ? 'none'  : 'block';
-  document.getElementById('fabtab-nueva').className   = 'btn btn-sm ' + (esNueva ? 'btn-primary' : 'btn-ghost');
-  document.getElementById('fabtab-precios').className = 'btn btn-sm ' + (esNueva ? 'btn-ghost' : 'btn-primary');
-  if (!esNueva && !window._fabPreciosCargados) { window._fabPreciosCargados = true; cargarFabrica(); }
+  const tabs = ['nueva', 'elegir', 'precios'];
+  tabs.forEach(t => {
+    document.getElementById('fab-sub-' + t).style.display = (t === cual) ? 'block' : 'none';
+    document.getElementById('fabtab-' + t).className = 'btn btn-sm ' + (t === cual ? 'btn-primary' : 'btn-ghost');
+  });
+  if (cual === 'elegir') cargarSeleccion();
+  if (cual === 'precios' && !window._fabPreciosCargados) { window._fabPreciosCargados = true; cargarFabrica(); }
+}
+
+// ============================================================
+// FÁBRICA WEB — Elegir fotos (verbatim del panel aprobado) + disparo GENERAR
+// ============================================================
+let _selExpedientes = [];
+
+async function cargarSeleccion() {
+  const cont = document.getElementById('sel-cont');
+  cont.innerHTML = '<div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div>';
+  const { data, error } = await db.from('fabrica_fichas')
+    .select('id,ean,titulo_keepa,marca,es_chase,es_vaulted,es_exclusivo,fotos_keepa,fotos_elegidas,estado')
+    .in('estado', ['preparado', 'sin_foto'])
+    .order('id');
+  if (error) { cont.innerHTML = '<div style="padding:20px;color:#b91c1c">Error: ' + error.message + '</div>'; return; }
+  _selExpedientes = (data || []).map(prepararExpediente);
+  renderSeleccion();
+}
+
+function prepararExpediente(f) {
+  let fotos = [];
+  try { fotos = Array.isArray(f.fotos_keepa) ? f.fotos_keepa : JSON.parse(f.fotos_keepa || '[]'); } catch (e) { fotos = []; }
+  const papeles = fotos.map((u, i) => i === 0 ? 'caja' : i === 1 ? 'recorte' : i >= 3 ? 'quitar' : 'secundaria');
+  return { ...f, fotos, papeles };
+}
+
+function renderSeleccion() {
+  const cont = document.getElementById('sel-cont');
+  if (!_selExpedientes.length) {
+    cont.innerHTML = '<div class="info-box" style="font-size:13px">No hay fichas preparadas ahora mismo. Cuando prepares un producto en "Nueva ficha", aparecerá aquí para que elijas las fotos.</div>';
+    return;
+  }
+  cont.innerHTML = _selExpedientes.map((f, idx) => {
+    const rar = f.es_chase
+      ? '<span class="badge" style="background:#f59e0b;color:#3a2600">CHASE</span>'
+      : f.es_vaulted ? '<span class="badge" style="background:#7c3aed;color:#fff">VAULTED</span>'
+      : f.es_exclusivo ? '<span class="badge" style="background:#0ea5b7;color:#fff">EXCLUSIVO</span>' : '';
+    const fotosHtml = f.fotos.map((url, i) => {
+      const papel = f.papeles[i];
+      const borde = papel === 'caja' ? '#f59e0b' : papel === 'recorte' ? '#7c3aed' : papel === 'secundaria' ? '#16a34a' : '#d1d5db';
+      const op = papel === 'quitar' ? '0.4' : '1';
+      return `<div style="text-align:center">
+        <div style="border:3px solid ${borde};border-radius:10px;padding:4px;opacity:${op};background:#f7f5fb">
+          <img src="${url}" style="width:120px;height:120px;object-fit:contain;display:block">
+        </div>
+        <div style="display:flex;gap:3px;justify-content:center;margin-top:5px;flex-wrap:wrap">
+          ${botonPapel(idx, i, 'caja', 'Caja', papel)}
+          ${botonPapel(idx, i, 'recorte', 'Recorte', papel)}
+          ${botonPapel(idx, i, 'secundaria', 'Secund.', papel)}
+          ${botonPapel(idx, i, 'quitar', 'Quitar', papel)}
+        </div>
+      </div>`;
+    }).join('');
+    return `<div class="card" style="padding:16px;margin-bottom:16px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <div style="flex:1"><div style="font-weight:600;font-size:14px">${f.titulo_keepa || f.ean}</div><div style="font-size:11px;color:var(--gray-500)">${f.marca || ''} · ${f.ean}</div></div>
+        ${rar}
+      </div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap">${fotosHtml || '<span style="color:var(--gray-500);font-size:13px">Sin fotos de Keepa.</span>'}</div>
+      <div style="margin-top:14px;display:flex;align-items:center;gap:10px">
+        <button class="btn btn-primary btn-sm" onclick="confirmarFicha(${idx})">✅ Confirmar selección</button>
+        <span style="font-size:12px;color:var(--gray-500)" id="sel-msg-${idx}"></span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function botonPapel(idx, i, papel, label, actual) {
+  const cols = { caja: '#f59e0b', recorte: '#7c3aed', secundaria: '#16a34a', quitar: '#9ca3af' };
+  const on = actual === papel;
+  const bg = on ? cols[papel] : '#fff';
+  const fg = on ? (papel === 'caja' ? '#3a2600' : '#fff') : 'var(--navy)';
+  return `<button onclick="marcarPapel(${idx},${i},'${papel}')" style="font-size:10px;font-weight:600;padding:3px 7px;border-radius:6px;border:1px solid ${cols[papel]};background:${bg};color:${fg};cursor:pointer">${label}</button>`;
+}
+
+function marcarPapel(idx, i, papel) {
+  const exp = _selExpedientes[idx];
+  if (papel === 'caja' || papel === 'recorte') {
+    exp.papeles = exp.papeles.map(p => p === papel ? 'secundaria' : p);
+  }
+  exp.papeles[i] = papel;
+  renderSeleccion();
+}
+
+async function confirmarFicha(idx) {
+  const exp = _selExpedientes[idx];
+  const msg = document.getElementById('sel-msg-' + idx);
+  const caja = exp.fotos[exp.papeles.indexOf('caja')] || null;
+  const recorte = exp.fotos[exp.papeles.indexOf('recorte')] || null;
+  const secundarias = exp.fotos.filter((u, i) => exp.papeles[i] === 'secundaria');
+  if (!caja || !recorte) { msg.textContent = '⚠️ Marca al menos la Caja y el Recorte.'; msg.style.color = '#b91c1c'; return; }
+  msg.textContent = 'Guardando...'; msg.style.color = 'var(--gray-500)';
+  const fotos_elegidas = { caja, recorte_moloka: recorte, secundarias, propias_n: 0 };
+  const { error } = await db.from('fabrica_fichas').update({ fotos_elegidas, estado: 'fotos_ok' }).eq('id', exp.id);
+  if (error) { msg.textContent = 'Error: ' + error.message; msg.style.color = '#b91c1c'; return; }
+  msg.textContent = '✅ Guardado. Lista para generar.'; msg.style.color = '#16a34a';
+  _selExpedientes.splice(idx, 1);
+  setTimeout(renderSeleccion, 900);
+}
+
+async function fabGenerarPublicar() {
+  const log = document.getElementById('sel-generar-log');
+  const btn = document.getElementById('sel-generar-btn');
+  // ¿Hay alguna ficha en 'fotos_ok' (confirmada) esperando?
+  const { count, error: e0 } = await db.from('fabrica_fichas')
+    .select('id', { count: 'exact', head: true }).eq('estado', 'fotos_ok');
+  if (e0) { log.innerHTML = '<div class="info-box" style="border-left:3px solid #b00020">⚠️ ' + e0.message + '</div>'; return; }
+  if (!count) {
+    log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">No hay ninguna ficha confirmada todavía. Confirma al menos una selección arriba (Caja + Recorte) antes de generar.</div>';
+    return;
+  }
+  btn.disabled = true;
+  log.innerHTML = '<div class="info-box">⏳ Lanzando la generación de ' + count + ' ficha(s)...</div>';
+  try {
+    const resp = await fetch('/api/disparar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secreto: DISPARO_SECRET, workflow: 'fabrica-generar.yml' })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      log.innerHTML = '<div class="info-box" style="border-left:3px solid #2e7d32">✅ Generación lanzada para ' + count + ' ficha(s).<br><span style="color:#888780">Redacta el texto, monta las fotos y las publica en la web. Tarda unos minutos (la IA y el montaje van por ficha). Cuando termine, las verás en la web y podrás ponerles precio en la pestaña "Precios web".</span></div>';
+    } else if (resp.status === 409) {
+      log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">⏳ ' + (data.error || 'Ya hay una generación en marcha. Espera a que termine.') + '</div>';
+      btn.disabled = false;
+    } else {
+      log.innerHTML = '<div class="info-box" style="border-left:3px solid #b00020">⚠️ No se pudo lanzar: ' + (data.error || ('HTTP ' + resp.status)) + '.</div>';
+      btn.disabled = false;
+    }
+  } catch (e) {
+    log.innerHTML = '<div class="info-box" style="border-left:3px solid #b00020">⚠️ Error: ' + e.message + '</div>';
+    btn.disabled = false;
+  }
 }
 
 // ============================================================
