@@ -298,6 +298,23 @@ def main():
     if avisos:
         print(f"⚠️  {len(avisos)} para revisar a mano:")
         for a in avisos: print("   -", a)
+
+    # Reconstruir la web sola (Astro es estático): avisar al Deploy Hook de Vercel.
+    # Solo si se publicó algo y el hook está configurado. Si falla, no rompe nada.
+    if publicadas:
+        hook = os.environ.get('VERCEL_DEPLOY_HOOK')
+        if hook:
+            try:
+                r = requests.post(hook, timeout=30)
+                if r.status_code in (200, 201):
+                    print("🔄 Web avisada para reconstruirse (Vercel). En ~1-2 min saldrá lo nuevo.")
+                else:
+                    print(f"⚠️  El aviso a Vercel respondió HTTP {r.status_code} (revisa el Deploy Hook).")
+            except Exception as e:
+                print(f"⚠️  No pude avisar a Vercel ({e}). La web se reconstruirá en el próximo deploy.")
+        else:
+            print("ℹ️  Sin VERCEL_DEPLOY_HOOK configurado: la web no se reconstruye sola.")
+
     print("\n👉 Recuerda correr el sincronizador de stock para que los productos nuevos cojan stock real.")
 
 if __name__ == "__main__":
