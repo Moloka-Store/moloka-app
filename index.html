@@ -294,6 +294,9 @@
     <div class="nav-item" data-page="escanear" onclick="showPage('escanear',this)">
       <span class="nav-icon">🔍</span> Escanear proveedor
     </div>
+    <div class="nav-item" data-page="fabrica" onclick="showPage('fabrica',this)">
+      <span class="nav-icon">🏭</span> Fábrica web
+    </div>
   </nav>
   <div class="sidebar-footer" id="conn-status">Conectando...</div>
 </aside>
@@ -344,6 +347,31 @@
   </div>
 
   <!-- INVENTARIO -->
+  <div class="page" id="page-fabrica">
+    <div class="page-header">
+      <div><div class="page-title">🏭 Fábrica web · Precios</div><div class="page-sub">Productos publicados en la web (pasados por la fábrica). Pon el precio de cada canal; se guarda solo al salir de la casilla.</div></div>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <div style="padding:14px 16px;border-bottom:1px solid var(--gray-200);display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <input type="text" id="fab-buscar" placeholder="🔍 Buscar producto..." oninput="renderFabrica()" style="flex:1;min-width:180px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">
+        <span style="font-size:12px;color:var(--gray-500)" id="fab-contador">—</span>
+      </div>
+      <div class="table-wrap" style="max-height:75vh;overflow:auto">
+        <table id="fab-tabla">
+          <thead style="position:sticky;top:0;background:white;z-index:10">
+            <tr>
+              <th>Producto</th>
+              <th style="text-align:center">Rareza</th>
+              <th style="text-align:center" title="Precio que se mostrará en la web propia">Precio Web (€)</th>
+              <th style="text-align:center" title="Precio que irá al feed de Miravia">Precio Miravia (€)</th>
+            </tr>
+          </thead>
+          <tbody id="fab-tbody"><tr><td colspan="4"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <div class="page" id="page-inventario">
     <div class="page-header">
       <div><div class="page-title">📦 Inventario</div><div class="page-sub" id="inv-subtitle">Cargando...</div></div>
@@ -1274,6 +1302,64 @@ function showPage(id, el) {
   if (id === 'movimientos') cargarMovimientos();
   if (id === 'actualizar') initActualizar();
   if (id === 'escanear') initEscanear();
+  if (id === 'fabrica') cargarFabrica();
+}
+
+// ============================================================
+// FÁBRICA WEB — precios por canal (web / miravia) de los productos publicados
+// ============================================================
+let _fabProductos = [];
+
+async function cargarFabrica() {
+  const tbody = document.getElementById('fab-tbody');
+  tbody.innerHTML = '<tr><td colspan="4"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr>';
+  let filas = [], desde = 0;
+  while (true) {
+    const { data, error } = await db.from('web_productos')
+      .select('id,nombre,fandom,ean,es_chase,es_vaulted,es_exclusivo,precio_web,precio_miravia,imagen_principal')
+      .eq('activo', true).eq('origen', 'fabrica')
+      .order('actualizado', { ascending: false })
+      .range(desde, desde + 999);
+    if (error) { tbody.innerHTML = '<tr><td colspan="4" style="padding:20px;color:#b91c1c">Error: ' + error.message + '</td></tr>'; return; }
+    filas = filas.concat(data || []);
+    if (!data || data.length < 1000) break;
+    desde += 1000;
+  }
+  _fabProductos = filas;
+  renderFabrica();
+}
+
+function renderFabrica() {
+  const q = (document.getElementById('fab-buscar').value || '').toLowerCase();
+  const tbody = document.getElementById('fab-tbody');
+  const lista = _fabProductos.filter(p => !q || (p.nombre || '').toLowerCase().includes(q) || (p.fandom || '').toLowerCase().includes(q));
+  document.getElementById('fab-contador').textContent = lista.length + ' producto' + (lista.length === 1 ? '' : 's');
+  if (!lista.length) { tbody.innerHTML = '<tr><td colspan="4" style="padding:20px;color:var(--gray-500)">Sin productos de fábrica todavía.</td></tr>'; return; }
+  tbody.innerHTML = lista.map(p => {
+    const rar = p.es_chase ? 'CHASE' : p.es_vaulted ? 'VAULTED' : p.es_exclusivo ? 'EXCLUSIVO' : '—';
+    const img = p.imagen_principal ? `<img src="${p.imagen_principal}" style="width:34px;height:34px;object-fit:contain;border-radius:6px;background:#f7f5fb">` : '';
+    const pw = p.precio_web != null ? p.precio_web : '';
+    const pm = p.precio_miravia != null ? p.precio_miravia : '';
+    return `<tr>
+      <td><div style="display:flex;align-items:center;gap:10px">${img}<div><div style="font-weight:600;font-size:13px">${p.nombre || ''}</div><div style="font-size:11px;color:var(--gray-500)">${p.fandom || ''} · ${p.ean || ''}</div></div></div></td>
+      <td style="text-align:center;font-size:11px;font-weight:600">${rar}</td>
+      <td style="text-align:center"><input type="number" step="0.01" min="0" value="${pw}" onchange="guardarPrecioFabrica(${p.id},'precio_web',this)" style="width:90px;padding:6px;border:1px solid var(--gray-200);border-radius:6px;text-align:right"></td>
+      <td style="text-align:center"><input type="number" step="0.01" min="0" value="${pm}" onchange="guardarPrecioFabrica(${p.id},'precio_miravia',this)" style="width:90px;padding:6px;border:1px solid var(--gray-200);border-radius:6px;text-align:right"></td>
+    </tr>`;
+  }).join('');
+}
+
+async function guardarPrecioFabrica(id, campo, input) {
+  const raw = (input.value || '').trim();
+  const val = raw === '' ? null : parseFloat(raw);
+  if (raw !== '' && (isNaN(val) || val < 0)) { input.style.borderColor = '#b91c1c'; return; }
+  input.style.borderColor = '#9ca3af';
+  const upd = {}; upd[campo] = val;
+  const { error } = await db.from('web_productos').update(upd).eq('id', id);
+  if (error) { input.style.borderColor = '#b91c1c'; input.title = error.message; return; }
+  input.style.borderColor = '#16a34a';
+  setTimeout(() => { input.style.borderColor = 'var(--gray-200)'; }, 1200);
+  const p = _fabProductos.find(x => x.id === id); if (p) p[campo] = val;
 }
 
 // ============================================================
