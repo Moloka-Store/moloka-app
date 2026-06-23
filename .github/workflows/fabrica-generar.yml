@@ -23,4 +23,5 @@ jobs:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY:         ${{ secrets.SUPABASE_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          VERCEL_DEPLOY_HOOK:   ${{ secrets.VERCEL_DEPLOY_HOOK }}
         run: python -u robot_generar.py
