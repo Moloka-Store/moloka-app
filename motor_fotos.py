@@ -1,0 +1,119 @@
+# -*- coding: utf-8 -*-
+"""
+MOLOKA · FÁBRICA DE FICHAS · MOTOR DE FOTOS (núcleo)
+Funciones de imagen: recorte + montajes (neón, regla, portada) + control de calidad.
+Calibrado para Funko Pop estándar (~10 cm) sobre fondo blanco de Keepa.
+"""
+import numpy as np
+from PIL import Image, ImageFilter, ImageDraw
+from scipy import ndimage
+
+# ---------- RECORTE (receta cerrada) ----------
+def recortar(fig_rgb):
+    """Recibe PIL RGB sobre fondo blanco. Devuelve PIL RGBA recortada y limpia."""
+    arr = np.array(fig_rgb.convert('RGB'))
+    white = (arr[:,:,0]>=235)&(arr[:,:,1]>=235)&(arr[:,:,2]>=235)
+    lbl,n = ndimage.label(white)
+    border = set(lbl[0,:])|set(lbl[-1,:])|set(lbl[:,0])|set(lbl[:,-1]); border.discard(0)
+    bg_border = np.isin(lbl, list(border)); counts = np.bincount(lbl.ravel())
+    ys,_ = np.where(~bg_border); y0,y1 = ys.min(),ys.max(); neck_y = y0+0.58*(y1-y0)
+    fondo = bg_border.copy()
+    big = [i for i in range(1,n+1) if counts[i]>150 and i not in border]
+    if big:
+        for li,com in zip(big, ndimage.center_of_mass(np.ones_like(lbl),lbl,big)):
+            if com[0] < neck_y: fondo |= (lbl==li)        # axilas/cuello arriba -> fondo
+    figura = ~fondo
+    # rellenar huecos de TEJIDO del vestido (no blanco puro), no el cuello
+    filled = ndimage.binary_fill_holes(figura); holes = filled & ~figura
+    hl,hn = ndimage.label(holes)
+    fillthese=[]
+    for i in range(1,hn+1):
+        reg=(hl==i)
+        if reg.sum()<3000 and arr[reg].mean(0).min()<244: fillthese.append(i)
+    figura = figura | np.isin(hl, fillthese)
+    alpha = (figura*255).astype(np.uint8)
+    # picos claros del cuello -> transparentar (distinguir de piel por desaturación)
+    rgb=arr.astype(int); a=alpha.astype(float); Hf=a.shape[0]
+    solid=a>=180; width=solid.sum(1)
+    yA,yB=int(0.40*Hf),int(0.62*Hf); neck_row=yA+int(np.argmin(width[yA:yB]))
+    band=np.zeros_like(solid); band[max(0,neck_row-40):neck_row+40,:]=True
+    target=band&(a>=120)&(rgb.min(2)>=205)&((rgb.max(2)-rgb.min(2))<28)
+    target=ndimage.binary_dilation(target,iterations=2); a[target]=0
+    alpha=np.array(Image.fromarray(a.astype(np.uint8)).filter(ImageFilter.MinFilter(3)))
+    alpha=np.array(Image.fromarray(alpha).filter(ImageFilter.GaussianBlur(0.7)))
+    # descontaminar borde (quitar blanco pegado)
+    af=alpha.astype(float)/255.0; a3=af[...,None]
+    fg=np.clip((arr.astype(float)-(1-a3)*255.0)/np.clip(a3,0.25,1),0,255)
+    arr2=np.where((af<0.999)[...,None],fg,arr.astype(float)).astype(np.uint8)
+    out=Image.fromarray(np.dstack([arr2,alpha]),'RGBA')
+    return out.crop(Image.fromarray(alpha).getbbox())
+
+# ---------- CONTROL DE CALIDAD (test del magenta) ----------
+def test_calidad(fig_rgba):
+    """Devuelve (ok, motivo). Detecta restos casi-blancos en la zona del cuello."""
+    arr=np.array(fig_rgba); rgb=arr[:,:,:3].astype(int); a=arr[:,:,3]; H=a.shape[0]
+    zona=slice(int(0.40*H),int(0.62*H))
+    solid=a[zona]>=240; blanco=solid&(rgb[zona].min(2)>=235)
+    n=int(blanco.sum())
+    if n>60: return False, f"{n}px casi-blancos en el cuello"
+    return True, "limpio"
+
+# ---------- MONTAJE NEÓN ----------
+def montar_neon(fig_rgba, fondo_rgb):
+    bg=fondo_rgb.convert('RGBA'); W,H=bg.size
+    th=int(H*0.62); r=th/fig_rgba.height
+    f2=fig_rgba.resize((int(fig_rgba.width*r),th),Image.LANCZOS)
+    arr=np.array(f2).astype(float); a=arr[:,:,3]/255.0
+    dist=ndimage.distance_transform_edt(a>0.5); fade=np.clip(dist/6.0,0,1)*0.45+0.55
+    for c in range(3): arr[:,:,c]*=fade
+    arr[:,:,3]=np.array(Image.fromarray((a*255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(0.9)))
+    f2b=Image.fromarray(np.clip(arr,0,255).astype(np.uint8),'RGBA')
+    x=(W-f2b.width)//2; ground=int(H*0.90); y=ground-f2b.height; canvas=bg.copy()
+    am=f2b.split()[3]; hm=am.filter(ImageFilter.MaxFilter(9)).filter(ImageFilter.GaussianBlur(13))
+    hcl=Image.new('RGBA',f2b.size,(170,80,255,255)); hcl.putalpha(hm.point(lambda v:int(v*0.42)))
+    h_=Image.new('RGBA',(W,H),(0,0,0,0)); h_.alpha_composite(hcl,(x,y)); canvas=Image.alpha_composite(canvas,h_)
+    shd=Image.new('RGBA',(W,H),(0,0,0,0)); sd=ImageDraw.Draw(shd)
+    sw,sh=int(f2b.width*0.78),int(f2b.width*0.13); cx=x+f2b.width//2
+    sd.ellipse([cx-sw//2,ground-sh//2-int(sh*0.1),cx+sw//2,ground+sh//2-int(sh*0.1)],fill=(0,0,0,135))
+    canvas=Image.alpha_composite(canvas,shd.filter(ImageFilter.GaussianBlur(13)))
+    rf=f2b.transpose(Image.FLIP_TOP_BOTTOM); g=np.zeros((rf.height,rf.width),np.uint8)
+    for yy in range(rf.height): g[yy,:]=int(60*(1-yy/rf.height))
+    ra=np.minimum(np.array(rf.split()[3]),g).astype(np.uint8); rf.putalpha(Image.fromarray(ra))
+    canvas.alpha_composite(rf.filter(ImageFilter.GaussianBlur(1.3)),(x,ground-2))
+    canvas.alpha_composite(f2b,(x,y))
+    return canvas.convert('RGB')
+
+# ---------- MONTAJE REGLA 10 cm ----------
+def montar_regla(fig_rgba, regla_rgb):
+    reg=regla_rgb.convert('RGB'); W,H=reg.size; a=np.array(reg)
+    R,G,B=a[:,:,0].astype(int),a[:,:,1].astype(int),a[:,:,2].astype(int)
+    rosa=(R>200)&(G<150)&(B>150)&(R-G>80)
+    col=rosa[:,330:376].sum(1); yy=np.where(col>3)[0]; y10,y0=int(yy.min()),int(yy.max())
+    alto=y0-y10; r=alto/fig_rgba.height
+    f=fig_rgba.resize((int(fig_rgba.width*r),alto),Image.LANCZOS)
+    arr=np.array(f).astype(float); al=arr[:,:,3]/255.0
+    dist=ndimage.distance_transform_edt(al>0.5); fade=np.clip(dist/5.0,0,1)*0.45+0.55
+    for c in range(3): arr[:,:,c]*=fade
+    arr[:,:,3]=np.array(Image.fromarray((al*255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(0.8)))
+    fb=Image.fromarray(np.clip(arr,0,255).astype(np.uint8),'RGBA')
+    canvas=reg.convert('RGBA'); hueco=int((400+W)/2); x=hueco-fb.width//2; y=y0-fb.height
+    shd=Image.new('RGBA',(W,H),(0,0,0,0)); sd=ImageDraw.Draw(shd)
+    sw,sh=int(fb.width*0.7),int(fb.width*0.10); cx=x+fb.width//2
+    sd.ellipse([cx-sw//2,y0-sh//2,cx+sw//2,y0+sh//2],fill=(0,0,0,120))
+    canvas=Image.alpha_composite(canvas,shd.filter(ImageFilter.GaussianBlur(8)))
+    canvas.alpha_composite(fb,(x,y))
+    return canvas.convert('RGB')
+
+# ---------- MONTAJE PORTADA (caja + figura) ----------
+def montar_portada(caja_rgb, fig_rgb, S=1400):
+    def rec(img,u=238):
+        a=np.array(img.convert('RGB')); nf=~((a[:,:,0]>=u)&(a[:,:,1]>=u)&(a[:,:,2]>=u))
+        ys,xs=np.where(nf); return img.crop((xs.min(),ys.min(),xs.max(),ys.max()))
+    caja=rec(caja_rgb); fig=rec(fig_rgb)
+    L=Image.new('RGB',(S,S),(255,255,255))
+    def esc(img,h): r=h/img.height; return img.resize((max(1,int(img.width*r)),int(h)),Image.LANCZOS)
+    funko_h=int(0.576*S); caja_h=int(funko_h/1.10)
+    cR=esc(caja,caja_h); fR=esc(fig,funko_h)
+    L.paste(cR,(int(0.27*S)-cR.width//2,int(0.07*S)))
+    L.paste(fR,(int(0.70*S)-fR.width//2,int(0.88*S)-fR.height))
+    return L
