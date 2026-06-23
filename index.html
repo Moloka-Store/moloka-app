@@ -349,25 +349,76 @@
   <!-- INVENTARIO -->
   <div class="page" id="page-fabrica">
     <div class="page-header">
-      <div><div class="page-title">🏭 Fábrica web · Precios</div><div class="page-sub">Productos publicados en la web (pasados por la fábrica). Pon el precio de cada canal; se guarda solo al salir de la casilla.</div></div>
+      <div><div class="page-title">🏭 Fábrica web</div><div class="page-sub">Da de alta fichas nuevas desde la foto del culo, y pon los precios de los productos ya publicados.</div></div>
     </div>
-    <div class="card" style="padding:0;overflow:hidden">
-      <div style="padding:14px 16px;border-bottom:1px solid var(--gray-200);display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <input type="text" id="fab-buscar" placeholder="🔍 Buscar producto..." oninput="renderFabrica()" style="flex:1;min-width:180px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">
-        <span style="font-size:12px;color:var(--gray-500)" id="fab-contador">—</span>
+
+    <!-- Sub-pestañas de la Fábrica -->
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      <button id="fabtab-nueva"   class="btn btn-primary btn-sm" onclick="fabSubTab('nueva')">➕ Nueva ficha</button>
+      <button id="fabtab-precios" class="btn btn-ghost btn-sm"   onclick="fabSubTab('precios')">🏷️ Precios web</button>
+    </div>
+
+    <!-- ====================== SUB-PESTAÑA: NUEVA FICHA ====================== -->
+    <div id="fab-sub-nueva">
+      <div class="card" style="padding:18px;margin-bottom:16px">
+        <div style="font-weight:600;margin-bottom:4px">1 · Añade cada Funko a la tanda</div>
+        <div style="font-size:13px;color:var(--gray-500);margin-bottom:14px">Sube la foto del culo de la caja (la del código de barras). La máquina sacará el EAN sola. Marca las rarezas solo si las conoces.</div>
+
+        <div style="display:grid;gap:12px;max-width:560px">
+          <div>
+            <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Foto del culo</label>
+            <input type="file" id="fab-foto" accept="image/*" style="font-size:13px">
+          </div>
+
+          <div>
+            <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Rareza (opcional)</label>
+            <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:13px">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="fab-vaulted"> Vaulted (retirado)</label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="fab-chase"> Chase</label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="fab-exclusivo" onchange="document.getElementById('fab-tipoexc-wrap').style.display=this.checked?'block':'none'"> Exclusivo</label>
+            </div>
+          </div>
+
+          <div id="fab-tipoexc-wrap" style="display:none">
+            <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">¿Exclusivo de dónde? (opcional)</label>
+            <input type="text" id="fab-tipoexc" placeholder="Ej: PREVIEWS, Funko Shop, SDCC..." style="width:100%;max-width:320px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">
+          </div>
+
+          <div>
+            <button class="btn btn-ghost btn-sm" onclick="fabAñadirItem()">➕ Añadir a la tanda</button>
+          </div>
+        </div>
       </div>
-      <div class="table-wrap" style="max-height:75vh;overflow:auto">
-        <table id="fab-tabla">
-          <thead style="position:sticky;top:0;background:white;z-index:10">
-            <tr>
-              <th>Producto</th>
-              <th style="text-align:center">Rareza</th>
-              <th style="text-align:center" title="Precio que se mostrará en la web propia">Precio Web (€)</th>
-              <th style="text-align:center" title="Precio que irá al feed de Miravia">Precio Miravia (€)</th>
-            </tr>
-          </thead>
-          <tbody id="fab-tbody"><tr><td colspan="4"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr></tbody>
-        </table>
+
+      <div class="card" style="padding:18px">
+        <div style="font-weight:600;margin-bottom:4px">2 · Tanda a preparar (<span id="fab-tanda-n">0</span>)</div>
+        <div style="font-size:13px;color:var(--gray-500);margin-bottom:14px">Cuando tengas todas, dale a Preparar. La nube las procesa de una vez.</div>
+        <div id="fab-tanda-lista" style="display:grid;gap:8px;margin-bottom:14px"><span style="font-size:13px;color:var(--gray-500)">Aún no has añadido ninguna.</span></div>
+        <button id="fab-preparar-btn" class="btn btn-primary" onclick="fabPrepararTanda()" disabled>🚀 Preparar tanda (0)</button>
+        <div id="fab-nueva-log" style="margin-top:14px"></div>
+      </div>
+    </div>
+
+    <!-- ====================== SUB-PESTAÑA: PRECIOS (intacta) ====================== -->
+    <div id="fab-sub-precios" style="display:none">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="padding:14px 16px;border-bottom:1px solid var(--gray-200);display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <input type="text" id="fab-buscar" placeholder="🔍 Buscar producto..." oninput="renderFabrica()" style="flex:1;min-width:180px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">
+          <span style="font-size:12px;color:var(--gray-500)" id="fab-contador">—</span>
+        </div>
+        <div class="table-wrap" style="max-height:75vh;overflow:auto">
+          <table id="fab-tabla">
+            <thead style="position:sticky;top:0;background:white;z-index:10">
+              <tr>
+                <th>Producto</th>
+                <th style="text-align:center">Rareza</th>
+                <th style="text-align:center" title="Precio que se mostrará en la web propia">Precio Web (€)</th>
+                <th style="text-align:center" title="Precio que irá al feed de Miravia">Precio Miravia (€)</th>
+              </tr>
+            </thead>
+            <tbody id="fab-tbody"><tr><td colspan="4"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr></tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
@@ -1302,7 +1353,127 @@ function showPage(id, el) {
   if (id === 'movimientos') cargarMovimientos();
   if (id === 'actualizar') initActualizar();
   if (id === 'escanear') initEscanear();
-  if (id === 'fabrica') cargarFabrica();
+  if (id === 'fabrica') fabSubTab('nueva');
+}
+
+// ============================================================
+// FÁBRICA WEB — sub-pestañas (Nueva ficha / Precios)
+// ============================================================
+function fabSubTab(cual) {
+  const esNueva = (cual === 'nueva');
+  document.getElementById('fab-sub-nueva').style.display   = esNueva ? 'block' : 'none';
+  document.getElementById('fab-sub-precios').style.display = esNueva ? 'none'  : 'block';
+  document.getElementById('fabtab-nueva').className   = 'btn btn-sm ' + (esNueva ? 'btn-primary' : 'btn-ghost');
+  document.getElementById('fabtab-precios').className = 'btn btn-sm ' + (esNueva ? 'btn-ghost' : 'btn-primary');
+  if (!esNueva && !window._fabPreciosCargados) { window._fabPreciosCargados = true; cargarFabrica(); }
+}
+
+// ============================================================
+// FÁBRICA WEB — Nueva ficha: tanda -> buzón -> dispara robot PREPARAR
+// ============================================================
+let _fabTanda = [];  // [{file, es_vaulted, es_chase, es_exclusivo, tipo_exclusivo}]
+
+function fabAñadirItem() {
+  const input = document.getElementById('fab-foto');
+  const file  = input.files && input.files[0];
+  if (!file) { alert('Elige primero la foto del culo.'); return; }
+  _fabTanda.push({
+    file,
+    es_vaulted:   document.getElementById('fab-vaulted').checked,
+    es_chase:     document.getElementById('fab-chase').checked,
+    es_exclusivo: document.getElementById('fab-exclusivo').checked,
+    tipo_exclusivo: document.getElementById('fab-exclusivo').checked ? (document.getElementById('fab-tipoexc').value.trim() || null) : null,
+  });
+  // limpiar el formulario para el siguiente
+  input.value = '';
+  document.getElementById('fab-vaulted').checked = false;
+  document.getElementById('fab-chase').checked = false;
+  document.getElementById('fab-exclusivo').checked = false;
+  document.getElementById('fab-tipoexc').value = '';
+  document.getElementById('fab-tipoexc-wrap').style.display = 'none';
+  fabRenderTanda();
+}
+
+function fabQuitarItem(i) { _fabTanda.splice(i, 1); fabRenderTanda(); }
+
+function fabRenderTanda() {
+  const cont = document.getElementById('fab-tanda-lista');
+  const n = _fabTanda.length;
+  document.getElementById('fab-tanda-n').textContent = n;
+  const btn = document.getElementById('fab-preparar-btn');
+  btn.textContent = '🚀 Preparar tanda (' + n + ')';
+  btn.disabled = (n === 0);
+  if (!n) { cont.innerHTML = '<span style="font-size:13px;color:var(--gray-500)">Aún no has añadido ninguna.</span>'; return; }
+  cont.innerHTML = _fabTanda.map((it, i) => {
+    const tags = [];
+    if (it.es_vaulted)   tags.push('Vaulted');
+    if (it.es_chase)     tags.push('Chase');
+    if (it.es_exclusivo) tags.push('Exclusivo' + (it.tipo_exclusivo ? ' (' + it.tipo_exclusivo + ')' : ''));
+    const tagTxt = tags.length ? ' · <span style="color:var(--navy)">' + tags.join(', ') + '</span>' : '';
+    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">' +
+           '<span style="flex:1">📷 ' + it.file.name + tagTxt + '</span>' +
+           '<button class="btn btn-ghost btn-sm" onclick="fabQuitarItem(' + i + ')">Quitar</button></div>';
+  }).join('');
+}
+
+async function fabPrepararTanda() {
+  const log = document.getElementById('fab-nueva-log');
+  const btn = document.getElementById('fab-preparar-btn');
+  if (!_fabTanda.length) return;
+  btn.disabled = true;
+  log.innerHTML = '<div class="info-box">⏳ Subiendo fotos y dejando la orden...</div>';
+  try {
+    // 1) Limpiar el buzón de la fábrica (por si quedó algo viejo)
+    try {
+      const { data: viejos } = await db.storage.from('informes').list('fabrica', { limit: 200 });
+      const borrar = (viejos || []).filter(o => !o.name.startsWith('.')).map(o => 'fabrica/' + o.name);
+      if (borrar.length) await db.storage.from('informes').remove(borrar);
+    } catch (e) {}
+
+    // 2) Subir cada foto al buzón y construir los items del recado
+    const tanda = new Date().toISOString().slice(0,16).replace(/[-:T]/g,'').replace(/(\d{8})(\d{4})/,'$1_$2');
+    const items = [];
+    for (let i = 0; i < _fabTanda.length; i++) {
+      const it = _fabTanda[i];
+      const limpio = it.file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const ruta = 'fabrica/' + tanda + '_' + i + '_' + limpio;
+      const { error } = await db.storage.from('informes').upload(ruta, it.file, { upsert: true, contentType: 'image/jpeg' });
+      if (error) throw new Error('subiendo ' + it.file.name + ': ' + error.message);
+      items.push({
+        foto_culo: ruta,
+        es_vaulted: it.es_vaulted, es_chase: it.es_chase,
+        es_exclusivo: it.es_exclusivo, tipo_exclusivo: it.tipo_exclusivo,
+      });
+    }
+
+    // 3) Dejar el recado
+    const recado = { tanda, items };
+    const blob = new Blob([JSON.stringify(recado)], { type: 'application/json' });
+    const { error: e2 } = await db.storage.from('informes').upload('fabrica/_solicitud_fabrica.json', blob, { upsert: true });
+    if (e2) throw new Error('dejando el recado: ' + e2.message);
+
+    // 4) Disparar el robot PREPARAR
+    const resp = await fetch('/api/disparar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secreto: DISPARO_SECRET, workflow: 'fabrica-preparar.yml' })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      log.innerHTML = '<div class="info-box" style="border-left:3px solid #2e7d32">✅ ' + items.length + ' ficha(s) lanzada(s) a preparar en la nube.<br><span style="color:#888780">En un par de minutos estarán listas para elegir fotos. Si alguna foto sale borrosa y no se lee el código, te avisará y bastará con repetirla.</span></div>';
+      _fabTanda = [];
+      fabRenderTanda();
+    } else if (resp.status === 409) {
+      log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">⏳ ' + (data.error || 'Ya hay una preparación en marcha. Espera a que termine.') + '</div>';
+      btn.disabled = false;
+    } else {
+      log.innerHTML = '<div class="info-box" style="border-left:3px solid #b00020">⚠️ No se pudo lanzar: ' + (data.error || ('HTTP ' + resp.status)) + '.</div>';
+      btn.disabled = false;
+    }
+  } catch (e) {
+    log.innerHTML = '<div class="info-box" style="border-left:3px solid #b00020">⚠️ Error: ' + e.message + '</div>';
+    btn.disabled = false;
+  }
 }
 
 // ============================================================
