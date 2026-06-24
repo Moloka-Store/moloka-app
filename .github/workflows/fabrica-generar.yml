@@ -15,7 +15,7 @@ jobs:
           python-version: '3.11'
 
       - name: Dependencias Python
-        run: pip install anthropic supabase requests scipy pillow numpy
+        run: pip install anthropic supabase requests scipy pillow numpy rembg onnxruntime
 
       - name: Robot GENERAR
         env:
