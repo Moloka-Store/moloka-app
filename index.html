@@ -1502,7 +1502,7 @@ async function fabRehacerFotos() {
   try {
     const recado = JSON.stringify({ id: f.id, caja, figura });
     const blob = new Blob([recado], { type: 'application/json' });
-    const up = await db.storage.from('fotos-fabrica').upload('fabrica/_solicitud_rehacer.json', blob, { upsert: true, contentType: 'application/json' });
+    const up = await db.storage.from('informes').upload('fabrica/_solicitud_rehacer.json', blob, { upsert: true, contentType: 'application/json' });
     if (up.error) throw new Error(up.error.message);
     const resp = await fetch('/api/disparar', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
