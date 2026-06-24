@@ -1,0 +1,25 @@
+name: Moloka - Fabrica Redactar
+
+on:
+  workflow_dispatch:
+
+jobs:
+  redactar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Dependencias Python
+        run: pip install supabase anthropic requests
+
+      - name: Robot REDACTAR
+        env:
+          SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:      ${{ secrets.SUPABASE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python -u robot_redactar.py
