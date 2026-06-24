@@ -1472,7 +1472,7 @@ function fabEsperarBorrador(tanda) {
     }
     if (intentos > 96) {  // ~8 min (monta + descarga modelo IA la 1a vez)
       clearInterval(_fabPoll);
-      log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">Está tardando más de lo normal. Mira en un momento la pestaña, o dale otra vez a Generar.</div>';
+      log.innerHTML = '<div class="info-box" style="border-left:3px solid #b91c1c">❌ El motor no ha respondido en 8 minutos. Seguramente ha fallado algo. Revisa el log en GitHub → Actions (workflow "Fabrica Preparar") para ver el error, o vuelve a darle a Generar. La ficha NO se ha publicado.</div>';
       document.getElementById('fab-generar-btn').disabled = false;
     }
   }, 5000);
@@ -1511,6 +1511,21 @@ async function fabReemplazarMontaje(tipo, input) {
   }
 }
 
+function fabVerGrande(url, label) {
+  let ov = document.getElementById('fab-lightbox');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'fab-lightbox';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(10,8,20,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:zoom-out';
+    ov.onclick = () => { ov.style.display = 'none'; };
+    document.body.appendChild(ov);
+  }
+  ov.innerHTML = `
+    <div style="color:#fff;font-size:14px;margin-bottom:10px;font-weight:600">${label || ''} · tamaño real (así se verá en la web) — clic para cerrar</div>
+    <img src="${url}" style="max-width:92vw;max-height:82vh;object-fit:contain;border-radius:8px;background:#fff;box-shadow:0 8px 40px rgba(0,0,0,.5)">`;
+  ov.style.display = 'flex';
+}
+
 function fabRenderResultado() {
   const f = _fabActual;
   const cont = document.getElementById('fab-resultado');
@@ -1525,7 +1540,7 @@ function fabRenderResultado() {
   if (fg.protector) tipos.push(['protector','Protector']);
   const montajesHtml = tipos.filter(([k]) => fg[k]).map(([k,label]) => `<div style="text-align:center">
       <div style="border:2px solid var(--gray-200);border-radius:10px;padding:4px;background:#f7f5fb">
-        <img src="${fg[k]}" style="width:130px;height:130px;object-fit:contain;display:block"></div>
+        <img src="${fg[k]}" onclick="fabVerGrande('${fg[k]}','${label}')" title="Clic para verla a tamaño real" style="width:130px;height:130px;object-fit:contain;display:block;cursor:zoom-in"></div>
       <div style="font-size:11px;font-weight:600;margin-top:4px">${label}</div>
       <label style="font-size:10px;color:var(--navy-light);cursor:pointer;text-decoration:underline">cambiar por la mía<input type="file" accept="image/*" style="display:none" onchange="fabReemplazarMontaje('${k}',this)"></label>
     </div>`).join('');
