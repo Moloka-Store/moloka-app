@@ -316,6 +316,17 @@ def preparar_item(ean, item, foto_culo_url):
     except Exception as e:
         print(f"      AVISO: montaje de fotos falló ({e}). Se podrá subir a mano en la app.")
 
+    # Evitar duplicados: si ya hay borradores de este mismo EAN (regeneraciones), se borran
+    # antes de insertar el nuevo, para no acumular copias en la lista de borradores.
+    try:
+        viejos = sb.table('fabrica_fichas').select('id').eq('ean', ean).eq('estado', 'borrador').execute().data or []
+        if viejos:
+            for v in viejos:
+                sb.table('fabrica_fichas').delete().eq('id', v['id']).execute()
+            print(f"      (limpiados {len(viejos)} borrador(es) anterior(es) del mismo EAN)")
+    except Exception as e:
+        print(f"      (aviso: no pude limpiar borradores anteriores: {e})")
+
     sb.table('fabrica_fichas').insert(fila).execute()
     print(f"      OK -> 'borrador', {len(fotos)} candidatas + montaje.")
     return True
