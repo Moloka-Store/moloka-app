@@ -1521,7 +1521,7 @@ function fabRenderResultado() {
 
   // MONTAJES FINALES (lo que irá a la web) con opción de reemplazar cada uno
   const fg = f.fotos_generadas || {};
-  const tipos = [['portada','Portada'],['neon','Neón'],['regla','Regla'],['caja','Caja']];
+  const tipos = [['portada','Portada'],['caja','Caja'],['figura','Silueta'],['neon','Neón'],['regla','Regla']];
   if (fg.protector) tipos.push(['protector','Protector']);
   const montajesHtml = tipos.filter(([k]) => fg[k]).map(([k,label]) => `<div style="text-align:center">
       <div style="border:2px solid var(--gray-200);border-radius:10px;padding:4px;background:#f7f5fb">
