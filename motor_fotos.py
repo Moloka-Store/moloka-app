@@ -89,13 +89,13 @@ def _recortar_clasico(fig_rgb):
 
 # ---------- CONTROL DE CALIDAD (test del magenta) ----------
 def test_calidad(fig_rgba):
-    """Devuelve (ok, motivo). Detecta restos casi-blancos en la zona del cuello."""
-    arr=np.array(fig_rgba); rgb=arr[:,:,:3].astype(int); a=arr[:,:,3]; H=a.shape[0]
-    zona=slice(int(0.40*H),int(0.62*H))
-    solid=a[zona]>=240; blanco=solid&(rgb[zona].min(2)>=235)
-    n=int(blanco.sum())
-    if n>60: return False, f"{n}px casi-blancos en el cuello"
-    return True, "limpio"
+    """Con recorte por IA, los blancos son legítimos (trajes/sombreros blancos), no suciedad.
+    Solo rechazamos recortes vacíos o degenerados (si la IA fallara del todo)."""
+    arr = np.array(fig_rgba); a = arr[:,:,3]
+    solido = int((a >= 200).sum())
+    if solido < 500:
+        return False, "recorte casi vacío (la IA no encontró figura)"
+    return True, "ok"
 
 # ---------- MONTAJE NEÓN ----------
 def montar_neon(fig_rgba, fondo_rgb):
