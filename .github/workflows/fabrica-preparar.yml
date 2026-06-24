@@ -6,7 +6,7 @@ on:
 jobs:
   preparar:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -18,7 +18,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libzbar0
 
       - name: Dependencias Python
-        run: pip install keepa supabase pyzbar pillow anthropic
+        run: pip install keepa supabase pyzbar pillow anthropic scipy numpy requests rembg onnxruntime
 
       - name: Robot PREPARAR
         env:
