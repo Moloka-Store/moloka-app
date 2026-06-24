@@ -216,17 +216,22 @@ def cargar_web_productos():
         desde += 1000
     return filas
 
-def galeria(fg):
-    """Lista de URLs en el orden fijo, solo las que existan."""
+def galeria(fg, secundarias=None):
+    """Orden: portada, caja, figura, [secundarias elegidas], neon, regla, protector."""
     fg = fg or {}
-    return [fg[k] for k in ORDEN_GALERIA if fg.get(k)]
+    out = [fg[k] for k in ('portada','caja','figura') if fg.get(k)]
+    for u in (secundarias or []):
+        if u and u not in out: out.append(u)
+    out += [fg[k] for k in ('neon','regla','protector') if fg.get(k)]
+    return out
 
 def volcar_a_web(f, indice):
     """Upsert de un expediente a web_productos (idéntico a motor_paso7, por ficha)."""
     ean = f.get('ean'); slug = f.get('slug')
     if not ean or not slug:
         return 'saltado', None
-    imgs = galeria(f.get('fotos_generadas'))
+    secundarias = (f.get('fotos_elegidas') or {}).get('secundarias') or []
+    imgs = galeria(f.get('fotos_generadas'), secundarias)
     principal = (f.get('fotos_generadas') or {}).get('portada') or (imgs[0] if imgs else None)
     contenido = {
         'ean': str(ean), 'slug': slug,
@@ -237,7 +242,9 @@ def volcar_a_web(f, indice):
         'categoria': f.get('categoria'), 'fandom': f.get('fandom'),
         'es_chase': bool(f.get('es_chase')), 'es_vaulted': bool(f.get('es_vaulted')),
         'es_exclusivo': bool(f.get('es_exclusivo')),
-        'precio': f.get('precio'),
+        'precio': f.get('precio_web'),            # la web lee 'precio' -> va el precio WEB
+        'precio_web': f.get('precio_web'),        # para la pestaña Precios
+        'precio_miravia': f.get('precio_miravia'),# solo para el feed de Miravia
         'imagen_principal': principal, 'imagenes': imgs or None,
         'origen': 'fabrica', 'activo': True,
     }
