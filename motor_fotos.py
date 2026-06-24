@@ -26,10 +26,22 @@ def recortar(fig_rgb):
         out = remove(rgb, session=_get_rembg()).convert('RGBA')
         arr = np.array(out)
         alpha = arr[:,:,3]
-        # ENDURECER: lo que la IA da como figura (semi)opaca -> sólido del todo.
-        # Evita transparencias a medias en zonas finas (corbatas, peanas) que dejan
-        # ver el fondo a través. Umbral medio: >=128 pasa a 255, el resto a 0.
-        alpha = np.where(alpha >= 128, 255, 0).astype(np.uint8)
+        solido = alpha >= 128
+        # RELLENAR SOLO HUECOS PEQUEÑOS (corbata, centro de peana): agujeros internos
+        # rodeados de figura y de área pequeña. Los grandes (espacio entre piernas) se
+        # respetan como fondo. Umbral = 1.5% del área de la figura.
+        filled = ndimage.binary_fill_holes(solido)
+        huecos = filled & ~solido
+        hl, hn = ndimage.label(huecos)
+        area_fig = max(1, int(solido.sum()))
+        umbral = int(0.015 * area_fig)
+        rellenar = np.zeros_like(solido)
+        for i in range(1, hn + 1):
+            reg = (hl == i)
+            if int(reg.sum()) < umbral:
+                rellenar |= reg
+        mask = solido | rellenar
+        alpha = np.where(mask, 255, 0).astype(np.uint8)
         # limpiar motas: quedarse con el componente grande de la máscara
         solid = alpha > 128
         lbl, n = ndimage.label(solid)
