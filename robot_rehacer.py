@@ -6,7 +6,7 @@ usando la CAJA y la FIGURA que el usuario eligió a mano en la app, SIN pisar la
 que el usuario ya hubiera subido con "cambiar por la mía" (carpeta /propias/).
 Lee el recado fabrica/_solicitud_rehacer.json {id, caja, figura}.
 """
-import os, io, json, requests
+import os, io, json, time, requests
 from PIL import Image
 from supabase import create_client
 import motor_fotos as M
@@ -29,12 +29,15 @@ def a_jpg_bytes(img, q=94):
     buf = io.BytesIO(); img.save(buf, "JPEG", quality=q); return buf.getvalue()
 
 def subir(admin, ruta, data):
-    """Sube (o reemplaza) un jpg al bucket y devuelve su URL pública."""
+    """Sube (o reemplaza) un jpg al bucket y devuelve su URL pública con rompe-caché
+    (?v=timestamp) para que el navegador y el CDN no muestren la versión vieja al rehacer."""
     admin.storage.from_(BUCKET).upload(
         ruta, data,
         {"content-type": "image/jpeg", "upsert": "true"}  # upsert: si ya existe, lo reemplaza
     )
-    return admin.storage.from_(BUCKET).get_public_url(ruta)
+    url = admin.storage.from_(BUCKET).get_public_url(ruta)
+    sep = '&' if '?' in url else '?'
+    return f"{url}{sep}v={int(time.time())}"
 
 def descargar_asset(nombre):
     """Baja un asset fijo (fondo_neon / regla_10cm) del Storage en vez de /content."""
@@ -93,7 +96,9 @@ def main():
     fid  = recado['id']
     caja = recado.get('caja')
     figura = recado.get('figura')
-    print(f"Rehacer fotos de ficha id={fid} | caja={'sí' if caja else 'no'} | figura={'sí' if figura else 'no'}")
+    print(f"Rehacer fotos de ficha id={fid}")
+    print(f"   CAJA   recibida del recado: {caja}")
+    print(f"   FIGURA recibida del recado: {figura}")
 
     fila = (sb.table('fabrica_fichas').select('*').eq('id', fid).limit(1).execute().data or [None])[0]
     if not fila:
@@ -120,6 +125,9 @@ def main():
     enlaces, err = generar_fotos(fila, fondo, regla, prot)
     if err:
         print(f"❌ No se pudo rehacer: {err}"); limpiar_recado(); return
+    print("   --- URLs montadas ---")
+    for k in ('portada','neon','regla','caja','figura','protector'):
+        if k in enlaces: print(f"   {k}: {enlaces[k]}")
 
     # Mezclar: lo nuevo, pero respetando lo tuyo (/propias/)
     final = dict(enlaces)
