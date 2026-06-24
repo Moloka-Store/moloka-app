@@ -355,67 +355,57 @@
     <!-- Sub-pestañas de la Fábrica -->
     <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
       <button id="fabtab-nueva"   class="btn btn-primary btn-sm" onclick="fabSubTab('nueva')">➕ Nueva ficha</button>
-      <button id="fabtab-elegir"  class="btn btn-ghost btn-sm"   onclick="fabSubTab('elegir')">🖼️ Elegir fotos</button>
       <button id="fabtab-precios" class="btn btn-ghost btn-sm"   onclick="fabSubTab('precios')">🏷️ Precios web</button>
     </div>
 
-    <!-- ====================== SUB-PESTAÑA: ELEGIR FOTOS ====================== -->
-    <div id="fab-sub-elegir" style="display:none">
-      <div class="card" style="padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-        <div style="flex:1;min-width:220px">
-          <div style="font-weight:600">Fichas preparadas, listas para elegir fotos</div>
-          <div style="font-size:13px;color:var(--gray-500)">Marca en cada una cuál es la <b>Caja</b> (la que tiene el número) y cuál el <b>Recorte</b> (la figura sola). Confirma, y cuando tengas las que quieras, dale a Generar.</div>
-        </div>
-        <button class="btn btn-ghost btn-sm" onclick="cargarSeleccion()">🔄 Refrescar</button>
-        <button id="sel-generar-btn" class="btn btn-primary" onclick="fabGenerarPublicar()">🚀 Generar y publicar las confirmadas</button>
-      </div>
-      <div id="sel-generar-log" style="margin-bottom:14px"></div>
-      <div id="sel-cont"></div>
-    </div>
-
-
-    <!-- ====================== SUB-PESTAÑA: NUEVA FICHA ====================== -->
+    <!-- ====================== SUB-PESTAÑA: NUEVA FICHA (uno a uno) ====================== -->
     <div id="fab-sub-nueva">
-      <div class="card" style="padding:18px;margin-bottom:16px">
-        <div style="font-weight:600;margin-bottom:4px">1 · Añade cada Funko a la tanda</div>
-        <div style="font-size:13px;color:var(--gray-500);margin-bottom:14px">Sube la foto del culo de la caja (la del código de barras). La máquina sacará el EAN sola. Marca las rarezas solo si las conoces.</div>
 
-        <div style="display:grid;gap:12px;max-width:560px">
+      <!-- 1 · FORMULARIO -->
+      <div class="card" style="padding:18px;margin-bottom:16px">
+        <div style="font-weight:600;margin-bottom:4px">1 · Datos del producto</div>
+        <div style="font-size:13px;color:var(--gray-500);margin-bottom:16px">Sube la foto del culo (la del código de barras). La máquina saca el EAN sola y genera la ficha.</div>
+        <div style="display:grid;gap:14px;max-width:640px">
           <div>
-            <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Foto del culo</label>
+            <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">📷 Foto del culo</label>
             <input type="file" id="fab-foto" accept="image/*" style="font-size:13px">
           </div>
-
           <div>
-            <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Rareza (opcional)</label>
+            <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Rareza (solo si la conoces)</label>
             <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:13px">
               <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="fab-vaulted"> Vaulted (retirado)</label>
               <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="fab-chase"> Chase</label>
               <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="fab-exclusivo" onchange="document.getElementById('fab-tipoexc-wrap').style.display=this.checked?'block':'none'"> Exclusivo</label>
             </div>
           </div>
-
           <div id="fab-tipoexc-wrap" style="display:none">
-            <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">¿Exclusivo de dónde? (opcional)</label>
-            <input type="text" id="fab-tipoexc" placeholder="Ej: PREVIEWS, Funko Shop, SDCC..." style="width:100%;max-width:320px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">
+            <input type="text" id="fab-tipoexc" placeholder="¿Exclusivo de dónde? Ej: PREVIEWS, Funko Shop, SDCC..." style="width:100%;max-width:340px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">
           </div>
-
           <div>
-            <button class="btn btn-ghost btn-sm" onclick="fabAñadirItem()">➕ Añadir a la tanda</button>
+            <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">🎁 Protector</label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px"><input type="checkbox" id="fab-protector"> Vender con protector <span style="color:var(--gray-500)">(añade la funda a la galería y la coletilla de regalo)</span></label>
+          </div>
+          <div style="display:flex;gap:16px;flex-wrap:wrap">
+            <div style="flex:1;min-width:150px">
+              <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Precio web (€)</label>
+              <input type="number" step="0.01" id="fab-precio-web" placeholder="19,90" style="width:100%;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">
+            </div>
+            <div style="flex:1;min-width:150px">
+              <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Precio Miravia (€)</label>
+              <input type="number" step="0.01" id="fab-precio-miravia" placeholder="21,99" style="width:100%;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">
+            </div>
+          </div>
+          <div>
+            <button id="fab-generar-btn" class="btn btn-primary" onclick="fabGenerarFicha()">🔎 Generar ficha</button>
           </div>
         </div>
+        <div id="fab-gen-log" style="margin-top:14px"></div>
       </div>
 
-      <div class="card" style="padding:18px">
-        <div style="font-weight:600;margin-bottom:4px">2 · Tanda a preparar (<span id="fab-tanda-n">0</span>)</div>
-        <div style="font-size:13px;color:var(--gray-500);margin-bottom:14px">Cuando tengas todas, dale a Preparar. La nube las procesa de una vez.</div>
-        <div id="fab-tanda-lista" style="display:grid;gap:8px;margin-bottom:14px"><span style="font-size:13px;color:var(--gray-500)">Aún no has añadido ninguna.</span></div>
-        <button id="fab-preparar-btn" class="btn btn-primary" onclick="fabPrepararTanda()" disabled>🚀 Preparar tanda (0)</button>
-        <div id="fab-nueva-log" style="margin-top:14px"></div>
-      </div>
+      <!-- 2 · RESULTADO (oculto hasta generar) -->
+      <div id="fab-resultado" style="display:none"></div>
     </div>
 
-    <!-- ====================== SUB-PESTAÑA: PRECIOS (intacta) ====================== -->
     <div id="fab-sub-precios" style="display:none">
       <div class="card" style="padding:0;overflow:hidden">
         <div style="padding:14px 16px;border-bottom:1px solid var(--gray-200);display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -429,10 +419,9 @@
                 <th>Producto</th>
                 <th style="text-align:center">Rareza</th>
                 <th style="text-align:center" title="Precio que se mostrará en la web propia">Precio Web (€)</th>
-                <th style="text-align:center" title="Precio que irá al feed de Miravia">Precio Miravia (€)</th>
               </tr>
             </thead>
-            <tbody id="fab-tbody"><tr><td colspan="4"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr></tbody>
+            <tbody id="fab-tbody"><tr><td colspan="3"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr></tbody>
           </table>
         </div>
       </div>
@@ -1376,255 +1365,263 @@ function showPage(id, el) {
 // FÁBRICA WEB — sub-pestañas (Nueva ficha / Precios)
 // ============================================================
 function fabSubTab(cual) {
-  const tabs = ['nueva', 'elegir', 'precios'];
+  const tabs = ['nueva', 'precios'];
   tabs.forEach(t => {
     document.getElementById('fab-sub-' + t).style.display = (t === cual) ? 'block' : 'none';
     document.getElementById('fabtab-' + t).className = 'btn btn-sm ' + (t === cual ? 'btn-primary' : 'btn-ghost');
   });
-  if (cual === 'elegir') cargarSeleccion();
   if (cual === 'precios' && !window._fabPreciosCargados) { window._fabPreciosCargados = true; cargarFabrica(); }
 }
 
 // ============================================================
-// FÁBRICA WEB — Elegir fotos (verbatim del panel aprobado) + disparo GENERAR
+// FÁBRICA WEB — Nueva ficha (uno a uno): Generar -> espera -> revisar -> Publicar
 // ============================================================
-let _selExpedientes = [];
+let _fabActual = null;   // { id, ean, tanda, fotos:[], papeles:[], web_desc, ... }
+let _fabPoll = null;
 
-async function cargarSeleccion() {
-  const cont = document.getElementById('sel-cont');
-  cont.innerHTML = '<div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div>';
-  const { data, error } = await db.from('fabrica_fichas')
-    .select('id,ean,titulo_keepa,marca,es_chase,es_vaulted,es_exclusivo,fotos_keepa,fotos_elegidas,estado')
-    .in('estado', ['preparado', 'sin_foto'])
-    .order('id');
-  if (error) { cont.innerHTML = '<div style="padding:20px;color:#b91c1c">Error: ' + error.message + '</div>'; return; }
-  _selExpedientes = (data || []).map(prepararExpediente);
-  renderSeleccion();
-}
-
-function prepararExpediente(f) {
-  let fotos = [];
-  try { fotos = Array.isArray(f.fotos_keepa) ? f.fotos_keepa : JSON.parse(f.fotos_keepa || '[]'); } catch (e) { fotos = []; }
-  const papeles = fotos.map((u, i) => i === 0 ? 'caja' : i === 1 ? 'recorte' : i >= 3 ? 'quitar' : 'secundaria');
-  return { ...f, fotos, papeles };
-}
-
-function renderSeleccion() {
-  const cont = document.getElementById('sel-cont');
-  if (!_selExpedientes.length) {
-    cont.innerHTML = '<div class="info-box" style="font-size:13px">No hay fichas preparadas ahora mismo. Cuando prepares un producto en "Nueva ficha", aparecerá aquí para que elijas las fotos.</div>';
-    return;
-  }
-  cont.innerHTML = _selExpedientes.map((f, idx) => {
-    const rar = f.es_chase
-      ? '<span class="badge" style="background:#f59e0b;color:#3a2600">CHASE</span>'
-      : f.es_vaulted ? '<span class="badge" style="background:#7c3aed;color:#fff">VAULTED</span>'
-      : f.es_exclusivo ? '<span class="badge" style="background:#0ea5b7;color:#fff">EXCLUSIVO</span>' : '';
-    const fotosHtml = f.fotos.map((url, i) => {
-      const papel = f.papeles[i];
-      const borde = papel === 'caja' ? '#f59e0b' : papel === 'recorte' ? '#7c3aed' : papel === 'secundaria' ? '#16a34a' : '#d1d5db';
-      const op = papel === 'quitar' ? '0.4' : '1';
-      return `<div style="text-align:center">
-        <div style="border:3px solid ${borde};border-radius:10px;padding:4px;opacity:${op};background:#f7f5fb">
-          <img src="${url}" style="width:120px;height:120px;object-fit:contain;display:block">
-        </div>
-        <div style="display:flex;gap:3px;justify-content:center;margin-top:5px;flex-wrap:wrap">
-          ${botonPapel(idx, i, 'caja', 'Caja', papel)}
-          ${botonPapel(idx, i, 'recorte', 'Recorte', papel)}
-          ${botonPapel(idx, i, 'secundaria', 'Secund.', papel)}
-          ${botonPapel(idx, i, 'quitar', 'Quitar', papel)}
-        </div>
-      </div>`;
-    }).join('');
-    return `<div class="card" style="padding:16px;margin-bottom:16px">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-        <div style="flex:1"><div style="font-weight:600;font-size:14px">${f.titulo_keepa || f.ean}</div><div style="font-size:11px;color:var(--gray-500)">${f.marca || ''} · ${f.ean}</div></div>
-        ${rar}
-      </div>
-      <div style="display:flex;gap:14px;flex-wrap:wrap">${fotosHtml || '<span style="color:var(--gray-500);font-size:13px">Sin fotos de Keepa.</span>'}</div>
-      <div style="margin-top:14px;display:flex;align-items:center;gap:10px">
-        <button class="btn btn-primary btn-sm" onclick="confirmarFicha(${idx})">✅ Confirmar selección</button>
-        <span style="font-size:12px;color:var(--gray-500)" id="sel-msg-${idx}"></span>
-      </div>
-    </div>`;
-  }).join('');
-}
-
-function botonPapel(idx, i, papel, label, actual) {
+function botonPapel(i, papel, label, actual) {
   const cols = { caja: '#f59e0b', recorte: '#7c3aed', secundaria: '#16a34a', quitar: '#9ca3af' };
   const on = actual === papel;
   const bg = on ? cols[papel] : '#fff';
   const fg = on ? (papel === 'caja' ? '#3a2600' : '#fff') : 'var(--navy)';
-  return `<button onclick="marcarPapel(${idx},${i},'${papel}')" style="font-size:10px;font-weight:600;padding:3px 7px;border-radius:6px;border:1px solid ${cols[papel]};background:${bg};color:${fg};cursor:pointer">${label}</button>`;
+  return `<button onclick="fabMarcarPapel(${i},'${papel}')" style="font-size:10px;font-weight:600;padding:3px 7px;border-radius:6px;border:1px solid ${cols[papel]};background:${bg};color:${fg};cursor:pointer">${label}</button>`;
 }
 
-function marcarPapel(idx, i, papel) {
-  const exp = _selExpedientes[idx];
+function fabMarcarPapel(i, papel) {
+  if (!_fabActual) return;
   if (papel === 'caja' || papel === 'recorte') {
-    exp.papeles = exp.papeles.map(p => p === papel ? 'secundaria' : p);
+    _fabActual.papeles = _fabActual.papeles.map(p => p === papel ? 'secundaria' : p);
   }
-  exp.papeles[i] = papel;
-  renderSeleccion();
+  _fabActual.papeles[i] = papel;
+  fabRenderResultado();
 }
 
-async function confirmarFicha(idx) {
-  const exp = _selExpedientes[idx];
-  const msg = document.getElementById('sel-msg-' + idx);
-  const caja = exp.fotos[exp.papeles.indexOf('caja')] || null;
-  const recorte = exp.fotos[exp.papeles.indexOf('recorte')] || null;
-  const secundarias = exp.fotos.filter((u, i) => exp.papeles[i] === 'secundaria');
-  if (!caja || !recorte) { msg.textContent = '⚠️ Marca al menos la Caja y el Recorte.'; msg.style.color = '#b91c1c'; return; }
-  msg.textContent = 'Guardando...'; msg.style.color = 'var(--gray-500)';
-  const fotos_elegidas = { caja, recorte_moloka: recorte, secundarias, propias_n: 0 };
-  const { error } = await db.from('fabrica_fichas').update({ fotos_elegidas, estado: 'fotos_ok' }).eq('id', exp.id);
-  if (error) { msg.textContent = 'Error: ' + error.message; msg.style.color = '#b91c1c'; return; }
-  msg.textContent = '✅ Guardado. Lista para generar.'; msg.style.color = '#16a34a';
-  _selExpedientes.splice(idx, 1);
-  setTimeout(renderSeleccion, 900);
-}
-
-async function fabGenerarPublicar() {
-  const log = document.getElementById('sel-generar-log');
-  const btn = document.getElementById('sel-generar-btn');
-  // ¿Hay alguna ficha en 'fotos_ok' (confirmada) esperando?
-  const { count, error: e0 } = await db.from('fabrica_fichas')
-    .select('id', { count: 'exact', head: true }).eq('estado', 'fotos_ok');
-  if (e0) { log.innerHTML = '<div class="info-box" style="border-left:3px solid #b00020">⚠️ ' + e0.message + '</div>'; return; }
-  if (!count) {
-    log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">No hay ninguna ficha confirmada todavía. Confirma al menos una selección arriba (Caja + Recorte) antes de generar.</div>';
-    return;
-  }
+async function fabGenerarFicha() {
+  const log = document.getElementById('fab-gen-log');
+  const btn = document.getElementById('fab-generar-btn');
+  const file = (document.getElementById('fab-foto').files || [])[0];
+  if (!file) { log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">Sube primero la foto del culo.</div>'; return; }
   btn.disabled = true;
-  log.innerHTML = '<div class="info-box">⏳ Lanzando la generación de ' + count + ' ficha(s)...</div>';
-  try {
-    const resp = await fetch('/api/disparar', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ secreto: DISPARO_SECRET, workflow: 'fabrica-generar.yml' })
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (resp.ok) {
-      log.innerHTML = '<div class="info-box" style="border-left:3px solid #2e7d32">✅ Generación lanzada para ' + count + ' ficha(s).<br><span style="color:#888780">Redacta el texto, monta las fotos y las publica en la web. Tarda unos minutos (la IA y el montaje van por ficha). Cuando termine, las verás en la web y podrás ponerles precio en la pestaña "Precios web".</span></div>';
-    } else if (resp.status === 409) {
-      log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">⏳ ' + (data.error || 'Ya hay una generación en marcha. Espera a que termine.') + '</div>';
-      btn.disabled = false;
-    } else {
-      log.innerHTML = '<div class="info-box" style="border-left:3px solid #b00020">⚠️ No se pudo lanzar: ' + (data.error || ('HTTP ' + resp.status)) + '.</div>';
-      btn.disabled = false;
-    }
-  } catch (e) {
-    log.innerHTML = '<div class="info-box" style="border-left:3px solid #b00020">⚠️ Error: ' + e.message + '</div>';
-    btn.disabled = false;
-  }
-}
+  log.innerHTML = '<div class="info-box">⏳ Subiendo la foto y lanzando la generación...</div>';
 
-// ============================================================
-// FÁBRICA WEB — Nueva ficha: tanda -> buzón -> dispara robot PREPARAR
-// ============================================================
-let _fabTanda = [];  // [{file, es_vaulted, es_chase, es_exclusivo, tipo_exclusivo}]
-
-function fabAñadirItem() {
-  const input = document.getElementById('fab-foto');
-  const file  = input.files && input.files[0];
-  if (!file) { alert('Elige primero la foto del culo.'); return; }
-  _fabTanda.push({
-    file,
-    es_vaulted:   document.getElementById('fab-vaulted').checked,
-    es_chase:     document.getElementById('fab-chase').checked,
+  const item = {
+    es_vaulted: document.getElementById('fab-vaulted').checked,
+    es_chase: document.getElementById('fab-chase').checked,
     es_exclusivo: document.getElementById('fab-exclusivo').checked,
-    tipo_exclusivo: document.getElementById('fab-exclusivo').checked ? (document.getElementById('fab-tipoexc').value.trim() || null) : null,
-  });
-  // limpiar el formulario para el siguiente
-  input.value = '';
-  document.getElementById('fab-vaulted').checked = false;
-  document.getElementById('fab-chase').checked = false;
-  document.getElementById('fab-exclusivo').checked = false;
-  document.getElementById('fab-tipoexc').value = '';
-  document.getElementById('fab-tipoexc-wrap').style.display = 'none';
-  fabRenderTanda();
-}
+    tipo_exclusivo: (document.getElementById('fab-tipoexc').value || '').trim() || null,
+    con_protector: document.getElementById('fab-protector').checked,
+    precio_web: parseFloat(document.getElementById('fab-precio-web').value) || null,
+    precio_miravia: parseFloat(document.getElementById('fab-precio-miravia').value) || null,
+  };
 
-function fabQuitarItem(i) { _fabTanda.splice(i, 1); fabRenderTanda(); }
-
-function fabRenderTanda() {
-  const cont = document.getElementById('fab-tanda-lista');
-  const n = _fabTanda.length;
-  document.getElementById('fab-tanda-n').textContent = n;
-  const btn = document.getElementById('fab-preparar-btn');
-  btn.textContent = '🚀 Preparar tanda (' + n + ')';
-  btn.disabled = (n === 0);
-  if (!n) { cont.innerHTML = '<span style="font-size:13px;color:var(--gray-500)">Aún no has añadido ninguna.</span>'; return; }
-  cont.innerHTML = _fabTanda.map((it, i) => {
-    const tags = [];
-    if (it.es_vaulted)   tags.push('Vaulted');
-    if (it.es_chase)     tags.push('Chase');
-    if (it.es_exclusivo) tags.push('Exclusivo' + (it.tipo_exclusivo ? ' (' + it.tipo_exclusivo + ')' : ''));
-    const tagTxt = tags.length ? ' · <span style="color:var(--navy)">' + tags.join(', ') + '</span>' : '';
-    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">' +
-           '<span style="flex:1">📷 ' + it.file.name + tagTxt + '</span>' +
-           '<button class="btn btn-ghost btn-sm" onclick="fabQuitarItem(' + i + ')">Quitar</button></div>';
-  }).join('');
-}
-
-async function fabPrepararTanda() {
-  const log = document.getElementById('fab-nueva-log');
-  const btn = document.getElementById('fab-preparar-btn');
-  if (!_fabTanda.length) return;
-  btn.disabled = true;
-  log.innerHTML = '<div class="info-box">⏳ Subiendo fotos y dejando la orden...</div>';
   try {
-    // 1) Limpiar el buzón de la fábrica (por si quedó algo viejo)
+    // limpiar buzón viejo
     try {
       const { data: viejos } = await db.storage.from('informes').list('fabrica', { limit: 200 });
       const borrar = (viejos || []).filter(o => !o.name.startsWith('.')).map(o => 'fabrica/' + o.name);
       if (borrar.length) await db.storage.from('informes').remove(borrar);
     } catch (e) {}
 
-    // 2) Subir cada foto al buzón y construir los items del recado
     const tanda = new Date().toISOString().slice(0,16).replace(/[-:T]/g,'').replace(/(\d{8})(\d{4})/,'$1_$2');
-    const items = [];
-    for (let i = 0; i < _fabTanda.length; i++) {
-      const it = _fabTanda[i];
-      const limpio = it.file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const ruta = 'fabrica/' + tanda + '_' + i + '_' + limpio;
-      const { error } = await db.storage.from('informes').upload(ruta, it.file, { upsert: true, contentType: 'image/jpeg' });
-      if (error) throw new Error('subiendo ' + it.file.name + ': ' + error.message);
-      items.push({
-        foto_culo: ruta,
-        es_vaulted: it.es_vaulted, es_chase: it.es_chase,
-        es_exclusivo: it.es_exclusivo, tipo_exclusivo: it.tipo_exclusivo,
-      });
-    }
+    const limpio = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const ruta = 'fabrica/' + tanda + '_0_' + limpio;
+    const up = await db.storage.from('informes').upload(ruta, file, { upsert: true, contentType: 'image/jpeg' });
+    if (up.error) throw new Error('subiendo la foto: ' + up.error.message);
+    item.foto_culo = ruta;
 
-    // 3) Dejar el recado
-    const recado = { tanda, items };
+    const recado = { tanda, items: [item] };
     const blob = new Blob([JSON.stringify(recado)], { type: 'application/json' });
-    const { error: e2 } = await db.storage.from('informes').upload('fabrica/_solicitud_fabrica.json', blob, { upsert: true });
+    const e2 = (await db.storage.from('informes').upload('fabrica/_solicitud_fabrica.json', blob, { upsert: true })).error;
     if (e2) throw new Error('dejando el recado: ' + e2.message);
 
-    // 4) Disparar el robot PREPARAR
     const resp = await fetch('/api/disparar', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ secreto: DISPARO_SECRET, workflow: 'fabrica-preparar.yml' })
     });
     const data = await resp.json().catch(() => ({}));
-    if (resp.ok) {
-      log.innerHTML = '<div class="info-box" style="border-left:3px solid #2e7d32">✅ ' + items.length + ' ficha(s) lanzada(s) a preparar en la nube.<br><span style="color:#888780">En un par de minutos estarán listas para elegir fotos. Si alguna foto sale borrosa y no se lee el código, te avisará y bastará con repetirla.</span></div>';
-      _fabTanda = [];
-      fabRenderTanda();
-    } else if (resp.status === 409) {
-      log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">⏳ ' + (data.error || 'Ya hay una preparación en marcha. Espera a que termine.') + '</div>';
-      btn.disabled = false;
-    } else {
+    if (!resp.ok) {
       log.innerHTML = '<div class="info-box" style="border-left:3px solid #b00020">⚠️ No se pudo lanzar: ' + (data.error || ('HTTP ' + resp.status)) + '.</div>';
-      btn.disabled = false;
+      btn.disabled = false; return;
     }
+    log.innerHTML = '<div class="info-box">⏳ Generando ficha... (saca el EAN, busca las fotos y redacta la descripción). Esto tarda un par de minutos, no cierres la pantalla.</div>';
+    fabEsperarBorrador(tanda);
   } catch (e) {
     log.innerHTML = '<div class="info-box" style="border-left:3px solid #b00020">⚠️ Error: ' + e.message + '</div>';
     btn.disabled = false;
   }
 }
+
+function fabEsperarBorrador(tanda) {
+  const log = document.getElementById('fab-gen-log');
+  let intentos = 0;
+  clearInterval(_fabPoll);
+  _fabPoll = setInterval(async () => {
+    intentos++;
+    const { data, error } = await db.from('fabrica_fichas')
+      .select('*').eq('tanda', tanda).order('id', { ascending: false }).limit(1);
+    if (!error && data && data.length && (data[0].estado === 'borrador' || data[0].estado === 'sin_foto')) {
+      clearInterval(_fabPoll);
+      if (data[0].estado === 'sin_foto') {
+        log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">⚠️ No se pudo leer el código de barras de la foto. Haz otra foto del culo más nítida y vuelve a darle a Generar.</div>';
+        document.getElementById('fab-generar-btn').disabled = false;
+        return;
+      }
+      log.innerHTML = '<div class="info-box" style="border-left:3px solid #2e7d32">✅ Ficha generada. Revísala abajo.</div>';
+      fabCargarResultado(data[0]);
+      return;
+    }
+    if (intentos > 60) {  // ~5 min
+      clearInterval(_fabPoll);
+      log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">Está tardando más de lo normal. Mira en un momento la pestaña, o dale otra vez a Generar.</div>';
+      document.getElementById('fab-generar-btn').disabled = false;
+    }
+  }, 5000);
+}
+
+function fabCargarResultado(f) {
+  let fotos = [];
+  try { fotos = Array.isArray(f.fotos_keepa) ? f.fotos_keepa : JSON.parse(f.fotos_keepa || '[]'); } catch (e) { fotos = []; }
+  const papeles = fotos.map((u, i) => i === 0 ? 'caja' : i === 1 ? 'recorte' : i >= 3 ? 'quitar' : 'secundaria');
+  _fabActual = { ...f, fotos, papeles };
+  document.getElementById('fab-generar-btn').disabled = false;
+  fabRenderResultado();
+}
+
+function fabRenderResultado() {
+  const f = _fabActual;
+  const cont = document.getElementById('fab-resultado');
+  if (!f) { cont.style.display = 'none'; return; }
+  const rar = f.es_chase ? '<span class="badge" style="background:#f59e0b;color:#3a2600">CHASE</span>'
+    : f.es_vaulted ? '<span class="badge" style="background:#7c3aed;color:#fff">VAULTED</span>'
+    : f.es_exclusivo ? '<span class="badge" style="background:#0ea5b7;color:#fff">EXCLUSIVO</span>' : '';
+  const fotosHtml = f.fotos.map((url, i) => {
+    const papel = f.papeles[i];
+    const borde = papel === 'caja' ? '#f59e0b' : papel === 'recorte' ? '#7c3aed' : papel === 'secundaria' ? '#16a34a' : '#d1d5db';
+    const op = papel === 'quitar' ? '0.4' : '1';
+    return `<div style="text-align:center">
+      <div style="border:3px solid ${borde};border-radius:10px;padding:4px;opacity:${op};background:#f7f5fb">
+        <img src="${url}" style="width:120px;height:120px;object-fit:contain;display:block"></div>
+      <div style="display:flex;gap:3px;justify-content:center;margin-top:5px;flex-wrap:wrap">
+        ${botonPapel(i,'caja','Caja',papel)}${botonPapel(i,'recorte','Recorte',papel)}${botonPapel(i,'secundaria','Secund.',papel)}${botonPapel(i,'quitar','Quitar',papel)}
+      </div></div>`;
+  }).join('');
+  const subir = `<div style="text-align:center;align-self:center">
+      <label style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:130px;height:130px;border:2px dashed #94a3b8;border-radius:10px;cursor:pointer;color:var(--navy-light);font-size:12px;text-align:center">
+        ＋ subir<br>foto mía<input type="file" accept="image/*" style="display:none" onchange="fabCargarFotoPropia(this)"></label></div>`;
+
+  cont.style.display = 'block';
+  cont.className = 'card';
+  cont.style.padding = '18px';
+  cont.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+      <div style="font-weight:600;flex:1">2 · Revisa y publica</div>
+      <span style="font-size:12px;font-weight:600;border:1px solid var(--navy);color:var(--navy);padding:3px 9px;border-radius:6px">${f.nombre_corto || f.titulo_keepa || f.ean}</span> ${rar}
+    </div>
+    <div style="font-size:13px;font-weight:600;margin:12px 0 4px">Elige las fotos</div>
+    <div style="font-size:13px;color:var(--gray-500);margin-bottom:10px">Marca cuál es la <b>Caja</b> (la del número) y cuál el <b>Recorte</b> (figura sola). Lo demás, secundaria o quitar.</div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:8px">${fotosHtml}${subir}</div>
+
+    <div style="font-size:13px;font-weight:600;margin:18px 0 6px">Descripción para la web (generada)</div>
+    <div id="fab-desc-box" style="border:1px solid var(--gray-200);border-radius:8px;padding:14px;font-size:13px;line-height:1.5;background:var(--gray-50);color:var(--gray-700)">${f.web_desc || '<i>Sin descripción. Pulsa Regenerar.</i>'}</div>
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
+      <input id="fab-instr" placeholder='Instrucción para regenerar (ej: "más corta", "no digas chaval")' style="flex:1;min-width:240px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">
+      <button class="btn btn-ghost btn-sm" onclick="fabRegenerarDesc()">🔄 Regenerar descripción</button>
+    </div>
+    <div id="fab-pub-log" style="margin-top:8px"></div>
+    <div style="border-top:1px solid var(--gray-200);margin-top:18px;padding-top:14px;display:flex;justify-content:flex-end">
+      <button id="fab-publicar-btn" class="btn btn-primary" style="background:#10B981;border-color:#10B981" onclick="fabPublicar()">✅ Publicar en la web</button>
+    </div>`;
+}
+
+async function fabCargarFotoPropia(input) {
+  const file = (input.files || [])[0];
+  if (!file || !_fabActual) return;
+  const log = document.getElementById('fab-pub-log');
+  log.innerHTML = '<span style="font-size:12px;color:var(--gray-500)">Subiendo tu foto...</span>';
+  try {
+    const limpio = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const ruta = _fabActual.ean + '/propias/' + Date.now() + '_' + limpio;
+    const up = await db.storage.from('fotos-fabrica').upload(ruta, file, { upsert: true, contentType: 'image/jpeg' });
+    if (up.error) throw new Error(up.error.message);
+    const { data: pub } = db.storage.from('fotos-fabrica').getPublicUrl(ruta);
+    _fabActual.fotos.push(pub.publicUrl);
+    _fabActual.papeles.push('secundaria');
+    log.innerHTML = '';
+    fabRenderResultado();
+  } catch (e) {
+    log.innerHTML = '<span style="font-size:12px;color:#b91c1c">No se pudo subir: ' + e.message + '</span>';
+  }
+}
+
+async function fabRegenerarDesc() {
+  if (!_fabActual) return;
+  const log = document.getElementById('fab-pub-log');
+  const instr = (document.getElementById('fab-instr').value || '').trim();
+  const descPrevio = _fabActual.web_desc || '';
+  log.innerHTML = '<span style="font-size:12px;color:var(--gray-500)">⏳ Regenerando la descripción... (~1 min)</span>';
+  try {
+    const recado = { id: _fabActual.id, instruccion: instr || null };
+    const blob = new Blob([JSON.stringify(recado)], { type: 'application/json' });
+    const e2 = (await db.storage.from('informes').upload('fabrica/_solicitud_redactar.json', blob, { upsert: true })).error;
+    if (e2) throw new Error(e2.message);
+    const resp = await fetch('/api/disparar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secreto: DISPARO_SECRET, workflow: 'fabrica-redactar.yml' })
+    });
+    if (!resp.ok) { const d = await resp.json().catch(()=>({})); throw new Error(d.error || ('HTTP ' + resp.status)); }
+    let intentos = 0;
+    const poll = setInterval(async () => {
+      intentos++;
+      const { data } = await db.from('fabrica_fichas').select('*').eq('id', _fabActual.id).limit(1);
+      if (data && data.length && (data[0].web_desc || '') !== descPrevio) {
+        clearInterval(poll);
+        _fabActual.web_desc = data[0].web_desc; _fabActual.miravia_desc = data[0].miravia_desc;
+        _fabActual.nombre_corto = data[0].nombre_corto;
+        log.innerHTML = '<span style="font-size:12px;color:#16a34a">✅ Descripción regenerada.</span>';
+        fabRenderResultado();
+      } else if (intentos > 40) {
+        clearInterval(poll);
+        log.innerHTML = '<span style="font-size:12px;color:#ba7517">Tardó más de lo normal; refresca en un momento.</span>';
+      }
+    }, 4000);
+  } catch (e) {
+    log.innerHTML = '<span style="font-size:12px;color:#b91c1c">Error: ' + e.message + '</span>';
+  }
+}
+
+async function fabPublicar() {
+  if (!_fabActual) return;
+  const f = _fabActual;
+  const log = document.getElementById('fab-pub-log');
+  const btn = document.getElementById('fab-publicar-btn');
+  const caja = f.fotos[f.papeles.indexOf('caja')] || null;
+  const recorte = f.fotos[f.papeles.indexOf('recorte')] || null;
+  const secundarias = f.fotos.filter((u, i) => f.papeles[i] === 'secundaria');
+  if (!caja || !recorte) { log.innerHTML = '<span style="font-size:12px;color:#b91c1c">⚠️ Marca al menos la Caja y el Recorte antes de publicar.</span>'; return; }
+  btn.disabled = true;
+  log.innerHTML = '<span style="font-size:12px;color:var(--gray-500)">⏳ Publicando... (monta las fotos y sube a la web)</span>';
+  try {
+    const fotos_elegidas = { caja, recorte_moloka: recorte, secundarias, propias_n: 0 };
+    const e1 = (await db.from('fabrica_fichas').update({ fotos_elegidas, estado: 'fotos_ok' }).eq('id', f.id)).error;
+    if (e1) throw new Error(e1.message);
+    const resp = await fetch('/api/disparar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secreto: DISPARO_SECRET, workflow: 'fabrica-generar.yml' })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      log.innerHTML = '<div class="info-box" style="border-left:3px solid #2e7d32;margin-top:8px">✅ Publicando en la web. En un par de minutos estará online (monta las fotos, sube a la web y la reconstruye). Puedes empezar otra ficha.</div>';
+      setTimeout(() => { _fabActual = null; fabRenderResultado(); document.getElementById('fab-gen-log').innerHTML = ''; document.getElementById('fab-foto').value=''; }, 2500);
+    } else if (resp.status === 409) {
+      log.innerHTML = '<span style="font-size:12px;color:#ba7517">⏳ ' + (data.error || 'Ya hay una publicación en marcha. Espera a que termine.') + '</span>'; btn.disabled = false;
+    } else {
+      log.innerHTML = '<span style="font-size:12px;color:#b91c1c">⚠️ ' + (data.error || ('HTTP ' + resp.status)) + '</span>'; btn.disabled = false;
+    }
+  } catch (e) {
+    log.innerHTML = '<span style="font-size:12px;color:#b91c1c">Error: ' + e.message + '</span>'; btn.disabled = false;
+  }
+}
+
 
 // ============================================================
 // FÁBRICA WEB — precios por canal (web / miravia) de los productos publicados
@@ -1641,7 +1638,7 @@ async function cargarFabrica() {
       .eq('activo', true).eq('origen', 'fabrica')
       .order('actualizado', { ascending: false })
       .range(desde, desde + 999);
-    if (error) { tbody.innerHTML = '<tr><td colspan="4" style="padding:20px;color:#b91c1c">Error: ' + error.message + '</td></tr>'; return; }
+    if (error) { tbody.innerHTML = '<tr><td colspan="3" style="padding:20px;color:#b91c1c">Error: ' + error.message + '</td></tr>'; return; }
     filas = filas.concat(data || []);
     if (!data || data.length < 1000) break;
     desde += 1000;
@@ -1655,7 +1652,7 @@ function renderFabrica() {
   const tbody = document.getElementById('fab-tbody');
   const lista = _fabProductos.filter(p => !q || (p.nombre || '').toLowerCase().includes(q) || (p.fandom || '').toLowerCase().includes(q));
   document.getElementById('fab-contador').textContent = lista.length + ' producto' + (lista.length === 1 ? '' : 's');
-  if (!lista.length) { tbody.innerHTML = '<tr><td colspan="4" style="padding:20px;color:var(--gray-500)">Sin productos de fábrica todavía.</td></tr>'; return; }
+  if (!lista.length) { tbody.innerHTML = '<tr><td colspan="3" style="padding:20px;color:var(--gray-500)">Sin productos de fábrica todavía.</td></tr>'; return; }
   tbody.innerHTML = lista.map(p => {
     const rar = p.es_chase ? 'CHASE' : p.es_vaulted ? 'VAULTED' : p.es_exclusivo ? 'EXCLUSIVO' : '—';
     const img = p.imagen_principal ? `<img src="${p.imagen_principal}" style="width:34px;height:34px;object-fit:contain;border-radius:6px;background:#f7f5fb">` : '';
@@ -1665,7 +1662,6 @@ function renderFabrica() {
       <td><div style="display:flex;align-items:center;gap:10px">${img}<div><div style="font-weight:600;font-size:13px">${p.nombre || ''}</div><div style="font-size:11px;color:var(--gray-500)">${p.fandom || ''} · ${p.ean || ''}</div></div></div></td>
       <td style="text-align:center;font-size:11px;font-weight:600">${rar}</td>
       <td style="text-align:center"><input type="number" step="0.01" min="0" value="${pw}" onchange="guardarPrecioFabrica(${p.id},'precio_web',this)" style="width:90px;padding:6px;border:1px solid var(--gray-200);border-radius:6px;text-align:right"></td>
-      <td style="text-align:center"><input type="number" step="0.01" min="0" value="${pm}" onchange="guardarPrecioFabrica(${p.id},'precio_miravia',this)" style="width:90px;padding:6px;border:1px solid var(--gray-200);border-radius:6px;text-align:right"></td>
     </tr>`;
   }).join('');
 }
