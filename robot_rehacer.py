@@ -7,9 +7,25 @@ que el usuario ya hubiera subido con "cambiar por la mía" (carpeta /propias/).
 Lee el recado fabrica/_solicitud_rehacer.json {id, caja, figura}.
 """
 import os, io, json, time, requests
+import numpy as np
 from PIL import Image
 from supabase import create_client
 import motor_fotos as M
+
+def cuadrar_foto(data):
+    """Recorta el blanco sobrante de una foto y la centra en un lienzo cuadrado blanco,
+    para que las fotos propias (verticales, con márgenes) salgan como las de Keepa."""
+    img = Image.open(io.BytesIO(data)).convert('RGB')
+    arr = np.array(img)
+    nf = ~((arr[:,:,0] >= 240) & (arr[:,:,1] >= 240) & (arr[:,:,2] >= 240))
+    ys, xs = np.where(nf)
+    if len(xs) and len(ys):
+        img = img.crop((int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1))
+    w, h = img.size
+    lado = int(max(w, h) * 1.08)  # margen del 8% alrededor
+    lienzo = Image.new('RGB', (lado, lado), (255, 255, 255))
+    lienzo.paste(img, ((lado - w) // 2, (lado - h) // 2))
+    buf = io.BytesIO(); lienzo.save(buf, "JPEG", quality=94); return buf.getvalue()
 
 SUPABASE_URL = os.environ['SUPABASE_URL']
 SUPABASE_KEY = os.environ['SUPABASE_KEY']
@@ -121,10 +137,11 @@ def main():
     for tipo, ruta_informes in propias.items():
         try:
             data = admin.storage.from_('informes').download(ruta_informes)
+            data = cuadrar_foto(data)   # recorta blanco sobrante + lienzo cuadrado (como Keepa)
             destino = f"{fila.get('ean','sinEAN')}/propias/{tipo}_{int(time.time())}.jpg"
             url = subir(admin, destino, data)
             propias_pub[tipo] = url
-            print(f"   foto propia '{tipo}' movida a fotos-fabrica -> {url}")
+            print(f"   foto propia '{tipo}' cuadrada y movida a fotos-fabrica -> {url}")
         except Exception as e:
             print(f"   (aviso: no pude mover la foto propia '{tipo}': {e})")
 
