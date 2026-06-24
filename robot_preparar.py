@@ -7,12 +7,13 @@
 # La redaccion (prompt+funciones) es VERBATIM del robot GENERAR.
 # Secrets: KEEPA_API_KEY, SUPABASE_URL, SUPABASE_KEY, SUPABASE_SERVICE_KEY, ANTHROPIC_API_KEY
 # ============================================================================
-import os, re, sys, json, datetime, tempfile, base64, requests, unicodedata
+import os, re, sys, json, datetime, tempfile, base64, requests, unicodedata, io
 import keepa
 from supabase import create_client
 from anthropic import Anthropic
 from pyzbar.pyzbar import decode
 from PIL import Image, ImageOps, ImageEnhance
+import motor_fotos as M
 
 sys.stdout.reconfigure(line_buffering=True)
 
@@ -26,6 +27,8 @@ api      = keepa.Keepa(os.environ['KEEPA_API_KEY'])
 sb       = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
 sb_admin = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_SERVICE_KEY'])
 cliente  = Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
+SUPABASE_URL = os.environ['SUPABASE_URL']
+BUCKET = 'fotos-fabrica'
 print("Tokens Keepa:", api.tokens_left, "| Supabase + Anthropic OK")
 
 # ===================== LECTOR EAN + KEEPA (verbatim) =====================
@@ -195,6 +198,62 @@ def redactar(f):
         if texto.startswith("json"): texto = texto[4:]
         texto = texto.strip()
     return json.loads(texto)
+# ===================== MONTAJE DE FOTOS (verbatim del GENERAR) =====================
+def descargar(url):
+    r = requests.get(url, headers=HEADERS, timeout=20); r.raise_for_status()
+    return Image.open(io.BytesIO(r.content)).convert('RGB')
+
+def a_jpg_bytes(img, q=94):
+    buf = io.BytesIO(); img.save(buf, "JPEG", quality=q); return buf.getvalue()
+
+def subir(admin, ruta, data):
+    """Sube (o reemplaza) un jpg al bucket y devuelve su URL pública."""
+    admin.storage.from_(BUCKET).upload(
+        ruta, data,
+        {"content-type": "image/jpeg", "upsert": "true"}  # upsert: si ya existe, lo reemplaza
+    )
+    return admin.storage.from_(BUCKET).get_public_url(ruta)
+
+def descargar_asset(nombre):
+    """Baja un asset fijo (fondo_neon / regla_10cm) del Storage en vez de /content."""
+    url = f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET}/assets/{nombre}"
+    r = requests.get(url, headers=HEADERS, timeout=30); r.raise_for_status()
+    return Image.open(io.BytesIO(r.content))
+
+def generar_fotos(f, fondo, regla, prot=None):
+    """Recorta la figura, control de calidad, monta neón/regla/portada y sube a Storage.
+    Devuelve (fotos_generadas, error_o_None). La caja y la figura se reutilizan de los
+    inputs Keepa para que la galería web salga completa (portada/caja/figura/neon/regla)."""
+    ean = f.get('ean','sinEAN')
+    fe  = f.get('fotos_elegidas') or {}
+    url_fig  = fe.get('recorte_moloka') or fe.get('principal')
+    url_caja = fe.get('caja')                       # costura: la caja es 'caja' (no 'portada')
+    if not url_fig:
+        return None, "sin foto de figura (recorte)"
+    figura = descargar(url_fig)
+    rec = M.recortar(figura)
+    ok, motivo = M.test_calidad(rec)
+    if not ok:
+        return None, f"recorte sucio ({motivo})"
+    enlaces = {}
+    enlaces['neon']  = subir(admin, f"{ean}/neon.jpg",  a_jpg_bytes(M.montar_neon(rec, fondo)))
+    enlaces['regla'] = subir(admin, f"{ean}/regla.jpg", a_jpg_bytes(M.montar_regla(rec, regla)))
+    if url_caja:
+        caja = descargar(url_caja)
+        enlaces['portada'] = subir(admin, f"{ean}/portada.jpg", a_jpg_bytes(M.montar_portada(caja, figura)))
+        enlaces['caja']    = url_caja               # input reutilizado para la galería
+    enlaces['figura'] = url_fig                      # input reutilizado para la galería
+    # PROTECTOR: solo si la ficha lo lleva y tenemos plantilla + caja
+    if f.get('con_protector') and prot is not None and url_caja:
+        try:
+            caja_img = descargar(url_caja)
+            enlaces['protector'] = subir(admin, f"{ean}/protector.jpg", a_jpg_bytes(M.montar_protector(caja_img, prot)))
+        except Exception as e:
+            print(f"   (aviso: no pude montar el protector: {e})")
+    return enlaces, None
+
+admin = sb_admin
+
 # ===================== PREPARAR + REDACTAR (uno a uno) =====================
 def preparar_item(ean, item, foto_culo_url):
     print(f"   Keepa {ean} ...")
@@ -238,8 +297,26 @@ def preparar_item(ean, item, foto_culo_url):
     except Exception as e:
         print(f"      AVISO: redaccion fallo ({e}). Dejo el borrador sin texto, se puede regenerar.")
 
+    # Montaje de fotos (auto-elige caja=foto0, recorte=foto1) para que se revise YA montado.
+    try:
+        fila['fotos_elegidas'] = {'caja': fotos[0] if fotos else None,
+                                  'recorte_moloka': fotos[1] if len(fotos) > 1 else (fotos[0] if fotos else None),
+                                  'secundarias': [], 'propias_n': 0}
+        fondo = descargar_asset('fondo_neon.png')
+        regla = descargar_asset('regla_10cm.png')
+        try: prot = descargar_asset('protector_funko.png')
+        except Exception: prot = None
+        enlaces, err = generar_fotos({**fila, 'fotos_elegidas': fila['fotos_elegidas']}, fondo, regla, prot)
+        if enlaces:
+            fila['fotos_generadas'] = enlaces
+            print(f"      fotos montadas: {', '.join(k for k in ('portada','neon','regla','protector') if k in enlaces)}")
+        elif err:
+            print(f"      AVISO montaje: {err} (se podrá subir la foto a mano en la app)")
+    except Exception as e:
+        print(f"      AVISO: montaje de fotos falló ({e}). Se podrá subir a mano en la app.")
+
     sb.table('fabrica_fichas').insert(fila).execute()
-    print(f"      OK -> 'borrador', {len(fotos)} fotos candidatas.")
+    print(f"      OK -> 'borrador', {len(fotos)} candidatas + montaje.")
     return True
 
 def main():
