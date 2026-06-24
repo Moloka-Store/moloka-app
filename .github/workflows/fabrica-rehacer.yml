@@ -1,0 +1,25 @@
+name: Moloka - Fabrica Rehacer
+
+on:
+  workflow_dispatch:
+
+jobs:
+  rehacer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Dependencias Python
+        run: pip install supabase pillow scipy numpy requests rembg onnxruntime
+
+      - name: Robot REHACER
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:         ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python -u robot_rehacer.py
