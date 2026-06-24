@@ -99,6 +99,9 @@ def main():
     print(f"Rehacer fotos de ficha id={fid}")
     print(f"   CAJA   recibida del recado: {caja}")
     print(f"   FIGURA recibida del recado: {figura}")
+    propias = recado.get('propias') or {}
+    if propias:
+        print(f"   FOTOS PROPIAS pendientes: {list(propias.keys())}")
 
     fila = (sb.table('fabrica_fichas').select('*').eq('id', fid).limit(1).execute().data or [None])[0]
     if not fila:
@@ -110,10 +113,28 @@ def main():
     if mias:
         print(f"   conservando tus fotos: {', '.join(mias.keys())}")
 
-    # Montar con la caja/figura elegidas
+    # PROMOCIONAR FOTOS PROPIAS: la app las subió a 'informes' (sin RLS para ella);
+    # el robot las mueve a fotos-fabrica (con service key, saltándose el RLS) y obtiene
+    # su URL pública. Caja/figura propias se usan como input del montaje; las demás
+    # (portada/neon/regla/protector) sustituyen directamente al montaje final.
+    propias_pub = {}
+    for tipo, ruta_informes in propias.items():
+        try:
+            data = admin.storage.from_('informes').download(ruta_informes)
+            destino = f"{fila.get('ean','sinEAN')}/propias/{tipo}_{int(time.time())}.jpg"
+            url = subir(admin, destino, data)
+            propias_pub[tipo] = url
+            print(f"   foto propia '{tipo}' movida a fotos-fabrica -> {url}")
+        except Exception as e:
+            print(f"   (aviso: no pude mover la foto propia '{tipo}': {e})")
+
+    # Montar con la caja/figura elegidas (si subiste caja/figura propia, manda esa)
     fe = dict(fila.get('fotos_elegidas') or {})
     if caja:   fe['caja'] = caja
     if figura: fe['recorte_moloka'] = figura
+    if propias_pub.get('caja'):   fe['caja'] = propias_pub['caja']
+    if propias_pub.get('figura'): fe['recorte_moloka'] = propias_pub['figura']
+    if propias_pub.get('silueta'): fe['recorte_moloka'] = propias_pub['silueta']
     fila['fotos_elegidas'] = fe
 
     print("Descargando assets...")
@@ -129,12 +150,20 @@ def main():
     for k in ('portada','neon','regla','caja','figura','protector'):
         if k in enlaces: print(f"   {k}: {enlaces[k]}")
 
-    # Mezclar: lo nuevo, pero respetando lo tuyo (/propias/)
+    # Mezclar: lo montado, respetando lo que ya tenías propio (/propias/)
     final = dict(enlaces)
     final.update(mias)
+    # Las fotos propias que son montaje FINAL (portada/neon/regla/protector/caja/figura)
+    # sustituyen directamente a lo montado (van tal cual a web/Miravia).
+    for tipo, url in propias_pub.items():
+        final[tipo] = url
 
     sb.table('fabrica_fichas').update({'fotos_generadas': final, 'fotos_elegidas': fe}).eq('id', fid).execute()
     print(f"✅ Fotos rehechas: {', '.join(final.keys())}")
+    # Limpiar las fotos propias ya procesadas del bucket informes
+    for ruta in propias.values():
+        try: admin.storage.from_('informes').remove([ruta])
+        except Exception: pass
     limpiar_recado()
 
 if __name__ == '__main__':
