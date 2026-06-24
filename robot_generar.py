@@ -160,7 +160,7 @@ def descargar_asset(nombre):
     r = requests.get(url, headers=HEADERS, timeout=30); r.raise_for_status()
     return Image.open(io.BytesIO(r.content))
 
-def generar_fotos(f, fondo, regla):
+def generar_fotos(f, fondo, regla, prot=None):
     """Recorta la figura, control de calidad, monta neón/regla/portada y sube a Storage.
     Devuelve (fotos_generadas, error_o_None). La caja y la figura se reutilizan de los
     inputs Keepa para que la galería web salga completa (portada/caja/figura/neon/regla)."""
@@ -183,12 +183,22 @@ def generar_fotos(f, fondo, regla):
         enlaces['portada'] = subir(admin, f"{ean}/portada.jpg", a_jpg_bytes(M.montar_portada(caja, figura)))
         enlaces['caja']    = url_caja               # input reutilizado para la galería
     enlaces['figura'] = url_fig                      # input reutilizado para la galería
+    # PROTECTOR: solo si la ficha lo lleva y tenemos plantilla + caja
+    if f.get('con_protector') and prot is not None and url_caja:
+        try:
+            caja_img = descargar(url_caja)
+            enlaces['protector'] = subir(admin, f"{ean}/protector.jpg", a_jpg_bytes(M.montar_protector(caja_img, prot)))
+        except Exception as e:
+            print(f"   (aviso: no pude montar el protector: {e})")
     return enlaces, None
 
 # ====================================================================
 # BLOQUE VOLCADO  (verbatim de motor_paso7_web; el upsert va envuelto en función)
 # ====================================================================
-ORDEN_GALERIA = ['portada', 'caja', 'figura', 'neon', 'regla']   # orden fijo de la galeria web
+COLETILLA_WEB = "<br><br>Funda protectora incluida — gratis. Este Funko sale de nuestro almacén con su protector específico de regalo, para que la caja se mantenga perfecta de camino a tu estantería. Cuidamos cada pieza que enviamos protegida."
+COLETILLA_MIRAVIA = "<br><br>🎁 Protector de regalo. Este Funko Pop! se envía dentro de su funda protectora específica, incluida sin coste. Lo recibes impecable y lo conservas como el primer día: la caja, a salvo de roces, polvo y luz. Un detalle de tienda especializada."
+
+ORDEN_GALERIA = ['portada', 'caja', 'figura', 'neon', 'regla', 'protector']   # orden fijo (protector si lleva)
 
 def norm_ean(ean):
     """EAN normalizado para casar (hay UPC con/sin cero inicial)."""
@@ -255,6 +265,11 @@ def main():
     try:
         fondo = descargar_asset('fondo_neon.png')
         regla = descargar_asset('regla_10cm.png')
+        try:
+            prot = descargar_asset('protector_funko.png')
+        except Exception:
+            prot = None
+            print("   (aviso: sin protector_funko.png en assets/; las fichas con protector saldrán sin esa foto)")
     except Exception as e:
         print(f"❌ No pude bajar los assets (¿están en fotos-fabrica/assets/?): {e}"); return
 
@@ -266,25 +281,16 @@ def main():
         ean = f.get('ean','sinEAN')
         print(f"\n── {ean} · {(f.get('titulo_keepa') or '')[:45]}")
 
-        # 1) REDACCIÓN
-        try:
-            out = redactar(f)
-        except Exception as e:
-            avisos.append(f"{ean}: fallo redacción ({e})"); continue
-        categoria = out.get('categoria') if out.get('categoria') in CATEGORIAS else None
-        nombre_corto = (out.get('nombre_corto') or '').strip() or f.get('titulo_keepa')
-        slug = slugify(out.get('slug') or nombre_corto)
-        campos = {'miravia_titulo': out.get('miravia_titulo'), 'miravia_desc': out.get('miravia_desc'),
-                  'web_titulo': out.get('web_titulo'), 'web_desc': out.get('web_desc'),
-                  'categoria': categoria, 'fandom': out.get('fandom'),
-                  'slug': slug, 'nombre_corto': nombre_corto}
-        f.update(campos)
-        sb.table('fabrica_fichas').update(campos).eq('id', f['id']).execute()
-        print(f"   ✏️  nº caja '{out.get('numero_leido','')}' · {categoria} · {f.get('fandom')} · /{slug}")
+        # 1) PROTECTOR: si lleva, pegar la coletilla aprobada al final de las descripciones
+        if f.get('con_protector'):
+            if f.get('web_desc'):     f['web_desc']     = (f['web_desc'] or '').rstrip() + COLETILLA_WEB
+            if f.get('miravia_desc'): f['miravia_desc'] = (f['miravia_desc'] or '').rstrip() + COLETILLA_MIRAVIA
+            sb.table('fabrica_fichas').update({'web_desc': f.get('web_desc'), 'miravia_desc': f.get('miravia_desc')}).eq('id', f['id']).execute()
+            print("   protector: coletillas anadidas")
 
         # 2) FOTOS
         try:
-            enlaces, err = generar_fotos(f, fondo, regla)
+            enlaces, err = generar_fotos(f, fondo, regla, prot)
         except Exception as e:
             avisos.append(f"{ean}: fallo fotos ({e})"); continue
         if err:
