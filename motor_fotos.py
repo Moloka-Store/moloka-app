@@ -8,8 +8,47 @@ import numpy as np
 from PIL import Image, ImageFilter, ImageDraw
 from scipy import ndimage
 
-# ---------- RECORTE (receta cerrada) ----------
+# ---------- RECORTE (IA: rembg / U²-Net, como Canva) ----------
+_rembg_session = None
+def _get_rembg():
+    global _rembg_session
+    if _rembg_session is None:
+        from rembg import new_session
+        _rembg_session = new_session('u2net')   # se descarga la 1ª vez (~170MB)
+    return _rembg_session
+
 def recortar(fig_rgb):
+    """Recibe PIL RGB sobre fondo blanco. Devuelve PIL RGBA recortada y limpia.
+    Usa IA (rembg). Si rembg no está disponible, cae al recorte clásico."""
+    try:
+        from rembg import remove
+        rgb = fig_rgb.convert('RGB')
+        out = remove(rgb, session=_get_rembg()).convert('RGBA')
+        arr = np.array(out)
+        alpha = arr[:,:,3]
+        # limpiar motas: quedarse con el componente grande de la máscara
+        solid = alpha > 128
+        lbl, n = ndimage.label(solid)
+        if n > 1:
+            sizes = ndimage.sum(np.ones_like(lbl), lbl, range(1, n+1))
+            keep = int(np.argmax(sizes)) + 1
+            alpha = np.where(lbl == keep, alpha, 0).astype(np.uint8)
+        # suavizado leve del borde
+        alpha = np.array(Image.fromarray(alpha).filter(ImageFilter.GaussianBlur(0.6)))
+        # descontaminar halo blanco del borde (unmultiply sobre blanco)
+        rgbf = np.array(rgb).astype(float)
+        af = alpha.astype(float)/255.0; a3 = af[...,None]
+        fg = np.clip((rgbf-(1-a3)*255.0)/np.clip(a3,0.25,1),0,255)
+        arr2 = np.where((af<0.999)[...,None], fg, rgbf).astype(np.uint8)
+        res = Image.fromarray(np.dstack([arr2, alpha]), 'RGBA')
+        bb = Image.fromarray(alpha).getbbox()
+        return res.crop(bb) if bb else res
+    except Exception as e:
+        print(f"   (aviso: rembg no disponible, uso recorte clásico: {e})")
+        return _recortar_clasico(fig_rgb)
+
+# ---------- RECORTE CLÁSICO (red de seguridad si la IA fallara) ----------
+def _recortar_clasico(fig_rgb):
     """Recibe PIL RGB sobre fondo blanco. Devuelve PIL RGBA recortada y limpia."""
     arr = np.array(fig_rgb.convert('RGB'))
     white = (arr[:,:,0]>=235)&(arr[:,:,1]>=235)&(arr[:,:,2]>=235)
