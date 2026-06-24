@@ -104,16 +104,32 @@ def montar_regla(fig_rgba, regla_rgb):
     canvas.alpha_composite(fb,(x,y))
     return canvas.convert('RGB')
 
-# ---------- MONTAJE PORTADA (caja + figura) ----------
+# ---------- MONTAJE PORTADA (caja + figura, SIN solaparse) ----------
 def montar_portada(caja_rgb, fig_rgb, S=1400):
     def rec(img,u=238):
         a=np.array(img.convert('RGB')); nf=~((a[:,:,0]>=u)&(a[:,:,1]>=u)&(a[:,:,2]>=u))
         ys,xs=np.where(nf); return img.crop((xs.min(),ys.min(),xs.max(),ys.max()))
     caja=rec(caja_rgb); fig=rec(fig_rgb)
     L=Image.new('RGB',(S,S),(255,255,255))
-    def esc(img,h): r=h/img.height; return img.resize((max(1,int(img.width*r)),int(h)),Image.LANCZOS)
-    funko_h=int(0.576*S); caja_h=int(funko_h/1.10)
+    def esc(img,h):
+        r=h/img.height; return img.resize((max(1,int(img.width*r)),max(1,int(h))),Image.LANCZOS)
+    # Alturas objetivo: figura algo mayor que la caja (da profundidad sin taparla).
+    funko_h=int(0.60*S); caja_h=int(funko_h/1.12)
     cR=esc(caja,caja_h); fR=esc(fig,funko_h)
-    L.paste(cR,(int(0.27*S)-cR.width//2,int(0.07*S)))
-    L.paste(fR,(int(0.70*S)-fR.width//2,int(0.88*S)-fR.height))
+    # Margenes y hueco garantizado entre caja (izquierda) y figura (derecha).
+    margen=int(0.045*S); gap=int(0.03*S)
+    ancho_util=S-2*margen-gap
+    # Si juntas no caben a lo ancho (figura ancha, p.ej. Goku con baculo), encoger AMBAS.
+    if cR.width+fR.width > ancho_util:
+        f=ancho_util/(cR.width+fR.width)
+        cR=esc(cR,int(cR.height*f)); fR=esc(fR,int(fR.height*f))
+    # Colocar: caja arriba-izquierda, figura abajo-derecha, sin pisarse.
+    cx=margen; cy=int(0.10*S)
+    fx=S-margen-fR.width
+    fy=int(0.93*S)-fR.height
+    # Seguro anti-solape: el borde izq. de la figura nunca invade la caja + hueco.
+    if fx < cx+cR.width+gap:
+        fx=cx+cR.width+gap
+    L.paste(cR,(cx,cy))
+    L.paste(fR,(fx,fy))
     return L
