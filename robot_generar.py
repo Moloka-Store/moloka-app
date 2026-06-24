@@ -268,18 +268,6 @@ def main():
     if not pendientes:
         print("Nada que hacer. (Elige fotos de alguna ficha en la app y vuelve a lanzar.)"); return
 
-    print("Descargando assets fijos del Storage...")
-    try:
-        fondo = descargar_asset('fondo_neon.png')
-        regla = descargar_asset('regla_10cm.png')
-        try:
-            prot = descargar_asset('protector_funko.png')
-        except Exception:
-            prot = None
-            print("   (aviso: sin protector_funko.png en assets/; las fichas con protector saldrán sin esa foto)")
-    except Exception as e:
-        print(f"❌ No pude bajar los assets (¿están en fotos-fabrica/assets/?): {e}"); return
-
     web = cargar_web_productos()
     indice = {(norm_ean(w.get('ean')), bool(w.get('es_chase'))): w for w in web}
 
@@ -295,19 +283,7 @@ def main():
             sb.table('fabrica_fichas').update({'web_desc': f.get('web_desc'), 'miravia_desc': f.get('miravia_desc')}).eq('id', f['id']).execute()
             print("   protector: coletillas anadidas")
 
-        # 2) FOTOS
-        try:
-            enlaces, err = generar_fotos(f, fondo, regla, prot)
-        except Exception as e:
-            avisos.append(f"{ean}: fallo fotos ({e})"); continue
-        if err:
-            avisos.append(f"{ean}: {err} -> revisar foto a mano"); continue
-        f['fotos_generadas'] = enlaces
-        sb.table('fabrica_fichas').update({'fotos_generadas': enlaces}).eq('id', f['id']).execute()
-        montajes = [k for k in ('portada','neon','regla') if k in enlaces]
-        print(f"   📸 montajes: {', '.join(montajes)}  (+ caja/figura para la galería)")
-
-        # 3) VOLCADO A WEB
+        # 2) VOLCADO A WEB (las fotos ya vienen montadas y revisadas desde PREPARAR)
         try:
             accion, nom = volcar_a_web(f, indice)
         except Exception as e:
