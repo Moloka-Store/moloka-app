@@ -1401,9 +1401,10 @@ async function fabCargarBorradores() {
       <img src="${thumb}" style="width:54px;height:54px;object-fit:contain;background:#f7f5fb;border-radius:8px">
       <div style="flex:1;min-width:0">
         <div style="font-weight:600;font-size:14px">${f.nombre_corto || f.titulo_keepa || f.ean}${rar ? ' · ' + rar : ''}</div>
-        <div style="font-size:12px;color:var(--gray-500)">EAN ${f.ean}</div>
+        <div style="font-size:12px;color:var(--gray-500)">EAN ${f.ean} · id ${f.id}</div>
       </div>
       <button class="btn btn-primary btn-sm" onclick="fabAbrirBorrador(${f.id})">Abrir</button>
+      <button class="btn btn-ghost btn-sm" style="color:#b91c1c;border-color:#f0a0a0" onclick="fabBorrarBorrador(${f.id})">🗑️ Borrar</button>
     </div>`;
   }).join('');
 }
@@ -1414,6 +1415,13 @@ async function fabAbrirBorrador(id) {
   fabSubTab('nueva');
   fabCargarResultado(data[0]);
   setTimeout(() => { const r = document.getElementById('fab-resultado'); if (r) r.scrollIntoView({ behavior: 'smooth' }); }, 100);
+}
+
+async function fabBorrarBorrador(id) {
+  if (!confirm('¿Borrar este borrador? No se puede deshacer.')) return;
+  const { error } = await db.from('fabrica_fichas').delete().eq('id', id);
+  if (error) { alert('No se pudo borrar: ' + error.message); return; }
+  fabCargarBorradores();
 }
 
 // ============================================================
