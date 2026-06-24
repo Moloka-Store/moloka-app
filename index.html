@@ -355,6 +355,7 @@
     <!-- Sub-pestañas de la Fábrica -->
     <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
       <button id="fabtab-nueva"   class="btn btn-primary btn-sm" onclick="fabSubTab('nueva')">➕ Nueva ficha</button>
+      <button id="fabtab-borradores" class="btn btn-ghost btn-sm" onclick="fabSubTab('borradores')">📋 Borradores</button>
       <button id="fabtab-precios" class="btn btn-ghost btn-sm"   onclick="fabSubTab('precios')">🏷️ Precios web</button>
     </div>
 
@@ -404,6 +405,17 @@
 
       <!-- 2 · RESULTADO (oculto hasta generar) -->
       <div id="fab-resultado" style="display:none"></div>
+    </div>
+
+    <div id="fab-sub-borradores" style="display:none">
+      <div class="card" style="padding:18px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+          <div style="font-weight:600;flex:1">Fichas en revisión (borradores)</div>
+          <button class="btn btn-ghost btn-sm" onclick="fabCargarBorradores()">🔄 Actualizar</button>
+        </div>
+        <div style="font-size:13px;color:var(--gray-500);margin-bottom:14px">Fichas generadas que aún no has publicado. Ábrelas para revisarlas o terminarlas sin tener que regenerar desde la foto.</div>
+        <div id="fab-borradores-lista"><span style="color:var(--gray-500);font-size:13px">Pulsa Actualizar para cargar.</span></div>
+      </div>
     </div>
 
     <div id="fab-sub-precios" style="display:none">
@@ -1365,12 +1377,43 @@ function showPage(id, el) {
 // FÁBRICA WEB — sub-pestañas (Nueva ficha / Precios)
 // ============================================================
 function fabSubTab(cual) {
-  const tabs = ['nueva', 'precios'];
+  const tabs = ['nueva', 'borradores', 'precios'];
   tabs.forEach(t => {
     document.getElementById('fab-sub-' + t).style.display = (t === cual) ? 'block' : 'none';
     document.getElementById('fabtab-' + t).className = 'btn btn-sm ' + (t === cual ? 'btn-primary' : 'btn-ghost');
   });
   if (cual === 'precios' && !window._fabPreciosCargados) { window._fabPreciosCargados = true; cargarFabrica(); }
+  if (cual === 'borradores') fabCargarBorradores();
+}
+
+async function fabCargarBorradores() {
+  const cont = document.getElementById('fab-borradores-lista');
+  cont.innerHTML = '<span style="color:var(--gray-500);font-size:13px">Cargando...</span>';
+  const { data, error } = await db.from('fabrica_fichas').select('*').eq('estado', 'borrador').order('id', { ascending: false });
+  if (error) { cont.innerHTML = '<span style="color:#b91c1c;font-size:13px">Error: ' + error.message + '</span>'; return; }
+  if (!data || !data.length) { cont.innerHTML = '<span style="color:var(--gray-500);font-size:13px">No hay borradores pendientes. ✅</span>'; return; }
+  cont.innerHTML = data.map(f => {
+    const fg = f.fotos_generadas || {};
+    let kp = []; try { kp = Array.isArray(f.fotos_keepa) ? f.fotos_keepa : JSON.parse(f.fotos_keepa || '[]'); } catch (e) {}
+    const thumb = fg.portada || fg.neon || kp[0] || '';
+    const rar = f.es_chase ? 'CHASE' : f.es_vaulted ? 'VAULTED' : f.es_exclusivo ? 'EXCLUSIVO' : '';
+    return `<div style="display:flex;align-items:center;gap:12px;padding:10px;border:1px solid var(--gray-200);border-radius:10px;margin-bottom:8px">
+      <img src="${thumb}" style="width:54px;height:54px;object-fit:contain;background:#f7f5fb;border-radius:8px">
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;font-size:14px">${f.nombre_corto || f.titulo_keepa || f.ean}${rar ? ' · ' + rar : ''}</div>
+        <div style="font-size:12px;color:var(--gray-500)">EAN ${f.ean}</div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="fabAbrirBorrador(${f.id})">Abrir</button>
+    </div>`;
+  }).join('');
+}
+
+async function fabAbrirBorrador(id) {
+  const { data, error } = await db.from('fabrica_fichas').select('*').eq('id', id).limit(1);
+  if (error || !data || !data.length) return;
+  fabSubTab('nueva');
+  fabCargarResultado(data[0]);
+  setTimeout(() => { const r = document.getElementById('fab-resultado'); if (r) r.scrollIntoView({ behavior: 'smooth' }); }, 100);
 }
 
 // ============================================================
