@@ -1500,13 +1500,14 @@ async function fabRehacerFotos() {
   const figKeepa  = f.fotos[f.papeles.indexOf('recorte')] || null;
   const caja   = cajaKeepa || (typeof fg.caja   === 'string' && fg.caja.includes('/propias/')   ? fg.caja   : null);
   const figura = figKeepa  || (typeof fg.figura === 'string' && fg.figura.includes('/propias/') ? fg.figura : null);
-  if (!caja && !figura) {
-    log.innerHTML = '<span style="font-size:12px;color:#b91c1c">Marca al menos la Caja o la Silueta correcta (o súbela con "cambiar por la mía") antes de rehacer.</span>';
+  const hayPropias = Object.keys(f.propias_pendientes || {}).length > 0;
+  if (!caja && !figura && !hayPropias) {
+    log.innerHTML = '<span style="font-size:12px;color:#b91c1c">Marca la Caja o la Silueta correcta, o sube una foto con "cambiar por la mía", antes de rehacer.</span>';
     return;
   }
   log.innerHTML = '<span style="font-size:12px;color:var(--gray-500)">⏳ Rehaciendo las fotos con tu elección... (1-3 min)</span>';
   try {
-    const recado = JSON.stringify({ id: f.id, caja, figura });
+    const recado = JSON.stringify({ id: f.id, caja, figura, propias: f.propias_pendientes || {} });
     const blob = new Blob([recado], { type: 'application/json' });
     const up = await db.storage.from('informes').upload('fabrica/_solicitud_rehacer.json', blob, { upsert: true, contentType: 'application/json' });
     if (up.error) throw new Error(up.error.message);
@@ -1550,16 +1551,20 @@ async function fabReemplazarMontaje(tipo, input) {
   log.innerHTML = '<span style="font-size:12px;color:var(--gray-500)">Subiendo tu foto para ' + tipo + '...</span>';
   try {
     const limpio = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const ruta = _fabActual.ean + '/propias/' + tipo + '_' + Date.now() + '_' + limpio;
-    const up = await db.storage.from('fotos-fabrica').upload(ruta, file, { upsert: true, contentType: 'image/jpeg' });
+    // Sube al bucket 'informes' (la app SÍ puede escribir ahí). El robot la moverá a
+    // fotos-fabrica al rehacer (con su llave maestra, saltándose el RLS).
+    const ruta = 'fabrica/propias/' + _fabActual.ean + '_' + tipo + '_' + Date.now() + '_' + limpio;
+    const up = await db.storage.from('informes').upload(ruta, file, { upsert: true, contentType: 'image/jpeg' });
     if (up.error) throw new Error(up.error.message);
-    const { data: pub } = db.storage.from('fotos-fabrica').getPublicUrl(ruta);
+    // Vista previa local inmediata (para que veas tu foto ya, aunque aún no sea pública)
+    const preview = URL.createObjectURL(file);
     const fg = Object.assign({}, _fabActual.fotos_generadas || {});
-    fg[tipo] = pub.publicUrl;
-    const e1 = (await db.from('fabrica_fichas').update({ fotos_generadas: fg }).eq('id', _fabActual.id)).error;
-    if (e1) throw new Error(e1.message);
+    fg[tipo] = preview;
     _fabActual.fotos_generadas = fg;
-    log.innerHTML = '<span style="font-size:12px;color:#16a34a">✅ Foto de ' + tipo + ' reemplazada por la tuya.</span>';
+    // Registra la foto pendiente de procesar (tipo -> ruta en informes)
+    _fabActual.propias_pendientes = Object.assign({}, _fabActual.propias_pendientes || {});
+    _fabActual.propias_pendientes[tipo] = ruta;
+    log.innerHTML = '<span style="font-size:12px;color:#16a34a">✅ Foto de ' + tipo + ' subida. Pulsa <b>Rehacer fotos</b> para aplicarla.</span>';
     fabRenderResultado();
   } catch (e) {
     log.innerHTML = '<span style="font-size:12px;color:#b91c1c">No se pudo: ' + e.message + '</span>';
