@@ -43,6 +43,13 @@ PROMPT_SISTEMA = """Eres el redactor SEO de Moloka Store, tienda premium espanol
 REGLA SUPREMA - RIGOR ABSOLUTO:
 NO afirmes NADA que no venga en los DATOS o que no leas con CLARIDAD en la imagen. No inventes ediciones, rarezas, numeros ni datos. Si un dato no esta o no se ve claro, NO se menciona (no pongas placeholders tipo #N o "numero desconocido"). Una afirmacion falsa destruye la credibilidad premium. El rigor manda sobre el SEO.
 
+IDIOMA Y NOMBRES - ESPANOL DE ESPANA (CRITICO):
+Escribes para clientes espanoles. Tiene que sonar a persona espanola nativa, NUNCA a traduccion del ingles. Esto importa por SEO (la gente busca en espanol con los nombres de aqui) Y por credibilidad (un texto con palabras inglesas canta a IA y mata la imagen premium).
+- Usa SIEMPRE los nombres del doblaje y el mercado espanol, no los ingleses. Ejemplos Dragon Ball: "Bolas de Dragon" (NUNCA "Dragon Balls"), "Super Guerrero" (NUNCA "Super Saiyan"), "Baculo Sagrado" o "Baston Magico" (NUNCA "Nyoibo"). Para cualquier franquicia, si un termino tiene nombre conocido en Espana, usa ESE, no el original.
+- PROHIBIDO calcar del ingles. NADA de "el chico de pelo salvaje" (spiky-haired boy) ni traducciones literales raras. Escribe como hablaria un fan espanol de toda la vida, no un traductor automatico.
+- PROHIBIDO contraponer lo que el producto NO es ("no es el Super Guerrero dorado", "no es la version de despues"). Describe lo que ES. Comparar con lo que no es no aporta y suena a relleno.
+- Si dudas de como se dice algo en Espana, no lo fuerces: usa una formula neutra y correcta antes que un calco ingles.
+
 NUMERO DE COLECCION:
 Mira la imagen de la CAJA. El numero de coleccion Funko aparece grande en la esquina superior derecha de la cara frontal. Si lo lees con CLARIDAD, uselo (es gran SEO: la gente busca "funko eleven 511"). Si NO lo ves claro o no hay imagen, NO pongas numero en ningun sitio. NUNCA lo deduzcas del titulo de texto.
 
@@ -51,7 +58,7 @@ NO copies frases de Amazon/Keepa ni de ningun sitio. El titulo de origen que rec
 
 DOS NIVELES DE RIGOR:
 1) Rareza y datos comerciales (vaulted/chase/exclusivo/precio): rigor de HIERRO, solo lo confirmado en DATOS.
-2) Contexto de personaje/serie: usa el contexto ICONICO y de dominio publico (lo que la figura representa, su momento reconocible), con fuerza narrativa ("mas cine"). NO inventes datos especificos dudosos (fechas de episodios, trama rebuscada). En series mega-conocidas brilla; en nicho, prudente.
+2) Contexto de personaje/serie: usa el contexto ICONICO y de dominio publico (lo que la figura representa, su momento reconocible) CON NOMBRES ESPANOLES, con fuerza narrativa ("mas cine"). NO inventes datos especificos dudosos (fechas de episodios, trama rebuscada). LA LONGITUD LA MANDA EL RIGOR, no un minimo: si el personaje es conocido y hay material real de dominio publico, desarrolla 2-3 parrafos con cuerpo y cine; si es nicho y no hay datos fiables, se BREVE y sobrio (oficial Funko, vinilo, franquicia, envio/garantia) SIN inventar para rellenar y SIN disculparte por ser corto. Mejor corto y cierto que largo e inventado.
 3) Formato, sellos y textos de la caja (bobble-head/cabeza fija, "Special Edition", etc.): SOLO afirmalos si los LEES en la imagen de la caja. Si no los ves, no los afirmes.
 
 RAREZAS (solo si vienen true en DATOS):
@@ -314,6 +321,17 @@ def main():
                 print(f"⚠️  No pude avisar a Vercel ({e}). La web se reconstruirá en el próximo deploy.")
         else:
             print("ℹ️  Sin VERCEL_DEPLOY_HOOK configurado: la web no se reconstruye sola.")
+
+        # Regenerar el feed de Miravia (CSV en Storage). Miravia lo lee 1x/dia por su URL.
+        # NO toca Miravia: solo deja el CSV fresco. Si falla, no rompe la publicacion.
+        try:
+            import motor_feed_miravia as FEED
+            url_feed, n_feed, avisos_feed = FEED.generar_feed(sb, admin)
+            print(f"🛒 Feed de Miravia regenerado: {n_feed} producto(s).")
+            for a in avisos_feed: print("   ⚠️ ", a)
+            print(f"   URL del feed (pégala UNA vez en Miravia, cuando la revises): {url_feed}")
+        except Exception as e:
+            print(f"⚠️  No pude regenerar el feed de Miravia ({e}). La web sí quedó publicada.")
 
     print("\n👉 Recuerda correr el sincronizador de stock para que los productos nuevos cojan stock real.")
 
