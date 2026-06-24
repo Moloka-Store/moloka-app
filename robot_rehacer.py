@@ -76,14 +76,14 @@ def generar_fotos(f, fondo, regla, prot=None):
 
 def leer_recado():
     try:
-        r = admin.storage.from_(BUCKET).download('fabrica/_solicitud_rehacer.json')
+        r = admin.storage.from_('informes').download('fabrica/_solicitud_rehacer.json')
         return json.loads(r.decode('utf-8'))
     except Exception as e:
         print(f"No hay recado de rehacer (o no se pudo leer): {e}")
         return None
 
 def limpiar_recado():
-    try: admin.storage.from_(BUCKET).remove(['fabrica/_solicitud_rehacer.json'])
+    try: admin.storage.from_('informes').remove(['fabrica/_solicitud_rehacer.json'])
     except Exception: pass
 
 def main():
