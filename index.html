@@ -1488,6 +1488,55 @@ function fabCargarResultado(f) {
   fabRenderResultado();
 }
 
+async function fabRehacerFotos() {
+  if (!_fabActual) return;
+  const f = _fabActual;
+  const log = document.getElementById('fab-pub-log');
+  const caja = f.fotos[f.papeles.indexOf('caja')] || null;
+  const figura = f.fotos[f.papeles.indexOf('recorte')] || null;
+  if (!caja && !figura) {
+    log.innerHTML = '<span style="font-size:12px;color:#b91c1c">Marca al menos la Caja o la Silueta correcta antes de rehacer.</span>';
+    return;
+  }
+  log.innerHTML = '<span style="font-size:12px;color:var(--gray-500)">⏳ Rehaciendo las fotos con tu elección... (1-3 min)</span>';
+  try {
+    const recado = JSON.stringify({ id: f.id, caja, figura });
+    const blob = new Blob([recado], { type: 'application/json' });
+    const up = await db.storage.from('fotos-fabrica').upload('fabrica/_solicitud_rehacer.json', blob, { upsert: true, contentType: 'application/json' });
+    if (up.error) throw new Error(up.error.message);
+    const resp = await fetch('/api/disparar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secreto: DISPARO_SECRET, workflow: 'fabrica-rehacer.yml' })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      log.innerHTML = '<span style="font-size:12px;color:#b91c1c">⚠️ ' + (data.error || ('HTTP ' + resp.status)) + '</span>';
+      return;
+    }
+    // Sondear hasta que cambien las fotos montadas
+    const antes = JSON.stringify(f.fotos_generadas || {});
+    let intentos = 0;
+    clearInterval(_fabPoll);
+    _fabPoll = setInterval(async () => {
+      intentos++;
+      const { data: d } = await db.from('fabrica_fichas').select('fotos_generadas').eq('id', f.id).limit(1);
+      if (d && d.length && JSON.stringify(d[0].fotos_generadas || {}) !== antes) {
+        clearInterval(_fabPoll);
+        f.fotos_generadas = d[0].fotos_generadas;
+        log.innerHTML = '<span style="font-size:12px;color:#16a34a">✅ Fotos rehechas con tu Caja/Silueta.</span>';
+        fabRenderResultado();
+        return;
+      }
+      if (intentos > 60) {  // ~5 min
+        clearInterval(_fabPoll);
+        log.innerHTML = '<span style="font-size:12px;color:#b91c1c">El robot tardó demasiado. Mira el log en GitHub → Actions (workflow "Fabrica Rehacer").</span>';
+      }
+    }, 5000);
+  } catch (e) {
+    log.innerHTML = '<span style="font-size:12px;color:#b91c1c">Error: ' + e.message + '</span>';
+  }
+}
+
 async function fabReemplazarMontaje(tipo, input) {
   const file = (input.files || [])[0];
   if (!file || !_fabActual) return;
@@ -1548,13 +1597,13 @@ function fabRenderResultado() {
   // CANDIDATAS KEEPA para marcar secundarias (opcional)
   const candHtml = f.fotos.map((url, i) => {
     const papel = f.papeles[i];
-    const borde = papel === 'secundaria' ? '#16a34a' : '#d1d5db';
+    const borde = papel === 'caja' ? '#f59e0b' : papel === 'recorte' ? '#7c3aed' : papel === 'secundaria' ? '#16a34a' : '#d1d5db';
     const op = papel === 'quitar' ? '0.5' : '1';
     return `<div style="text-align:center">
       <div style="border:3px solid ${borde};border-radius:10px;padding:3px;opacity:${op};background:#f7f5fb">
-        <img src="${url}" style="width:90px;height:90px;object-fit:contain;display:block"></div>
-      <div style="display:flex;gap:3px;justify-content:center;margin-top:4px">
-        ${botonPapel(i,'secundaria','+ Galería',papel)}${botonPapel(i,'quitar','No',papel)}
+        <img src="${url}" onclick="fabVerGrande('${url}','Foto de Keepa')" title="Clic para verla grande" style="width:96px;height:96px;object-fit:contain;display:block;cursor:zoom-in"></div>
+      <div style="display:flex;gap:3px;justify-content:center;margin-top:4px;flex-wrap:wrap">
+        ${botonPapel(i,'caja','Caja',papel)}${botonPapel(i,'recorte','Silueta',papel)}${botonPapel(i,'secundaria','+Gal.',papel)}${botonPapel(i,'quitar','No',papel)}
       </div></div>`;
   }).join('');
 
@@ -1571,7 +1620,9 @@ function fabRenderResultado() {
     <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:8px">${montajesHtml || '<span style="font-size:13px;color:#b91c1c">No se montó ninguna foto. Sube las tuyas con los botones de abajo o revisa el log de Actions.</span>'}</div>
 
     <div style="font-size:13px;font-weight:600;margin:18px 0 4px">Fotos extra de Keepa (opcional, para la galería)</div>
+    <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px">¿La fábrica cogió la caja o la figura equivocada (típico en CHASE)? Marca aquí la <b style="color:#f59e0b">Caja</b> y la <b style="color:#7c3aed">Silueta</b> correctas y pulsa <b>Rehacer fotos</b>. Clic en una foto la amplía.</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px">${candHtml || '<span style="font-size:12px;color:var(--gray-500)">Sin fotos extra.</span>'}</div>
+    <div style="margin-bottom:6px"><button class="btn btn-ghost btn-sm" onclick="fabRehacerFotos()">🔧 Rehacer fotos con la Caja/Silueta marcadas</button></div>
 
     <div style="font-size:13px;font-weight:600;margin:18px 0 6px">Descripción para la web (generada)</div>
     <div id="fab-desc-box" style="border:1px solid var(--gray-200);border-radius:8px;padding:14px;font-size:13px;line-height:1.5;background:var(--gray-50);color:var(--gray-700)">${f.web_desc || '<i>Sin descripción. Pulsa Regenerar.</i>'}</div>
