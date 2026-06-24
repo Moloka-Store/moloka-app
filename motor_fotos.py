@@ -133,3 +133,27 @@ def montar_portada(caja_rgb, fig_rgb, S=1400):
     L.paste(cR,(cx,cy))
     L.paste(fR,(fx,fy))
     return L
+
+
+# ---------- MONTAJE PROTECTOR (caja + protector lado a lado, "Better Together") ----------
+def montar_protector(caja_rgb, prot_rgb):
+    """Caja del Funko (izq) + protector vacío (der), sobre blanco. El protector ya viene enderezado.
+    Receta verbatim de motor_protector_colab.py."""
+    def _rec(img, umbral=243, margen=4):
+        g = img.convert('L'); mask = g.point(lambda p: 255 if p < umbral else 0)
+        bb = mask.getbbox()
+        if not bb: return img
+        l,t,r,b = bb
+        return img.crop((max(0,l-margen),max(0,t-margen),min(img.width,r+margen),min(img.height,b+margen)))
+    def _esc(img, alto):
+        return img.resize((max(1,int(img.width*alto/img.height)), alto), Image.LANCZOS)
+    caja_s = _esc(_rec(caja_rgb), 820)
+    prot_s = _esc(prot_rgb, 880)
+    GAP, MH, MV = 40, 110, 95
+    W = caja_s.width + prot_s.width + GAP + 2*MH
+    H = max(caja_s.height, prot_s.height) + 2*MV
+    c = Image.new('RGB', (W, H), 'white')
+    by = H - MV
+    c.paste(caja_s, (MH, by - caja_s.height))
+    c.paste(prot_s, (MH + caja_s.width + GAP, by - prot_s.height))
+    return c
