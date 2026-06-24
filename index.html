@@ -1470,7 +1470,7 @@ function fabEsperarBorrador(tanda) {
       fabCargarResultado(data[0]);
       return;
     }
-    if (intentos > 60) {  // ~5 min
+    if (intentos > 96) {  // ~8 min (monta + descarga modelo IA la 1a vez)
       clearInterval(_fabPoll);
       log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">Está tardando más de lo normal. Mira en un momento la pestaña, o dale otra vez a Generar.</div>';
       document.getElementById('fab-generar-btn').disabled = false;
@@ -1481,10 +1481,34 @@ function fabEsperarBorrador(tanda) {
 function fabCargarResultado(f) {
   let fotos = [];
   try { fotos = Array.isArray(f.fotos_keepa) ? f.fotos_keepa : JSON.parse(f.fotos_keepa || '[]'); } catch (e) { fotos = []; }
-  const papeles = fotos.map((u, i) => i === 0 ? 'caja' : i === 1 ? 'recorte' : i >= 3 ? 'quitar' : 'secundaria');
+  // candidatas Keepa: por defecto todas "quitar" (caja/figura ya se montaron solas); marcas las que quieras como secundaria
+  const papeles = fotos.map(() => 'quitar');
   _fabActual = { ...f, fotos, papeles };
   document.getElementById('fab-generar-btn').disabled = false;
   fabRenderResultado();
+}
+
+async function fabReemplazarMontaje(tipo, input) {
+  const file = (input.files || [])[0];
+  if (!file || !_fabActual) return;
+  const log = document.getElementById('fab-pub-log');
+  log.innerHTML = '<span style="font-size:12px;color:var(--gray-500)">Subiendo tu foto para ' + tipo + '...</span>';
+  try {
+    const limpio = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const ruta = _fabActual.ean + '/propias/' + tipo + '_' + Date.now() + '_' + limpio;
+    const up = await db.storage.from('fotos-fabrica').upload(ruta, file, { upsert: true, contentType: 'image/jpeg' });
+    if (up.error) throw new Error(up.error.message);
+    const { data: pub } = db.storage.from('fotos-fabrica').getPublicUrl(ruta);
+    const fg = Object.assign({}, _fabActual.fotos_generadas || {});
+    fg[tipo] = pub.publicUrl;
+    const e1 = (await db.from('fabrica_fichas').update({ fotos_generadas: fg }).eq('id', _fabActual.id)).error;
+    if (e1) throw new Error(e1.message);
+    _fabActual.fotos_generadas = fg;
+    log.innerHTML = '<span style="font-size:12px;color:#16a34a">✅ Foto de ' + tipo + ' reemplazada por la tuya.</span>';
+    fabRenderResultado();
+  } catch (e) {
+    log.innerHTML = '<span style="font-size:12px;color:#b91c1c">No se pudo: ' + e.message + '</span>';
+  }
 }
 
 function fabRenderResultado() {
@@ -1494,20 +1518,30 @@ function fabRenderResultado() {
   const rar = f.es_chase ? '<span class="badge" style="background:#f59e0b;color:#3a2600">CHASE</span>'
     : f.es_vaulted ? '<span class="badge" style="background:#7c3aed;color:#fff">VAULTED</span>'
     : f.es_exclusivo ? '<span class="badge" style="background:#0ea5b7;color:#fff">EXCLUSIVO</span>' : '';
-  const fotosHtml = f.fotos.map((url, i) => {
+
+  // MONTAJES FINALES (lo que irá a la web) con opción de reemplazar cada uno
+  const fg = f.fotos_generadas || {};
+  const tipos = [['portada','Portada'],['neon','Neón'],['regla','Regla'],['caja','Caja']];
+  if (fg.protector) tipos.push(['protector','Protector']);
+  const montajesHtml = tipos.filter(([k]) => fg[k]).map(([k,label]) => `<div style="text-align:center">
+      <div style="border:2px solid var(--gray-200);border-radius:10px;padding:4px;background:#f7f5fb">
+        <img src="${fg[k]}" style="width:130px;height:130px;object-fit:contain;display:block"></div>
+      <div style="font-size:11px;font-weight:600;margin-top:4px">${label}</div>
+      <label style="font-size:10px;color:var(--navy-light);cursor:pointer;text-decoration:underline">cambiar por la mía<input type="file" accept="image/*" style="display:none" onchange="fabReemplazarMontaje('${k}',this)"></label>
+    </div>`).join('');
+
+  // CANDIDATAS KEEPA para marcar secundarias (opcional)
+  const candHtml = f.fotos.map((url, i) => {
     const papel = f.papeles[i];
-    const borde = papel === 'caja' ? '#f59e0b' : papel === 'recorte' ? '#7c3aed' : papel === 'secundaria' ? '#16a34a' : '#d1d5db';
-    const op = papel === 'quitar' ? '0.4' : '1';
+    const borde = papel === 'secundaria' ? '#16a34a' : '#d1d5db';
+    const op = papel === 'quitar' ? '0.5' : '1';
     return `<div style="text-align:center">
-      <div style="border:3px solid ${borde};border-radius:10px;padding:4px;opacity:${op};background:#f7f5fb">
-        <img src="${url}" style="width:120px;height:120px;object-fit:contain;display:block"></div>
-      <div style="display:flex;gap:3px;justify-content:center;margin-top:5px;flex-wrap:wrap">
-        ${botonPapel(i,'caja','Caja',papel)}${botonPapel(i,'recorte','Recorte',papel)}${botonPapel(i,'secundaria','Secund.',papel)}${botonPapel(i,'quitar','Quitar',papel)}
+      <div style="border:3px solid ${borde};border-radius:10px;padding:3px;opacity:${op};background:#f7f5fb">
+        <img src="${url}" style="width:90px;height:90px;object-fit:contain;display:block"></div>
+      <div style="display:flex;gap:3px;justify-content:center;margin-top:4px">
+        ${botonPapel(i,'secundaria','+ Galería',papel)}${botonPapel(i,'quitar','No',papel)}
       </div></div>`;
   }).join('');
-  const subir = `<div style="text-align:center;align-self:center">
-      <label style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:130px;height:130px;border:2px dashed #94a3b8;border-radius:10px;cursor:pointer;color:var(--navy-light);font-size:12px;text-align:center">
-        ＋ subir<br>foto mía<input type="file" accept="image/*" style="display:none" onchange="fabCargarFotoPropia(this)"></label></div>`;
 
   cont.style.display = 'block';
   cont.className = 'card';
@@ -1517,9 +1551,12 @@ function fabRenderResultado() {
       <div style="font-weight:600;flex:1">2 · Revisa y publica</div>
       <span style="font-size:12px;font-weight:600;border:1px solid var(--navy);color:var(--navy);padding:3px 9px;border-radius:6px">${f.nombre_corto || f.titulo_keepa || f.ean}</span> ${rar}
     </div>
-    <div style="font-size:13px;font-weight:600;margin:12px 0 4px">Elige las fotos</div>
-    <div style="font-size:13px;color:var(--gray-500);margin-bottom:10px">Marca cuál es la <b>Caja</b> (la del número) y cuál el <b>Recorte</b> (figura sola). Lo demás, secundaria o quitar.</div>
-    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:8px">${fotosHtml}${subir}</div>
+    <div style="font-size:13px;font-weight:600;margin:12px 0 4px">Fotos montadas (así saldrán en la web)</div>
+    <div style="font-size:13px;color:var(--gray-500);margin-bottom:10px">Si alguna no te gusta, dale a <b>"cambiar por la mía"</b> y sube la tuya: irá tal cual a la web y a Miravia.</div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:8px">${montajesHtml || '<span style="font-size:13px;color:#b91c1c">No se montó ninguna foto. Sube las tuyas con los botones de abajo o revisa el log de Actions.</span>'}</div>
+
+    <div style="font-size:13px;font-weight:600;margin:18px 0 4px">Fotos extra de Keepa (opcional, para la galería)</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px">${candHtml || '<span style="font-size:12px;color:var(--gray-500)">Sin fotos extra.</span>'}</div>
 
     <div style="font-size:13px;font-weight:600;margin:18px 0 6px">Descripción para la web (generada)</div>
     <div id="fab-desc-box" style="border:1px solid var(--gray-200);border-radius:8px;padding:14px;font-size:13px;line-height:1.5;background:var(--gray-50);color:var(--gray-700)">${f.web_desc || '<i>Sin descripción. Pulsa Regenerar.</i>'}</div>
@@ -1594,15 +1631,17 @@ async function fabPublicar() {
   const f = _fabActual;
   const log = document.getElementById('fab-pub-log');
   const btn = document.getElementById('fab-publicar-btn');
-  const caja = f.fotos[f.papeles.indexOf('caja')] || null;
-  const recorte = f.fotos[f.papeles.indexOf('recorte')] || null;
+  const fg = f.fotos_generadas || {};
+  // Las fotos ya vienen montadas (portada/neón/regla) desde Generar. Aquí solo añadimos secundarias.
+  if (!fg.portada && !fg.neon) { log.innerHTML = '<span style="font-size:12px;color:#b91c1c">⚠️ No hay fotos montadas. Sube al menos una con "cambiar por la mía" antes de publicar.</span>'; return; }
   const secundarias = f.fotos.filter((u, i) => f.papeles[i] === 'secundaria');
-  if (!caja || !recorte) { log.innerHTML = '<span style="font-size:12px;color:#b91c1c">⚠️ Marca al menos la Caja y el Recorte antes de publicar.</span>'; return; }
   btn.disabled = true;
-  log.innerHTML = '<span style="font-size:12px;color:var(--gray-500)">⏳ Publicando... (monta las fotos y sube a la web)</span>';
+  log.innerHTML = '<span style="font-size:12px;color:var(--gray-500)">⏳ Publicando en la web...</span>';
   try {
-    const fotos_elegidas = { caja, recorte_moloka: recorte, secundarias, propias_n: 0 };
-    const e1 = (await db.from('fabrica_fichas').update({ fotos_elegidas, estado: 'fotos_ok' }).eq('id', f.id)).error;
+    // conservar caja/recorte que eligió el montaje automático, añadir secundarias marcadas
+    const fe = Object.assign({ caja: fg.caja || null, recorte_moloka: fg.figura || null, propias_n: 0 }, f.fotos_elegidas || {});
+    fe.secundarias = secundarias;
+    const e1 = (await db.from('fabrica_fichas').update({ fotos_elegidas: fe, estado: 'fotos_ok' }).eq('id', f.id)).error;
     if (e1) throw new Error(e1.message);
     const resp = await fetch('/api/disparar', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1610,7 +1649,7 @@ async function fabPublicar() {
     });
     const data = await resp.json().catch(() => ({}));
     if (resp.ok) {
-      log.innerHTML = '<div class="info-box" style="border-left:3px solid #2e7d32;margin-top:8px">✅ Publicando en la web. En un par de minutos estará online (monta las fotos, sube a la web y la reconstruye). Puedes empezar otra ficha.</div>';
+      log.innerHTML = '<div class="info-box" style="border-left:3px solid #2e7d32;margin-top:8px">✅ Publicando en la web. En un par de minutos estará online. Puedes empezar otra ficha.</div>';
       setTimeout(() => { _fabActual = null; fabRenderResultado(); document.getElementById('fab-gen-log').innerHTML = ''; document.getElementById('fab-foto').value=''; }, 2500);
     } else if (resp.status === 409) {
       log.innerHTML = '<span style="font-size:12px;color:#ba7517">⏳ ' + (data.error || 'Ya hay una publicación en marcha. Espera a que termine.') + '</span>'; btn.disabled = false;
