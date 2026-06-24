@@ -29,6 +29,7 @@ sb_admin = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_SERVIC
 cliente  = Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
 SUPABASE_URL = os.environ['SUPABASE_URL']
 BUCKET = 'fotos-fabrica'
+HEADERS = {"User-Agent": "Mozilla/5.0"}   # Keepa/Amazon sirve imágenes con UA de navegador
 print("Tokens Keepa:", api.tokens_left, "| Supabase + Anthropic OK")
 
 # ===================== LECTOR EAN + KEEPA (verbatim) =====================
