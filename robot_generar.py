@@ -217,12 +217,13 @@ def cargar_web_productos():
     return filas
 
 def galeria(fg, secundarias=None):
-    """Orden: portada, caja, figura, [secundarias elegidas], neon, regla, protector."""
+    """Orden: portada, caja, figura, neon, regla, [secundarias], protector."""
     fg = fg or {}
-    out = [fg[k] for k in ('portada','caja','figura') if fg.get(k)]
+    out = [fg[k] for k in ('portada','caja','figura','neon','regla') if fg.get(k)]
     for u in (secundarias or []):
         if u and u not in out: out.append(u)
-    out += [fg[k] for k in ('neon','regla','protector') if fg.get(k)]
+    if fg.get('protector') and fg['protector'] not in out:
+        out.append(fg['protector'])
     return out
 
 def volcar_a_web(f, indice):
