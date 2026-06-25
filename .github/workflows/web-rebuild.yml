@@ -1,0 +1,11 @@
+name: Moloka - Reconstruir Web
+
+on:
+  workflow_dispatch:
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Disparar build de Vercel (deploy hook)
+        run: curl -fsS -X POST "${{ secrets.VERCEL_DEPLOY_HOOK }}"
