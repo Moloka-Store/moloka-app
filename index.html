@@ -1576,47 +1576,29 @@ function fabToast(tipo, html, fichaId) {
 }
 
 // --- Sigue una ficha que se esta rehaciendo, sin bloquear la pesta\u00f1a ---
-const _FAB_LS = 'moloka_rehacer_pend';
-function _fabGuardarTrabajo(id, nombre, antes) {
-  try { const m = JSON.parse(localStorage.getItem(_FAB_LS) || '{}'); m[id] = { nombre, antes, ts: Date.now() }; localStorage.setItem(_FAB_LS, JSON.stringify(m)); } catch (e) {}
-}
-function _fabBorrarTrabajo(id) {
-  try { const m = JSON.parse(localStorage.getItem(_FAB_LS) || '{}'); delete m[id]; localStorage.setItem(_FAB_LS, JSON.stringify(m)); } catch (e) {}
-}
-function fabReanudarTrabajos() {
-  try {
-    const m = JSON.parse(localStorage.getItem(_FAB_LS) || '{}');
-    const ahora = Date.now();
-    Object.keys(m).forEach(id => {
-      const t = m[id] || {};
-      if (ahora - (t.ts || 0) > 15 * 60 * 1000) { _fabBorrarTrabajo(id); return; }  // viejo: descartar
-      fabSeguirRehacer(Number(id), t.nombre, t.antes);
-    });
-  } catch (e) {}
-}
-
-async function fabSeguirRehacer(id, nombre, antes) {
+async function fabSeguirRehacer(id, nombre) {
   if (_fabTrabajos[id]) clearInterval(_fabTrabajos[id]);
-  _fabGuardarTrabajo(id, nombre, antes);
-  const safe = escapeHtml(String(nombre || ('#'+id)));
+  const safe = escapeHtml(String(nombre || ('#' + id)));
+  // 'antes' = estado REAL en la base de datos AHORA (no el de la memoria, que puede ir desfasado
+  // y provocar un falso "ya estan listas" nada mas empezar).
+  let antes = '__sin_leer__';
+  try {
+    const { data: d0 } = await db.from('fabrica_fichas').select('fotos_generadas').eq('id', id).limit(1);
+    if (d0 && d0.length) antes = JSON.stringify(d0[0].fotos_generadas || {});
+  } catch (e) {}
   let intentos = 0;
   _fabTrabajos[id] = setInterval(async () => {
     intentos++;
-    const _dbg = document.getElementById('fab-pub-log');
-    const { data: d, error: _e } = await db.from('fabrica_fichas').select('*').eq('id', id).limit(1);
-    if (_e) { if (_dbg) _dbg.innerHTML = '<span style="font-size:11px;color:#b91c1c">DIAG #' + id + ' \u00b7 error al leer: ' + _e.message + '</span>'; return; }
-    if (!d || !d.length) { if (_dbg) _dbg.innerHTML = '<span style="font-size:11px;color:#b91c1c">DIAG #' + id + ' \u00b7 intento ' + intentos + ' \u00b7 NO encuentro la ficha (id mal o RLS)</span>'; return; }
-    const _ahora = JSON.stringify(d[0].fotos_generadas || {});
-    if (_ahora !== antes) {
-      clearInterval(_fabTrabajos[id]); delete _fabTrabajos[id]; _fabBorrarTrabajo(id);
-      if (_dbg) _dbg.innerHTML = '<span style="font-size:12px;color:#16a34a">\u2705 Cambio detectado, refrescando\u2026</span>';
-      if (_fabActual && _fabActual.id === id) { fabCargarResultado(d[0]); }
-      fabToast('ok', '\u2705 Fotos listas: <b>' + safe + '</b>', id);
+    const { data: d } = await db.from('fabrica_fichas').select('*').eq('id', id).limit(1);
+    if (d && d.length && antes !== '__sin_leer__' && JSON.stringify(d[0].fotos_generadas || {}) !== antes) {
+      clearInterval(_fabTrabajos[id]); delete _fabTrabajos[id];
+      const abierta = _fabActual && Number(_fabActual.id) === Number(id);
+      if (abierta) fabCargarResultado(d[0]);
+      fabToast('ok', '\u2705 Fotos actualizadas: <b>' + safe + '</b>', abierta ? null : id);
       return;
     }
-    if (_dbg) _dbg.innerHTML = '<span style="font-size:11px;color:#888">DIAG #' + id + ' \u00b7 intento ' + intentos + ' \u00b7 sin cambios a\u00fan (antes ' + antes.length + ' / ahora ' + _ahora.length + ' chars)</span>';
     if (intentos > 120) {
-      clearInterval(_fabTrabajos[id]); delete _fabTrabajos[id]; _fabBorrarTrabajo(id);
+      clearInterval(_fabTrabajos[id]); delete _fabTrabajos[id];
       fabToast('err', '\u26a0\ufe0f El robot tard\u00f3 demasiado con <b>' + safe + '</b>. Mira GitHub \u2192 Actions.', id);
     }
   }, 5000);
@@ -1656,7 +1638,7 @@ async function fabRehacerFotos() {
     }
     // En SEGUNDO PLANO: te puedes ir a otra ficha o pesta\u00f1a; te aviso cuando esten listas.
     log.innerHTML = '<span style="font-size:12px;color:#16a34a">\u2705 En marcha. Puedes seguir con otra ficha \u2014 te avisar\u00e9 abajo a la derecha cuando est\u00e9n listas.</span>';
-    fabSeguirRehacer(f.id, (f.nombre_corto || f.titulo_keepa || f.ean || ('#'+f.id)), JSON.stringify(f.fotos_generadas || {}));
+    fabSeguirRehacer(f.id, (f.nombre_corto || f.titulo_keepa || f.ean || ('#'+f.id)));
   } catch (e) {
     log.innerHTML = '<span style="font-size:12px;color:#b91c1c">Error: ' + e.message + '</span>';
   }
@@ -1757,7 +1739,8 @@ function fabRenderResultado() {
       </div></div>`;
   }).join('');
 
-  const secPrev = f.secundarias_propias_preview || [];
+  const secReales = (f.fotos_elegidas && f.fotos_elegidas.secundarias) || [];
+  const secPrev = (f.secundarias_propias_preview || []).concat(secReales);   // previa local + las que el robot ya guardó
   const secPropiasHtml = secPrev.map(u => `<div style="border:2px solid #16a34a;border-radius:10px;padding:3px;background:#f7f5fb"><img src="${u}" style="width:96px;height:96px;object-fit:contain;display:block"></div>`).join('');
 
   cont.style.display = 'block';
@@ -1863,7 +1846,7 @@ async function fabPublicar() {
   try {
     // conservar caja/recorte que eligió el montaje automático, añadir secundarias marcadas
     const fe = Object.assign({ caja: fg.caja || null, recorte_moloka: fg.figura || null, propias_n: 0 }, f.fotos_elegidas || {});
-    fe.secundarias = secundarias;
+    fe.secundarias = [...new Set((fe.secundarias || []).concat(secundarias))];   // conserva tus secundarias propias + a\u00f1ade las de Keepa marcadas
     const e1 = (await db.from('fabrica_fichas').update({ fotos_elegidas: fe, estado: 'fotos_ok' }).eq('id', f.id)).error;
     if (e1) throw new Error(e1.message);
     const resp = await fetch('/api/disparar', {
@@ -8907,7 +8890,6 @@ async function init() {
     if (error) throw error;
     document.getElementById('conn-status').textContent = '✅ Conectado · moloka.es';
     cargarAlertas();
-    fabReanudarTrabajos();   // reanuda seguimientos de 'rehacer' si recargaste con uno en curso
   } catch(e) {
     document.getElementById('conn-status').textContent = '❌ Sin conexión';
     console.error('Supabase error:', e);
