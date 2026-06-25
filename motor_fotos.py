@@ -147,22 +147,27 @@ def montar_m7(fig_rgba, f, S=1024):
     fandom = (f.get('fandom') or '') if isinstance(f, dict) else ''
     mm = _re.search(r'#\s*(\d+)', nombre)
     numero = ('#'+mm.group(1)) if mm else ''
-    base = _re.sub(r'#\s*\d+','',nombre).strip().rstrip('|-/ ').strip() or nombre
-    # El titulo grande es solo el nombre; lo que va entre parentesis (variante) baja al pie
-    mp = _re.match(r'^(.*?)\s*\(([^)]*)\)\s*$', base)
-    if mp:
-        titulo = mp.group(1).strip(); variante = mp.group(2).strip()
-    else:
-        titulo = base; variante = ''
-    pie_partes = ([variante] if variante else []) + ['Funko Pop!', 'Vinilo', '\u2248 10 cm']
-    pie = ' \u00b7 '.join(pie_partes)
+    # Nombre del personaje = nombre completo SIN el #numero (ya NO separamos coletillas).
+    personaje = _re.sub(r'#\s*\d+','',nombre).strip().rstrip('|-/ ').strip() or nombre
+    pie = ' \u00b7 '.join(['Funko Pop!', 'Vinilo', '\u2248 10 cm'])
     W=S; M=Image.new('RGBA',(W,W),(255,255,255,255)); d=ImageDraw.Draw(M)
     HH=int(W*0.146); M.paste(_m7_grad(W,HH),(0,0))
-    if fandom:
-        d.text((60,int(HH*0.26)), ' '.join(fandom.upper()), font=_m7_font(19), fill=(255,255,255))
-    d.text((58,int(HH*0.42)), titulo, font=_m7_font(54), fill=(255,255,255))
+    def _ancho(txt, font): bb=d.textbbox((0,0),txt,font=font); return bb[2]-bb[0]
+    def _fit(txt, sz0, sz_min, x0, x_lim):
+        sz=sz0
+        while sz>sz_min and x0+_ancho(txt,_m7_font(sz))>x_lim: sz-=2
+        return _m7_font(sz)
+    # Numero de coleccion a la DERECHA (a la altura de la franquicia)
+    lim_der = W-60
     if numero:
-        d.text((W-60,int(HH*0.5)), numero, font=_m7_font(44), fill=(255,255,255), anchor='rm')
+        fnum=_m7_font(44); d.text((W-60,int(HH*0.30)), numero, font=fnum, fill=(255,255,255), anchor='rm')
+        lim_der=(W-60)-_ancho(numero,fnum)-24
+    # FRANQUICIA grande ARRIBA (protagonista); se ajusta sola SOLO si fuera larguisima.
+    if fandom:
+        fr=' '.join(fandom.upper().split())
+        d.text((58,int(HH*0.14)), fr, font=_fit(fr,44,30,58,lim_der), fill=(255,255,255))
+    # NOMBRE del personaje, mediano, DEBAJO (ancho completo; nunca rompe por largo que sea).
+    d.text((58,int(HH*0.60)), personaje, font=_fit(personaje,28,20,58,W-60), fill=(255,255,255))
     alto=int(W*0.55); r=alto/max(1,fig_rgba.height)
     fig=fig_rgba.resize((max(1,int(fig_rgba.width*r)),alto),Image.LANCZOS)
     cx=W//2; eb=int(W*0.83)
