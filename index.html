@@ -1475,6 +1475,13 @@ async function fabGenerarFicha() {
     precio_miravia: parseFloat(document.getElementById('fab-precio-miravia').value) || null,
   };
 
+  // Reinicia los toggles de rareza para que la SIGUIENTE ficha empiece SIN marcar
+  // (evita arrastrar por error CHASE / Exclusivo / Vaulted de la ficha anterior).
+  document.getElementById('fab-chase').checked = false;
+  document.getElementById('fab-exclusivo').checked = false;
+  document.getElementById('fab-vaulted').checked = false;
+  const _te = document.getElementById('fab-tipoexc'); if (_te) _te.value = '';
+
   try {
     // limpiar buzón viejo
     try {
