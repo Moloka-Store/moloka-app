@@ -170,9 +170,15 @@ def main():
     # Mezclar: lo montado, respetando lo que ya tenías propio (/propias/)
     final = dict(enlaces)
     final.update(mias)
+    # Secundarias propias: van a la galería de secundarias (ya cuadradas), NO como montaje
+    sec_propias = [u for t, u in propias_pub.items() if t.startswith('secundaria')]
+    if sec_propias:
+        fe['secundarias'] = (fe.get('secundarias') or []) + sec_propias
     # Las fotos propias que son montaje FINAL (portada/neon/regla/protector/caja/figura)
     # sustituyen directamente a lo montado (van tal cual a web/Miravia).
     for tipo, url in propias_pub.items():
+        if tipo.startswith('secundaria'):
+            continue
         final[tipo] = url
 
     sb.table('fabrica_fichas').update({'fotos_generadas': final, 'fotos_elegidas': fe}).eq('id', fid).execute()
