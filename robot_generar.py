@@ -176,8 +176,7 @@ def generar_fotos(f, fondo, regla, prot=None):
     if not ok:
         return None, f"recorte sucio ({motivo})"
     enlaces = {}
-    enlaces['neon']  = subir(admin, f"{ean}/neon.jpg",  a_jpg_bytes(M.montar_neon(rec, fondo)))
-    enlaces['regla'] = subir(admin, f"{ean}/regla.jpg", a_jpg_bytes(M.montar_regla(rec, regla)))
+    enlaces['ficha'] = subir(admin, f"{ean}/ficha.jpg", a_jpg_bytes(M.montar_m7(rec, f)))
     if url_caja:
         caja = descargar(url_caja)
         enlaces['portada'] = subir(admin, f"{ean}/portada.jpg", a_jpg_bytes(M.montar_portada(caja, figura)))
@@ -198,7 +197,9 @@ def generar_fotos(f, fondo, regla, prot=None):
 COLETILLA_WEB = "<br><br>Funda protectora incluida — gratis. Este Funko sale de nuestro almacén con su protector específico de regalo, para que la caja se mantenga perfecta de camino a tu estantería. Cuidamos cada pieza que enviamos protegida."
 COLETILLA_MIRAVIA = "<br><br>🎁 Protector de regalo. Este Funko Pop! se envía dentro de su funda protectora específica, incluida sin coste. Lo recibes impecable y lo conservas como el primer día: la caja, a salvo de roces, polvo y luz. Un detalle de tienda especializada."
 
-ORDEN_GALERIA = ['portada', 'caja', 'figura', 'neon', 'regla', 'protector']   # orden fijo (protector si lleva)
+GPSR_WEB = "<br><br><b>Información de seguridad del producto (GPSR)</b><br>Responsable en la UE: Funko EU BV · Zuidplein 36, 1077 XV Ámsterdam (NL) · supportEMEA@funko.com"
+
+ORDEN_GALERIA = ['portada', 'caja', 'figura', 'ficha', 'protector']   # orden fijo (protector si lleva)
 
 def norm_ean(ean):
     """EAN normalizado para casar (hay UPC con/sin cero inicial)."""
@@ -217,9 +218,9 @@ def cargar_web_productos():
     return filas
 
 def galeria(fg, secundarias=None):
-    """Orden: portada, caja, figura, neon, regla, [secundarias], protector."""
+    """Orden: portada, caja, figura, ficha (M7), [secundarias], protector."""
     fg = fg or {}
-    out = [fg[k] for k in ('portada','caja','figura','neon','regla') if fg.get(k)]
+    out = [fg[k] for k in ('portada','caja','figura','ficha') if fg.get(k)]
     for u in (secundarias or []):
         if u and u not in out: out.append(u)
     if fg.get('protector') and fg['protector'] not in out:
@@ -287,6 +288,12 @@ def main():
             if f.get('miravia_desc'): f['miravia_desc'] = (f['miravia_desc'] or '').rstrip() + COLETILLA_MIRAVIA
             sb.table('fabrica_fichas').update({'web_desc': f.get('web_desc'), 'miravia_desc': f.get('miravia_desc')}).eq('id', f['id']).execute()
             print("   protector: coletillas anadidas")
+
+        # 1b) GPSR: bloque legal fijo (Funko) al final de la descripcion web, sin duplicar
+        if f.get('web_desc') and 'GPSR' not in (f.get('web_desc') or ''):
+            f['web_desc'] = (f['web_desc'] or '').rstrip() + GPSR_WEB
+            sb.table('fabrica_fichas').update({'web_desc': f.get('web_desc')}).eq('id', f['id']).execute()
+            print("   GPSR: bloque legal anadido")
 
         # 2) VOLCADO A WEB (las fotos ya vienen montadas y revisadas desde PREPARAR)
         try:
