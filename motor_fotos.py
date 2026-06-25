@@ -5,7 +5,7 @@ Funciones de imagen: recorte + montajes (neón, regla, portada) + control de cal
 Calibrado para Funko Pop estándar (~10 cm) sobre fondo blanco de Keepa.
 """
 import numpy as np
-from PIL import Image, ImageFilter, ImageDraw
+from PIL import Image, ImageFilter, ImageDraw, ImageFont
 from scipy import ndimage
 
 # ---------- RECORTE (IA: rembg / U²-Net, como Canva) ----------
@@ -112,6 +112,61 @@ def test_calidad(fig_rgba):
     if solido < 500:
         return False, "recorte casi vacío (la IA no encontró figura)"
     return True, "ok"
+
+# ---------- MONTAJE FICHA M7 (header de marca + figura + datos) ----------
+import re as _re, glob as _glob
+_BR = [(236,72,153),(124,58,237),(34,211,238)]   # marca: #ec4899 -> #7c3aed(52%) -> #22d3ee
+_STOPS = [0.0, 0.52, 1.0]
+def _m7_font(sz, bold=True):
+    for c in (['SpaceGrotesk-Bold.ttf'] if bold else ['SpaceGrotesk-Medium.ttf']):
+        try: return ImageFont.truetype(c, sz)
+        except Exception: pass
+    pat = 'DejaVuSans-Bold.ttf' if bold else 'DejaVuSans.ttf'
+    g = _glob.glob('/usr/share/fonts/**/'+pat, recursive=True)
+    return ImageFont.truetype(g[0], sz) if g else ImageFont.load_default()
+def _m7_grad(w,h,horizontal=True):
+    a=np.zeros((h,w,3),np.uint8); n=(w if horizontal else h)
+    for i in range(n):
+        t=i/max(1,n-1); col=list(_BR[-1])
+        for k in range(len(_STOPS)-1):
+            if t<=_STOPS[k+1] or k==len(_STOPS)-2:
+                u=(t-_STOPS[k])/max(1e-6,(_STOPS[k+1]-_STOPS[k])); u=min(max(u,0),1)
+                col=[int(_BR[k][j]+(_BR[k+1][j]-_BR[k][j])*u) for j in range(3)]; break
+        if horizontal: a[:,i]=col
+        else: a[i,:]=col
+    return Image.fromarray(a)
+def _m7_tgrad(txt,font):
+    tmp=Image.new('RGBA',(10,10)); d=ImageDraw.Draw(tmp); bb=d.textbbox((0,0),txt,font=font)
+    w,h=bb[2]-bb[0],bb[3]-bb[1]; pad=10; W,H=w+pad*2,h+pad*2
+    m=Image.new('L',(W,H),0); ImageDraw.Draw(m).text((pad-bb[0],pad-bb[1]),txt,font=font,fill=255)
+    o=Image.new('RGBA',(W,H),(0,0,0,0)); o.paste(_m7_grad(W,H),(0,0),m); return o
+def montar_m7(fig_rgba, f, S=1024):
+    """Ficha M7: header de marca (serie+nombre+numero) + figura recortada + datos + MOLOKA.
+    Sustituye a neon y regla. Recibe la figura YA recortada (RGBA) y la fila f (dict)."""
+    nombre = (f.get('nombre_corto') or f.get('web_titulo') or '') if isinstance(f, dict) else str(f or '')
+    fandom = (f.get('fandom') or '') if isinstance(f, dict) else ''
+    mm = _re.search(r'#\s*(\d+)', nombre)
+    numero = ('#'+mm.group(1)) if mm else ''
+    titulo = _re.sub(r'#\s*\d+','',nombre).strip().rstrip('|-/ ').strip() or nombre
+    pie = 'Funko Pop! \u00b7 Vinilo \u00b7 \u2248 10 cm'
+    W=S; M=Image.new('RGBA',(W,W),(255,255,255,255)); d=ImageDraw.Draw(M)
+    HH=int(W*0.146); M.paste(_m7_grad(W,HH),(0,0))
+    if fandom:
+        d.text((60,int(HH*0.26)), ' '.join(fandom.upper()), font=_m7_font(19), fill=(255,255,255))
+    d.text((58,int(HH*0.42)), titulo, font=_m7_font(54), fill=(255,255,255))
+    if numero:
+        d.text((W-60,int(HH*0.5)), numero, font=_m7_font(44), fill=(255,255,255), anchor='rm')
+    alto=int(W*0.55); r=alto/max(1,fig_rgba.height)
+    fig=fig_rgba.resize((max(1,int(fig_rgba.width*r)),alto),Image.LANCZOS)
+    cx=W//2; eb=int(W*0.83)
+    s=Image.new('RGBA',(W,W),(0,0,0,0)); ImageDraw.Draw(s).ellipse([cx-115,eb-18,cx+115,eb+18],fill=(40,30,60,55))
+    M.alpha_composite(s.filter(ImageFilter.GaussianBlur(17)))
+    M.alpha_composite(fig,(cx-fig.width//2,eb-alto))
+    d.line([60,int(W*0.9),W-60,int(W*0.9)],fill=(232,233,240),width=2)
+    d.text((60,int(W*0.93)), pie, font=_m7_font(23,False), fill=(110,110,130))
+    lg=_m7_tgrad('MOLOKA',_m7_font(56)); sc=0.52; lg=lg.resize((int(lg.width*sc),int(lg.height*sc)))
+    M.paste(lg,(W-60-lg.width,int(W*0.925)),lg)
+    return M.convert('RGB')
 
 # ---------- MONTAJE NEÓN ----------
 def montar_neon(fig_rgba, fondo_rgb):
