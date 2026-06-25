@@ -77,8 +77,7 @@ def generar_fotos(f, fondo, regla, prot=None):
     if not ok:
         return None, f"recorte sucio ({motivo})"
     enlaces = {}
-    enlaces['neon']  = subir(admin, f"{ean}/neon.jpg",  a_jpg_bytes(M.montar_neon(rec, fondo)))
-    enlaces['regla'] = subir(admin, f"{ean}/regla.jpg", a_jpg_bytes(M.montar_regla(rec, regla)))
+    enlaces['ficha'] = subir(admin, f"{ean}/ficha.jpg", a_jpg_bytes(M.montar_m7(rec, f)))
     if url_caja:
         caja = descargar(url_caja)
         enlaces['portada'] = subir(admin, f"{ean}/portada.jpg", a_jpg_bytes(M.montar_portada(caja, figura)))
@@ -164,7 +163,7 @@ def main():
     if err:
         print(f"❌ No se pudo rehacer: {err}"); limpiar_recado(); return
     print("   --- URLs montadas ---")
-    for k in ('portada','neon','regla','caja','figura','protector'):
+    for k in ('portada','ficha','caja','figura','protector'):
         if k in enlaces: print(f"   {k}: {enlaces[k]}")
 
     # Mezclar: lo montado, respetando lo que ya tenías propio (/propias/)
