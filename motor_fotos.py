@@ -147,8 +147,15 @@ def montar_m7(fig_rgba, f, S=1024):
     fandom = (f.get('fandom') or '') if isinstance(f, dict) else ''
     mm = _re.search(r'#\s*(\d+)', nombre)
     numero = ('#'+mm.group(1)) if mm else ''
-    titulo = _re.sub(r'#\s*\d+','',nombre).strip().rstrip('|-/ ').strip() or nombre
-    pie = 'Funko Pop! \u00b7 Vinilo \u00b7 \u2248 10 cm'
+    base = _re.sub(r'#\s*\d+','',nombre).strip().rstrip('|-/ ').strip() or nombre
+    # El titulo grande es solo el nombre; lo que va entre parentesis (variante) baja al pie
+    mp = _re.match(r'^(.*?)\s*\(([^)]*)\)\s*$', base)
+    if mp:
+        titulo = mp.group(1).strip(); variante = mp.group(2).strip()
+    else:
+        titulo = base; variante = ''
+    pie_partes = ([variante] if variante else []) + ['Funko Pop!', 'Vinilo', '\u2248 10 cm']
+    pie = ' \u00b7 '.join(pie_partes)
     W=S; M=Image.new('RGBA',(W,W),(255,255,255,255)); d=ImageDraw.Draw(M)
     HH=int(W*0.146); M.paste(_m7_grad(W,HH),(0,0))
     if fandom:
