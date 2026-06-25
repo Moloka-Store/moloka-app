@@ -1395,7 +1395,7 @@ async function fabCargarBorradores() {
   cont.innerHTML = data.map(f => {
     const fg = f.fotos_generadas || {};
     let kp = []; try { kp = Array.isArray(f.fotos_keepa) ? f.fotos_keepa : JSON.parse(f.fotos_keepa || '[]'); } catch (e) {}
-    const thumb = fg.portada || fg.neon || kp[0] || '';
+    const thumb = fg.portada || fg.ficha || kp[0] || '';
     const rar = f.es_chase ? 'CHASE' : f.es_vaulted ? 'VAULTED' : f.es_exclusivo ? 'EXCLUSIVO' : '';
     return `<div style="display:flex;align-items:center;gap:12px;padding:10px;border:1px solid var(--gray-200);border-radius:10px;margin-bottom:8px">
       <img src="${thumb}" style="width:54px;height:54px;object-fit:contain;background:#f7f5fb;border-radius:8px">
@@ -1668,7 +1668,7 @@ function fabRenderResultado() {
 
   // MONTAJES FINALES (lo que irá a la web) con opción de reemplazar cada uno
   const fg = f.fotos_generadas || {};
-  const tipos = [['portada','Portada'],['caja','Caja'],['figura','Silueta'],['neon','Neón'],['regla','Regla']];
+  const tipos = [['portada','Portada'],['caja','Caja'],['figura','Silueta'],['ficha','Ficha']];
   if (fg.protector) tipos.push(['protector','Protector']);
   const montajesHtml = tipos.filter(([k]) => fg[k]).map(([k,label]) => `<div style="text-align:center">
       <div style="border:2px solid var(--gray-200);border-radius:10px;padding:4px;background:#f7f5fb">
@@ -1789,7 +1789,7 @@ async function fabPublicar() {
   const btn = document.getElementById('fab-publicar-btn');
   const fg = f.fotos_generadas || {};
   // Las fotos ya vienen montadas (portada/neón/regla) desde Generar. Aquí solo añadimos secundarias.
-  if (!fg.portada && !fg.neon) { log.innerHTML = '<span style="font-size:12px;color:#b91c1c">⚠️ No hay fotos montadas. Sube al menos una con "cambiar por la mía" antes de publicar.</span>'; return; }
+  if (!fg.portada && !fg.ficha) { log.innerHTML = '<span style="font-size:12px;color:#b91c1c">⚠️ No hay fotos montadas. Sube al menos una con "cambiar por la mía" antes de publicar.</span>'; return; }
   const secundarias = f.fotos.filter((u, i) => f.papeles[i] === 'secundaria');
   btn.disabled = true;
   log.innerHTML = '<span style="font-size:12px;color:var(--gray-500)">⏳ Publicando en la web...</span>';
