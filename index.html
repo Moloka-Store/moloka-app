@@ -1480,6 +1480,7 @@ async function fabGenerarFicha() {
   document.getElementById('fab-chase').checked = false;
   document.getElementById('fab-exclusivo').checked = false;
   document.getElementById('fab-vaulted').checked = false;
+  document.getElementById('fab-protector').checked = false;
   const _te = document.getElementById('fab-tipoexc'); if (_te) _te.value = '';
 
   try {
@@ -1575,21 +1576,41 @@ function fabToast(tipo, html, fichaId) {
 }
 
 // --- Sigue una ficha que se esta rehaciendo, sin bloquear la pesta\u00f1a ---
+const _FAB_LS = 'moloka_rehacer_pend';
+function _fabGuardarTrabajo(id, nombre, antes) {
+  try { const m = JSON.parse(localStorage.getItem(_FAB_LS) || '{}'); m[id] = { nombre, antes, ts: Date.now() }; localStorage.setItem(_FAB_LS, JSON.stringify(m)); } catch (e) {}
+}
+function _fabBorrarTrabajo(id) {
+  try { const m = JSON.parse(localStorage.getItem(_FAB_LS) || '{}'); delete m[id]; localStorage.setItem(_FAB_LS, JSON.stringify(m)); } catch (e) {}
+}
+function fabReanudarTrabajos() {
+  try {
+    const m = JSON.parse(localStorage.getItem(_FAB_LS) || '{}');
+    const ahora = Date.now();
+    Object.keys(m).forEach(id => {
+      const t = m[id] || {};
+      if (ahora - (t.ts || 0) > 15 * 60 * 1000) { _fabBorrarTrabajo(id); return; }  // viejo: descartar
+      fabSeguirRehacer(Number(id), t.nombre, t.antes);
+    });
+  } catch (e) {}
+}
+
 async function fabSeguirRehacer(id, nombre, antes) {
   if (_fabTrabajos[id]) clearInterval(_fabTrabajos[id]);
+  _fabGuardarTrabajo(id, nombre, antes);
   const safe = escapeHtml(String(nombre || ('#'+id)));
   let intentos = 0;
   _fabTrabajos[id] = setInterval(async () => {
     intentos++;
-    const { data: d } = await db.from('fabrica_fichas').select('fotos_generadas').eq('id', id).limit(1);
+    const { data: d } = await db.from('fabrica_fichas').select('*').eq('id', id).limit(1);
     if (d && d.length && JSON.stringify(d[0].fotos_generadas || {}) !== antes) {
-      clearInterval(_fabTrabajos[id]); delete _fabTrabajos[id];
-      if (_fabActual && _fabActual.id === id) { _fabActual.fotos_generadas = d[0].fotos_generadas; fabRenderResultado(); }
+      clearInterval(_fabTrabajos[id]); delete _fabTrabajos[id]; _fabBorrarTrabajo(id);
+      if (_fabActual && _fabActual.id === id) { fabCargarResultado(d[0]); }
       fabToast('ok', '\u2705 Fotos listas: <b>' + safe + '</b>', id);
       return;
     }
-    if (intentos > 72) {  // ~6 min
-      clearInterval(_fabTrabajos[id]); delete _fabTrabajos[id];
+    if (intentos > 120) {  // ~10 min (la 1a del dia descarga el modelo de IA)
+      clearInterval(_fabTrabajos[id]); delete _fabTrabajos[id]; _fabBorrarTrabajo(id);
       fabToast('err', '\u26a0\ufe0f El robot tard\u00f3 demasiado con <b>' + safe + '</b>. Mira GitHub \u2192 Actions.', id);
     }
   }, 5000);
@@ -8880,6 +8901,7 @@ async function init() {
     if (error) throw error;
     document.getElementById('conn-status').textContent = '✅ Conectado · moloka.es';
     cargarAlertas();
+    fabReanudarTrabajos();   // reanuda seguimientos de 'rehacer' si recargaste con uno en curso
   } catch(e) {
     document.getElementById('conn-status').textContent = '❌ Sin conexión';
     console.error('Supabase error:', e);
