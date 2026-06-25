@@ -1602,14 +1602,20 @@ async function fabSeguirRehacer(id, nombre, antes) {
   let intentos = 0;
   _fabTrabajos[id] = setInterval(async () => {
     intentos++;
-    const { data: d } = await db.from('fabrica_fichas').select('*').eq('id', id).limit(1);
-    if (d && d.length && JSON.stringify(d[0].fotos_generadas || {}) !== antes) {
+    const _dbg = document.getElementById('fab-pub-log');
+    const { data: d, error: _e } = await db.from('fabrica_fichas').select('*').eq('id', id).limit(1);
+    if (_e) { if (_dbg) _dbg.innerHTML = '<span style="font-size:11px;color:#b91c1c">DIAG #' + id + ' \u00b7 error al leer: ' + _e.message + '</span>'; return; }
+    if (!d || !d.length) { if (_dbg) _dbg.innerHTML = '<span style="font-size:11px;color:#b91c1c">DIAG #' + id + ' \u00b7 intento ' + intentos + ' \u00b7 NO encuentro la ficha (id mal o RLS)</span>'; return; }
+    const _ahora = JSON.stringify(d[0].fotos_generadas || {});
+    if (_ahora !== antes) {
       clearInterval(_fabTrabajos[id]); delete _fabTrabajos[id]; _fabBorrarTrabajo(id);
+      if (_dbg) _dbg.innerHTML = '<span style="font-size:12px;color:#16a34a">\u2705 Cambio detectado, refrescando\u2026</span>';
       if (_fabActual && _fabActual.id === id) { fabCargarResultado(d[0]); }
       fabToast('ok', '\u2705 Fotos listas: <b>' + safe + '</b>', id);
       return;
     }
-    if (intentos > 120) {  // ~10 min (la 1a del dia descarga el modelo de IA)
+    if (_dbg) _dbg.innerHTML = '<span style="font-size:11px;color:#888">DIAG #' + id + ' \u00b7 intento ' + intentos + ' \u00b7 sin cambios a\u00fan (antes ' + antes.length + ' / ahora ' + _ahora.length + ' chars)</span>';
+    if (intentos > 120) {
       clearInterval(_fabTrabajos[id]); delete _fabTrabajos[id]; _fabBorrarTrabajo(id);
       fabToast('err', '\u26a0\ufe0f El robot tard\u00f3 demasiado con <b>' + safe + '</b>. Mira GitHub \u2192 Actions.', id);
     }
