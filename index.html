@@ -423,6 +423,7 @@
         <div style="padding:14px 16px;border-bottom:1px solid var(--gray-200);display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <input type="text" id="fab-buscar" placeholder="🔍 Buscar producto..." oninput="renderFabrica()" style="flex:1;min-width:180px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">
           <span style="font-size:12px;color:var(--gray-500)" id="fab-contador">—</span>
+          <button class="btn btn-ghost btn-sm" onclick="cargarFabrica()" title="Recargar la lista">🔄 Actualizar</button>
         </div>
         <div class="table-wrap" style="max-height:75vh;overflow:auto">
           <table id="fab-tabla">
@@ -431,6 +432,7 @@
                 <th>Producto</th>
                 <th style="text-align:center">Rareza</th>
                 <th style="text-align:center" title="Precio de venta en la web propia (IVA incluido)">Precio Web (€)</th>
+                <th style="text-align:center" title="Precio rebajado (oferta). Si lo rellenas, la web tacha el normal y muestra este en rojo con el % de descuento">Oferta (€)</th>
                 <th style="text-align:center" title="Precio de compra (PVD, sin IVA) — viene de Inventario">Compra (€)</th>
                 <th style="text-align:center" title="Coste de la caja de envío, sin IVA — lo rellenas tú">Caja (€)</th>
                 <th style="text-align:center" title="Coste del protector, sin IVA — lo rellenas tú">Protector (€)</th>
@@ -438,7 +440,7 @@
                 <th style="text-align:center" title="Beneficio ÷ precio de venta (IVA incluido)">Margen</th>
               </tr>
             </thead>
-            <tbody id="fab-tbody"><tr><td colspan="8"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr></tbody>
+            <tbody id="fab-tbody"><tr><td colspan="9"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr></tbody>
           </table>
         </div>
       </div>
@@ -1387,7 +1389,7 @@ function fabSubTab(cual) {
     document.getElementById('fab-sub-' + t).style.display = (t === cual) ? 'block' : 'none';
     document.getElementById('fabtab-' + t).className = 'btn btn-sm ' + (t === cual ? 'btn-primary' : 'btn-ghost');
   });
-  if (cual === 'precios' && !window._fabPreciosCargados) { window._fabPreciosCargados = true; cargarFabrica(); }
+  if (cual === 'precios') { cargarFabrica(); }   // recarga cada vez que entras: ves las fichas nuevas sin F5
   if (cual === 'borradores') fabCargarBorradores();
 }
 
@@ -1830,15 +1832,15 @@ let _fabProductos = [];
 
 async function cargarFabrica() {
   const tbody = document.getElementById('fab-tbody');
-  tbody.innerHTML = '<tr><td colspan="8"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr>';
+  tbody.innerHTML = '<tr><td colspan="9"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr>';
   let filas = [], desde = 0;
   while (true) {
     const { data, error } = await db.from('web_productos')
-      .select('id,nombre,fandom,ean,es_chase,es_vaulted,es_exclusivo,precio_web,precio_miravia,coste_caja,coste_protector,imagen_principal')
+      .select('id,nombre,fandom,ean,es_chase,es_vaulted,es_exclusivo,precio_web,precio_oferta,precio_miravia,coste_caja,coste_protector,imagen_principal')
       .eq('activo', true).eq('origen', 'fabrica')
       .order('actualizado', { ascending: false })
       .range(desde, desde + 999);
-    if (error) { tbody.innerHTML = '<tr><td colspan="8" style="padding:20px;color:#b91c1c">Error: ' + error.message + '</td></tr>'; return; }
+    if (error) { tbody.innerHTML = '<tr><td colspan="9" style="padding:20px;color:#b91c1c">Error: ' + error.message + '</td></tr>'; return; }
     filas = filas.concat(data || []);
     if (!data || data.length < 1000) break;
     desde += 1000;
@@ -1874,7 +1876,7 @@ async function cargarFabrica() {
 // Beneficio web = (precio venta CON IVA / 1,21) - compra - caja - protector.
 // Margen = beneficio / precio venta CON IVA (mismo criterio que el resto de la app).
 function calcBeneficioFab(p) {
-  const pv = p.precio_web;
+  const pv = (p.precio_oferta != null && p.precio_oferta > 0) ? p.precio_oferta : p.precio_web;  // si hay oferta, el margen se calcula sobre el precio rebajado
   if (pv == null || pv <= 0 || p._pvd == null) return { ben: null, margen: null };
   const base = pv / 1.21;
   const caja = p.coste_caja != null ? p.coste_caja : 0;
@@ -1889,12 +1891,13 @@ function renderFabrica() {
   const tbody = document.getElementById('fab-tbody');
   const lista = _fabProductos.filter(p => !q || (p.nombre || '').toLowerCase().includes(q) || (p.fandom || '').toLowerCase().includes(q));
   document.getElementById('fab-contador').textContent = lista.length + ' producto' + (lista.length === 1 ? '' : 's');
-  if (!lista.length) { tbody.innerHTML = '<tr><td colspan="8" style="padding:20px;color:var(--gray-500)">Sin productos de fábrica todavía.</td></tr>'; return; }
+  if (!lista.length) { tbody.innerHTML = '<tr><td colspan="9" style="padding:20px;color:var(--gray-500)">Sin productos de fábrica todavía.</td></tr>'; return; }
   const inp = 'style="width:74px;padding:6px;border:1px solid var(--gray-200);border-radius:6px;text-align:right"';
   tbody.innerHTML = lista.map(p => {
     const rar = p.es_chase ? 'CHASE' : p.es_vaulted ? 'VAULTED' : p.es_exclusivo ? 'EXCLUSIVO' : '—';
     const img = p.imagen_principal ? `<img src="${p.imagen_principal}" style="width:34px;height:34px;object-fit:contain;border-radius:6px;background:#f7f5fb">` : '';
     const pw = p.precio_web != null ? p.precio_web : '';
+    const po = p.precio_oferta != null ? p.precio_oferta : '';
     const cc = p.coste_caja != null ? p.coste_caja : '';
     const cp = p.coste_protector != null ? p.coste_protector : '';
     const compra = p._pvd != null ? fmtEurFab(p._pvd) : '—';
@@ -1904,6 +1907,7 @@ function renderFabrica() {
       <td><div style="display:flex;align-items:center;gap:10px">${img}<div><div style="font-weight:600;font-size:13px">${p.nombre || ''}</div><div style="font-size:11px;color:var(--gray-500)">${p.fandom || ''} · ${p.ean || ''}</div></div></div></td>
       <td style="text-align:center;font-size:11px;font-weight:600">${rar}</td>
       <td style="text-align:center"><input type="number" step="0.01" min="0" value="${pw}" onchange="guardarPrecioFabrica(${p.id},'precio_web',this)" style="width:90px;padding:6px;border:1px solid var(--gray-200);border-radius:6px;text-align:right"></td>
+      <td style="text-align:center"><input type="number" step="0.01" min="0" value="${po}" onchange="guardarPrecioFabrica(${p.id},'precio_oferta',this)" placeholder="—" style="width:90px;padding:6px;border:1px solid #fca5a5;border-radius:6px;text-align:right;color:#dc2626"></td>
       <td style="text-align:center;font-size:13px;color:var(--gray-500)">${compra}</td>
       <td style="text-align:center"><input type="number" step="0.01" min="0" value="${cc}" onchange="guardarPrecioFabrica(${p.id},'coste_caja',this)" ${inp}></td>
       <td style="text-align:center"><input type="number" step="0.01" min="0" value="${cp}" onchange="guardarPrecioFabrica(${p.id},'coste_protector',this)" ${inp}></td>
@@ -3644,7 +3648,7 @@ async function cargarRotacion() {
   } catch(e) {
     console.error(e);
     const tb = document.getElementById('rot-tbody');
-    if (tb) tb.innerHTML = '<tr><td colspan="9" style="color:var(--red);padding:20px;text-align:center">Error cargando: ' + e.message + '</td></tr>';
+    if (tb) tb.innerHTML = '<tr><td colspan="8" style="color:var(--red);padding:20px;text-align:center">Error cargando: ' + e.message + '</td></tr>';
   }
 }
 
