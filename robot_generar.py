@@ -234,10 +234,14 @@ def volcar_a_web(f, indice):
     secundarias = (f.get('fotos_elegidas') or {}).get('secundarias') or []
     imgs = galeria(f.get('fotos_generadas'), secundarias)
     principal = (f.get('fotos_generadas') or {}).get('portada') or (imgs[0] if imgs else None)
+    # Titulo visible: si lleva protector, lo anadimos al nombre (guard anti-duplicado)
+    nombre_titulo = f.get('nombre_corto') or f.get('web_titulo') or ''
+    if f.get('con_protector') and 'protector' not in nombre_titulo.lower():
+        nombre_titulo = nombre_titulo.rstrip() + ' con protector incluido'
     contenido = {
         'ean': str(ean), 'slug': slug,
         'titulo_seo': f.get('web_titulo'),
-        'nombre': f.get('nombre_corto') or f.get('web_titulo'),
+        'nombre': nombre_titulo,
         'descripcion_html': f.get('web_desc'),
         'licencia': f.get('marca'),
         'categoria': f.get('categoria'), 'fandom': f.get('fandom'),
