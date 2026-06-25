@@ -424,6 +424,8 @@
           <input type="text" id="fab-buscar" placeholder="🔍 Buscar producto..." oninput="renderFabrica()" style="flex:1;min-width:180px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">
           <span style="font-size:12px;color:var(--gray-500)" id="fab-contador">—</span>
           <button class="btn btn-ghost btn-sm" onclick="cargarFabrica()" title="Recargar la lista">🔄 Actualizar</button>
+          <button class="btn btn-primary btn-sm" onclick="fabActualizarWeb(this)" title="Reconstruye la web pública con los precios y ofertas actuales (tarda 1-2 min)">🚀 Actualizar web</button>
+          <span id="fab-web-log" style="font-size:12px;color:var(--gray-500)"></span>
         </div>
         <div class="table-wrap" style="max-height:75vh;overflow:auto">
           <table id="fab-tabla">
@@ -1829,6 +1831,31 @@ async function fabPublicar() {
 // FÁBRICA WEB — precios por canal (web / miravia) de los productos publicados
 // ============================================================
 let _fabProductos = [];
+
+async function fabActualizarWeb(btn) {
+  const log = document.getElementById('fab-web-log');
+  if (!confirm('\u00bfReconstruir la web p\u00fablica con los precios y ofertas actuales?\nTarda 1-2 minutos en estar online.')) return;
+  if (btn) btn.disabled = true;
+  if (log) { log.style.color = 'var(--gray-500)'; log.textContent = '\u23f3 Lanzando reconstrucci\u00f3n...'; }
+  try {
+    const resp = await fetch('/api/disparar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secreto: DISPARO_SECRET, workflow: 'web-rebuild.yml' })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      if (log) { log.style.color = '#2e7d32'; log.textContent = '\u2705 Reconstruyendo. En 1-2 min estar\u00e1 online.'; }
+    } else if (resp.status === 409) {
+      if (log) { log.style.color = '#ba7517'; log.textContent = '\u23f3 ' + (data.error || 'Ya hay una reconstrucci\u00f3n en marcha.'); }
+    } else {
+      if (log) { log.style.color = '#b91c1c'; log.textContent = '\u26a0\ufe0f ' + (data.error || ('HTTP ' + resp.status)); }
+    }
+  } catch (e) {
+    if (log) { log.style.color = '#b91c1c'; log.textContent = 'Error: ' + e.message; }
+  } finally {
+    if (btn) setTimeout(() => { btn.disabled = false; }, 4000);
+  }
+}
 
 async function cargarFabrica() {
   const tbody = document.getElementById('fab-tbody');
