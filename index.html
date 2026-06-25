@@ -1438,6 +1438,7 @@ async function fabBorrarBorrador(id) {
 // ============================================================
 let _fabActual = null;   // { id, ean, tanda, fotos:[], papeles:[], web_desc, ... }
 let _fabPoll = null;
+let _fabTrabajos = {};   // seguimientos de "rehacer" en segundo plano (id -> timer)
 
 function botonPapel(i, papel, label, actual) {
   const cols = { caja: '#f59e0b', recorte: '#7c3aed', secundaria: '#16a34a', quitar: '#9ca3af' };
@@ -1548,6 +1549,45 @@ function fabCargarResultado(f) {
   fabRenderResultado();
 }
 
+// --- Aviso flotante (toast) independiente de la pesta\u00f1a en la que estes ---
+function fabToast(tipo, html, fichaId) {
+  let cont = document.getElementById('fab-toasts');
+  if (!cont) {
+    cont = document.createElement('div');
+    cont.id = 'fab-toasts';
+    cont.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:99999;display:flex;flex-direction:column;gap:10px;max-width:340px';
+    document.body.appendChild(cont);
+  }
+  const col = tipo === 'ok' ? '#16a34a' : '#b91c1c';
+  const t = document.createElement('div');
+  t.style.cssText = 'background:#fff;border-left:4px solid '+col+';box-shadow:0 8px 26px rgba(0,0,0,.18);border-radius:10px;padding:12px 14px;font-size:13px;color:#1f2937;display:flex;gap:10px;align-items:center';
+  const ver = fichaId ? '<button onclick="fabAbrirBorrador('+fichaId+');this.parentElement.remove()" style="background:'+col+';color:#fff;border:none;border-radius:7px;padding:5px 11px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">Ver</button>' : '';
+  t.innerHTML = '<div style="flex:1">'+html+'</div>'+ver+'<button onclick="this.parentElement.remove()" style="background:none;border:none;color:#9ca3af;font-size:17px;cursor:pointer;line-height:1;padding:0 2px">\u00d7</button>';
+  cont.appendChild(t);
+  if (tipo === 'ok') setTimeout(() => { if (t.parentElement) t.remove(); }, 20000);
+}
+
+// --- Sigue una ficha que se esta rehaciendo, sin bloquear la pesta\u00f1a ---
+async function fabSeguirRehacer(id, nombre, antes) {
+  if (_fabTrabajos[id]) clearInterval(_fabTrabajos[id]);
+  const safe = escapeHtml(String(nombre || ('#'+id)));
+  let intentos = 0;
+  _fabTrabajos[id] = setInterval(async () => {
+    intentos++;
+    const { data: d } = await db.from('fabrica_fichas').select('fotos_generadas').eq('id', id).limit(1);
+    if (d && d.length && JSON.stringify(d[0].fotos_generadas || {}) !== antes) {
+      clearInterval(_fabTrabajos[id]); delete _fabTrabajos[id];
+      if (_fabActual && _fabActual.id === id) { _fabActual.fotos_generadas = d[0].fotos_generadas; fabRenderResultado(); }
+      fabToast('ok', '\u2705 Fotos listas: <b>' + safe + '</b>', id);
+      return;
+    }
+    if (intentos > 72) {  // ~6 min
+      clearInterval(_fabTrabajos[id]); delete _fabTrabajos[id];
+      fabToast('err', '\u26a0\ufe0f El robot tard\u00f3 demasiado con <b>' + safe + '</b>. Mira GitHub \u2192 Actions.', id);
+    }
+  }, 5000);
+}
+
 async function fabRehacerFotos() {
   if (!_fabActual) return;
   const f = _fabActual;
@@ -1580,25 +1620,9 @@ async function fabRehacerFotos() {
       log.innerHTML = '<span style="font-size:12px;color:#b91c1c">⚠️ ' + (data.error || ('HTTP ' + resp.status)) + '</span>';
       return;
     }
-    // Sondear hasta que cambien las fotos montadas
-    const antes = JSON.stringify(f.fotos_generadas || {});
-    let intentos = 0;
-    clearInterval(_fabPoll);
-    _fabPoll = setInterval(async () => {
-      intentos++;
-      const { data: d } = await db.from('fabrica_fichas').select('fotos_generadas').eq('id', f.id).limit(1);
-      if (d && d.length && JSON.stringify(d[0].fotos_generadas || {}) !== antes) {
-        clearInterval(_fabPoll);
-        f.fotos_generadas = d[0].fotos_generadas;
-        log.innerHTML = '<span style="font-size:12px;color:#16a34a">✅ Fotos rehechas con tu Caja/Silueta.</span>';
-        fabRenderResultado();
-        return;
-      }
-      if (intentos > 60) {  // ~5 min
-        clearInterval(_fabPoll);
-        log.innerHTML = '<span style="font-size:12px;color:#b91c1c">El robot tardó demasiado. Mira el log en GitHub → Actions (workflow "Fabrica Rehacer").</span>';
-      }
-    }, 5000);
+    // En SEGUNDO PLANO: te puedes ir a otra ficha o pesta\u00f1a; te aviso cuando esten listas.
+    log.innerHTML = '<span style="font-size:12px;color:#16a34a">\u2705 En marcha. Puedes seguir con otra ficha \u2014 te avisar\u00e9 abajo a la derecha cuando est\u00e9n listas.</span>';
+    fabSeguirRehacer(f.id, (f.nombre_corto || f.titulo_keepa || f.ean || ('#'+f.id)), JSON.stringify(f.fotos_generadas || {}));
   } catch (e) {
     log.innerHTML = '<span style="font-size:12px;color:#b91c1c">Error: ' + e.message + '</span>';
   }
@@ -1844,7 +1868,7 @@ async function fabActualizarWeb(btn) {
     });
     const data = await resp.json().catch(() => ({}));
     if (resp.ok) {
-      if (log) { log.style.color = '#2e7d32'; log.textContent = '\u2705 Reconstruyendo. En 1-2 min estar\u00e1 online.'; }
+      if (log) { log.style.color = '#2e7d32'; log.textContent = '\u2705 Reconstruyendo. En 1-2 min estar\u00e1 online.'; setTimeout(() => { if (log) log.textContent = ''; }, 8000); }
     } else if (resp.status === 409) {
       if (log) { log.style.color = '#ba7517'; log.textContent = '\u23f3 ' + (data.error || 'Ya hay una reconstrucci\u00f3n en marcha.'); }
     } else {
