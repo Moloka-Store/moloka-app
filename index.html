@@ -1622,6 +1622,27 @@ async function fabReemplazarMontaje(tipo, input) {
   }
 }
 
+async function fabAnadirSecundaria(input) {
+  const file = (input.files || [])[0];
+  if (!file || !_fabActual) return;
+  const log = document.getElementById('fab-pub-log');
+  log.innerHTML = '<span style="font-size:12px;color:var(--gray-500)">Subiendo tu foto secundaria...</span>';
+  try {
+    const limpio = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const tipo = 'secundaria_' + Date.now();
+    const ruta = 'fabrica/propias/' + _fabActual.ean + '_' + tipo + '_' + limpio;
+    const up = await db.storage.from('informes').upload(ruta, file, { upsert: true, contentType: 'image/jpeg' });
+    if (up.error) throw new Error(up.error.message);
+    _fabActual.propias_pendientes = Object.assign({}, _fabActual.propias_pendientes || {});
+    _fabActual.propias_pendientes[tipo] = ruta;
+    _fabActual.secundarias_propias_preview = (_fabActual.secundarias_propias_preview || []).concat([URL.createObjectURL(file)]);
+    log.innerHTML = '<span style="font-size:12px;color:#16a34a">\u2705 Foto secundaria subida. Pulsa <b>Rehacer fotos</b> para que se cuadre y entre en la galer\u00eda.</span>';
+    fabRenderResultado();
+  } catch (e) {
+    log.innerHTML = '<span style="font-size:12px;color:#b91c1c">No se pudo: ' + e.message + '</span>';
+  }
+}
+
 function fabVerGrande(url, label) {
   let ov = document.getElementById('fab-lightbox');
   if (!ov) {
@@ -1669,6 +1690,9 @@ function fabRenderResultado() {
       </div></div>`;
   }).join('');
 
+  const secPrev = f.secundarias_propias_preview || [];
+  const secPropiasHtml = secPrev.map(u => `<div style="border:2px solid #16a34a;border-radius:10px;padding:3px;background:#f7f5fb"><img src="${u}" style="width:96px;height:96px;object-fit:contain;display:block"></div>`).join('');
+
   cont.style.display = 'block';
   cont.className = 'card';
   cont.style.padding = '18px';
@@ -1680,6 +1704,10 @@ function fabRenderResultado() {
     <div style="font-size:13px;font-weight:600;margin:12px 0 4px">Fotos montadas (así saldrán en la web)</div>
     <div style="font-size:13px;color:var(--gray-500);margin-bottom:10px">Si alguna no te gusta, dale a <b>"cambiar por la mía"</b> y sube la tuya: irá tal cual a la web y a Miravia.</div>
     <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:8px">${montajesHtml || '<span style="font-size:13px;color:#b91c1c">No se montó ninguna foto. Sube las tuyas con los botones de abajo o revisa el log de Actions.</span>'}</div>
+
+    <div style="font-size:13px;font-weight:600;margin:18px 0 4px">Tus fotos secundarias (se cuadran solas)</div>
+    <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px">Sube fotos extra (la caja, un detalle, un brillo…) para la galería. Al pulsar <b>Rehacer fotos</b> se recortan y cuadran igual que las de la fábrica, así no se descuadran ni salen cortadas.</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">${secPropiasHtml}<label class="btn btn-ghost btn-sm" style="cursor:pointer">➕ Añadir foto secundaria<input type="file" accept="image/*" style="display:none" onchange="fabAnadirSecundaria(this)"></label></div>
 
     <div style="font-size:13px;font-weight:600;margin:18px 0 4px">Fotos extra de Keepa (opcional, para la galería)</div>
     <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px">¿La fábrica cogió la caja o la figura equivocada (típico en CHASE)? Marca aquí la <b style="color:#f59e0b">Caja</b> y la <b style="color:#7c3aed">Silueta</b> correctas y pulsa <b>Rehacer fotos</b>. Clic en una foto la amplía.</div>
