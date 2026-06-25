@@ -430,10 +430,15 @@
               <tr>
                 <th>Producto</th>
                 <th style="text-align:center">Rareza</th>
-                <th style="text-align:center" title="Precio que se mostrará en la web propia">Precio Web (€)</th>
+                <th style="text-align:center" title="Precio de venta en la web propia (IVA incluido)">Precio Web (€)</th>
+                <th style="text-align:center" title="Precio de compra (PVD, sin IVA) — viene de Inventario">Compra (€)</th>
+                <th style="text-align:center" title="Coste de la caja de envío, sin IVA — lo rellenas tú">Caja (€)</th>
+                <th style="text-align:center" title="Coste del protector, sin IVA — lo rellenas tú">Protector (€)</th>
+                <th style="text-align:center" title="Base (precio web sin IVA) − compra − caja − protector">Beneficio (€)</th>
+                <th style="text-align:center" title="Beneficio ÷ precio de venta (IVA incluido)">Margen</th>
               </tr>
             </thead>
-            <tbody id="fab-tbody"><tr><td colspan="3"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr></tbody>
+            <tbody id="fab-tbody"><tr><td colspan="8"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr></tbody>
           </table>
         </div>
       </div>
@@ -1825,38 +1830,85 @@ let _fabProductos = [];
 
 async function cargarFabrica() {
   const tbody = document.getElementById('fab-tbody');
-  tbody.innerHTML = '<tr><td colspan="4"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr>';
+  tbody.innerHTML = '<tr><td colspan="8"><div class="loading-state"><div class="big-loader"></div><p>Cargando...</p></div></td></tr>';
   let filas = [], desde = 0;
   while (true) {
     const { data, error } = await db.from('web_productos')
-      .select('id,nombre,fandom,ean,es_chase,es_vaulted,es_exclusivo,precio_web,precio_miravia,imagen_principal')
+      .select('id,nombre,fandom,ean,es_chase,es_vaulted,es_exclusivo,precio_web,precio_miravia,coste_caja,coste_protector,imagen_principal')
       .eq('activo', true).eq('origen', 'fabrica')
       .order('actualizado', { ascending: false })
       .range(desde, desde + 999);
-    if (error) { tbody.innerHTML = '<tr><td colspan="3" style="padding:20px;color:#b91c1c">Error: ' + error.message + '</td></tr>'; return; }
+    if (error) { tbody.innerHTML = '<tr><td colspan="8" style="padding:20px;color:#b91c1c">Error: ' + error.message + '</td></tr>'; return; }
     filas = filas.concat(data || []);
     if (!data || data.length < 1000) break;
     desde += 1000;
   }
+  // Cruce con Inventario: precio de compra (pvd, sin IVA) de la tabla productos.
+  // Clave = EAN normalizado (sin ceros a la izquierda) + chase. Si un EAN tiene varias
+  // fichas (varios proveedores), nos quedamos con la MAS RECIENTE (mayor id).
+  try {
+    const mapaPvd = {};
+    let prods = [], d2 = 0;
+    while (true) {
+      const { data: pd, error: e2 } = await db.from('productos')
+        .select('id,ean,es_chase,pvd').eq('activo', true).range(d2, d2 + 999);
+      if (e2) break;
+      prods = prods.concat(pd || []);
+      if (!pd || pd.length < 1000) break;
+      d2 += 1000;
+    }
+    for (const pr of prods) {
+      if (pr.pvd == null) continue;
+      const k = String(pr.ean || '').replace(/^0+/, '') + '|' + (pr.es_chase ? 1 : 0);
+      if (!(k in mapaPvd) || pr.id > mapaPvd[k].id) mapaPvd[k] = { pvd: pr.pvd, id: pr.id };
+    }
+    for (const f of filas) {
+      const k = String(f.ean || '').replace(/^0+/, '') + '|' + (f.es_chase ? 1 : 0);
+      f._pvd = mapaPvd[k] ? mapaPvd[k].pvd : null;
+    }
+  } catch (e) { /* si falla el cruce, _pvd queda sin valor y la columna sale como guion */ }
   _fabProductos = filas;
   renderFabrica();
 }
+
+// Beneficio web = (precio venta CON IVA / 1,21) - compra - caja - protector.
+// Margen = beneficio / precio venta CON IVA (mismo criterio que el resto de la app).
+function calcBeneficioFab(p) {
+  const pv = p.precio_web;
+  if (pv == null || pv <= 0 || p._pvd == null) return { ben: null, margen: null };
+  const base = pv / 1.21;
+  const caja = p.coste_caja != null ? p.coste_caja : 0;
+  const prot = p.coste_protector != null ? p.coste_protector : 0;
+  const ben = base - p._pvd - caja - prot;
+  return { ben, margen: ben / pv * 100 };
+}
+function fmtEurFab(n) { return n == null ? '—' : n.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'; }
 
 function renderFabrica() {
   const q = (document.getElementById('fab-buscar').value || '').toLowerCase();
   const tbody = document.getElementById('fab-tbody');
   const lista = _fabProductos.filter(p => !q || (p.nombre || '').toLowerCase().includes(q) || (p.fandom || '').toLowerCase().includes(q));
   document.getElementById('fab-contador').textContent = lista.length + ' producto' + (lista.length === 1 ? '' : 's');
-  if (!lista.length) { tbody.innerHTML = '<tr><td colspan="3" style="padding:20px;color:var(--gray-500)">Sin productos de fábrica todavía.</td></tr>'; return; }
+  if (!lista.length) { tbody.innerHTML = '<tr><td colspan="8" style="padding:20px;color:var(--gray-500)">Sin productos de fábrica todavía.</td></tr>'; return; }
+  const inp = 'style="width:74px;padding:6px;border:1px solid var(--gray-200);border-radius:6px;text-align:right"';
   tbody.innerHTML = lista.map(p => {
     const rar = p.es_chase ? 'CHASE' : p.es_vaulted ? 'VAULTED' : p.es_exclusivo ? 'EXCLUSIVO' : '—';
     const img = p.imagen_principal ? `<img src="${p.imagen_principal}" style="width:34px;height:34px;object-fit:contain;border-radius:6px;background:#f7f5fb">` : '';
     const pw = p.precio_web != null ? p.precio_web : '';
-    const pm = p.precio_miravia != null ? p.precio_miravia : '';
-    return `<tr>
+    const cc = p.coste_caja != null ? p.coste_caja : '';
+    const cp = p.coste_protector != null ? p.coste_protector : '';
+    const compra = p._pvd != null ? fmtEurFab(p._pvd) : '—';
+    const r = calcBeneficioFab(p);
+    const col = r.ben == null ? 'var(--gray-500)' : (r.ben >= 0 ? '#16a34a' : '#b91c1c');
+    return `<tr data-id="${p.id}">
       <td><div style="display:flex;align-items:center;gap:10px">${img}<div><div style="font-weight:600;font-size:13px">${p.nombre || ''}</div><div style="font-size:11px;color:var(--gray-500)">${p.fandom || ''} · ${p.ean || ''}</div></div></div></td>
       <td style="text-align:center;font-size:11px;font-weight:600">${rar}</td>
       <td style="text-align:center"><input type="number" step="0.01" min="0" value="${pw}" onchange="guardarPrecioFabrica(${p.id},'precio_web',this)" style="width:90px;padding:6px;border:1px solid var(--gray-200);border-radius:6px;text-align:right"></td>
+      <td style="text-align:center;font-size:13px;color:var(--gray-500)">${compra}</td>
+      <td style="text-align:center"><input type="number" step="0.01" min="0" value="${cc}" onchange="guardarPrecioFabrica(${p.id},'coste_caja',this)" ${inp}></td>
+      <td style="text-align:center"><input type="number" step="0.01" min="0" value="${cp}" onchange="guardarPrecioFabrica(${p.id},'coste_protector',this)" ${inp}></td>
+      <td class="fab-ben" style="text-align:center;font-weight:600;font-size:13px;color:${col}">${fmtEurFab(r.ben)}</td>
+      <td class="fab-mar" style="text-align:center;font-weight:600;font-size:13px;color:${col}">${r.margen == null ? '—' : r.margen.toFixed(1) + ' %'}</td>
     </tr>`;
   }).join('');
 }
@@ -1872,6 +1924,16 @@ async function guardarPrecioFabrica(id, campo, input) {
   input.style.borderColor = '#16a34a';
   setTimeout(() => { input.style.borderColor = 'var(--gray-200)'; }, 1200);
   const p = _fabProductos.find(x => x.id === id); if (p) p[campo] = val;
+  if (p) {
+    const r = calcBeneficioFab(p);
+    const tr = input.closest('tr');
+    if (tr) {
+      const cBen = tr.querySelector('.fab-ben'), cMar = tr.querySelector('.fab-mar');
+      const col = r.ben == null ? 'var(--gray-500)' : (r.ben >= 0 ? '#16a34a' : '#b91c1c');
+      if (cBen) { cBen.textContent = fmtEurFab(r.ben); cBen.style.color = col; }
+      if (cMar) { cMar.textContent = r.margen == null ? '—' : r.margen.toFixed(1) + ' %'; cMar.style.color = col; }
+    }
+  }
 }
 
 // ============================================================
