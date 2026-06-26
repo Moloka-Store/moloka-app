@@ -1,0 +1,35 @@
+name: Moloka - Excel Miravia
+
+on:
+  workflow_dispatch:        # lanzar a mano desde la pestaña Actions (para probar)
+  repository_dispatch:      # lo disparará el botón de la app (más adelante)
+    types: [miravia-excel]
+
+jobs:
+  generar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias
+        run: pip install -U openpyxl supabase
+
+      - name: Generar el Excel de Miravia
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python moloka_miravia_excel.py
+
+      - name: Subir el Excel como artifact descargable
+        if: hashFiles('carga_miravia.xlsm') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: carga_miravia
+          path: carga_miravia.xlsm
+          retention-days: 7
