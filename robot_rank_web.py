@@ -68,7 +68,36 @@ def variantes_ean(core):
     return [v for v in vs if v]
 def norm(code): return str(code).strip().lstrip('0')
 
-# ===================== Cargar catalogo TCG (Funkos en stock) =====================
+# ===================== Filtro de entrada (VERIFICADO) + 5 categorias =====================
+# Tipos que entran. Mystery Minis FUERA. Pines/camisetas/merch/Dorbz fuera (no estan).
+TIPOS_OK = {
+    'Merchandising-Funko POP!',
+    'Merchandising-Funko Bitty POP',
+    'Merchandising-Funko Pop! Keychain',
+}
+# GRANDES = NO enviables (10"/25cm/jumbo). Agresivo: ante la duda, fuera (logistica).
+GRANDES = ['10"', '10 "', "10''", '10\u201d', '25 cm', '25cm', 'jumbo', 'super sized', 'super-sized', 'mega ']
+# BASURA = no es figura suelta (packs, figura+camiseta, cajas mayoristas de 12, sorpresas).
+BASURA  = ['12 unidades', '(12', 'display', '& tee', 'tee!', ' pack', 'pack ', '4pk',
+           '4 pack', '3 pack', '2 pack', '3-pack', 'multipack', 'surprise', 'box set',
+           'choc)', 'holiday tree', 'tree holiday', 'mystery pocket']
+def es_grande(cab):
+    c = cab.lower(); return any(k in c for k in GRANDES)
+def es_basura(cab):
+    c = cab.lower(); return any(k in c for k in BASURA)
+# 5 CATEGORIAS para la web: Funko Pop! / Deluxe (incl. 6") / Diorama (Moment+Ride+Town)
+# / Bitty Pop (incl. Pocket) / Llavero. Diorama manda sobre Deluxe.
+def formato_de(tipo, cab):
+    c = cab.lower()
+    if 'Keychain' in tipo: return 'Llavero'
+    if 'Bitty' in tipo or 'bitty' in c: return 'Bitty Pop'
+    if 'pocket' in c: return 'Bitty Pop'
+    if ' ride' in c or ' town' in c or 'moment' in c: return 'Diorama'
+    if 'deluxe' in c: return 'Deluxe'
+    if '6"' in c or '6 "' in c or '15 cm' in c or '15cm' in c or 'oversized' in c: return 'Deluxe'
+    return 'Funko Pop!'
+
+# ===================== Cargar catalogo TCG (Funkos enviables en stock) =====================
 def cargar_tcg():
     data = sb.storage.from_(BUCKET).download(CAT_PATH)
     wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
@@ -81,12 +110,18 @@ def cargar_tcg():
     def num(x):
         try: return float(str(x).replace(',', '.'))
         except Exception: return 0.0
-    ESTADOS_OK = {'disponible', 'oferta'}   # los que llegan en 48h (no backorder/preorder)
+    ESTADOS_OK = {'disponible', 'oferta'}   # 48h (no backorder/preorder)
     filas, vistos = [], set()
+    f_tipo = f_grande = f_basura = 0
     for r in rows[1:]:
-        tipo = str(r[iTipo] or '')
-        if 'Funko POP' not in tipo and 'Funko Pop' not in tipo:   # solo Funko POP!
-            continue
+        tipo = str(r[iTipo] or '').strip()
+        cab = str(r[iCab] or '')
+        if tipo not in TIPOS_OK:
+            f_tipo += 1; continue
+        if 'Funko POP!' in tipo and es_grande(cab):
+            f_grande += 1; continue
+        if es_basura(cab):
+            f_basura += 1; continue
         if str(r[iEstado] or '').strip().lower() not in ESTADOS_OK:
             continue
         if num(r[iS]) < 1:
@@ -97,7 +132,9 @@ def cargar_tcg():
         vistos.add(ean_in)
         core = core_ean(ean_in)
         filas.append({'ean_in': ean_in, 'core': core, 'variantes': variantes_ean(core),
-                      'nombre': str(r[iCab] or ''), 'pa': num(r[iP]), 'pvpr': num(r[iV])})
+                      'nombre': cab, 'pa': num(r[iP]), 'pvpr': num(r[iV]),
+                      'formato': formato_de(tipo, cab)})
+    print(f">>> Filtro entrada: fuera tipo {f_tipo}, fuera grande {f_grande}, fuera basura {f_basura} | ENTRAN {len(filas)}")
     return filas
 
 # ---- Dedup contra el fisico ya en web (no re-rankear lo que ya tienes) ----
@@ -179,7 +216,7 @@ filas_out = []
 for ein, c in candidatos.items():
     f = c['fila']; mr = mejor_rank(c)
     pasa = (mr is not None and mr <= RANK_MAXIMO)
-    filas_out.append({'ean': ein, 'nombre': f['nombre'], 'rank_act': c['r_act'] if c['r_act']>0 else None,
+    filas_out.append({'ean': ein, 'nombre': f['nombre'], 'formato': f.get('formato',''), 'rank_act': c['r_act'] if c['r_act']>0 else None,
                       'rank_90': c['r_90'] if c['r_90']>0 else None, 'mejor_rank': mr,
                       'pa': f['pa'], 'pvpr': f['pvpr'], 'asin': c['asin'], 'pasa': 'SI' if pasa else 'no'})
 filas_out.sort(key=lambda x: (x['mejor_rank'] is None, x['mejor_rank'] or 10**12))
@@ -201,10 +238,10 @@ print(f"  >>> PASAN con RANK_MAXIMO={RANK_MAXIMO}: {total_pasa}  (de {len(filas_
 
 # Excel a Storage
 wb = openpyxl.Workbook(); ws = wb.active; ws.title = 'Ranking'
-COLS = ['EAN','Nombre','Rank actual','Rank 90d','Mejor rank','PA (coste)','PVPR','ASIN','Pasa']
+COLS = ['EAN','Nombre','Formato','Rank actual','Rank 90d','Mejor rank','PA (coste)','PVPR','ASIN','Pasa']
 ws.append(COLS)
 for x in filas_out:
-    ws.append([x['ean'], x['nombre'], x['rank_act'], x['rank_90'], x['mejor_rank'],
+    ws.append([x['ean'], x['nombre'], x.get('formato',''), x['rank_act'], x['rank_90'], x['mejor_rank'],
                x['pa'], x['pvpr'], x['asin'], x['pasa']])
 buf = io.BytesIO(); wb.save(buf); buf.seek(0)
 try:
