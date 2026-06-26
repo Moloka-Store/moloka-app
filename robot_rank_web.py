@@ -190,7 +190,29 @@ def pasada(cod_por_ean, etiqueta):
     for n,lote in enumerate(lotes,1):
         prods = keepa_query(lote, product_code_is_asin=False, domain='ES', stats=90, history=0)
         if prods is None:
-            print(f"  lote {n}/{len(lotes)} NO resuelto -> se salta"); continue
+            # Un lote entero falla casi siempre por UN codigo malo que envenena la
+            # peticion de 100. En vez de perder los 99 buenos, lo reintentamos
+            # PARTIDO (en trozos de 25, y si un trozo tambien falla, de uno en uno)
+            # para salvar los buenos y aislar solo el malo.
+            print(f"  lote {n}/{len(lotes)} fallo entero -> reintento PARTIDO (para no perder los buenos)")
+            salvados = 0
+            for j in range(0, len(lote), 25):
+                trozo = lote[j:j+25]
+                p2 = keepa_query(trozo, product_code_is_asin=False, domain='ES', stats=90, history=0)
+                if p2 is not None:
+                    for prod in p2: registra(prod, pool, vistos)
+                    salvados += len(p2)
+                    continue
+                # el trozo de 25 tambien falla -> de uno en uno para aislar el malo
+                for cod in trozo:
+                    p3 = keepa_query([cod], product_code_is_asin=False, domain='ES', stats=90, history=0)
+                    if p3 is None:
+                        print(f"      codigo malo aislado, se salta: {cod}")
+                    else:
+                        for prod in p3: registra(prod, pool, vistos)
+                        salvados += len(p3)
+            print(f"  lote {n}/{len(lotes)} (partido) | salvados {salvados} | tokens {api.tokens_left}")
+            continue
         for prod in prods: registra(prod, pool, vistos)
         print(f"  lote {n}/{len(lotes)} | tokens {api.tokens_left}")
     return vistos
