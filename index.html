@@ -2506,7 +2506,7 @@ async function lanzarLoteWeb(){
       const ean = String(r['EAN']||'').trim();
       if(!ean || isNaN(mr) || mr<=0 || mr>corte) continue;
       if(isNaN(pa) || pa<=0) continue;
-      items.push({ean, precio_web: redondea95(pa*1.75)});
+      items.push({ean, precio_web: redondea95(pa*1.75), formato: String(r['Formato']||'').trim()});
     }
     if(!items.length){ log.innerHTML='<div class="info-box" style="border-left:3px solid #ba7517">No hay Funkos con rank ≤ '+corte+' y coste válido. Sube el corte o revisa el ranking.</div>'; go.disabled=false; return; }
     const tanda = new Date().toISOString().slice(0,16).replace(/[-:T]/g,'');
