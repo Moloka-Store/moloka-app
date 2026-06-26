@@ -297,6 +297,9 @@
     <div class="nav-item" data-page="fabrica" onclick="showPage('fabrica',this)">
       <span class="nav-icon">🏭</span> Fábrica web
     </div>
+    <div class="nav-item" data-page="funkos-tcg" onclick="showPage('funkos-tcg',this)">
+      <span class="nav-icon">🧪</span> Funkos TCG
+    </div>
   </nav>
   <div class="sidebar-footer" id="conn-status">Conectando...</div>
 </aside>
@@ -935,6 +938,41 @@
     <div class="card" style="margin-top:16px">
       <div class="inv-field-label" style="margin-bottom:8px">📚 Biblioteca de escaneos</div>
       <div id="esc-biblioteca"><span style="color:#888780">Cargando…</span></div>
+    </div>
+  </div>
+
+  <div class="page" id="page-funkos-tcg">
+    <div class="page-head">
+      <div><div class="page-title">🧪 Funkos TCG → Web</div><div class="page-sub">Llena la web con Funkos de TCG bajo pedido (48 h). Dos pasos: analizar rank y fabricar fichas.</div></div>
+    </div>
+
+    <div class="info-box" style="margin-top:8px">
+      🧪 <strong>Paso 1 — Analizar rank.</strong> Sube el catálogo de TCG. La nube saca el rank de Amazon (solo España, barato) de los Funkos en stock y deja un ranking. <strong>Paso 2 — Fabricar.</strong> Eliges el corte de rank y la fábrica genera las fichas (Keepa + montaje Moloka) como borrador para revisar y publicar.
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="inv-field-label" style="margin-bottom:8px">Paso 1 · Analizar rank de TCG</div>
+      <label class="btn btn-ghost" style="display:inline-block;cursor:pointer">
+        📄 Subir catálogo TCG (.xlsx)
+        <input type="file" id="rw-file" accept=".xlsx,.xls" style="display:none" onchange="document.getElementById('rw-sel').textContent=(this.files[0]||{}).name||'ningún fichero seleccionado'">
+      </label>
+      <div class="inv-field-label" id="rw-sel" style="margin-top:6px">ningún fichero seleccionado</div>
+      <div style="margin-top:12px">
+        <label class="inv-field-label">Rank máximo (generoso, para recolectar amplio; el corte fino va en el Paso 2)</label>
+        <input class="input" id="rw-rank" type="number" value="150000" min="1" style="max-width:200px">
+      </div>
+      <button class="btn" id="rw-go" style="margin-top:12px" onclick="lanzarRankWeb()">🧪 Analizar rank en la nube</button>
+      <div id="rw-log" style="margin-top:14px"></div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="inv-field-label" style="margin-bottom:8px">Paso 2 · Fabricar fichas del lote (tras el análisis)</div>
+      <div style="margin-top:4px">
+        <label class="inv-field-label">Corte de rank: se fabrican los Funkos con rank ≤ este número</label>
+        <input class="input" id="rl-rank" type="number" value="60000" min="1" style="max-width:200px">
+      </div>
+      <button class="btn" id="rl-go" style="margin-top:12px" onclick="lanzarLoteWeb()">🏭 Fabricar fichas del lote</button>
+      <div id="rl-log" style="margin-top:14px"></div>
     </div>
   </div>
 
@@ -2410,6 +2448,85 @@ async function subirInformes() {
 // (que guarda la llave de GitHub escondida). "Dispara y olvida": no espera a que
 // termine la corrida (~20 min rápida / ~1 h completa).
 const DISPARO_SECRET = 'hbj9lNd5iv4OtcIG89PkoUcRxTZ1-nbB';
+
+// ===== Funkos TCG -> Web: Paso 1 (rank) y Paso 2 (lote) =====
+function redondea95(x){ return Math.round(x - 0.95) + 0.95; }
+
+async function lanzarRankWeb(){
+  const file = (document.getElementById('rw-file').files||[])[0];
+  const rank = parseInt(document.getElementById('rw-rank').value||'150000',10);
+  const log = document.getElementById('rw-log');
+  const go = document.getElementById('rw-go');
+  if(!file){ log.innerHTML='<div class="info-box" style="border-left:3px solid #ba7517">⚠️ Sube primero el catálogo de TCG.</div>'; return; }
+  go.disabled=true;
+  log.innerHTML='<div class="info-box">⏳ Subiendo catálogo y lanzando el análisis de rank…</div>';
+  try{
+    try{ const {data:v}=await db.storage.from('informes').list('web_rank',{limit:100});
+      const b=(v||[]).filter(o=>!o.name.startsWith('.')).map(o=>'web_rank/'+o.name);
+      if(b.length) await db.storage.from('informes').remove(b);
+    }catch(e){}
+    const up=await db.storage.from('informes').upload('web_rank/catalogo.xlsx', file, {upsert:true});
+    if(up.error) throw new Error('subiendo el catálogo: '+up.error.message);
+    const recado={rank_maximo:rank, fecha:new Date().toISOString()};
+    const blob=new Blob([JSON.stringify(recado)],{type:'application/json'});
+    const e2=(await db.storage.from('informes').upload('web_rank/_solicitud.json', blob, {upsert:true})).error;
+    if(e2) throw new Error('dejando el recado: '+e2.message);
+    const resp=await fetch('/api/disparar',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({secreto:DISPARO_SECRET, workflow:'web-rank.yml'})});
+    const data=await resp.json().catch(()=>({}));
+    if(resp.ok){
+      log.innerHTML='<div class="info-box" style="border-left:3px solid #2e7d32">✅ Análisis de rank lanzado. Tarda ~1 h (según cuántos Funkos en stock y los tokens de Keepa). Al terminar deja el ranking en Storage (informes/web_rank/ranking_tcg.xlsx) y la distribución en el log de Actions. Luego usa el Paso 2.</div>';
+    } else if(resp.status===409){
+      log.innerHTML='<div class="info-box" style="border-left:3px solid #ba7517">⏳ '+(data.error||'Ya hay un análisis en marcha.')+'</div>';
+    } else {
+      log.innerHTML='<div class="info-box" style="border-left:3px solid #b00020">⚠️ No se pudo lanzar: '+(data.error||('HTTP '+resp.status))+'.</div>';
+    }
+  }catch(e){ log.innerHTML='<div class="info-box" style="border-left:3px solid #b00020">⚠️ Error: '+e.message+'</div>'; }
+  go.disabled=false;
+}
+
+async function lanzarLoteWeb(){
+  const corte = parseInt(document.getElementById('rl-rank').value||'60000',10);
+  const log = document.getElementById('rl-log');
+  const go = document.getElementById('rl-go');
+  go.disabled=true;
+  log.innerHTML='<div class="info-box">⏳ Leyendo el ranking y preparando el lote…</div>';
+  try{
+    let dl;
+    try{ dl = await db.storage.from('informes').download('web_rank/ranking_tcg.xlsx'); }
+    catch(e){ throw new Error('no encuentro el ranking. ¿Terminó el Paso 1?'); }
+    if(dl.error) throw new Error('no encuentro el ranking. ¿Terminó el Paso 1?');
+    const buf = await dl.data.arrayBuffer();
+    const wb = XLSX.read(buf,{type:'array'});
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
+    const items=[];
+    for(const r of rows){
+      const mr = parseInt(r['Mejor rank'],10);
+      const pa = parseFloat(String(r['PA (coste)']).replace(',','.'));
+      const ean = String(r['EAN']||'').trim();
+      if(!ean || isNaN(mr) || mr<=0 || mr>corte) continue;
+      if(isNaN(pa) || pa<=0) continue;
+      items.push({ean, precio_web: redondea95(pa*1.75)});
+    }
+    if(!items.length){ log.innerHTML='<div class="info-box" style="border-left:3px solid #ba7517">No hay Funkos con rank ≤ '+corte+' y coste válido. Sube el corte o revisa el ranking.</div>'; go.disabled=false; return; }
+    const tanda = new Date().toISOString().slice(0,16).replace(/[-:T]/g,'');
+    const recado={tanda, items};
+    const blob=new Blob([JSON.stringify(recado)],{type:'application/json'});
+    const e2=(await db.storage.from('informes').upload('fabrica_lote/_solicitud_lote.json', blob, {upsert:true})).error;
+    if(e2) throw new Error('dejando el recado: '+e2.message);
+    const resp=await fetch('/api/disparar',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({secreto:DISPARO_SECRET, workflow:'fabrica-lote.yml'})});
+    const rdata=await resp.json().catch(()=>({}));
+    if(resp.ok){
+      log.innerHTML='<div class="info-box" style="border-left:3px solid #2e7d32">✅ Lote lanzado: '+items.length+' Funkos a fabricar (rank ≤ '+corte+'). La fábrica los deja como BORRADOR (montaje Moloka) para revisar y publicar. Los que ya tengan ficha se saltan.</div>';
+    } else if(resp.status===409){
+      log.innerHTML='<div class="info-box" style="border-left:3px solid #ba7517">⏳ '+(rdata.error||'Ya hay un lote en marcha.')+'</div>';
+    } else {
+      log.innerHTML='<div class="info-box" style="border-left:3px solid #b00020">⚠️ No se pudo lanzar: '+(rdata.error||('HTTP '+resp.status))+'.</div>';
+    }
+  }catch(e){ log.innerHTML='<div class="info-box" style="border-left:3px solid #b00020">⚠️ Error: '+e.message+'</div>'; }
+  go.disabled=false;
+}
 async function lanzarProcesado(modo) {
   const log = document.getElementById('act-log');
   const runBtn = document.getElementById('act-run');
