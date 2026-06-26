@@ -28,6 +28,10 @@ BUCKET      = 'informes'
 RECADO_LOTE = 'fabrica_lote/_solicitud_lote.json'
 CAT_PATH    = 'web_rank/catalogo.xlsx'   # el catalogo que dejo el Paso 1
 
+# Bloque legal GPSR de Funko (verbatim de robot_generar; obligatorio en Funkos).
+GPSR_WEB = ("<br><br><b>Información de seguridad del producto (GPSR)</b><br>"
+            "Responsable en la UE: Funko EU BV · Zuidplein 36, 1077 XV Ámsterdam (NL) · supportEMEA@funko.com")
+
 # ---------------------------------------------------------------------------
 def cargar_catalogo_tcg():
     """Devuelve {ean: (cabecera, [urls_imagen])} leido del catalogo de TCG."""
@@ -131,11 +135,17 @@ def main():
             nombre_corto = (out.get('nombre_corto') or '').strip() or nombre_tcg
             slug         = R.slugify(out.get('slug') or nombre_corto)
 
+            web_desc = (out.get('web_desc') or '').rstrip()
+            if web_desc and 'GPSR' not in web_desc:
+                web_desc += GPSR_WEB
+
             fila = {
                 'ean': ean, 'slug': slug,
+                'origen': 'tcg', 'origen_id': ean,          # id del producto dentro de TCG = su EAN
+                'seccion': 'funko',
                 'titulo_seo': out.get('web_titulo'),
                 'nombre': nombre_corto,
-                'descripcion_html': out.get('web_desc'),
+                'descripcion_html': web_desc or None,
                 'licencia': 'Funko',
                 'categoria': categoria, 'fandom': out.get('fandom'),
                 'es_chase': bool(it.get('es_chase')),
@@ -144,9 +154,9 @@ def main():
                 'precio': it.get('precio_web'), 'precio_web': it.get('precio_web'),
                 'imagen_principal': imgs[0], 'imagenes': imgs,
                 'formato': (it.get('formato') or '').strip() or None,
-                'origen': 'tcg', 'activo': False,          # BORRADOR oculto hasta aprobar
+                'activo': False,                            # BORRADOR oculto hasta aprobar
                 'en_web': False, 'en_miravia': False,
-                'stock': 0, 'disponibilidad': 'bajo pedido',
+                'stock': 0, 'disponibilidad': 'pedido',     # literal EXACTO de la cinta (NO 'bajo pedido')
             }
             fila = {k: v for k, v in fila.items() if v is not None}
             R.sb.table('web_productos').insert(fila).execute()
