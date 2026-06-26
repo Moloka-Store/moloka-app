@@ -1,71 +1,173 @@
 # ============================================================================
-# ROBOT LOTE  -  Modo "a lo bruto" de la Fabrica
+# ROBOT LOTE  -  Fabrica de fichas para la linea "Funkos TCG bajo pedido"
 # ----------------------------------------------------------------------------
-# Reutiliza el MOTOR de robot_preparar.py (Keepa + montaje M7 + redaccion) SIN
-# tocarlo. La fabrica "joya" de Elena queda intacta.
-# Lee un recado propio (informes/fabrica/_solicitud_lote.json) con muchos EANs
-# directos (sacados del Excel del escaner) y genera una ficha 'borrador' por
-# cada uno, para revisar en bloque y publicar.
-# Resumible: si un EAN ya tiene ficha (corrida cortada o ya hecha a mano), lo salta.
-# Mismos Secrets que la fabrica: KEEPA_API_KEY, SUPABASE_URL, SUPABASE_KEY,
-# SUPABASE_SERVICE_KEY, ANTHROPIC_API_KEY
+# Para TCG la VERDAD del producto es TCG (lo que pides por EAN = lo que llega).
+# Por eso esta linea NO usa imagen ni nombre de Keepa (que pueden venir del ASIN
+# equivocado) y NO pasa por el montaje M7 de Elena (la imagen de TCG es caja+
+# figura, el recorte fallaria). En su lugar:
+#   - nombre + imagen salen del CATALOGO de TCG (web_rank/catalogo.xlsx, que subio
+#     el Paso 1), por EAN.
+#   - la descripcion la redacta Claude con el MISMO prompt de la fabrica
+#     (reutilizado de robot_preparar, sin reescribirlo), a partir del dato de TCG.
+#   - se escribe un BORRADOR directamente en web_productos con origen='tcg' y
+#     activo=false (oculto) -> se revisa y se activa cuando esta OK.
+# NO toca robot_preparar / robot_generar / motor_fotos: la fabrica "joya" de
+# Elena queda 100% intacta. Solo reutiliza de robot_preparar (lectura): el
+# cliente de Anthropic, el PROMPT, el MODELO, las CATEGORIAS, slugify y sb.
+# Resumible: si un EAN ya esta en web_productos, lo salta.
+# Secrets (ya en fabrica-lote.yml): KEEPA_API_KEY, SUPABASE_URL, SUPABASE_KEY,
+#   SUPABASE_SERVICE_KEY, ANTHROPIC_API_KEY
 # ============================================================================
-import json, datetime, sys
-import robot_preparar as R   # <-- importa el motor tal cual (no lo modifica)
+import json, datetime, sys, io
+import openpyxl
+import robot_preparar as R   # reusa (solo lectura): cliente, PROMPT_SISTEMA, MODELO, CATEGORIAS, slugify, descargar_b64, sb
 
 sys.stdout.reconfigure(line_buffering=True)
 
+BUCKET      = 'informes'
 RECADO_LOTE = 'fabrica_lote/_solicitud_lote.json'
+CAT_PATH    = 'web_rank/catalogo.xlsx'   # el catalogo que dejo el Paso 1
 
+# ---------------------------------------------------------------------------
+def cargar_catalogo_tcg():
+    """Devuelve {ean: (cabecera, [urls_imagen])} leido del catalogo de TCG."""
+    data = R.sb.storage.from_(BUCKET).download(CAT_PATH)
+    wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    hdr = [str(c).strip() if c is not None else '' for c in rows[0]]
+    idx = {h: i for i, h in enumerate(hdr)}
+    iE   = idx['EAN']
+    iCab = idx['Cabecera']
+    iImg = idx.get('Imágenes', idx.get('Imagenes'))
+    m = {}
+    for r in rows[1:]:
+        ean = str(r[iE] or '').strip()
+        if not ean:
+            continue
+        cab = str(r[iCab] or '').strip()
+        imgs = []
+        if iImg is not None:
+            raw = str(r[iImg] or '').strip()
+            imgs = [u.strip() for u in raw.split(';') if u.strip().lower().startswith('http')]
+        m[ean] = (cab, imgs)
+    return m
+
+# ---------------------------------------------------------------------------
+def redactar_tcg(nombre_tcg, img_url, rarezas):
+    """Misma redaccion que la fabrica (MISMO PROMPT_SISTEMA), pero con datos de TCG.
+    Le pasa la imagen de TCG (caja+figura) para que Claude lea el numero de la caja."""
+    datos = {"titulo_origen_solo_para_identificar": nombre_tcg,
+             "marca": "Funko", "tamano": "aprox. 10 cm"}
+    datos.update({k: v for k, v in (rarezas or {}).items() if v})
+    contenido = [{"type": "text", "text":
+        "DATOS (verificados, no anadas nada que no este aqui):\n" +
+        json.dumps(datos, ensure_ascii=False, indent=2) +
+        "\n\nLee el numero de coleccion de la imagen de la caja (esquina sup. derecha). "
+        "Si no se ve claro, no pongas numero."}]
+    if img_url:
+        try:
+            b64 = R.descargar_b64(img_url)
+            contenido.insert(0, {"type": "image",
+                                 "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}})
+        except Exception as e:
+            print(f"    (aviso: no pude bajar la imagen TCG, redacto sin ella: {e})")
+    msg = R.cliente.messages.create(model=R.MODELO, max_tokens=1800,
+                                    system=R.PROMPT_SISTEMA,
+                                    messages=[{"role": "user", "content": contenido}])
+    texto = msg.content[0].text.strip()
+    if texto.startswith("```"):
+        texto = texto.split("```")[1]
+        if texto.startswith("json"):
+            texto = texto[4:]
+        texto = texto.strip()
+    return json.loads(texto)
+
+# ---------------------------------------------------------------------------
+def ya_en_web(ean):
+    try:
+        r = R.sb.table('web_productos').select('id').eq('ean', str(ean)).limit(1).execute().data
+        return bool(r)
+    except Exception:
+        return False
+
+# ---------------------------------------------------------------------------
 def main():
-    crudo = R._bajar(R.BUCKET_BUZON, RECADO_LOTE)
+    crudo = R._bajar(BUCKET, RECADO_LOTE)
     if crudo is None:
         print("SIN recado de lote. Nada que hacer."); return
     recado = json.loads(crudo.decode('utf-8'))
     tanda  = recado.get('tanda') or datetime.datetime.now().strftime('%Y%m%d_%H%M')
     items  = recado.get('items') or []
-    print(f"Recado LOTE: tanda {tanda}, {len(items)} EAN(s).")
+    print(f"Recado LOTE TCG: tanda {tanda}, {len(items)} EAN(s).")
 
-    ok, err, saltados = [], [], []
+    try:
+        catalogo = cargar_catalogo_tcg()
+        print(f"Catalogo TCG cargado: {len(catalogo)} EANs con nombre/imagen.")
+    except Exception as e:
+        print(f"ERROR: no pude cargar el catalogo TCG ({CAT_PATH}): {e}")
+        return
+
+    ok, err, saltados, sin_dato = [], [], [], []
     for i, it in enumerate(items, 1):
-        it['tanda'] = tanda
         ean = str(it.get('ean') or '').strip()
         if not ean:
             continue
-        # Resumibilidad + dedup: si ya hay ficha de ese EAN (cualquier estado), saltar.
-        try:
-            ya = R.sb.table('fabrica_fichas').select('id').eq('ean', ean).limit(1).execute().data
-        except Exception:
-            ya = None
-        if ya:
-            print(f"[{i}/{len(items)}] {ean} ya tiene ficha -> salto")
+        if ya_en_web(ean):
+            print(f"[{i}/{len(items)}] {ean} ya esta en web -> salto")
             saltados.append(ean); continue
-        print(f"\n[{i}/{len(items)}] (lote) EAN {ean}")
+        nombre_tcg, imgs = catalogo.get(ean, (None, []))
+        if not nombre_tcg or not imgs:
+            print(f"[{i}/{len(items)}] {ean} sin nombre/imagen en catalogo TCG -> salto")
+            sin_dato.append(ean); continue
+
+        print(f"\n[{i}/{len(items)}] TCG {ean} | {nombre_tcg[:55]}")
         try:
-            if R.preparar_item(ean, it, None):
-                ok.append(ean)
-                fmt = (it.get('formato') or '').strip()
-                if fmt:
-                    try:
-                        R.sb.table('web_formato').upsert({'ean': ean, 'formato': fmt}, on_conflict='ean').execute()
-                    except Exception as e:
-                        print(f"   (aviso: no pude guardar formato de {ean}: {e})")
-            else:
-                err.append(ean)
+            rarezas = {"es_chase": it.get('es_chase'),
+                       "es_vaulted": it.get('es_vaulted'),
+                       "es_exclusivo": it.get('es_exclusivo')}
+            out = redactar_tcg(nombre_tcg, imgs[0], rarezas)
+            categoria    = out.get('categoria') if out.get('categoria') in R.CATEGORIAS else None
+            nombre_corto = (out.get('nombre_corto') or '').strip() or nombre_tcg
+            slug         = R.slugify(out.get('slug') or nombre_corto)
+
+            fila = {
+                'ean': ean, 'slug': slug,
+                'titulo_seo': out.get('web_titulo'),
+                'nombre': nombre_corto,
+                'descripcion_html': out.get('web_desc'),
+                'licencia': 'Funko',
+                'categoria': categoria, 'fandom': out.get('fandom'),
+                'es_chase': bool(it.get('es_chase')),
+                'es_vaulted': bool(it.get('es_vaulted')),
+                'es_exclusivo': bool(it.get('es_exclusivo')),
+                'precio': it.get('precio_web'), 'precio_web': it.get('precio_web'),
+                'imagen_principal': imgs[0], 'imagenes': imgs,
+                'formato': (it.get('formato') or '').strip() or None,
+                'origen': 'tcg', 'activo': False,          # BORRADOR oculto hasta aprobar
+                'en_web': False, 'en_miravia': False,
+                'stock': 0, 'disponibilidad': 'bajo pedido',
+            }
+            fila = {k: v for k, v in fila.items() if v is not None}
+            R.sb.table('web_productos').insert(fila).execute()
+            print(f"      OK -> web_productos (borrador, activo=false) | {nombre_corto[:45]} "
+                  f"| cat={categoria} | fmt={fila.get('formato')}")
+            ok.append(ean)
         except Exception as e:
             print(f"   ERROR procesando {ean}: {e}")
             err.append(ean)
 
-    # Borra el recado SOLO al terminar (si se corta antes, al relanzar retoma donde iba).
+    # Borra el recado SOLO al terminar (si se corta antes, al relanzar retoma).
     try:
-        R.sb.storage.from_(R.BUCKET_BUZON).remove([RECADO_LOTE])
+        R.sb.storage.from_(BUCKET).remove([RECADO_LOTE])
     except Exception:
         pass
 
-    print(f"\n==== RESUMEN LOTE {tanda} ====")
-    print(f"  Borradores OK: {len(ok)} | saltados (ya existían): {len(saltados)} | errores: {len(err)}")
-    if err:
-        print(f"  EAN con error: {err}")
+    print(f"\n==== RESUMEN LOTE TCG {tanda} ====")
+    print(f"  Creados (borrador): {len(ok)} | ya en web: {len(saltados)} "
+          f"| sin dato TCG: {len(sin_dato)} | errores: {len(err)}")
+    if err:      print(f"  EAN con error: {err}")
+    if sin_dato: print(f"  EAN sin nombre/imagen: {sin_dato}")
     print("Fin.")
 
 if __name__ == '__main__':
