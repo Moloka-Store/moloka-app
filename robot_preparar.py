@@ -275,6 +275,7 @@ def preparar_item(ean, item, foto_culo_url):
         'fotos_keepa': fotos, 'fotos_elegidas': {}, 'foto_culo': foto_culo_url,
         'precio_web': item.get('precio_web'), 'precio_miravia': item.get('precio_miravia'),
         'con_protector': bool(item.get('con_protector', False)),
+        'en_web': bool(item.get('en_web', True)), 'en_miravia': bool(item.get('en_miravia', False)),
     }
 
     # REDACTAR (usa la foto de Keepa para leer el numero de la caja)
