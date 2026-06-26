@@ -44,6 +44,12 @@ def main():
         try:
             if R.preparar_item(ean, it, None):
                 ok.append(ean)
+                fmt = (it.get('formato') or '').strip()
+                if fmt:
+                    try:
+                        R.sb.table('web_formato').upsert({'ean': ean, 'formato': fmt}, on_conflict='ean').execute()
+                    except Exception as e:
+                        print(f"   (aviso: no pude guardar formato de {ean}: {e})")
             else:
                 err.append(ean)
         except Exception as e:
