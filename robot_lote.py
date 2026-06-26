@@ -15,7 +15,7 @@ import robot_preparar as R   # <-- importa el motor tal cual (no lo modifica)
 
 sys.stdout.reconfigure(line_buffering=True)
 
-RECADO_LOTE = 'fabrica/_solicitud_lote.json'
+RECADO_LOTE = 'fabrica_lote/_solicitud_lote.json'
 
 def main():
     crudo = R._bajar(R.BUCKET_BUZON, RECADO_LOTE)
