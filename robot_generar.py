@@ -252,7 +252,8 @@ def volcar_a_web(f, indice):
         'precio_web': f.get('precio_web'),        # para la pestaña Precios
         'precio_miravia': f.get('precio_miravia'),# solo para el feed de Miravia
         'imagen_principal': principal, 'imagenes': imgs or None,
-        'origen': 'fabrica', 'activo': True,
+        'origen': 'fabrica', 'activo': bool(f.get('en_web', True)),
+        'en_web': bool(f.get('en_web', True)), 'en_miravia': bool(f.get('en_miravia', False)),
     }
     contenido = {k: v for k, v in contenido.items() if v is not None}
     clave = (norm_ean(ean), bool(f.get('es_chase')))
