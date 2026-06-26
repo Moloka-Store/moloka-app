@@ -239,6 +239,17 @@ def volcar_a_web(f, indice):
     nombre_titulo = f.get('nombre_corto') or f.get('web_titulo') or ''
     if f.get('con_protector') and 'protector' not in nombre_titulo.lower():
         nombre_titulo = nombre_titulo.rstrip() + ' con protector incluido'
+    # --- Datos para el Excel de Miravia (atributos adicionales + foto caja GPSR) ---
+    _nc = (f.get('nombre_corto') or '').strip()
+    _mnum = re.search(r'#\s*(\d+)', _nc)
+    _num = _mnum.group(1) if _mnum else ''
+    _personaje = re.sub(r'\s*#\s*\d+\s*$', '', _nc).strip()
+    _atrs = f"Franchise:{f.get('fandom') or ''};Character:{_personaje};Collection Number:{_num};Height:10 cm;Official Product:Yes"
+    _foto_caja = (f.get('fotos_elegidas') or {}).get('caja')
+    # Imágenes para Miravia: PRINCIPAL en fondo blanco (figura Keepa) primero, luego caja y montajes M7
+    _fg = f.get('fotos_generadas') or {}
+    _mimgs = [_fg.get('figura'), _fg.get('caja'), _fg.get('portada'), _fg.get('ficha')] + list(secundarias or [])
+    _vist = set(); _mimgs = [u for u in _mimgs if u and not (u in _vist or _vist.add(u))]
     contenido = {
         'ean': str(ean), 'slug': slug,
         'titulo_seo': f.get('web_titulo'),
@@ -252,6 +263,8 @@ def volcar_a_web(f, indice):
         'precio_web': f.get('precio_web'),        # para la pestaña Precios
         'precio_miravia': f.get('precio_miravia'),# solo para el feed de Miravia
         'imagen_principal': principal, 'imagenes': imgs or None,
+        'miravia_titulo': f.get('miravia_titulo'), 'miravia_desc': f.get('miravia_desc'),
+        'miravia_atributos': _atrs, 'foto_caja': _foto_caja, 'miravia_imagenes': _mimgs or None,
         'origen': 'fabrica', 'activo': bool(f.get('en_web', True)),
         'en_web': bool(f.get('en_web', True)), 'en_miravia': bool(f.get('en_miravia', False)),
     }
@@ -328,17 +341,6 @@ def main():
                 print(f"⚠️  No pude avisar a Vercel ({e}). La web se reconstruirá en el próximo deploy.")
         else:
             print("ℹ️  Sin VERCEL_DEPLOY_HOOK configurado: la web no se reconstruye sola.")
-
-        # Regenerar el feed de Miravia (CSV en Storage). Miravia lo lee 1x/dia por su URL.
-        # NO toca Miravia: solo deja el CSV fresco. Si falla, no rompe la publicacion.
-        try:
-            import motor_feed_miravia as FEED
-            url_feed, n_feed, avisos_feed = FEED.generar_feed(sb, admin)
-            print(f"🛒 Feed de Miravia regenerado: {n_feed} producto(s).")
-            for a in avisos_feed: print("   ⚠️ ", a)
-            print(f"   URL del feed (pégala UNA vez en Miravia, cuando la revises): {url_feed}")
-        except Exception as e:
-            print(f"⚠️  No pude regenerar el feed de Miravia ({e}). La web sí quedó publicada.")
 
     print("\n👉 Recuerda correr el sincronizador de stock para que los productos nuevos cojan stock real.")
 
