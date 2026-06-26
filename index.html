@@ -390,10 +390,12 @@
             <div style="flex:1;min-width:150px">
               <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Precio web (€)</label>
               <input type="number" step="0.01" id="fab-precio-web" placeholder="19,90" style="width:100%;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;margin-top:8px"><input type="checkbox" id="fab-en-web" checked> 🌐 Subir a la web</label>
             </div>
             <div style="flex:1;min-width:150px">
               <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Precio Miravia (€)</label>
               <input type="number" step="0.01" id="fab-precio-miravia" placeholder="21,99" style="width:100%;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;margin-top:8px"><input type="checkbox" id="fab-en-miravia"> 🛒 Subir a Miravia</label>
             </div>
           </div>
           <div>
@@ -1473,6 +1475,8 @@ async function fabGenerarFicha() {
     con_protector: document.getElementById('fab-protector').checked,
     precio_web: parseFloat(document.getElementById('fab-precio-web').value) || null,
     precio_miravia: parseFloat(document.getElementById('fab-precio-miravia').value) || null,
+    en_web: document.getElementById('fab-en-web').checked,
+    en_miravia: document.getElementById('fab-en-miravia').checked,
   };
 
   // Reinicia los toggles de rareza para que la SIGUIENTE ficha empiece SIN marcar
@@ -1481,6 +1485,8 @@ async function fabGenerarFicha() {
   document.getElementById('fab-exclusivo').checked = false;
   document.getElementById('fab-vaulted').checked = false;
   document.getElementById('fab-protector').checked = false;
+  document.getElementById('fab-en-web').checked = true;       // la web vuelve a SI por defecto
+  document.getElementById('fab-en-miravia').checked = false;  // Miravia vuelve a NO por defecto
   const _te = document.getElementById('fab-tipoexc'); if (_te) _te.value = '';
 
   try {
