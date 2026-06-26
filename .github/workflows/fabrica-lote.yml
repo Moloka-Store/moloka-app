@@ -1,0 +1,30 @@
+name: Moloka - Fabrica Lote
+
+on:
+  workflow_dispatch:
+
+jobs:
+  lote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Dependencia del sistema (zbar)
+        run: sudo apt-get update && sudo apt-get install -y libzbar0
+
+      - name: Dependencias Python
+        run: pip install keepa supabase pyzbar pillow anthropic scipy numpy requests rembg onnxruntime
+
+      - name: Robot LOTE
+        env:
+          KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:         ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python -u robot_lote.py
