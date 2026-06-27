@@ -18,7 +18,7 @@
 # Secrets (ya en fabrica-lote.yml): KEEPA_API_KEY, SUPABASE_URL, SUPABASE_KEY,
 #   SUPABASE_SERVICE_KEY, ANTHROPIC_API_KEY
 # ============================================================================
-import json, datetime, sys, io
+import json, datetime, sys, io, requests
 import openpyxl
 import robot_preparar as R   # reusa (solo lectura): cliente, PROMPT_SISTEMA, MODELO, CATEGORIAS, slugify, descargar_b64, sb
 
@@ -88,6 +88,29 @@ def redactar_tcg(nombre_tcg, img_url, rarezas):
     return json.loads(texto)
 
 # ---------------------------------------------------------------------------
+def rehospedar_imagen(url, ean, i):
+    """Descarga la imagen de TCG y la SUBE a Supabase Storage (fotos-fabrica/tcg/).
+    Asi la web sirve la imagen desde Moloka y NO enlaza a tcgfactory.com (oculta el
+    proveedor y no depende de ellos). Devuelve la URL publica de Moloka, o None."""
+    try:
+        r = requests.get(url, timeout=30); r.raise_for_status()
+        datos = r.content
+    except Exception as e:
+        print(f"      AVISO: no pude descargar la imagen TCG ({e})")
+        return None
+    nombre = f"tcg/{ean}_{i}.jpg"
+    try:
+        R.sb_admin.storage.from_(R.BUCKET_FOTOS).upload(
+            nombre, datos, {"content-type": "image/jpeg", "upsert": "true"})
+    except Exception as e:
+        print(f"      AVISO: no pude subir la imagen a Supabase ({e})")
+        return None
+    pub = R.sb_admin.storage.from_(R.BUCKET_FOTOS).get_public_url(nombre)
+    if isinstance(pub, dict):
+        pub = pub.get('publicUrl') or pub.get('publicURL')
+    return pub
+
+# ---------------------------------------------------------------------------
 def ya_en_web(ean):
     try:
         r = R.sb.table('web_productos').select('id').eq('ean', str(ean)).limit(1).execute().data
@@ -127,10 +150,20 @@ def main():
 
         print(f"\n[{i}/{len(items)}] TCG {ean} | {nombre_tcg[:55]}")
         try:
+            # Re-alojar imagenes en Supabase: la web NO debe enlazar a tcgfactory.com
+            imgs_web = []
+            for k, u in enumerate(imgs):
+                pub = rehospedar_imagen(u, ean, k)
+                if pub:
+                    imgs_web.append(pub)
+            if not imgs_web:
+                print(f"   {ean}: no pude re-alojar ninguna imagen -> salto")
+                err.append(ean); continue
+
             rarezas = {"es_chase": it.get('es_chase'),
                        "es_vaulted": it.get('es_vaulted'),
                        "es_exclusivo": it.get('es_exclusivo')}
-            out = redactar_tcg(nombre_tcg, imgs[0], rarezas)
+            out = redactar_tcg(nombre_tcg, imgs_web[0], rarezas)
             categoria    = out.get('categoria') if out.get('categoria') in R.CATEGORIAS else None
             nombre_corto = (out.get('nombre_corto') or '').strip() or nombre_tcg
             slug         = R.slugify(out.get('slug') or nombre_corto)
@@ -152,7 +185,7 @@ def main():
                 'es_vaulted': bool(it.get('es_vaulted')),
                 'es_exclusivo': bool(it.get('es_exclusivo')),
                 'precio': it.get('precio_web'), 'precio_web': it.get('precio_web'),
-                'imagen_principal': imgs[0], 'imagenes': imgs,
+                'imagen_principal': imgs_web[0], 'imagenes': imgs_web,
                 'formato': (it.get('formato') or '').strip() or None,
                 'activo': False,                            # BORRADOR oculto hasta aprobar
                 'en_web': False, 'en_miravia': False,
