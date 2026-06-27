@@ -217,8 +217,6 @@ def main():
     try:
         catalogo = cargar_catalogo_tcg()
         print(f"Catalogo TCG cargado: {len(catalogo)} EANs con nombre/imagen.")
-        fotos_keepa = cargar_fotos_keepa()
-        print(f"Fotos Keepa cargadas: {len(fotos_keepa)} EANs con foto de alta resolucion.")
     except Exception as e:
         print(f"ERROR: no pude cargar el catalogo TCG ({CAT_PATH}): {e}")
         return
@@ -238,64 +236,49 @@ def main():
 
         print(f"\n[{i}/{len(items)}] TCG {ean} | {nombre_tcg[:55]}")
         try:
-            kp = fotos_keepa.get(ean)
-            usar_keepa = bool(kp and kp.get('img_figura'))
-
-            # Imagen para que Claude lea el numero de caja: la caja de Keepa si la hay;
-            # si no, re-alojamos las de TCG (que ademas seran el fallback de galeria).
+            # Re-alojar las fotos de TCG en Supabase (fondo blanco -> recorte fiable).
+            # Convencion TCG: imgs[0]=figura sola, imgs[1]=caja.
             imgs_web = []
-            if usar_keepa:
-                img_leer = kp.get('img_caja') or kp.get('img_figura')
-            else:
-                for k, u in enumerate(imgs):
-                    pub = rehospedar_imagen(u, ean, k)
-                    if pub: imgs_web.append(pub)
-                if not imgs_web:
-                    print(f"   {ean}: no pude re-alojar ninguna imagen -> salto")
-                    err.append(ean); continue
-                img_leer = imgs_web[0]
+            for k, u in enumerate(imgs):
+                pub = rehospedar_imagen(u, ean, k)
+                if pub: imgs_web.append(pub)
+            if not imgs_web:
+                print(f"   {ean}: no pude re-alojar ninguna imagen -> salto")
+                err.append(ean); continue
+            img_fig  = imgs_web[0]
+            img_caja = imgs_web[1] if len(imgs_web) > 1 else imgs_web[0]
 
             rarezas = {"es_chase": it.get('es_chase'),
                        "es_vaulted": it.get('es_vaulted'),
                        "es_exclusivo": it.get('es_exclusivo')}
-            out = redactar_tcg(nombre_tcg, img_leer, rarezas)
+            out = redactar_tcg(nombre_tcg, img_caja, rarezas)   # la caja lleva el #numero
             categoria    = out.get('categoria') if out.get('categoria') in R.CATEGORIAS else None
             nombre_corto = (out.get('nombre_corto') or '').strip() or nombre_tcg
             slug         = R.slugify(out.get('slug') or nombre_corto)
             fandom_norm  = normaliza_fandom(out.get('fandom'))
+            formato      = (it.get('formato') or '').strip() or None
 
             web_desc = (out.get('web_desc') or '').rstrip()
             if web_desc and 'GPSR' not in web_desc:
                 web_desc += GPSR_WEB
 
-            # ---- IMAGENES: montaje M7 con foto Keepa (si pasa el freno) o fallback TCG ----
-            enlaces = None; fuente = 'tcg'
-            if usar_keepa and freno_ok(nombre_tcg, kp.get('nombre_keepa'), fandom_norm):
-                filaf = {'ean': ean, 'nombre_corto': nombre_corto, 'fandom': fandom_norm,
-                         'fotos_elegidas': {'caja': kp.get('img_caja'), 'recorte_moloka': kp.get('img_figura')},
-                         'con_protector': False}
-                enlaces, errf = R.generar_fotos(filaf, None, None, None)
-                if errf:
-                    print(f"   M7 fallo ({errf}) -> fallback foto TCG")
-                    enlaces = None
-                else:
-                    fuente = 'keepa'
-            elif usar_keepa:
-                print(f"   FRENO salta: TCG='{nombre_tcg[:35]}' vs KEEPA='{(kp.get('nombre_keepa') or '')[:35]}' -> foto TCG")
-
-            if enlaces:
-                gal = [enlaces.get('ficha'), enlaces.get('figura'), enlaces.get('caja'), enlaces.get('portada')]
-                imagenes = [g for g in gal if g]
-                imagen_principal = enlaces.get('ficha')
+            # ---- IMAGENES: montaje Moloka (portada + M7) recortando de la figura TCG ----
+            filaf = {'ean': ean, 'nombre_corto': nombre_corto, 'fandom': fandom_norm,
+                     'formato': formato,
+                     'fotos_elegidas': {'caja': img_caja, 'recorte_moloka': img_fig},
+                     'con_protector': False}
+            enlaces, errf = R.generar_fotos(filaf, None, None, None)
+            if errf or not enlaces:
+                print(f"   sin montaje ({errf or 'sin enlaces'}) -> fotos TCG planas")
+                imagen_principal = img_fig
+                imagenes = imgs_web
+                fuente = 'plano'
             else:
-                if not imgs_web:            # veniamos por Keepa y fallo -> re-alojar TCG ahora
-                    for k, u in enumerate(imgs):
-                        pub = rehospedar_imagen(u, ean, k)
-                        if pub: imgs_web.append(pub)
-                if not imgs_web:
-                    print(f"   {ean}: sin imagen Keepa ni TCG -> salto")
-                    err.append(ean); continue
-                imagen_principal = imgs_web[0]; imagenes = imgs_web
+                # Orden pedido: PRINCIPAL = portada (caja+figura); el M7 al FINAL.
+                gal = [enlaces.get('portada'), enlaces.get('figura'), enlaces.get('caja'), enlaces.get('ficha')]
+                imagenes = [g for g in gal if g]
+                imagen_principal = enlaces.get('portada') or enlaces.get('ficha') or img_fig
+                fuente = 'montaje'
 
             fila = {
                 'ean': ean, 'slug': slug,
@@ -311,7 +294,7 @@ def main():
                 'es_exclusivo': bool(it.get('es_exclusivo')),
                 'precio': it.get('precio_web'), 'precio_web': it.get('precio_web'),
                 'imagen_principal': imagen_principal, 'imagenes': imagenes,
-                'formato': (it.get('formato') or '').strip() or None,
+                'formato': formato,
                 'activo': False,                            # BORRADOR oculto hasta aprobar
                 'en_web': False, 'en_miravia': False,
                 'stock': 0, 'disponibilidad': 'pedido',     # literal EXACTO de la cinta (NO 'bajo pedido')
