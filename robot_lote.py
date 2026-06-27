@@ -174,13 +174,44 @@ def redactar_tcg(nombre_tcg, img_url, rarezas):
     return json.loads(texto)
 
 # ---------------------------------------------------------------------------
+def reencuadrar_blanco(datos_jpg, margen=0.08, lienzo=1200):
+    """Centra la figura sobre fondo blanco. Las fotos de TCG vienen con la figura
+    abajo y mucho aire arriba (o la base pegada al borde). Como el fondo es blanco,
+    detectar el recuadro de lo NO-blanco es trivial y fiable (nada de rembg): se
+    recorta a ese recuadro y se pega centrado en un cuadrado blanco con margen
+    uniforme. Asi la galeria sale centrada, sin aire de mas ni cortes.
+    Si algo falla, devuelve los bytes originales (nunca rompe el lote)."""
+    try:
+        from PIL import Image
+        import numpy as np
+        im = Image.open(io.BytesIO(datos_jpg)).convert('RGB')
+        a = np.asarray(im)
+        nf = (a < 245).any(axis=2)          # pixel "con contenido" = algun canal < 245
+        ys, xs = np.where(nf)
+        if len(xs) == 0:
+            return datos_jpg                # imagen toda blanca: no toco
+        x0, x1 = int(xs.min()), int(xs.max()) + 1
+        y0, y1 = int(ys.min()), int(ys.max()) + 1
+        fig = im.crop((x0, y0, x1, y1))
+        w, h = fig.size
+        lado = int(max(w, h) * (1 + 2 * margen))
+        cuadro = Image.new('RGB', (lado, lado), (255, 255, 255))
+        cuadro.paste(fig, ((lado - w) // 2, (lado - h) // 2))
+        cuadro = cuadro.resize((lienzo, lienzo), Image.LANCZOS)
+        buf = io.BytesIO(); cuadro.save(buf, 'JPEG', quality=90)
+        return buf.getvalue()
+    except Exception as e:
+        print(f"      (aviso: no pude reencuadrar, subo la original: {e})")
+        return datos_jpg
+
+# ---------------------------------------------------------------------------
 def rehospedar_imagen(url, ean, i):
     """Descarga la imagen de TCG y la SUBE a Supabase Storage (fotos-fabrica/tcg/).
     Asi la web sirve la imagen desde Moloka y NO enlaza a tcgfactory.com (oculta el
     proveedor y no depende de ellos). Devuelve la URL publica de Moloka, o None."""
     try:
         r = requests.get(url, timeout=30); r.raise_for_status()
-        datos = r.content
+        datos = reencuadrar_blanco(r.content)   # centra la figura sobre el blanco
     except Exception as e:
         print(f"      AVISO: no pude descargar la imagen TCG ({e})")
         return None
