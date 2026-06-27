@@ -175,13 +175,12 @@ def _redondea_95_arriba(x):
     e = math.floor(x)
     return e + 0.95 if x <= e + 0.95 + 1e-9 else e + 1.95
 
-def calcular_oferta(formato, es_chase, es_vaulted, es_exclusivo, precio_web, precio_tcg, estado):
-    """Devuelve el precio_oferta (rojo) si procede, o None. SOLO Funko estandar (no
-    rarezas), cuando TCG lo marca Oferta/Saldo. Traslada el ahorro de TCG al cliente
-    con suelo 11,95 y redondeo al ,95 arriba."""
-    if formato != 'Funko Pop!':
-        return None
-    if es_chase or es_vaulted or es_exclusivo:
+def calcular_oferta(es_estandar, precio_web, precio_tcg, estado):
+    """Devuelve el precio_oferta (rojo) si procede, o None. SOLO Funko estandar
+    (es_estandar=True, calculado en la app por PVPR=17), cuando TCG lo marca
+    Oferta/Saldo. Traslada el ahorro de TCG al cliente sobre el precio NORMAL fijo
+    (14,95), con suelo 11,95 y redondeo al ,95 arriba."""
+    if not es_estandar:
         return None
     if (estado or '').strip().lower() not in ('oferta', 'saldo'):
         return None
@@ -417,8 +416,7 @@ def main():
 
             # ---- OFERTA: solo Funko estandar, cuando TCG lo marca Oferta/Saldo ----
             precio_web = it.get('precio_web')
-            precio_oferta = calcular_oferta(formato, it.get('es_chase'), it.get('es_vaulted'),
-                                            it.get('es_exclusivo'), precio_web, precio_tcg, estado_tcg)
+            precio_oferta = calcular_oferta(it.get('es_estandar'), precio_web, precio_tcg, estado_tcg)
             if precio_oferta is not None:
                 print(f"   OFERTA TCG ({estado_tcg}, coste {precio_tcg}): {precio_web} -> {precio_oferta}")
 
