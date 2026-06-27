@@ -12,7 +12,7 @@
 # Recado opcional: informes/web_rank/_solicitud.json -> {"rank_maximo": 150000}
 # Secrets: KEEPA_API_KEY, SUPABASE_URL, SUPABASE_KEY
 # ============================================================================
-import os, io, json, time, datetime, sys
+import os, io, json, time, datetime, sys, re
 import keepa
 from supabase import create_client
 import openpyxl
@@ -37,6 +37,29 @@ try:
 except Exception:
     pass
 print(f">>> RANK_MAXIMO (corte para marcar 'pasa'): {RANK_MAXIMO}")
+
+
+# ---- Imagen Keepa en alta resolucion (copiado verbatim de la fabrica) ----
+def _nombre_el(el):
+    if isinstance(el, dict):
+        for k in ('l','large','hiRes','m','medium','image','name'):
+            if el.get(k): return str(el[k])
+    elif isinstance(el, str): return el
+    return None
+def _a_url(n):
+    n=str(n); return n if n.startswith('http') else 'https://m.media-amazon.com/images/I/'+n
+def _alta(url, px=1600):
+    if not url or '/images/I/' not in url: return url
+    base,_,fich=url.rpartition('/'); m=re.match(r'^([^.]+)\.',fich)
+    return f"{base}/{m.group(1)}._SL{px}_.jpg" if m else url
+def extraer_imagenes(prod, max_fotos=8):
+    urls=[]
+    for el in (prod.get('images') or []):
+        n=_nombre_el(el)
+        if n:
+            u=_alta(_a_url(n))
+            if u and u not in urls: urls.append(u)
+    return urls[:max_fotos]
 
 # ===================== Keepa con reintentos (VERBATIM del escaner) =====================
 KEEPA_MAX_INTENTOS = 4
@@ -171,9 +194,14 @@ def registra(prod, pool, vistos):
     r_act = cur[IDX_RANK] if len(cur)>IDX_RANK else -1
     r_90  = a90[IDX_RANK] if len(a90)>IDX_RANK else -1
     eans = {norm(str(e)) for e in (prod.get('eanList') or [])+(prod.get('upcList') or [])}
+    nombre_keepa = (prod.get('title') or '').strip()
+    fotos_k = extraer_imagenes(prod)                 # alta resolucion (1600px), gratis
+    img_caja   = fotos_k[0] if fotos_k else ''        # convencion fabrica: [0]=caja
+    img_figura = fotos_k[1] if len(fotos_k) > 1 else (fotos_k[0] if fotos_k else '')  # [1]=figura
     for ein in pool:
         if not (var_norm[ein] & eans): continue
-        cand = {'ean_in':ein,'asin':asin,'r_act':r_act,'r_90':r_90,'fila':fila_por_ean[ein]}
+        cand = {'ean_in':ein,'asin':asin,'r_act':r_act,'r_90':r_90,'fila':fila_por_ean[ein],
+                'nombre_keepa':nombre_keepa, 'img_figura':img_figura, 'img_caja':img_caja}
         if ein in candidatos:
             prev = candidatos[ein]
             ambiguos.append(ein)
@@ -240,7 +268,8 @@ for ein, c in candidatos.items():
     pasa = (mr is not None and mr <= RANK_MAXIMO)
     filas_out.append({'ean': ein, 'nombre': f['nombre'], 'formato': f.get('formato',''), 'rank_act': c['r_act'] if c['r_act']>0 else None,
                       'rank_90': c['r_90'] if c['r_90']>0 else None, 'mejor_rank': mr,
-                      'pa': f['pa'], 'pvpr': f['pvpr'], 'asin': c['asin'], 'pasa': 'SI' if pasa else 'no'})
+                      'pa': f['pa'], 'pvpr': f['pvpr'], 'asin': c['asin'], 'pasa': 'SI' if pasa else 'no',
+                      'nombre_keepa': c.get('nombre_keepa',''), 'img_figura': c.get('img_figura',''), 'img_caja': c.get('img_caja','')})
 filas_out.sort(key=lambda x: (x['mejor_rank'] is None, x['mejor_rank'] or 10**12))
 
 # Distribucion (la curva, para cortar el umbral)
@@ -260,11 +289,12 @@ print(f"  >>> PASAN con RANK_MAXIMO={RANK_MAXIMO}: {total_pasa}  (de {len(filas_
 
 # Excel a Storage
 wb = openpyxl.Workbook(); ws = wb.active; ws.title = 'Ranking'
-COLS = ['EAN','Nombre','Formato','Rank actual','Rank 90d','Mejor rank','PA (coste)','PVPR','ASIN','Pasa']
+COLS = ['EAN','Nombre','Formato','Rank actual','Rank 90d','Mejor rank','PA (coste)','PVPR','ASIN','Pasa','Nombre Keepa','Img figura','Img caja']
 ws.append(COLS)
 for x in filas_out:
     ws.append([x['ean'], x['nombre'], x.get('formato',''), x['rank_act'], x['rank_90'], x['mejor_rank'],
-               x['pa'], x['pvpr'], x['asin'], x['pasa']])
+               x['pa'], x['pvpr'], x['asin'], x['pasa'],
+               x.get('nombre_keepa',''), x.get('img_figura',''), x.get('img_caja','')])
 buf = io.BytesIO(); wb.save(buf); buf.seek(0)
 try:
     sb.storage.from_(BUCKET).upload(OUT_PATH, buf.read(),
