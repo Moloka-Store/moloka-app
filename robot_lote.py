@@ -18,7 +18,7 @@
 # Secrets (ya en fabrica-lote.yml): KEEPA_API_KEY, SUPABASE_URL, SUPABASE_KEY,
 #   SUPABASE_SERVICE_KEY, ANTHROPIC_API_KEY
 # ============================================================================
-import json, datetime, sys, io, requests
+import json, datetime, sys, io, re, unicodedata, requests
 import openpyxl
 import robot_preparar as R   # reusa (solo lectura): cliente, PROMPT_SISTEMA, MODELO, CATEGORIAS, slugify, descargar_b64, sb
 
@@ -27,6 +27,7 @@ sys.stdout.reconfigure(line_buffering=True)
 BUCKET      = 'informes'
 RECADO_LOTE = 'fabrica_lote/_solicitud_lote.json'
 CAT_PATH    = 'web_rank/catalogo.xlsx'   # el catalogo que dejo el Paso 1
+FOTOS_PATH  = 'web_rank/ranking_tcg_fotos.xlsx'  # fotos Keepa (alta res) del corte
 
 # Bloque legal GPSR de Funko (verbatim de robot_generar; obligatorio en Funkos).
 GPSR_WEB = ("<br><br><b>Información de seguridad del producto (GPSR)</b><br>"
@@ -60,6 +61,62 @@ def normaliza_fandom(f):
     if not f:
         return f
     return FANDOM_CANON.get(f.strip().lower(), f.strip())
+
+# ---------- FRENO difuso: nombre TCG vs nombre Keepa ----------
+# Nunca son identicos, asi que comparamos por palabras del PERSONAJE: quitamos
+# morralla y la franquicia de ambos; si comparten algun token -> mismo producto
+# (foto Keepa OK). Si no comparten NADA -> freno (foto TCG, por seguridad).
+_STOP = set("""funko pop vinyl figura figure de del la el los las y e and the a un una uno para con sin
+coleccionable coleccionables coleccionistas coleccion idea regalo gift mercancia oficial official
+merchandise juguetes toys ninos adultos kids fans tv anime animation games game movies movie video
+muneco modelo model display exhibicion exposicion collectable collectible special edition exclusive
+exclusivo vinilo serie bobble head bobblehead nuevo new standard std emea usa eu glow chase ride
+cabeza oscilante tete figurine vol""".split())
+
+def _sin_acentos(x):
+    return ''.join(c for c in unicodedata.normalize('NFD', str(x)) if unicodedata.category(c) != 'Mn')
+
+def _tokens_personaje(nombre, fandom=''):
+    s = _sin_acentos((nombre or '').lower())
+    s = re.sub(r'[^a-z0-9 ]', ' ', s)
+    fset = set(_sin_acentos((fandom or '').lower()).split())
+    toks = set()
+    for w in s.split():
+        if len(w) < 3 or w in _STOP or w in fset or w.isdigit():
+            continue
+        toks.add(w)
+    return toks
+
+def freno_ok(nombre_tcg, nombre_keepa, fandom):
+    t1 = _tokens_personaje(nombre_tcg, fandom)
+    t2 = _tokens_personaje(nombre_keepa, fandom)
+    if not t1 or not t2:
+        return True          # nombre demasiado corto para juzgar -> no frenamos
+    return len(t1 & t2) >= 1 # comparten al menos el personaje
+
+def cargar_fotos_keepa():
+    """{ean: {nombre_keepa, img_figura, img_caja}} del ranking_tcg_fotos.xlsx. Si no
+    existe, {} (todo ira por fallback TCG)."""
+    data = R._bajar(BUCKET, FOTOS_PATH)
+    if data is None:
+        return {}
+    ws = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True).active
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows:
+        return {}
+    idx = {(str(c).strip() if c is not None else ''): i for i, c in enumerate(rows[0])}
+    iE, iNk, iIf, iIc = idx.get('EAN'), idx.get('Nombre Keepa'), idx.get('Img figura'), idx.get('Img caja')
+    if iE is None or iIf is None:
+        return {}
+    m = {}
+    for r in rows[1:]:
+        ean = str(r[iE] or '').strip()
+        if not ean:
+            continue
+        m[ean] = {'nombre_keepa': str(r[iNk] or '') if iNk is not None else '',
+                  'img_figura':   str(r[iIf] or '') if iIf is not None else '',
+                  'img_caja':     str(r[iIc] or '') if iIc is not None else ''}
+    return m
 
 # ---------------------------------------------------------------------------
 def cargar_catalogo_tcg():
@@ -160,6 +217,8 @@ def main():
     try:
         catalogo = cargar_catalogo_tcg()
         print(f"Catalogo TCG cargado: {len(catalogo)} EANs con nombre/imagen.")
+        fotos_keepa = cargar_fotos_keepa()
+        print(f"Fotos Keepa cargadas: {len(fotos_keepa)} EANs con foto de alta resolucion.")
     except Exception as e:
         print(f"ERROR: no pude cargar el catalogo TCG ({CAT_PATH}): {e}")
         return
@@ -179,27 +238,64 @@ def main():
 
         print(f"\n[{i}/{len(items)}] TCG {ean} | {nombre_tcg[:55]}")
         try:
-            # Re-alojar imagenes en Supabase: la web NO debe enlazar a tcgfactory.com
+            kp = fotos_keepa.get(ean)
+            usar_keepa = bool(kp and kp.get('img_figura'))
+
+            # Imagen para que Claude lea el numero de caja: la caja de Keepa si la hay;
+            # si no, re-alojamos las de TCG (que ademas seran el fallback de galeria).
             imgs_web = []
-            for k, u in enumerate(imgs):
-                pub = rehospedar_imagen(u, ean, k)
-                if pub:
-                    imgs_web.append(pub)
-            if not imgs_web:
-                print(f"   {ean}: no pude re-alojar ninguna imagen -> salto")
-                err.append(ean); continue
+            if usar_keepa:
+                img_leer = kp.get('img_caja') or kp.get('img_figura')
+            else:
+                for k, u in enumerate(imgs):
+                    pub = rehospedar_imagen(u, ean, k)
+                    if pub: imgs_web.append(pub)
+                if not imgs_web:
+                    print(f"   {ean}: no pude re-alojar ninguna imagen -> salto")
+                    err.append(ean); continue
+                img_leer = imgs_web[0]
 
             rarezas = {"es_chase": it.get('es_chase'),
                        "es_vaulted": it.get('es_vaulted'),
                        "es_exclusivo": it.get('es_exclusivo')}
-            out = redactar_tcg(nombre_tcg, imgs_web[0], rarezas)
+            out = redactar_tcg(nombre_tcg, img_leer, rarezas)
             categoria    = out.get('categoria') if out.get('categoria') in R.CATEGORIAS else None
             nombre_corto = (out.get('nombre_corto') or '').strip() or nombre_tcg
             slug         = R.slugify(out.get('slug') or nombre_corto)
+            fandom_norm  = normaliza_fandom(out.get('fandom'))
 
             web_desc = (out.get('web_desc') or '').rstrip()
             if web_desc and 'GPSR' not in web_desc:
                 web_desc += GPSR_WEB
+
+            # ---- IMAGENES: montaje M7 con foto Keepa (si pasa el freno) o fallback TCG ----
+            enlaces = None; fuente = 'tcg'
+            if usar_keepa and freno_ok(nombre_tcg, kp.get('nombre_keepa'), fandom_norm):
+                filaf = {'ean': ean, 'nombre_corto': nombre_corto, 'fandom': fandom_norm,
+                         'fotos_elegidas': {'caja': kp.get('img_caja'), 'recorte_moloka': kp.get('img_figura')},
+                         'con_protector': False}
+                enlaces, errf = R.generar_fotos(filaf, None, None, None)
+                if errf:
+                    print(f"   M7 fallo ({errf}) -> fallback foto TCG")
+                    enlaces = None
+                else:
+                    fuente = 'keepa'
+            elif usar_keepa:
+                print(f"   FRENO salta: TCG='{nombre_tcg[:35]}' vs KEEPA='{(kp.get('nombre_keepa') or '')[:35]}' -> foto TCG")
+
+            if enlaces:
+                gal = [enlaces.get('ficha'), enlaces.get('figura'), enlaces.get('caja'), enlaces.get('portada')]
+                imagenes = [g for g in gal if g]
+                imagen_principal = enlaces.get('ficha')
+            else:
+                if not imgs_web:            # veniamos por Keepa y fallo -> re-alojar TCG ahora
+                    for k, u in enumerate(imgs):
+                        pub = rehospedar_imagen(u, ean, k)
+                        if pub: imgs_web.append(pub)
+                if not imgs_web:
+                    print(f"   {ean}: sin imagen Keepa ni TCG -> salto")
+                    err.append(ean); continue
+                imagen_principal = imgs_web[0]; imagenes = imgs_web
 
             fila = {
                 'ean': ean, 'slug': slug,
@@ -209,12 +305,12 @@ def main():
                 'nombre': nombre_corto,
                 'descripcion_html': web_desc or None,
                 'licencia': 'Funko',
-                'categoria': categoria, 'fandom': normaliza_fandom(out.get('fandom')),
+                'categoria': categoria, 'fandom': fandom_norm,
                 'es_chase': bool(it.get('es_chase')),
                 'es_vaulted': bool(it.get('es_vaulted')),
                 'es_exclusivo': bool(it.get('es_exclusivo')),
                 'precio': it.get('precio_web'), 'precio_web': it.get('precio_web'),
-                'imagen_principal': imgs_web[0], 'imagenes': imgs_web,
+                'imagen_principal': imagen_principal, 'imagenes': imagenes,
                 'formato': (it.get('formato') or '').strip() or None,
                 'activo': False,                            # BORRADOR oculto hasta aprobar
                 'en_web': False, 'en_miravia': False,
@@ -222,7 +318,7 @@ def main():
             }
             fila = {k: v for k, v in fila.items() if v is not None}
             R.sb.table('web_productos').insert(fila).execute()
-            print(f"      OK -> web_productos (borrador, activo=false) | {nombre_corto[:45]} "
+            print(f"      OK [{fuente}] -> web_productos (borrador, activo=false) | {nombre_corto[:40]} "
                   f"| cat={categoria} | fmt={fila.get('formato')}")
             ok.append(ean)
         except Exception as e:
