@@ -2569,7 +2569,11 @@ async function publicarRevisionTcg() {
   log.innerHTML = '✅ Publicadas ' + ok + (err ? (' · ⚠️ ' + err + ' con error') : '') +
     '.<br>Ahora reconstruye la web para verlas online: ' +
     '<button class="btn btn-sm btn-primary" style="margin-top:6px" onclick="reconstruirWebTcg(this)">☁️ Reconstruir web</button>';
-  setTimeout(cargarRevisionTcg, 1500);   // refresca: las publicadas ya no son borrador
+  // Vaciamos el mosaico (ya están publicadas) PERO dejamos el log con el botón de
+  // reconstruir visible (no recargamos la lista, que borraría el botón).
+  _revTcg = [];
+  document.getElementById('rev-tcg-lista').innerHTML = '';
+  document.getElementById('rev-tcg-acciones').style.display = 'none';
 }
 
 async function reconstruirWebTcg(btn) {
@@ -2634,14 +2638,23 @@ async function lanzarLoteWeb(){
     const buf = await dl.data.arrayBuffer();
     const wb = XLSX.read(buf,{type:'array'});
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
+    const COSTE_ESTANDAR = 8.55;   // coste normal fijo de un Funko Pop! estándar (PVPR 17)
     const items=[];
     for(const r of rows){
       const mr = parseInt(r['Mejor rank'],10);
       const pa = parseFloat(String(r['PA (coste)']).replace(',','.'));
+      const pvpr = parseFloat(String(r['PVPR']).replace(',','.'));
+      const formato = String(r['Formato']||'').trim();
       const ean = String(r['EAN']||'').trim();
       if(!ean || isNaN(mr) || mr<=0 || mr>corte) continue;
       if(isNaN(pa) || pa<=0) continue;
-      items.push({ean, precio_web: redondea95(pa*1.75), formato: String(r['Formato']||'').trim()});
+      // Estándar = Funko Pop! con PVPR 17. Su precio NORMAL se fija desde el coste
+      // normal (8,55), NO desde el PA del ranking: el PA baja cuando TCG está de
+      // promo, y si no lo fijáramos clavaríamos un precio de venta rebajado de forma
+      // permanente. La oferta (descuento temporal) la pone el robot encima de ese 14,95.
+      const es_estandar = (formato === 'Funko Pop!' && Math.round(pvpr) === 17);
+      const precio_web = es_estandar ? redondea95(COSTE_ESTANDAR*1.75) : redondea95(pa*1.75);
+      items.push({ean, precio_web, formato, es_estandar});
     }
     if(!items.length){ log.innerHTML='<div class="info-box" style="border-left:3px solid #ba7517">No hay Funkos con rank ≤ '+corte+' y coste válido. Sube el corte o revisa el ranking.</div>'; go.disabled=false; return; }
     const tanda = new Date().toISOString().slice(0,16).replace(/[-:T]/g,'');
