@@ -18,7 +18,7 @@
 # Secrets (ya en fabrica-lote.yml): KEEPA_API_KEY, SUPABASE_URL, SUPABASE_KEY,
 #   SUPABASE_SERVICE_KEY, ANTHROPIC_API_KEY
 # ============================================================================
-import json, datetime, sys, io, re, unicodedata, requests
+import json, datetime, sys, io, re, math, unicodedata, requests
 import openpyxl
 import robot_preparar as R   # reusa (solo lectura): cliente, PROMPT_SISTEMA, MODELO, CATEGORIAS, slugify, descargar_b64, sb
 
@@ -120,7 +120,9 @@ def cargar_fotos_keepa():
 
 # ---------------------------------------------------------------------------
 def cargar_catalogo_tcg():
-    """Devuelve {ean: (cabecera, [urls_imagen])} leido del catalogo de TCG."""
+    """Devuelve {ean: (cabecera, [urls_imagen], precio_tcg, estado)} del catalogo TCG.
+    precio_tcg = coste actual en TCG (rebajado si esta de oferta). estado = 'Oferta',
+    'Saldo', 'Disponible', etc. (lo usa la logica de ofertas)."""
     data = R.sb.storage.from_(BUCKET).download(CAT_PATH)
     wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
     ws = wb.active
@@ -130,6 +132,8 @@ def cargar_catalogo_tcg():
     iE   = idx['EAN']
     iCab = idx['Cabecera']
     iImg = idx.get('Imágenes', idx.get('Imagenes'))
+    iPre = idx.get('Precio')
+    iEst = idx.get('Estado producto')
     m = {}
     for r in rows[1:]:
         ean = str(r[iE] or '').strip()
@@ -140,8 +144,57 @@ def cargar_catalogo_tcg():
         if iImg is not None:
             raw = str(r[iImg] or '').strip()
             imgs = [u.strip() for u in raw.split(';') if u.strip().lower().startswith('http')]
-        m[ean] = (cab, imgs)
+        try:
+            precio_tcg = float(r[iPre]) if (iPre is not None and r[iPre] is not None) else None
+        except (TypeError, ValueError):
+            precio_tcg = None
+        estado = str(r[iEst] or '').strip() if iEst is not None else ''
+        m[ean] = (cab, imgs, precio_tcg, estado)
     return m
+
+# Patrones que delatan un DISPLAY/CASE de reventa (varias unidades), no un producto
+# individual. NO incluye "pack" a secas para no cargarnos los Bitty Pop (que vienen
+# en pack de 4 de forma legitima).
+_PATRONES_PACK = ('case', '5+1', 'display', 'caja de', 'pdq', 'assortment', 'counter')
+
+def es_pack(nombre_tcg, ean):
+    n = (nombre_tcg or '').lower()
+    if any(p in n for p in _PATRONES_PACK):
+        return True
+    if str(ean).strip().upper().endswith('C'):   # TCG sufija con 'C' los Case
+        return True
+    return False
+
+# Coste normal de un Funko estandar en TCG (lo que paga Moloka). Fijo por decision de
+# Fernando: 8,55 (no se toma del catalogo, que cuando hay oferta da el ya rebajado).
+COSTE_NORMAL_ESTANDAR = 8.55
+SUELO_OFERTA_ESTANDAR  = 11.95
+
+def _redondea_95_arriba(x):
+    """Redondea al X,95 inmediatamente >= x (precio comercial, a favor de Moloka)."""
+    e = math.floor(x)
+    return e + 0.95 if x <= e + 0.95 + 1e-9 else e + 1.95
+
+def calcular_oferta(formato, es_chase, es_vaulted, es_exclusivo, precio_web, precio_tcg, estado):
+    """Devuelve el precio_oferta (rojo) si procede, o None. SOLO Funko estandar (no
+    rarezas), cuando TCG lo marca Oferta/Saldo. Traslada el ahorro de TCG al cliente
+    con suelo 11,95 y redondeo al ,95 arriba."""
+    if formato != 'Funko Pop!':
+        return None
+    if es_chase or es_vaulted or es_exclusivo:
+        return None
+    if (estado or '').strip().lower() not in ('oferta', 'saldo'):
+        return None
+    if precio_web is None or precio_tcg is None:
+        return None
+    ahorro = COSTE_NORMAL_ESTANDAR - precio_tcg
+    if ahorro <= 0:
+        return None                              # TCG no esta mas barato de lo normal
+    bruto = precio_web - ahorro
+    oferta = max(SUELO_OFERTA_ESTANDAR, _redondea_95_arriba(bruto))
+    if oferta >= precio_web:
+        return None                              # no hay rebaja real que mostrar
+    return round(oferta, 2)
 
 # ---------------------------------------------------------------------------
 def redactar_tcg(nombre_tcg, img_url, rarezas):
@@ -307,7 +360,7 @@ def main():
         print(f"ERROR: no pude cargar el catalogo TCG ({CAT_PATH}): {e}")
         return
 
-    ok, err, saltados, sin_dato = [], [], [], []
+    ok, err, saltados, sin_dato, packs = [], [], [], [], []
     revision = []   # para la hoja de contactos del lote
     for i, it in enumerate(items, 1):
         ean = str(it.get('ean') or '').strip()
@@ -316,10 +369,13 @@ def main():
         if ya_en_web(ean):
             print(f"[{i}/{len(items)}] {ean} ya esta en web -> salto")
             saltados.append(ean); continue
-        nombre_tcg, imgs = catalogo.get(ean, (None, []))
+        nombre_tcg, imgs, precio_tcg, estado_tcg = catalogo.get(ean, (None, [], None, ''))
         if not nombre_tcg or not imgs:
             print(f"[{i}/{len(items)}] {ean} sin nombre/imagen en catalogo TCG -> salto")
             sin_dato.append(ean); continue
+        if es_pack(nombre_tcg, ean):
+            print(f"[{i}/{len(items)}] {ean} es Case/display/pack ({nombre_tcg[:40]}) -> salto")
+            packs.append(ean); continue
 
         print(f"\n[{i}/{len(items)}] TCG {ean} | {nombre_tcg[:55]}")
         try:
@@ -358,6 +414,13 @@ def main():
             web_desc = (out.get('web_desc') or '').rstrip()
             if web_desc and 'GPSR' not in web_desc:
                 web_desc += GPSR_WEB
+
+            # ---- OFERTA: solo Funko estandar, cuando TCG lo marca Oferta/Saldo ----
+            precio_web = it.get('precio_web')
+            precio_oferta = calcular_oferta(formato, it.get('es_chase'), it.get('es_vaulted'),
+                                            it.get('es_exclusivo'), precio_web, precio_tcg, estado_tcg)
+            if precio_oferta is not None:
+                print(f"   OFERTA TCG ({estado_tcg}, coste {precio_tcg}): {precio_web} -> {precio_oferta}")
 
             # ---- IMAGENES ----
             if caja_ancha:
@@ -399,11 +462,13 @@ def main():
                 'es_vaulted': bool(it.get('es_vaulted')),
                 'es_exclusivo': bool(it.get('es_exclusivo')),
                 'precio': it.get('precio_web'), 'precio_web': it.get('precio_web'),
+                'precio_oferta': precio_oferta,             # rojo tachando el normal (None si no hay oferta)
                 'imagen_principal': imagen_principal, 'imagenes': imagenes,
+                'imagenes_planas': planas,                  # fotos TCG planas (para "No vale" en la revision)
                 'formato': formato,
                 'activo': False,                            # BORRADOR oculto hasta aprobar
                 'en_web': False, 'en_miravia': False,
-                'stock': 0, 'disponibilidad': 'pedido',     # literal EXACTO de la cinta (NO 'bajo pedido')
+                'stock': 0, 'disponibilidad': 'inmediato',  # "Disponible" (no "Bajo pedido / Encargar")
             }
             fila = {k: v for k, v in fila.items() if v is not None}
             R.sb.table('web_productos').insert(fila).execute()
@@ -424,9 +489,10 @@ def main():
 
     print(f"\n==== RESUMEN LOTE TCG {tanda} ====")
     print(f"  Creados (borrador): {len(ok)} | ya en web: {len(saltados)} "
-          f"| sin dato TCG: {len(sin_dato)} | errores: {len(err)}")
+          f"| sin dato TCG: {len(sin_dato)} | packs/Case saltados: {len(packs)} | errores: {len(err)}")
     if err:      print(f"  EAN con error: {err}")
     if sin_dato: print(f"  EAN sin nombre/imagen: {sin_dato}")
+    if packs:    print(f"  EAN Case/pack excluidos: {packs}")
 
     # Desglose por tipo de montaje (para saber cuantas raras hay que revisar).
     if revision:
