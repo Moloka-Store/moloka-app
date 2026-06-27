@@ -32,6 +32,35 @@ CAT_PATH    = 'web_rank/catalogo.xlsx'   # el catalogo que dejo el Paso 1
 GPSR_WEB = ("<br><br><b>Información de seguridad del producto (GPSR)</b><br>"
             "Responsable en la UE: Funko EU BV · Zuidplein 36, 1077 XV Ámsterdam (NL) · supportEMEA@funko.com")
 
+# Normalizacion de franquicias: unifica grafias distintas del MISMO fandom para que
+# el filtro de la web salga limpio. Solo fusiona duplicados claros (y las series de
+# Star Wars bajo "Star Wars"). NO fusiona submarcas tipo Deadpool/X-Men en Marvel:
+# eso es decision de taxonomia, se puede ampliar cuando quieras.
+FANDOM_CANON = {
+    'kimetsu no yaiba': 'Demon Slayer',
+    'kimetsu no yaiba (demon slayer)': 'Demon Slayer',
+    'demon slayer kimetsu no yaiba': 'Demon Slayer',
+    'demon slayer': 'Demon Slayer',
+    'bola de dragon': 'Dragon Ball', 'bola de dragón': 'Dragon Ball',
+    'dragonball': 'Dragon Ball', 'dragon ball z': 'Dragon Ball',
+    'dragon ball super': 'Dragon Ball', 'dragon ball gt': 'Dragon Ball',
+    'masters of the universe': 'Masters del Universo',
+    'masters del universo': 'Masters del Universo',
+    'nightmare before christmas': 'Pesadilla antes de Navidad',
+    'pesadilla antes de navidad 30th': 'Pesadilla antes de Navidad',
+    'kaiju nº8': 'Kaiju No. 8', 'kaiju nº 8': 'Kaiju No. 8',
+    'kaiju no 8': 'Kaiju No. 8', 'kaiju no. 8': 'Kaiju No. 8',
+    'it': 'IT', 'nlf': 'NFL',
+    'arcane': 'League of Legends', 'arcane: league of legends': 'League of Legends',
+    'the mandalorian': 'Star Wars', 'ahsoka': 'Star Wars',
+    'star wars the acolyte': 'Star Wars', 'star wars: the acolyte': 'Star Wars',
+    'the acolyte': 'Star Wars',
+}
+def normaliza_fandom(f):
+    if not f:
+        return f
+    return FANDOM_CANON.get(f.strip().lower(), f.strip())
+
 # ---------------------------------------------------------------------------
 def cargar_catalogo_tcg():
     """Devuelve {ean: (cabecera, [urls_imagen])} leido del catalogo de TCG."""
@@ -180,7 +209,7 @@ def main():
                 'nombre': nombre_corto,
                 'descripcion_html': web_desc or None,
                 'licencia': 'Funko',
-                'categoria': categoria, 'fandom': out.get('fandom'),
+                'categoria': categoria, 'fandom': normaliza_fandom(out.get('fandom')),
                 'es_chase': bool(it.get('es_chase')),
                 'es_vaulted': bool(it.get('es_vaulted')),
                 'es_exclusivo': bool(it.get('es_exclusivo')),
