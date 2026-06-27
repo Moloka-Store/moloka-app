@@ -232,12 +232,6 @@ def volcar_a_web(f, indice):
     ean = f.get('ean'); slug = f.get('slug')
     if not ean or not slug:
         return 'saltado', None
-    # 🔒 SLUG ÚNICO PARA LA CHASE: la chase comparte EAN con la común y la IA les da el
-    # MISMO slug (lo saca del nombre, que es idéntico). Sin esto, las dos acaban con la
-    # misma URL en la web y una pisa a la otra (getStaticPaths descarta el path duplicado:
-    # "dos fichas en una"). Con el sufijo, la chase vive en su propia ficha separada.
-    if bool(f.get('es_chase')) and not str(slug).endswith('-chase'):
-        slug = str(slug) + '-chase'
     secundarias = (f.get('fotos_elegidas') or {}).get('secundarias') or []
     imgs = galeria(f.get('fotos_generadas'), secundarias)
     principal = (f.get('fotos_generadas') or {}).get('portada') or (imgs[0] if imgs else None)
@@ -272,6 +266,10 @@ def volcar_a_web(f, indice):
         'miravia_titulo': f.get('miravia_titulo'), 'miravia_desc': f.get('miravia_desc'),
         'miravia_atributos': _atrs, 'foto_caja': _foto_caja, 'miravia_imagenes': _mimgs or None,
         'origen': 'fabrica', 'activo': bool(f.get('en_web', True)),
+        # origen_id = id del producto dentro de la fabrica. Como chase y comun
+        # comparten EAN, la chase lleva sufijo -chase para no colisionar (igual
+        # que el slug y que la clave de dedup (ean, es_chase)).
+        'origen_id': str(ean) + ('-chase' if f.get('es_chase') else ''),
         'en_web': bool(f.get('en_web', True)), 'en_miravia': bool(f.get('en_miravia', False)),
     }
     contenido = {k: v for k, v in contenido.items() if v is not None}
