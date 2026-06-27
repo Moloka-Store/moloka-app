@@ -149,7 +149,18 @@ def montar_m7(fig_rgba, f, S=1024):
     numero = ('#'+mm.group(1)) if mm else ''
     # Nombre del personaje = nombre completo SIN el #numero (ya NO separamos coletillas).
     personaje = _re.sub(r'#\s*\d+','',nombre).strip().rstrip('|-/ ').strip() or nombre
-    pie = ' \u00b7 '.join(['Funko Pop!', 'Vinilo', '\u2248 10 cm'])
+    _fmt = (f.get('formato') or '').strip() if isinstance(f, dict) else ''
+    _SEP = ' \u00b7 '
+    if _fmt in ('', 'Funko Pop!'):
+        pie = _SEP.join(['Funko Pop!', 'Vinilo', '\u2248 10 cm'])
+    elif _fmt == 'Bitty Pop':
+        pie = _SEP.join(['Funko Bitty Pop!', 'Vinilo', '\u2248 2,5 cm'])
+    elif _fmt == 'Llavero':
+        pie = _SEP.join(['Funko Pop! Keychain', 'Llavero'])
+    elif _fmt == 'Deluxe':
+        pie = _SEP.join(['Funko Pop! Deluxe', 'Vinilo'])
+    else:
+        pie = _SEP.join(['Funko Pop!', 'Vinilo'])
     W=S; M=Image.new('RGBA',(W,W),(255,255,255,255)); d=ImageDraw.Draw(M)
     HH=int(W*0.146); M.paste(_m7_grad(W,HH),(0,0))
     def _ancho(txt, font): bb=d.textbbox((0,0),txt,font=font); return bb[2]-bb[0]
