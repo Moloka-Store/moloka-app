@@ -1,14 +1,16 @@
-# robot_fotos_tcg.py - Enriquecimiento de imagenes Keepa para la linea TCG.
+# robot_fotos_tcg.py - Imagenes Keepa (alta resolucion) para la linea TCG.
 #
-# Lee el ranking YA calculado (ranking_tcg.xlsx), coge SOLO los productos dentro
-# del corte de rank (los que vamos a publicar) y pide a Keepa POR ASIN su imagen
-# en alta resolucion (1600px) + nombre. Asi gastamos ~1 token por producto del
-# corte, no por todo el catalogo. NO re-rankea nada: reutiliza el rank guardado.
+# Lee el ranking ya calculado (ranking_tcg.xlsx), coge SOLO los del corte de rank
+# (los que vamos a publicar) y pide a Keepa POR ASIN su imagen 1600px + nombre.
+# ~1 token por producto.
 #
-# Salida: ranking_tcg_fotos.xlsx (solo el corte, con Nombre Keepa / Img figura /
-# Img caja). El Paso 2 (robot_lote) lo consume para montar el M7.
+# REANUDABLE Y SIN UMBRAL: guarda el progreso despues de CADA tanda. Si te quedas
+# sin tokens a mitad, lo sacado queda guardado; al relanzar continua por donde iba
+# saltando los que ya tienen foto. Nunca se tira un token.
+#
+# Salida: ranking_tcg_fotos.xlsx (el corte, con Nombre Keepa / Img figura / Img caja).
 
-import os, io, json, sys, re, time
+import os, io, sys, re, time
 import keepa
 from supabase import create_client
 import openpyxl
@@ -19,23 +21,19 @@ BUCKET    = 'informes'
 CARPETA   = 'web_rank'
 RANK_PATH = f'{CARPETA}/ranking_tcg.xlsx'
 OUT_PATH  = f'{CARPETA}/ranking_tcg_fotos.xlsx'
-RECADO    = f'{CARPETA}/_solicitud.json'
 
-CORTE = 30000   # rank maximo para entrar a la web ("los 580"); editable por recado
+# Corte fijo a 30000 a proposito (los "~580" que acordamos). Sube este numero a mano
+# si algun dia quieres ampliar el corte. No se lee del recado para no acoplarlo al
+# robot de rank (que usa rank_maximo=100000 para otra cosa).
+CORTE = 30000
+LOTE  = 50      # tanda pequena = guarda mas a menudo = mas seguro ante cortes
 
 api = keepa.Keepa(os.environ['KEEPA_API_KEY'])
 sb  = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
-print(">>> Tokens Keepa AHORA:", api.tokens_left, flush=True)
 
-# Corte desde el recado, si existe
-try:
-    crudo = sb.storage.from_(BUCKET).download(RECADO)
-    CORTE = int(json.loads(crudo.decode('utf-8')).get('rank_maximo') or CORTE)
-except Exception:
-    pass
-print(f">>> CORTE de rank (los que enriquecemos): <= {CORTE}")
+COLS = ['EAN','Nombre','Formato','Rank actual','Rank 90d','Mejor rank','PA (coste)','PVPR','ASIN','Pasa','Nombre Keepa','Img figura','Img caja']
 
-# ---- Imagen Keepa en alta resolucion (copiado verbatim de la fabrica) ----
+# ---- Imagen Keepa en alta resolucion (verbatim de la fabrica) ----
 def _nombre_el(el):
     if isinstance(el, dict):
         for k in ('l','large','hiRes','m','medium','image','name'):
@@ -71,19 +69,22 @@ def keepa_query(items, **kwargs):
                 print(f"  [Keepa] intento {intento+1}/{KEEPA_MAX_INTENTOS} fallo: {msg} -> reintento en {KEEPA_ESPERAS[intento]}s")
                 time.sleep(KEEPA_ESPERAS[intento])
             else:
-                print(f"  [Keepa] AGOTADOS {KEEPA_MAX_INTENTOS} intentos: {msg} -> se salta")
+                print(f"  [Keepa] AGOTADOS {KEEPA_MAX_INTENTOS} intentos: {msg} -> se salta tanda")
                 return None
+
+def to_int(v):
+    try: return int(v) if v not in (None,'') else None
+    except Exception: return None
 
 # ---- 1) Cargar ranking guardado ----
 try:
     crudo = sb.storage.from_(BUCKET).download(RANK_PATH)
 except Exception as e:
     print(f"!!! No encuentro {RANK_PATH} en Supabase: {e}")
-    print("!!! Necesito el ranking calculado antes de sacar fotos. Corre el Paso 1 (rank) primero.")
+    print("!!! Hace falta el ranking calculado antes de las fotos. Corre el Paso 1 (rank) primero.")
     sys.exit(1)
 
-wb = openpyxl.load_workbook(io.BytesIO(crudo), read_only=True, data_only=True)
-ws = wb.active
+ws = openpyxl.load_workbook(io.BytesIO(crudo), read_only=True, data_only=True).active
 filas = list(ws.iter_rows(values_only=True))
 if not filas:
     print("!!! El ranking esta vacio."); sys.exit(1)
@@ -92,81 +93,95 @@ idx = {h:i for i,h in enumerate(hdr)}
 need = ['EAN','Nombre','Formato','Mejor rank','ASIN']
 faltan = [c for c in need if c not in idx]
 if faltan:
-    print(f"!!! Al ranking le faltan columnas {faltan}. Columnas presentes: {hdr}")
-    sys.exit(1)
+    print(f"!!! Al ranking le faltan columnas {faltan}. Hay: {hdr}"); sys.exit(1)
 
 iE,iN,iF,iMR,iA = idx['EAN'],idx['Nombre'],idx['Formato'],idx['Mejor rank'],idx['ASIN']
 iRA = idx.get('Rank actual'); iR90 = idx.get('Rank 90d')
 iPA = idx.get('PA (coste)'); iPV = idx.get('PVPR'); iPasa = idx.get('Pasa')
 
-filas_d = filas[1:]
-print(f">>> Ranking cargado: {len(filas_d)} filas")
-
 # ---- 2) Filtrar al corte ----
-def to_int(v):
-    try: return int(v) if v not in (None,'') else None
-    except Exception: return None
-
 objetivo = []
-for r in filas_d:
+for r in filas[1:]:
     mr = to_int(r[iMR])
     if mr is None or mr > CORTE: continue
-    if not r[iA]: continue            # sin ASIN no podemos pedir foto por ASIN
+    if not r[iA]: continue
     objetivo.append(r)
-print(f">>> Dentro del corte <= {CORTE} y con ASIN: {len(objetivo)} productos")
+print(f">>> Ranking: {len(filas)-1} filas | dentro del corte <= {CORTE} con ASIN: {len(objetivo)}")
 if not objetivo:
-    print("!!! No hay productos dentro del corte. Revisa el CORTE o el ranking."); sys.exit(1)
+    print("!!! Nada dentro del corte."); sys.exit(1)
 
-# ---- 3) Chequeo de saldo: NO quemar la corrida a medias ----
-necesarios = len(objetivo)
-if api.tokens_left < necesarios:
-    print(f"!!! Tokens insuficientes: tienes {api.tokens_left}, necesitas ~{necesarios}.")
-    print(f"!!! Keepa regenera 1500/h. Espera a tener >= {necesarios} y relanza.")
-    print("!!! Paro AQUI para no gastar tokens en una corrida incompleta.")
-    sys.exit(1)
+# ---- 3) REANUDAR: cargar fotos ya hechas de una corrida anterior ----
+por_asin = {}   # asin -> {nombre_keepa, img_figura, img_caja}
+try:
+    prev = sb.storage.from_(BUCKET).download(OUT_PATH)
+    wsp = openpyxl.load_workbook(io.BytesIO(prev), read_only=True, data_only=True).active
+    pf = list(wsp.iter_rows(values_only=True))
+    ph = {str(c).strip() if c else '': i for i,c in enumerate(pf[0])}
+    pA, pNk, pIf, pIc = ph.get('ASIN'), ph.get('Nombre Keepa'), ph.get('Img figura'), ph.get('Img caja')
+    for r in pf[1:]:
+        a = str(r[pA]).strip() if pA is not None and r[pA] else ''
+        figura = r[pIf] if pIf is not None else ''
+        if a and figura:    # solo cuenta como "hecho" si tiene foto de figura
+            por_asin[a] = {'nombre_keepa': r[pNk] if pNk is not None else '',
+                           'img_figura': figura, 'img_caja': r[pIc] if pIc is not None else ''}
+    print(f">>> Reanudo: {len(por_asin)} ya tenian foto de una corrida anterior")
+except Exception:
+    print(">>> Sin corrida previa (empiezo de cero)")
 
-# ---- 4) Pedir imagen+nombre a Keepa POR ASIN (1 token/producto) ----
-asins = [str(r[iA]).strip() for r in objetivo]
-por_asin = {}
-LOTE = 100
-n_lotes = (len(asins)+LOTE-1)//LOTE
-for i in range(0, len(asins), LOTE):
-    lote = asins[i:i+LOTE]
+def guarda(prod):
+    a = prod.get('asin')
+    if not a: return
+    fotos = extraer_imagenes(prod)
+    por_asin[a] = {
+        'nombre_keepa': (prod.get('title') or '').strip(),
+        'img_caja':   fotos[0] if fotos else '',
+        'img_figura': fotos[1] if len(fotos) > 1 else (fotos[0] if fotos else ''),
+    }
+
+def escribir():
+    """Reconstruye el Excel completo (los ~580) con las fotos que haya y lo sube."""
+    wb = openpyxl.Workbook(); ws2 = wb.active; ws2.title = 'Ranking fotos'
+    ws2.append(COLS)
+    con = 0
+    for r in objetivo:
+        a = str(r[iA]).strip()
+        k = por_asin.get(a, {})
+        if k.get('img_figura'): con += 1
+        ws2.append([r[iE], r[iN], r[iF],
+                    r[iRA] if iRA is not None else '', r[iR90] if iR90 is not None else '', r[iMR],
+                    r[iPA] if iPA is not None else '', r[iPV] if iPV is not None else '', a,
+                    r[iPasa] if iPasa is not None else '',
+                    k.get('nombre_keepa',''), k.get('img_figura',''), k.get('img_caja','')])
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    sb.storage.from_(BUCKET).upload(OUT_PATH, buf.read(),
+        {'content-type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','upsert':'true'})
+    return con
+
+# ---- 4) Solo los que faltan, por tandas, GUARDANDO tras cada una ----
+pendientes = [str(r[iA]).strip() for r in objetivo if str(r[iA]).strip() not in por_asin]
+print(f">>> Pendientes de foto: {len(pendientes)} (sin umbral; gasto lo que haya y guardo cada tanda)")
+
+if not pendientes:
+    con = escribir()
+    print(f">>> Ya estaban todos. {con}/{len(objetivo)} con foto. Nada que pedir.")
+    sys.exit(0)
+
+n_lotes = (len(pendientes)+LOTE-1)//LOTE
+for i in range(0, len(pendientes), LOTE):
+    lote = pendientes[i:i+LOTE]
     prods = keepa_query(lote, product_code_is_asin=True, domain='ES', stats=90, history=0)
     if prods is None:
-        print(f"  lote {i//LOTE+1}/{n_lotes}: fallo entero, se salta")
+        print(f"  tanda {i//LOTE+1}/{n_lotes}: sin respuesta (saldo agotado?) -> guardo lo que hay y sigo")
+        escribir()
         continue
     for prod in prods:
-        a = prod.get('asin')
-        if not a: continue
-        fotos = extraer_imagenes(prod)
-        por_asin[a] = {
-            'nombre_keepa': (prod.get('title') or '').strip(),
-            'img_caja':   fotos[0] if fotos else '',                                  # [0]=caja
-            'img_figura': fotos[1] if len(fotos) > 1 else (fotos[0] if fotos else ''),# [1]=figura
-        }
-    print(f"  lote {i//LOTE+1}/{n_lotes} | tokens {api.tokens_left}")
+        guarda(prod)
+    con = escribir()   # guarda progreso tras CADA tanda
+    print(f"  tanda {i//LOTE+1}/{n_lotes} | nuevos {len(prods)} | total con foto {con}/{len(objetivo)} | tokens {api.tokens_left}")
 
-# ---- 5) Escribir ranking enriquecido (solo el corte) ----
-wb2 = openpyxl.Workbook(); ws2 = wb2.active; ws2.title = 'Ranking fotos'
-COLS = ['EAN','Nombre','Formato','Rank actual','Rank 90d','Mejor rank','PA (coste)','PVPR','ASIN','Pasa','Nombre Keepa','Img figura','Img caja']
-ws2.append(COLS)
-con_foto = 0
-for r in objetivo:
-    a = str(r[iA]).strip()
-    k = por_asin.get(a, {})
-    if k.get('img_figura'): con_foto += 1
-    ws2.append([
-        r[iE], r[iN], r[iF],
-        r[iRA] if iRA is not None else '', r[iR90] if iR90 is not None else '', r[iMR],
-        r[iPA] if iPA is not None else '', r[iPV] if iPV is not None else '', a,
-        r[iPasa] if iPasa is not None else '',
-        k.get('nombre_keepa',''), k.get('img_figura',''), k.get('img_caja',''),
-    ])
-buf = io.BytesIO(); wb2.save(buf); buf.seek(0)
-sb.storage.from_(BUCKET).upload(OUT_PATH, buf.read(),
-    {'content-type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','upsert':'true'})
-
-print(f"\n>>> Escrito {OUT_PATH}")
-print(f">>> {len(objetivo)} productos en el corte | {con_foto} con foto Keepa | {len(objetivo)-con_foto} sin foto (fallback TCG en Paso 2)")
-print(f">>> Tokens Keepa al terminar: {api.tokens_left}")
+con = escribir()
+faltan = len(objetivo) - con
+print(f"\n>>> FIN. {con}/{len(objetivo)} con foto Keepa | {faltan} sin foto (fallback TCG en Paso 2)")
+print(f">>> Tokens al terminar: {api.tokens_left}")
+if faltan:
+    print(f">>> Quedan {faltan} sin foto. Si fue por saldo, relanza cuando recargue y CONTINUA solo con esos.")
