@@ -974,6 +974,17 @@
       <button class="btn" id="rl-go" style="margin-top:12px" onclick="lanzarLoteWeb()">🏭 Fabricar fichas del lote</button>
       <div id="rl-log" style="margin-top:14px"></div>
     </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="inv-field-label" style="margin-bottom:8px">Paso 3 · Revisar y publicar</div>
+      <div style="font-size:13px;color:var(--gray-500);margin-bottom:10px">
+        Estas son las fichas que se van a publicar. Por defecto van todas en <b style="color:#16a34a">OK (verde)</b>, con su montaje. Marca en <b style="color:#dc2626">No vale (rojo)</b> solo las que estén mal: esas se publican con la <b>foto plana de TCG</b>, sin montaje. Cuando termines, pulsa Publicar.
+      </div>
+      <button class="btn btn-ghost" id="rev-tcg-cargar" onclick="cargarRevisionTcg()">🔍 Cargar fichas a revisar</button>
+      <div id="rev-tcg-acciones" style="margin-top:12px;display:none"></div>
+      <div id="rev-tcg-lista" style="margin-top:14px"></div>
+      <div id="rev-tcg-log" style="margin-top:10px;font-size:13px"></div>
+    </div>
   </div>
 
 </main>
@@ -2451,6 +2462,130 @@ const DISPARO_SECRET = 'hbj9lNd5iv4OtcIG89PkoUcRxTZ1-nbB';
 
 // ===== Funkos TCG -> Web: Paso 1 (rank) y Paso 2 (lote) =====
 function redondea95(x){ return Math.round(x - 0.95) + 0.95; }
+
+// ============================================================
+// FUNKOS TCG — Paso 3: Revisar y publicar
+// Mosaico de borradores tcg (activo=false). Por defecto OK -> se publica el
+// montaje. Marcar "No vale" -> al publicar, esa ficha pasa a las fotos planas
+// de TCG (imagenes_planas), sin montaje. Reutiliza el patrón de fabCargarBorradores
+// y el disparo de web-rebuild.yml (igual que fabActualizarWeb).
+// ============================================================
+let _revTcg = [];
+
+async function cargarRevisionTcg() {
+  const btn = document.getElementById('rev-tcg-cargar');
+  const lista = document.getElementById('rev-tcg-lista');
+  const acc = document.getElementById('rev-tcg-acciones');
+  const log = document.getElementById('rev-tcg-log');
+  if (log) log.textContent = '';
+  if (btn) btn.disabled = true;
+  lista.style.display = 'block';
+  lista.innerHTML = '<span style="color:var(--gray-500);font-size:13px">Cargando borradores...</span>';
+  let filas = [], desde = 0;
+  while (true) {
+    const { data, error } = await db.from('web_productos')
+      .select('id,ean,nombre,fandom,formato,precio_web,precio_oferta,imagen_principal,imagenes,imagenes_planas')
+      .eq('origen', 'tcg').eq('activo', false)
+      .order('id', { ascending: false })
+      .range(desde, desde + 999);
+    if (error) { lista.innerHTML = '<span style="color:#b91c1c;font-size:13px">Error: ' + error.message + '</span>'; if (btn) btn.disabled = false; return; }
+    filas = filas.concat(data || []);
+    if (!data || data.length < 1000) break;
+    desde += 1000;
+  }
+  if (btn) btn.disabled = false;
+  if (!filas.length) {
+    lista.innerHTML = '<span style="color:var(--gray-500);font-size:13px">No hay fichas TCG pendientes de revisar. ✅</span>';
+    acc.style.display = 'none'; return;
+  }
+  _revTcg = filas.map(f => ({ ...f, _novale: false }));
+  pintarRevisionTcg();
+  acc.style.display = 'block';
+}
+
+function pintarRevisionTcg() {
+  const lista = document.getElementById('rev-tcg-lista');
+  const acc = document.getElementById('rev-tcg-acciones');
+  lista.style.display = 'grid';
+  lista.style.gridTemplateColumns = 'repeat(auto-fill,minmax(200px,1fr))';
+  lista.style.gap = '14px';
+  lista.innerHTML = _revTcg.map((f, i) => {
+    const planas = Array.isArray(f.imagenes_planas) ? f.imagenes_planas : [];
+    const galMontaje = Array.isArray(f.imagenes) ? f.imagenes : [];
+    const principal = f._novale ? (planas[0] || f.imagen_principal || '') : (f.imagen_principal || planas[0] || '');
+    const galeria = f._novale ? planas : galMontaje;
+    const borde = f._novale ? '#dc2626' : '#16a34a';
+    const minis = galeria.slice(0, 5).map(u => '<img src="' + u + '" style="width:34px;height:34px;object-fit:contain;border:1px solid #eee;border-radius:4px;background:#fff">').join('');
+    const oferta = (f.precio_oferta != null)
+      ? '<span style="text-decoration:line-through;color:#9ca3af">' + (+f.precio_web).toFixed(2) + '€</span> <b style="color:#dc2626">' + (+f.precio_oferta).toFixed(2) + '€</b>'
+      : ((f.precio_web != null) ? (+f.precio_web).toFixed(2) + '€' : '');
+    const sinPlanas = planas.length === 0;
+    return '<div style="background:#fff;border:3px solid ' + borde + ';border-radius:10px;padding:10px">' +
+      '<img src="' + principal + '" style="width:100%;aspect-ratio:1;object-fit:contain;background:#fff;border-radius:6px">' +
+      '<div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap">' + minis + '</div>' +
+      '<div style="font-weight:600;font-size:13px;margin-top:8px;line-height:1.25">' + (f.nombre || f.ean) + '</div>' +
+      '<div style="font-size:11px;color:#888;margin-top:2px">' + (f.fandom || '') + ' · ' + (f.formato || '') + '</div>' +
+      '<div style="font-size:12px;margin-top:4px">' + oferta + '</div>' +
+      '<button onclick="revTcgToggle(' + i + ')" ' + (sinPlanas && !f._novale ? 'disabled title="Sin fotos planas guardadas (ficha antigua)"' : '') +
+        ' style="width:100%;margin-top:8px;font-size:12px;font-weight:600;padding:6px;border-radius:7px;cursor:pointer;border:1px solid ' + borde + ';background:' + (f._novale ? '#dc2626' : '#16a34a') + ';color:#fff;opacity:' + (sinPlanas && !f._novale ? '0.5' : '1') + '">' +
+        (f._novale ? '✗ No vale (foto plana)' : '✓ OK (montaje)') +
+      '</button>' +
+    '</div>';
+  }).join('');
+  const n = _revTcg.length, nMal = _revTcg.filter(f => f._novale).length;
+  acc.innerHTML = '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">' +
+    '<div style="font-size:13px"><b>' + n + '</b> fichas · <b style="color:#16a34a">' + (n - nMal) + '</b> con montaje · <b style="color:#dc2626">' + nMal + '</b> a foto plana</div>' +
+    '<button class="btn btn-primary" onclick="publicarRevisionTcg()">✅ Publicar ' + n + ' fichas</button>' +
+  '</div>';
+}
+
+function revTcgToggle(i) {
+  if (!_revTcg[i]) return;
+  const planas = Array.isArray(_revTcg[i].imagenes_planas) ? _revTcg[i].imagenes_planas : [];
+  if (planas.length === 0 && !_revTcg[i]._novale) return;   // sin planas no se puede pasar a plano
+  _revTcg[i]._novale = !_revTcg[i]._novale;
+  pintarRevisionTcg();
+}
+
+async function publicarRevisionTcg() {
+  const log = document.getElementById('rev-tcg-log');
+  const n = _revTcg.length;
+  if (!n) return;
+  if (!confirm('¿Publicar ' + n + ' fichas en la web?\nLas marcadas en rojo irán con la foto plana de TCG.')) return;
+  log.style.color = 'var(--gray-500)';
+  let ok = 0, err = 0;
+  for (let i = 0; i < _revTcg.length; i++) {
+    const f = _revTcg[i];
+    log.textContent = '⏳ Publicando ' + (i + 1) + '/' + n + '...';
+    const upd = { activo: true };
+    if (f._novale) {
+      const planas = Array.isArray(f.imagenes_planas) ? f.imagenes_planas : [];
+      if (planas.length) { upd.imagen_principal = planas[0]; upd.imagenes = planas; }
+    }
+    const { error } = await db.from('web_productos').update(upd).eq('id', f.id);
+    if (error) { err++; } else { ok++; }
+  }
+  log.style.color = err ? '#b91c1c' : '#2e7d32';
+  log.innerHTML = '✅ Publicadas ' + ok + (err ? (' · ⚠️ ' + err + ' con error') : '') +
+    '.<br>Ahora reconstruye la web para verlas online: ' +
+    '<button class="btn btn-sm btn-primary" style="margin-top:6px" onclick="reconstruirWebTcg(this)">☁️ Reconstruir web</button>';
+  setTimeout(cargarRevisionTcg, 1500);   // refresca: las publicadas ya no son borrador
+}
+
+async function reconstruirWebTcg(btn) {
+  const log = document.getElementById('rev-tcg-log');
+  if (btn) btn.disabled = true;
+  try {
+    const resp = await fetch('/api/disparar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secreto: DISPARO_SECRET, workflow: 'web-rebuild.yml' })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) { log.style.color = '#2e7d32'; log.textContent = '✅ Reconstruyendo. En 1-2 min estará online.'; }
+    else if (resp.status === 409) { log.style.color = '#ba7517'; log.textContent = '⏳ ' + (data.error || 'Ya hay una reconstrucción en marcha.'); if (btn) btn.disabled = false; }
+    else { log.style.color = '#b91c1c'; log.textContent = '⚠️ ' + (data.error || ('HTTP ' + resp.status)); if (btn) btn.disabled = false; }
+  } catch (e) { log.style.color = '#b91c1c'; log.textContent = 'Error: ' + e.message; if (btn) btn.disabled = false; }
+}
 
 async function lanzarRankWeb(){
   const file = (document.getElementById('rw-file').files||[])[0];
