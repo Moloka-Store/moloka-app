@@ -175,12 +175,12 @@ def redactar_tcg(nombre_tcg, img_url, rarezas):
 
 # ---------------------------------------------------------------------------
 def reencuadrar_blanco(datos_jpg, margen=0.08, lienzo=1200):
-    """Centra la figura sobre fondo blanco. Las fotos de TCG vienen con la figura
-    abajo y mucho aire arriba (o la base pegada al borde). Como el fondo es blanco,
-    detectar el recuadro de lo NO-blanco es trivial y fiable (nada de rembg): se
-    recorta a ese recuadro y se pega centrado en un cuadrado blanco con margen
-    uniforme. Asi la galeria sale centrada, sin aire de mas ni cortes.
-    Si algo falla, devuelve los bytes originales (nunca rompe el lote)."""
+    """Centra la figura sobre fondo blanco y mide su forma. Las fotos de TCG vienen
+    con la figura abajo y mucho aire arriba; como el fondo es blanco, detectar el
+    recuadro de lo NO-blanco es trivial y fiable. Recorta a ese recuadro, lo centra
+    en un cuadrado con margen uniforme, y de paso calcula el ratio ancho/alto del
+    contenido (sirve para detectar cajas apaisadas tipo Ride/Moment/pack).
+    Devuelve (bytes_jpg, ratio). ratio=None si todo blanco o si falla."""
     try:
         from PIL import Image
         import numpy as np
@@ -189,43 +189,44 @@ def reencuadrar_blanco(datos_jpg, margen=0.08, lienzo=1200):
         nf = (a < 245).any(axis=2)          # pixel "con contenido" = algun canal < 245
         ys, xs = np.where(nf)
         if len(xs) == 0:
-            return datos_jpg                # imagen toda blanca: no toco
+            return datos_jpg, None          # imagen toda blanca: no toco
         x0, x1 = int(xs.min()), int(xs.max()) + 1
         y0, y1 = int(ys.min()), int(ys.max()) + 1
         fig = im.crop((x0, y0, x1, y1))
         w, h = fig.size
+        ratio = (w / h) if h else None
         lado = int(max(w, h) * (1 + 2 * margen))
         cuadro = Image.new('RGB', (lado, lado), (255, 255, 255))
         cuadro.paste(fig, ((lado - w) // 2, (lado - h) // 2))
         cuadro = cuadro.resize((lienzo, lienzo), Image.LANCZOS)
         buf = io.BytesIO(); cuadro.save(buf, 'JPEG', quality=90)
-        return buf.getvalue()
+        return buf.getvalue(), ratio
     except Exception as e:
         print(f"      (aviso: no pude reencuadrar, subo la original: {e})")
-        return datos_jpg
+        return datos_jpg, None
 
 # ---------------------------------------------------------------------------
 def rehospedar_imagen(url, ean, i):
     """Descarga la imagen de TCG y la SUBE a Supabase Storage (fotos-fabrica/tcg/).
     Asi la web sirve la imagen desde Moloka y NO enlaza a tcgfactory.com (oculta el
-    proveedor y no depende de ellos). Devuelve la URL publica de Moloka, o None."""
+    proveedor y no depende de ellos). Devuelve (url_publica, ratio) o (None, None)."""
     try:
         r = requests.get(url, timeout=30); r.raise_for_status()
-        datos = reencuadrar_blanco(r.content)   # centra la figura sobre el blanco
+        datos, ratio = reencuadrar_blanco(r.content)   # centra la figura y mide su forma
     except Exception as e:
         print(f"      AVISO: no pude descargar la imagen TCG ({e})")
-        return None
+        return None, None
     nombre = f"tcg/{ean}_{i}.jpg"
     try:
         R.sb_admin.storage.from_(R.BUCKET_FOTOS).upload(
             nombre, datos, {"content-type": "image/jpeg", "upsert": "true"})
     except Exception as e:
         print(f"      AVISO: no pude subir la imagen a Supabase ({e})")
-        return None
+        return None, None
     pub = R.sb_admin.storage.from_(R.BUCKET_FOTOS).get_public_url(nombre)
     if isinstance(pub, dict):
         pub = pub.get('publicUrl') or pub.get('publicURL')
-    return pub
+    return pub, ratio
 
 # ---------------------------------------------------------------------------
 def ya_en_web(ean):
@@ -234,6 +235,60 @@ def ya_en_web(ean):
         return bool(r)
     except Exception:
         return False
+
+# ---------------------------------------------------------------------------
+def generar_hoja_revision(tanda, revision):
+    """Hoja de contactos del lote: un mosaico con cada ficha (principal + galeria +
+    nombre + EAN + etiqueta). Las "raras" (figura sola o caja apaisada) salen con
+    borde rojo para revisarlas de un vistazo. Cada ficha trae, plegado, el SQL listo
+    para pasarla a FOTO PLANA de TCG (sin montaje) si Fernando la ve mal."""
+    RARAS = {'plano-ancho', 'plano', 'montaje-sincaja'}
+    def esc(s):
+        return (str(s or '')).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    cards = []
+    for r in revision:
+        rara  = r['fuente'] in RARAS
+        borde = '#e11d48' if rara else '#e5e7eb'
+        minis = ''.join(f'<img src="{esc(u)}">' for u in (r.get('planas') or [])[:4])
+        planas = r.get('planas') or []
+        prin = planas[0] if planas else r.get('principal')
+        arr  = ", ".join("'" + esc(u) + "'" for u in planas) if planas else ("'" + esc(r.get('principal')) + "'")
+        sql  = (f"update web_productos set imagen_principal='{esc(prin)}', "
+                f"imagenes=array[{arr}] where ean='{esc(r['ean'])}';")
+        cards.append(f"""
+      <div class="card" style="border:3px solid {borde}">
+        <img class="big" src="{esc(r.get('principal'))}">
+        <div class="minis">{minis}</div>
+        <div class="nom">{esc(r['nombre'])}</div>
+        <div class="meta">{esc(r.get('fandom'))} · {esc(r['ean'])}</div>
+        <span class="etq" style="background:{borde}">{esc(r['fuente'])}</span>
+        <details><summary>pasar a foto plana</summary><textarea readonly onclick="this.select()">{esc(sql)}</textarea></details>
+      </div>""")
+    html = f"""<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Revision lote {esc(tanda)}</title>
+<style>
+ body{{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#f7f7fb;margin:0;padding:20px;color:#111}}
+ h1{{font-size:18px;margin:0 0 4px}}
+ .ley{{color:#555;font-size:13px;margin-bottom:16px}}
+ .ley b{{color:#e11d48}}
+ .grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}}
+ .card{{background:#fff;border-radius:10px;padding:10px;position:relative}}
+ .big{{width:100%;aspect-ratio:1;object-fit:contain;background:#fff;border-radius:6px}}
+ .minis{{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap}}
+ .minis img{{width:38px;height:38px;object-fit:contain;border:1px solid #eee;border-radius:4px;background:#fff}}
+ .nom{{font-weight:600;font-size:13px;margin-top:8px;line-height:1.25}}
+ .meta{{font-size:11px;color:#888;margin-top:2px}}
+ .etq{{display:inline-block;color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;margin-top:6px}}
+ details{{margin-top:8px}}
+ summary{{font-size:11px;color:#2563eb;cursor:pointer}}
+ textarea{{width:100%;height:64px;font-size:10px;margin-top:4px;border:1px solid #ddd;border-radius:4px}}
+</style></head><body>
+<h1>Revision lote {esc(tanda)} — {len(revision)} fichas</h1>
+<div class="ley">Las de <b>borde rojo</b> son las "raras" (figura sola o caja apaisada): mira esas con lupa. Si alguna esta mal, abre "pasar a foto plana", copia el SQL y ejecutalo en Supabase.</div>
+<div class="grid">{''.join(cards)}</div>
+</body></html>"""
+    return html.encode('utf-8')
 
 # ---------------------------------------------------------------------------
 def main():
@@ -253,6 +308,7 @@ def main():
         return
 
     ok, err, saltados, sin_dato = [], [], [], []
+    revision = []   # para la hoja de contactos del lote
     for i, it in enumerate(items, 1):
         ean = str(it.get('ean') or '').strip()
         if not ean:
@@ -268,23 +324,31 @@ def main():
         print(f"\n[{i}/{len(items)}] TCG {ean} | {nombre_tcg[:55]}")
         try:
             # Re-alojar las fotos de TCG en Supabase (fondo blanco -> recorte fiable).
+            # Guardamos (url, ratio_ancho_alto) de cada foto.
             imgs_web = []
             for k, u in enumerate(imgs):
-                pub = rehospedar_imagen(u, ean, k)
-                if pub: imgs_web.append(pub)
+                pub, ratio = rehospedar_imagen(u, ean, k)
+                if pub: imgs_web.append((pub, ratio))
             if not imgs_web:
                 print(f"   {ean}: no pude re-alojar ninguna imagen -> salto")
                 err.append(ean); continue
-            img_fig  = imgs_web[0]
-            # Solo hay caja si TCG trae una SEGUNDA foto distinta. Si trae una sola
-            # (muchos dioramas/Deluxe), NO hay caja: img_caja=None -> no se monta
-            # portada (evita duplicar la misma figura dos veces, p.ej. Ariel).
-            img_caja = imgs_web[1] if len(imgs_web) > 1 else None
+            planas    = [u for u, _ in imgs_web]              # fotos TCG planas (reencuadradas)
+            img_fig   = imgs_web[0][0]
+            caja_url   = imgs_web[1][0] if len(imgs_web) > 1 else None
+            caja_ratio = imgs_web[1][1] if len(imgs_web) > 1 else None
+            # Caja APAISADA (mas ancha que alta): Ride/Moment/pack. El montaje portada
+            # esta pensado para caja vertical de Funko -> con esas queda esquinado y
+            # con hueco. En ese caso NO montamos: van con foto plana de TCG.
+            caja_ancha = caja_ratio is not None and caja_ratio > 1.0
+            # Solo hay caja "montable" si hay 2a foto Y no es apaisada (si solo hay 1
+            # foto, img_caja=None -> no se monta portada, evita duplicar la figura).
+            img_caja = caja_url if (caja_url and not caja_ancha) else None
 
             rarezas = {"es_chase": it.get('es_chase'),
                        "es_vaulted": it.get('es_vaulted'),
                        "es_exclusivo": it.get('es_exclusivo')}
-            out = redactar_tcg(nombre_tcg, img_caja or img_fig, rarezas)   # la caja lleva el #numero; si no hay, la figura
+            # Para leer el #numero pasamos la caja real si la hay (aunque sea apaisada).
+            out = redactar_tcg(nombre_tcg, caja_url or img_fig, rarezas)
             categoria    = out.get('categoria') if out.get('categoria') in R.CATEGORIAS else None
             nombre_corto = (out.get('nombre_corto') or '').strip() or nombre_tcg
             slug         = R.slugify(out.get('slug') or nombre_corto)
@@ -295,25 +359,32 @@ def main():
             if web_desc and 'GPSR' not in web_desc:
                 web_desc += GPSR_WEB
 
-            # ---- IMAGENES: montaje Moloka (portada + M7) recortando de la figura TCG ----
-            filaf = {'ean': ean, 'nombre_corto': nombre_corto, 'fandom': fandom_norm,
-                     'formato': formato,
-                     'fotos_elegidas': {'caja': img_caja, 'recorte_moloka': img_fig},
-                     'con_protector': False}
-            enlaces, errf = R.generar_fotos(filaf, None, None, None)
-            if errf or not enlaces:
-                print(f"   sin montaje ({errf or 'sin enlaces'}) -> fotos TCG planas")
+            # ---- IMAGENES ----
+            if caja_ancha:
+                # Caja apaisada (Ride/Moment/pack): el montaje no le pega -> fotos planas.
+                print("   caja apaisada -> fotos TCG planas (sin montaje)")
                 imagen_principal = img_fig
-                imagenes = imgs_web
-                fuente = 'plano'
+                imagenes = planas
+                fuente = 'plano-ancho'
             else:
-                # CON caja: principal = portada (caja+figura). SIN caja: principal =
-                # figura sola reencuadrada (limpia), no la M7. El M7 va al final.
-                gal = [enlaces.get('portada'), enlaces.get('figura'), enlaces.get('caja'), enlaces.get('ficha')]
-                imagenes = [g for g in gal if g]
-                imagen_principal = (enlaces.get('portada') or enlaces.get('figura')
-                                    or enlaces.get('ficha') or img_fig)
-                fuente = 'montaje' if enlaces.get('portada') else 'montaje-sincaja'
+                filaf = {'ean': ean, 'nombre_corto': nombre_corto, 'fandom': fandom_norm,
+                         'formato': formato,
+                         'fotos_elegidas': {'caja': img_caja, 'recorte_moloka': img_fig},
+                         'con_protector': False}
+                enlaces, errf = R.generar_fotos(filaf, None, None, None)
+                if errf or not enlaces:
+                    print(f"   sin montaje ({errf or 'sin enlaces'}) -> fotos TCG planas")
+                    imagen_principal = img_fig
+                    imagenes = planas
+                    fuente = 'plano'
+                else:
+                    # CON caja: principal = portada (caja+figura). SIN caja: principal =
+                    # figura sola reencuadrada (limpia), no la M7. El M7 va al final.
+                    gal = [enlaces.get('portada'), enlaces.get('figura'), enlaces.get('caja'), enlaces.get('ficha')]
+                    imagenes = [g for g in gal if g]
+                    imagen_principal = (enlaces.get('portada') or enlaces.get('figura')
+                                        or enlaces.get('ficha') or img_fig)
+                    fuente = 'montaje' if enlaces.get('portada') else 'montaje-sincaja'
 
             fila = {
                 'ean': ean, 'slug': slug,
@@ -339,6 +410,8 @@ def main():
             print(f"      OK [{fuente}] -> web_productos (borrador, activo=false) | {nombre_corto[:40]} "
                   f"| cat={categoria} | fmt={fila.get('formato')}")
             ok.append(ean)
+            revision.append({'ean': ean, 'nombre': nombre_corto, 'fandom': fandom_norm,
+                             'fuente': fuente, 'principal': imagen_principal, 'planas': planas})
         except Exception as e:
             print(f"   ERROR procesando {ean}: {e}")
             err.append(ean)
@@ -354,6 +427,26 @@ def main():
           f"| sin dato TCG: {len(sin_dato)} | errores: {len(err)}")
     if err:      print(f"  EAN con error: {err}")
     if sin_dato: print(f"  EAN sin nombre/imagen: {sin_dato}")
+
+    # Desglose por tipo de montaje (para saber cuantas raras hay que revisar).
+    if revision:
+        from collections import Counter
+        c = Counter(r['fuente'] for r in revision)
+        print("  Montaje: " + " | ".join(f"{k}={v}" for k, v in sorted(c.items())))
+
+    # HOJA DE CONTACTOS: mosaico del lote para revisar en borrador, antes de publicar.
+    if revision:
+        try:
+            html = generar_hoja_revision(tanda, revision)
+            path = f"revision/lote_{tanda}.html"
+            R.sb_admin.storage.from_(R.BUCKET_FOTOS).upload(
+                path, html, {"content-type": "text/html", "upsert": "true"})
+            url = R.sb_admin.storage.from_(R.BUCKET_FOTOS).get_public_url(path)
+            if isinstance(url, dict):
+                url = url.get('publicUrl') or url.get('publicURL')
+            print(f"\n  >>> HOJA DE REVISION: {url}")
+        except Exception as e:
+            print(f"  (aviso: no pude generar la hoja de revision: {e})")
     print("Fin.")
 
 if __name__ == '__main__':
