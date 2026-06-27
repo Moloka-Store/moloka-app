@@ -268,7 +268,6 @@ def main():
         print(f"\n[{i}/{len(items)}] TCG {ean} | {nombre_tcg[:55]}")
         try:
             # Re-alojar las fotos de TCG en Supabase (fondo blanco -> recorte fiable).
-            # Convencion TCG: imgs[0]=figura sola, imgs[1]=caja.
             imgs_web = []
             for k, u in enumerate(imgs):
                 pub = rehospedar_imagen(u, ean, k)
@@ -277,12 +276,15 @@ def main():
                 print(f"   {ean}: no pude re-alojar ninguna imagen -> salto")
                 err.append(ean); continue
             img_fig  = imgs_web[0]
-            img_caja = imgs_web[1] if len(imgs_web) > 1 else imgs_web[0]
+            # Solo hay caja si TCG trae una SEGUNDA foto distinta. Si trae una sola
+            # (muchos dioramas/Deluxe), NO hay caja: img_caja=None -> no se monta
+            # portada (evita duplicar la misma figura dos veces, p.ej. Ariel).
+            img_caja = imgs_web[1] if len(imgs_web) > 1 else None
 
             rarezas = {"es_chase": it.get('es_chase'),
                        "es_vaulted": it.get('es_vaulted'),
                        "es_exclusivo": it.get('es_exclusivo')}
-            out = redactar_tcg(nombre_tcg, img_caja, rarezas)   # la caja lleva el #numero
+            out = redactar_tcg(nombre_tcg, img_caja or img_fig, rarezas)   # la caja lleva el #numero; si no hay, la figura
             categoria    = out.get('categoria') if out.get('categoria') in R.CATEGORIAS else None
             nombre_corto = (out.get('nombre_corto') or '').strip() or nombre_tcg
             slug         = R.slugify(out.get('slug') or nombre_corto)
@@ -305,11 +307,13 @@ def main():
                 imagenes = imgs_web
                 fuente = 'plano'
             else:
-                # Orden pedido: PRINCIPAL = portada (caja+figura); el M7 al FINAL.
+                # CON caja: principal = portada (caja+figura). SIN caja: principal =
+                # figura sola reencuadrada (limpia), no la M7. El M7 va al final.
                 gal = [enlaces.get('portada'), enlaces.get('figura'), enlaces.get('caja'), enlaces.get('ficha')]
                 imagenes = [g for g in gal if g]
-                imagen_principal = enlaces.get('portada') or enlaces.get('ficha') or img_fig
-                fuente = 'montaje'
+                imagen_principal = (enlaces.get('portada') or enlaces.get('figura')
+                                    or enlaces.get('ficha') or img_fig)
+                fuente = 'montaje' if enlaces.get('portada') else 'montaje-sincaja'
 
             fila = {
                 'ean': ean, 'slug': slug,
