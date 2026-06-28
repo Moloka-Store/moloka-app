@@ -232,6 +232,12 @@ def volcar_a_web(f, indice):
     ean = f.get('ean'); slug = f.get('slug')
     if not ean or not slug:
         return 'saltado', None
+    # 🔒 SLUG ÚNICO PARA LA CHASE: la chase comparte EAN con la común y la IA les da el
+    # MISMO slug (lo saca del nombre, que es idéntico). Sin esto, las dos acaban con la
+    # misma URL en la web y una pisa a la otra (getStaticPaths descarta el path duplicado:
+    # "dos fichas en una"). Con el sufijo, la chase vive en su propia ficha separada.
+    if bool(f.get('es_chase')) and not str(slug).endswith('-chase'):
+        slug = str(slug) + '-chase'
     secundarias = (f.get('fotos_elegidas') or {}).get('secundarias') or []
     imgs = galeria(f.get('fotos_generadas'), secundarias)
     principal = (f.get('fotos_generadas') or {}).get('portada') or (imgs[0] if imgs else None)
