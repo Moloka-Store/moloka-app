@@ -66,6 +66,10 @@ def generar_fotos(f, fondo, regla, prot=None):
     Devuelve (fotos_generadas, error_o_None). La caja y la figura se reutilizan de los
     inputs Keepa para que la galería web salga completa (portada/caja/figura/neon/regla)."""
     ean = f.get('ean','sinEAN')
+    # 🔒 La chase comparte EAN con la común: sus fotos van a {ean}-chase/ para NO pisar
+    # las de la común en el Storage. Antes las dos escribían en {ean}/portada.jpg y la
+    # última generada machacaba la foto de la otra (de ahí "se mezcla al hacer la chase").
+    pref = str(ean) + ('-chase' if f.get('es_chase') else '')
     fe  = f.get('fotos_elegidas') or {}
     url_fig  = fe.get('recorte_moloka') or fe.get('principal')
     url_caja = fe.get('caja')                       # costura: la caja es 'caja' (no 'portada')
@@ -77,17 +81,17 @@ def generar_fotos(f, fondo, regla, prot=None):
     if not ok:
         return None, f"recorte sucio ({motivo})"
     enlaces = {}
-    enlaces['ficha'] = subir(admin, f"{ean}/ficha.jpg", a_jpg_bytes(M.montar_m7(rec, f)))
+    enlaces['ficha'] = subir(admin, f"{pref}/ficha.jpg", a_jpg_bytes(M.montar_m7(rec, f)))
     if url_caja:
         caja = descargar(url_caja)
-        enlaces['portada'] = subir(admin, f"{ean}/portada.jpg", a_jpg_bytes(M.montar_portada(caja, figura)))
+        enlaces['portada'] = subir(admin, f"{pref}/portada.jpg", a_jpg_bytes(M.montar_portada(caja, figura)))
         enlaces['caja']    = url_caja               # input reutilizado para la galería
     enlaces['figura'] = url_fig                      # input reutilizado para la galería
     # PROTECTOR: solo si la ficha lo lleva y tenemos plantilla + caja
     if f.get('con_protector') and prot is not None and url_caja:
         try:
             caja_img = descargar(url_caja)
-            enlaces['protector'] = subir(admin, f"{ean}/protector.jpg", a_jpg_bytes(M.montar_protector(caja_img, prot)))
+            enlaces['protector'] = subir(admin, f"{pref}/protector.jpg", a_jpg_bytes(M.montar_protector(caja_img, prot)))
         except Exception as e:
             print(f"   (aviso: no pude montar el protector: {e})")
     return enlaces, None
@@ -137,7 +141,8 @@ def main():
         try:
             data = admin.storage.from_('informes').download(ruta_informes)
             data = cuadrar_foto(data)   # recorta blanco sobrante + lienzo cuadrado (como Keepa)
-            destino = f"{fila.get('ean','sinEAN')}/propias/{tipo}_{int(time.time())}.jpg"
+            _pref = str(fila.get('ean','sinEAN')) + ('-chase' if fila.get('es_chase') else '')
+            destino = f"{_pref}/propias/{tipo}_{int(time.time())}.jpg"
             url = subir(admin, destino, data)
             propias_pub[tipo] = url
             print(f"   foto propia '{tipo}' cuadrada y movida a fotos-fabrica -> {url}")
