@@ -227,7 +227,25 @@ def galeria(fg, secundarias=None):
         out.append(fg['protector'])
     return out
 
-def volcar_a_web(f, indice):
+def cargar_stock_inventario():
+    """Índice {(ean_norm, es_chase): stock_moloka} desde el inventario (tabla 'productos').
+    Es la fuente REAL del stock del almacén — la misma que usa la app. La web refleja ESTE
+    stock; nunca se inventa 0/agotado. La común y la chase son filas distintas (es_chase),
+    así que cada una cruza con SU stock y no se mezclan."""
+    filas, desde = [], 0
+    while True:
+        r = sb.table('productos').select('ean,es_chase,stock_moloka').range(desde, desde+999).execute()
+        lote = r.data or []
+        filas += lote
+        if len(lote) < 1000:
+            break
+        desde += 1000
+    idx = {}
+    for prod in filas:
+        idx[(norm_ean(prod.get('ean')), bool(prod.get('es_chase')))] = prod.get('stock_moloka') or 0
+    return idx
+
+def volcar_a_web(f, indice, stock_inv):
     """Upsert de un expediente a web_productos (idéntico a motor_paso7, por ficha)."""
     ean = f.get('ean'); slug = f.get('slug')
     if not ean or not slug:
@@ -256,8 +274,13 @@ def volcar_a_web(f, indice):
     _fg = f.get('fotos_generadas') or {}
     _mimgs = [_fg.get('figura'), _fg.get('caja'), _fg.get('portada'), _fg.get('ficha')] + list(secundarias or [])
     _vist = set(); _mimgs = [u for u in _mimgs if u and not (u in _vist or _vist.add(u))]
+    # Stock REAL del almacén (inventario). Una joya que tienes NO nace agotada; y la que
+    # no tengas sale agotada de verdad. Común y chase cruzan por (EAN, es_chase) por separado.
+    stock_real = stock_inv.get((norm_ean(ean), bool(f.get('es_chase'))), 0)
+    disponible = 'inmediato' if stock_real and stock_real > 0 else 'agotado'
     contenido = {
         'ean': str(ean), 'slug': slug,
+        'stock': stock_real, 'disponibilidad': disponible,
         'titulo_seo': f.get('web_titulo'),
         'nombre': nombre_titulo,
         'descripcion_html': f.get('web_desc'),
@@ -285,8 +308,8 @@ def volcar_a_web(f, indice):
     if existente:
         sb.table('web_productos').update(contenido).eq('id', existente['id']).execute()
         return 'actualizado', nombre_log
-    nueva = dict(contenido); nueva['stock'] = 0; nueva['disponibilidad'] = 'agotado'
-    sb.table('web_productos').insert(nueva).execute()
+    # stock y disponibilidad ya van en 'contenido' con el valor REAL del inventario
+    sb.table('web_productos').insert(dict(contenido)).execute()
     return 'creado', nombre_log
 
 # ====================================================================
@@ -300,6 +323,8 @@ def main():
 
     web = cargar_web_productos()
     indice = {(norm_ean(w.get('ean')), bool(w.get('es_chase'))): w for w in web}
+    stock_inv = cargar_stock_inventario()   # stock REAL del almacén (tabla productos)
+    print(f"   inventario: {len(stock_inv)} referencias con su stock_moloka")
 
     publicadas, avisos = 0, []
     for f in pendientes:
@@ -321,7 +346,7 @@ def main():
 
         # 2) VOLCADO A WEB (las fotos ya vienen montadas y revisadas desde PREPARAR)
         try:
-            accion, nom = volcar_a_web(f, indice)
+            accion, nom = volcar_a_web(f, indice, stock_inv)
         except Exception as e:
             avisos.append(f"{ean}: fallo volcado ({e})"); continue
 
