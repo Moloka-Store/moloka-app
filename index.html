@@ -898,6 +898,7 @@
             <option value="DBLINE">DBLine</option>
             <option value="OSMA">OSMA</option>
             <option value="BIEDRO">bie-dro</option>
+            <option value="OCIOSTOCK">OcioStock</option>
             <option value="DINOTOYS">Dinotoys</option>
             <option value="ZENTRADA">Zentrada</option>
             <option value="HEO">HEO</option>
@@ -2169,6 +2170,20 @@ async function escLeerMarcasFichero(file, prov) {
     let n = 0;
     for (const r of rows) { if (esEan13(r['Stück-EAN'])) n++; }
     if (n > 0) marcas.set('TODAS', n);
+    return marcas;
+  }
+  if (prov === 'OCIOSTOCK') {
+    // OcioStock: feed CSV ';' con comillas y BOM, con columna de marca limpia y
+    // stock real. Leemos como texto (quitando BOM) y dejamos que XLSX parsee el CSV
+    // con separador ';' (FS). Contamos por marca, solo los de stock_disponible>0.
+    const txt = new TextDecoder('utf-8').decode(buf).replace(/^\uFEFF/, '');
+    const wb = XLSX.read(txt, { type: 'string', FS: ';' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    for (const r of rows) {
+      if (!(num(r['stock_disponible']) > 0)) continue;
+      add(r['marca']);
+    }
     return marcas;
   }
   // Proveedores de Claude-in-Chrome (formato variable): ZENTRADA, HEO, DINOTOYS.
