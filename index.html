@@ -897,6 +897,7 @@
             <option value="BEMS">BEMS</option>
             <option value="DBLINE">DBLine</option>
             <option value="OSMA">OSMA</option>
+            <option value="BIEDRO">bie-dro</option>
             <option value="DINOTOYS">Dinotoys</option>
             <option value="ZENTRADA">Zentrada</option>
             <option value="HEO">HEO</option>
@@ -2155,6 +2156,18 @@ async function escLeerMarcasFichero(file, prov) {
     };
     let n = 0;
     for (const r of rows) { const s = stkOsma(r['verfügbar']); if (s > 0) n++; }
+    if (n > 0) marcas.set('TODAS', n);
+    return marcas;
+  }
+  if (prov === 'BIEDRO') {
+    // bie-dro: drogueria alemana multimarca, cabecera en la FILA 4 (range:3) y SIN
+    // columna de stock -> contamos las filas con EAN valido y devolvemos 'TODAS'.
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { range: 3, defval: '' });
+    const esEan13 = (s) => { s = String(s == null ? '' : s).trim(); return /^\d+$/.test(s) && (s.length === 12 || s.length === 13); };
+    let n = 0;
+    for (const r of rows) { if (esEan13(r['Stück-EAN'])) n++; }
     if (n > 0) marcas.set('TODAS', n);
     return marcas;
   }
