@@ -170,6 +170,23 @@ PERFILES = {
         'col_pa':'Stückpreis\nnetto', 'col_stock':None, 'col_estado':None, 'estados_ok':None,
         'sin_columna_stock':True,
     },
+    'OCIOSTOCK': {
+        # Mayorista espanol de licencias (Funko, Banpresto, Pyramid, Cerda...).
+        # Feed CSV diario con URL FIJA que se autoactualiza (el token va en GitHub
+        # Secrets, NUNCA en codigo). Separador ';', campos entrecomillados, BOM
+        # (utf-8-sig) -> solo afecta a la 1a columna 'id_producto', que no usamos.
+        # TIENE columna de marca limpia -> se puede filtrar por marca (FUNKO, etc.).
+        # Stock real en 'stock_disponible' (>0).
+        # 🔒 PA = 'precio_distribuidores' (coste del distribuidor). NO usar
+        # 'precio_neto'/'precio_bruto': son PVP recomendado, no el coste.
+        # OJO dropshipping: el precio puede venir mas alto que el mayorista real
+        # -> contrastar Funko contra BEMS/TCG antes de fiarse.
+        # Validado contra feed real: 13.412 con stock+EAN+precio (3.475 Funko).
+        'tipo':'csv', 'sep':';', 'header':0,
+        'col_marca':'marca', 'col_ean':'ean', 'col_nombre':'nombre',
+        'col_pa':'precio_distribuidores', 'col_stock':'stock_disponible',
+        'col_estado':None, 'estados_ok':None,
+    },
     # ============================================================
     # PROVEEDORES DE CLAUDE-IN-CHROME (formato VARIABLE) -> DETECCION TOLERANTE
     # ------------------------------------------------------------
