@@ -157,6 +157,19 @@ PERFILES = {
         'stock_especial':'osma',        # usa _stock_osma() para parsear '>3.000'
         'col_extra_liq':'wird ausgelistet',   # 'wird ausverkauft' = se liquida (info de compra)
     },
+    'BIEDRO': {
+        # Mayorista aleman de drogueria (primera necesidad Moloka), misma familia que OSMA.
+        # Excel .xlsx; la cabecera de datos esta en la FILA 4 (header=3): las 3 primeras
+        # son el formulario de pedido (Kunden-Nr, Kundenname, Anschrift).
+        # Precio UNITARIO neto con PUNTO decimal (3.40) -> _num() lo parsea directo.
+        # NO trae columna de stock -> sin_columna_stock=True (se asume disponible).
+        # Sin marca propia (va en el nombre) ni estado. CHASE no aplica.
+        # Validado contra catalogo real: 3.316 productos con EAN+precio.
+        'tipo':'excel', 'sheet':0, 'header':3,
+        'col_marca':None, 'col_ean':'Stück-EAN', 'col_nombre':'Artikelbezeichnung',
+        'col_pa':'Stückpreis\nnetto', 'col_stock':None, 'col_estado':None, 'estados_ok':None,
+        'sin_columna_stock':True,
+    },
     # ============================================================
     # PROVEEDORES DE CLAUDE-IN-CHROME (formato VARIABLE) -> DETECCION TOLERANTE
     # ------------------------------------------------------------
