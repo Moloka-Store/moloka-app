@@ -186,6 +186,7 @@ PERFILES = {
         'col_marca':'marca', 'col_ean':'ean', 'col_nombre':'nombre',
         'col_pa':'precio_distribuidores', 'col_stock':'stock_disponible',
         'col_estado':None, 'estados_ok':None,
+        'col_volumen':'txt_precios_volumen',   # descuentos por volumen -> pestana "Precio por lote"
     },
     # ============================================================
     # PROVEEDORES DE CLAUDE-IN-CHROME (formato VARIABLE) -> DETECCION TOLERANTE
@@ -365,6 +366,32 @@ def _num_eur(x):
     """Precio tipo '1,77 EUR' o '2.01 €' (ZENTRADA) -> float. Quita el sufijo de moneda."""
     s = str(x).upper().replace('EUR', '').replace('€', '').strip()
     return _num(s)
+
+def _mejor_volumen(s):
+    """Parsea los descuentos por volumen de OcioStock y devuelve (uds_minimas, precio)
+    del tramo MAS BARATO. Formato: tramos separados por '|', cada tramo
+    'lower:upper:precio' (upper puede ir vacio). Ej: '6:12:8.99|12::8.59' -> (12, 8.59).
+    Devuelve None si no hay ningun tramo valido."""
+    if not s:
+        return None
+    mejor = None
+    for parte in str(s).split('|'):
+        parte = parte.strip()
+        if not parte:
+            continue
+        campos = parte.split(':')
+        if len(campos) < 3:
+            continue
+        try:
+            uds = int(float(campos[0]))
+            precio = float(campos[-1])
+        except Exception:
+            continue
+        if precio <= 0:
+            continue
+        if mejor is None or precio < mejor[1]:
+            mejor = (uds, precio)
+    return mejor
 
 def _es_ean_valido(s):
     """True si s es un EAN/UPC utilizable: 12 o 13 digitos."""
@@ -564,9 +591,18 @@ else:
         if PERFIL.get('col_pa_promo'):                    # DBLine: promo si >0, si no Listino
             promo = _num(row.get(PERFIL['col_pa_promo'], ''))
             if promo and promo > 0: pa = promo
+        vol = None
+        if PERFIL.get('col_volumen'):
+            try:
+                mv = _mejor_volumen(row.get(PERFIL['col_volumen'], ''))
+                # solo guardamos el lote si REBAJA de verdad el precio suelto
+                if mv and pa and mv[1] < pa:
+                    vol = {'uds': mv[0], 'pa': round(mv[1], 4)}
+            except Exception:
+                vol = None
         filas.append({'ean_in':ean_in, 'core':core, 'variantes':variantes_ean(core),
                       'nombre':row.get(cN,''), 'marca':MARCA, 'pa':pa,
-                      'es_chase':es_chase_ean(ean_in)})
+                      'es_chase':es_chase_ean(ean_in), 'volumen':vol})
     print(f"Disponibles a escanear: {len(filas)} | fuera por estado/stock: {fuera_disp} | "
           f"EAN problematicos: {len(problematicos)} | CHASE: {sum(f['es_chase'] for f in filas)}")
 
@@ -763,6 +799,7 @@ for i,c in enumerate(lista,1):
     f = c['fila']
     item = {'nombre':f['nombre'],'ean':c['ean_in'],'asin':c['asin'],'marca':f['marca'],
             'pa':f['pa'],'core':f['core'],'es_chase':f['es_chase'],'propio':c['propio'],
+            'volumen':f.get('volumen'),
             'ambiguo':c['ean_in'] in amb_eans,'paises':{}}
     for dom in ('ES','IT','FR'):
         d = datos_pais(c['asin'], dom)
@@ -902,6 +939,67 @@ hoja('Descartados', problematicos + no_encontrados)
 hoja('Ambiguos', ambiguos)
 hoja('Sin_rank', [{'EAN':c['ean_in'],'ASIN':c['asin'],'Nombre':c['fila']['nombre'],
                    'rank_act':c['r_act'],'rank90':c['r_90']} for c in sin_rank])
+
+# ============================================================
+# Pestana "Precio por lote": escenario con descuento por VOLUMEN (OcioStock).
+# La hoja Analisis se queda igual (precio unitario). Aqui recalculamos el beneficio
+# con el precio del LOTE y ponemos a la derecha del todo las unidades minimas para
+# lograr ese precio. Solo entran los productos cuyo lote REBAJA el precio suelto.
+# ============================================================
+COLS_LOTE = ['Nombre','EAN','ASIN','Marca','País','Precio venta (€)','PA suelto (€)',
+             'PA lote (€)','Ahorro/ud (€)','Beneficio lote (€)','Margen lote','Decisión lote',
+             'Uds. para ese precio']
+filas_lote = []
+for item in registros:
+    vol = item.get('volumen')
+    if not vol:
+        continue
+    pa_lote = vol['pa']; uds = vol['uds']
+    pa_suelto = item.get('_pa_efectivo')
+    for dom in ('ES','IT','FR'):
+        d = item['_paises_calc'].get(dom)
+        if not d or not d.get('precio') or d.get('ref_pct') is None or d.get('fee') is None:
+            continue
+        rr = calc_rentabilidad(d['precio'], pa_lote, d['ref_pct'], d['fee'], d['iva'],
+                               almacen=ALMACEN, com_digitales=COM_DIGITALES)
+        filas_lote.append([
+            item['nombre'], item['ean'], item['asin'], item['marca'], dom,
+            round(d['precio'], 2),
+            round(pa_suelto, 2) if pa_suelto else None,
+            round(pa_lote, 2),
+            round(pa_suelto - pa_lote, 2) if pa_suelto else None,
+            round(rr['beneficio'], 2),
+            round(rr['margen'], 4),
+            decision_de(rr['margen']),
+            uds,
+        ])
+filas_lote.sort(key=lambda x: (x[10] if x[10] is not None else -9), reverse=True)
+
+wl = wb.create_sheet('Precio por lote')
+wl.append(COLS_LOTE)
+for fl in filas_lote:
+    wl.append(fl)
+for c in range(1, len(COLS_LOTE)+1):
+    wl.cell(row=1, column=c).font = Font(bold=True)
+if filas_lote:
+    LL = {name: get_column_letter(i+1) for i, name in enumerate(COLS_LOTE)}
+    lastL = wl.max_row
+    for nm in ['Precio venta (€)','PA suelto (€)','PA lote (€)','Ahorro/ud (€)','Beneficio lote (€)']:
+        for row in range(2, lastL+1):
+            wl[f'{LL[nm]}{row}'].number_format = '0.00'
+    for row in range(2, lastL+1):
+        wl[f'{LL["Margen lote"]}{row}'].number_format = '0.0%'
+    decL = LL['Decisión lote']; rngL = f'{decL}2:{decL}{lastL}'
+    wl.conditional_formatting.add(rngL, FormulaRule(formula=[f'ISNUMBER(SEARCH("NO COMPRAR",{decL}2))'],
+        fill=_cf_fill('FFC7CE'), font=Font(color='9C0006'), stopIfTrue=True))
+    wl.conditional_formatting.add(rngL, FormulaRule(formula=[f'ISNUMBER(SEARCH("VALORAR",{decL}2))'],
+        fill=_cf_fill('FFEB9C'), font=Font(color='9C6500'), stopIfTrue=True))
+    wl.conditional_formatting.add(rngL, FormulaRule(formula=[f'ISNUMBER(SEARCH("COMPRAR",{decL}2))'],
+        fill=_cf_fill('C6EFCE'), font=Font(color='006100'), stopIfTrue=True))
+    wl.column_dimensions[LL['Nombre']].width = 50
+    wl.column_dimensions[LL['Uds. para ese precio']].width = 18
+    wl.freeze_panes = 'A2'
+print(f"Pestana 'Precio por lote': {len(filas_lote)} filas con descuento por volumen")
 
 wb.save(ARCHIVO_SALIDA)
 print("Guardado local:", ARCHIVO_SALIDA, "| filas:", last-1)
