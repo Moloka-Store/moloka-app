@@ -707,7 +707,7 @@ try:
     while True:
         res = (sb.table('escaner_memoria')
                  .select('ean,es_case,pa,presente')
-                 .eq('proveedor', PROVEEDOR).eq('marca', MARCA)
+                 .eq('proveedor', PROVEEDOR)
                  .range(_d, _d+999).execute())
         if not res.data: break
         _rows.extend(res.data)
@@ -748,6 +748,56 @@ print(f"Agotados/desaparecidos desde la ultima vez: {len(ausentes)}")
 if MODO == 'nuevos':
     filas = [f for f in filas if f['_estado_mem'] in ('nuevo','reaparicion','cambio_precio')]
 print(f"A escanear (modo '{MODO}'): {len(filas)} productos")
+
+# ============================================================
+# CHECKPOINT: id comun para la cache de rank (Fase 1) y el progreso (Fase 2).
+# El id identifica ESTE escaneo (mismo catalogo + mismos parametros). Al relanzar un
+# escaneo cortado reanuda; con otro catalogo empieza limpio. TODO CON RED: si la cache
+# falla, se consulta Keepa normal y el escaner funciona como hoy.
+# ============================================================
+import hashlib
+_eans_filas = sorted(str(f['ean_in']) for f in filas)
+_ckpt_id = hashlib.md5(('|'.join([PROVEEDOR, str(MARCA), MODO, str(RANK_MAXIMO)] + _eans_filas)).encode()).hexdigest()[:16]
+
+# --- Cache de rank (Fase 1): lo unico caro de la Fase 1 es consultar el rank a Keepa.
+# Guardamos por lote lo minimo que usa registra() (asin, rank actual, rank 90, EANs).
+# Si el escaneo se corta y se relanza, la Fase 1 se rehace LEYENDO de aqui: 0 tokens.
+RANKCACHE_PATH = f'escaner_ckpt/_rankcache_{_ckpt_id}.json'
+_rankcache = {}
+try:
+    _d = sb.storage.from_(BUCKET).download(RANKCACHE_PATH)
+    _rankcache = json.loads(_d.decode('utf-8')) or {}
+    if _rankcache:
+        print(f">>> Cache de rank: {len(_rankcache)} lotes ya consultados (reanudo Fase 1 sin re-pagar).")
+except Exception:
+    _rankcache = {}
+
+def _clave_lote(codigos, domain):
+    return hashlib.md5((domain + '|' + '|'.join(map(str, codigos))).encode()).hexdigest()[:16]
+
+def _reduce_prod(prod):
+    # Solo lo que necesita registra(): asin, stats(current/avg90), eanList, upcList.
+    st = prod.get('stats') or {}
+    return {'asin': prod.get('asin'),
+            'stats': {'current': st.get('current'), 'avg90': st.get('avg90')},
+            'eanList': prod.get('eanList'), 'upcList': prod.get('upcList')}
+
+def keepa_rank(codigos, domain='ES'):
+    clave = _clave_lote(codigos, domain)
+    if clave in _rankcache:
+        return _rankcache[clave]                 # de la caja: 0 tokens
+    prods = keepa_query(codigos, product_code_is_asin=False, domain=domain, stats=90, history=0)
+    if prods is None:
+        return None
+    _rankcache[clave] = [_reduce_prod(p) for p in prods]
+    return _rankcache[clave]
+
+def _guardar_rankcache():
+    try:
+        sb.storage.from_(BUCKET).upload(RANKCACHE_PATH, json.dumps(_rankcache).encode(),
+                                        {'upsert': 'true', 'content-type': 'application/json'})
+    except Exception as _e:
+        print("AVISO cache de rank (no guardada, sigo igual):", _e)
 
 # ============================================================
 # Celda 6 - FASE 1: filtro de rank (Keepa ES, 1 token)
@@ -793,12 +843,14 @@ if filas:
         vistos = set()
         print(f"{etiqueta}: {len(pool)} productos, {len(codigos)} codigos, {len(lotes)} lotes")
         for n,lote in enumerate(lotes,1):
-            prods = keepa_query(lote, product_code_is_asin=False, domain='ES', stats=90, history=0)
+            prods = keepa_rank(lote, domain='ES')
             if prods is None:
                 print(f"  lote {n}/{len(lotes)} NO resuelto tras reintentos -> se salta este lote")
                 continue
             for prod in prods: registra(prod, pool, vistos)
+            if n % 5 == 0: _guardar_rankcache()
             print(f"  lote {n}/{len(lotes)} | tokens {api.tokens_left}")
+        _guardar_rankcache()
         return vistos
 
     vistos = pasada({f['ean_in']: cod_pref(f) for f in filas}, "Fase 1 (1 codigo/producto)")
@@ -859,9 +911,7 @@ lista = list(pasan.values())
 # checkpoint falla, el escaner sigue como siempre (empieza de cero, no se rompe).
 import hashlib
 CKPT_CADA = 50
-_eans_lista = sorted(str(c['ean_in']) for c in lista)
-_ckpt_id = hashlib.md5(('|'.join([PROVEEDOR, str(MARCA), MODO, str(RANK_MAXIMO)] + _eans_lista)).encode()).hexdigest()[:16]
-CKPT_PATH = f'escaner_ckpt/_ckpt_{_ckpt_id}.json'
+CKPT_PATH = f'escaner_ckpt/_ckpt_{_ckpt_id}.json'   # _ckpt_id: el mismo de la Fase 1
 
 infos = []
 _eans_hechos = set()
@@ -904,7 +954,7 @@ for i,c in enumerate(lista,1):
         _guardar_ckpt()
 print(f"Fase 2 completa: {len(infos)} productos")
 # Escaneo completo: el checkpoint ya no hace falta -> borrar
-try: sb.storage.from_(BUCKET).remove([CKPT_PATH])
+try: sb.storage.from_(BUCKET).remove([CKPT_PATH, RANKCACHE_PATH])
 except Exception: pass
 
 # ============================================================
