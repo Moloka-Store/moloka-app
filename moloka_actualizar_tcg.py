@@ -231,9 +231,29 @@ def main():
         try: sb.table('web_productos').update(upd).eq('id', f['id']).eq('origen', 'tcg').execute(); n_eur += 1
         except Exception as ex: print("ERR eur", f.get('ean'), ex)
 
+    # Reconstruir la web: Astro es estatico (el precio va "horneado" en el HTML),
+    # asi que sin esto los cambios quedan en Supabase pero la web sigue mostrando lo
+    # viejo. Solo si hubo cambios reales. Da un toque al deploy hook de Vercel (lo
+    # mismo que hace web-rebuild.yml).
+    web_reconstruida = False
+    if (n_off + n_on + n_eur) > 0:
+        hook = os.environ.get('VERCEL_DEPLOY_HOOK')
+        if hook:
+            try:
+                import requests as _rq
+                _rq.post(hook, timeout=20)
+                web_reconstruida = True
+                print(">>> Web: rebuild disparado (deploy hook de Vercel).")
+            except Exception as ex:
+                print("AVISO: no pude disparar el rebuild de la web:", ex)
+        else:
+            print("AVISO: falta el secret VERCEL_DEPLOY_HOOK; la web NO se reconstruira sola.")
+
     avisar(f"✅ <b>Actualizador TCG</b>\n"
-           f"Despublicados: {n_off}\nReactivados: {n_on}\nPrecios ajustados: {n_eur}")
-    print(f"\nAPLICADO: off={n_off} on={n_on} eur={n_eur}")
+           f"Despublicados: {n_off}\nReactivados: {n_on}\nPrecios ajustados: {n_eur}"
+           + ("\n🔄 Reconstruyendo la web…" if web_reconstruida else
+              ("\n⚠️ Cambios guardados, pero reconstruye la web a mano (faltó el deploy hook)." if (n_off+n_on+n_eur) > 0 else "")))
+    print(f"\nAPLICADO: off={n_off} on={n_on} eur={n_eur} | web_rebuild={web_reconstruida}")
 
 if __name__ == '__main__':
     main()
