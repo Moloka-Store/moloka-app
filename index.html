@@ -952,6 +952,23 @@
       🧪 <strong>Paso 1 — Analizar rank.</strong> Sube el catálogo de TCG. La nube saca el rank de Amazon (solo España, barato) de los Funkos en stock y deja un ranking. <strong>Paso 2 — Fabricar.</strong> Eliges el corte de rank y la fábrica genera las fichas (Keepa + montaje Moloka) como borrador para revisar y publicar.
     </div>
 
+    <div class="card" style="margin-top:16px;border-left:3px solid #7c3aed">
+      <div class="inv-field-label" style="margin-bottom:8px">🔄 Mantenimiento diario · Actualizar precios y stock</div>
+      <div style="font-size:13px;color:var(--gray-500);margin-bottom:10px">
+        Sube el Excel de TCG y la web se pone al día sola: corrige precios, aplica o quita ofertas y <b>despublica al instante lo que se quedó sin stock</b> (por debajo de 2 uds) para no vender lo que no puedes servir. Solo toca lo de TCG; las joyas no se rozan. No gasta Keepa.
+      </div>
+      <label class="btn btn-ghost" style="display:inline-block;cursor:pointer">
+        📄 Subir catálogo TCG (.xlsx)
+        <input type="file" id="at-file" accept=".xlsx,.xls" style="display:none" onchange="document.getElementById('at-sel').textContent=(this.files[0]||{}).name||'ningún fichero seleccionado'">
+      </label>
+      <div class="inv-field-label" id="at-sel" style="margin-top:6px">ningún fichero seleccionado</div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="at-prueba" checked> Modo prueba (solo me dice qué haría, sin tocar la web)
+      </label>
+      <button class="btn" id="at-go" style="margin-top:12px" onclick="actualizarWebTcg()">🔄 Actualizar precios y stock</button>
+      <div id="at-log" style="margin-top:14px"></div>
+    </div>
+
     <div class="card" style="margin-top:16px">
       <div class="inv-field-label" style="margin-bottom:8px">Paso 1 · Analizar rank de TCG</div>
       <label class="btn btn-ghost" style="display:inline-block;cursor:pointer">
@@ -2659,6 +2676,38 @@ async function lanzarRankWeb(){
       log.innerHTML='<div class="info-box" style="border-left:3px solid #2e7d32">✅ Análisis de rank lanzado. Tarda ~1 h (según cuántos Funkos en stock y los tokens de Keepa). Al terminar deja el ranking en Storage (informes/web_rank/ranking_tcg.xlsx) y la distribución en el log de Actions. Luego usa el Paso 2.</div>';
     } else if(resp.status===409){
       log.innerHTML='<div class="info-box" style="border-left:3px solid #ba7517">⏳ '+(data.error||'Ya hay un análisis en marcha.')+'</div>';
+    } else {
+      log.innerHTML='<div class="info-box" style="border-left:3px solid #b00020">⚠️ No se pudo lanzar: '+(data.error||('HTTP '+resp.status))+'.</div>';
+    }
+  }catch(e){ log.innerHTML='<div class="info-box" style="border-left:3px solid #b00020">⚠️ Error: '+e.message+'</div>'; }
+  go.disabled=false;
+}
+
+async function actualizarWebTcg(){
+  const file = (document.getElementById('at-file').files||[])[0];
+  const prueba = document.getElementById('at-prueba').checked;
+  const log = document.getElementById('at-log');
+  const go = document.getElementById('at-go');
+  if(!file){ log.innerHTML='<div class="info-box" style="border-left:3px solid #ba7517">⚠️ Sube primero el catálogo de TCG.</div>'; return; }
+  go.disabled=true;
+  log.innerHTML='<div class="info-box">⏳ Subiendo el catálogo y lanzando el actualizador…</div>';
+  try{
+    // 1) Subir el Excel donde el actualizador lo lee (el mismo sitio que el Paso 1)
+    const up=await db.storage.from('informes').upload('web_rank/catalogo.xlsx', file, {upsert:true});
+    if(up.error) throw new Error('subiendo el catálogo: '+up.error.message);
+    // 2) Recado con el modo (prueba = no toca la web; aplicar = lo hace de verdad)
+    const recado={modo: prueba?'preview':'aplicar', fecha:new Date().toISOString()};
+    const blob=new Blob([JSON.stringify(recado)],{type:'application/json'});
+    const e2=(await db.storage.from('informes').upload('actualizar_tcg/_solicitud.json', blob, {upsert:true})).error;
+    if(e2) throw new Error('dejando el recado: '+e2.message);
+    // 3) Disparar el actualizador
+    const resp=await fetch('/api/disparar',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({secreto:DISPARO_SECRET, workflow:'actualizar-tcg.yml'})});
+    const data=await resp.json().catch(()=>({}));
+    if(resp.ok){
+      log.innerHTML='<div class="info-box" style="border-left:3px solid #2e7d32">✅ Actualizador lanzado'+(prueba?' en <b>MODO PRUEBA</b> (no toca la web)':'')+'. En un par de minutos te llega el resumen por Telegram'+(prueba?' con lo que <i>haría</i>':'')+'.</div>';
+    } else if(resp.status===409){
+      log.innerHTML='<div class="info-box" style="border-left:3px solid #ba7517">⏳ '+(data.error||'Ya hay una actualización en marcha.')+'</div>';
     } else {
       log.innerHTML='<div class="info-box" style="border-left:3px solid #b00020">⚠️ No se pudo lanzar: '+(data.error||('HTTP '+resp.status))+'.</div>';
     }
