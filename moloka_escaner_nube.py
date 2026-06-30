@@ -110,6 +110,19 @@ try:
                 catalogo_local = f'/tmp/{nombre}'
                 with open(catalogo_local, 'wb') as fp:
                     fp.write(d)
+                # El boton sube los catalogos COMPRIMIDOS en gzip (para que el CSV gordo
+                # de OcioStock quepa en Storage). pd.read_csv descomprime .gz solo, pero
+                # pd.read_excel NO -> aqui descomprimimos cualquier gzip y dejamos el
+                # fichero PLANO, asi la lectura (excel o csv) recibe siempre el original.
+                with open(catalogo_local, 'rb') as _fp:
+                    _magic = _fp.read(2)
+                if _magic == b'\x1f\x8b':
+                    import gzip as _gz, shutil as _sh
+                    _plano = catalogo_local[:-3] if catalogo_local.endswith('.gz') else catalogo_local + '.plano'
+                    with _gz.open(catalogo_local, 'rb') as _src, open(_plano, 'wb') as _dst:
+                        _sh.copyfileobj(_src, _dst)
+                    catalogo_local = _plano
+                    print(">>> Catalogo descomprimido (venia en gzip).")
             except Exception as _e:
                 print('AVISO catalogo:', _e)
 except Exception as ex:
