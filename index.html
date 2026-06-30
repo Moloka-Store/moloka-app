@@ -2334,7 +2334,21 @@ async function lanzarEscaneo() {
     } catch (e) {}
     // 2) Subir el catálogo (los de fichero; MOLOKA no)
     if (prov !== 'MOLOKA' && file) {
-      const { error } = await db.storage.from('informes').upload('escaner/' + file.name, file, { upsert: true });
+      // Los catálogos grandes (OcioStock pesa ~69 MB) superan el límite de subida de
+      // Supabase. Los comprimimos en el navegador (gzip) antes de subir: un CSV de texto
+      // baja ~90% (69 MB -> ~7 MB). La nube los lee igual (pandas detecta el .gz por la
+      // extensión, sin tocar nada). Si el navegador no soporta CompressionStream, sube tal cual.
+      let subir = file, nombre = file.name;
+      try {
+        if (typeof CompressionStream !== 'undefined') {
+          const flujo = file.stream().pipeThrough(new CompressionStream('gzip'));
+          const buf = await new Response(flujo).arrayBuffer();
+          subir = new Blob([buf], { type: 'application/gzip' });
+          nombre = file.name + '.gz';
+        }
+      } catch (e) { subir = file; nombre = file.name; }
+      log.innerHTML = '<div class="info-box">Subiendo el catálogo (' + Math.max(1, Math.round(subir.size / 1048576)) + ' MB)…</div>';
+      const { error } = await db.storage.from('informes').upload('escaner/' + nombre, subir, { upsert: true });
       if (error) throw new Error('subiendo el catálogo: ' + error.message);
     }
     // 3) Dejar el recado con la configuración
