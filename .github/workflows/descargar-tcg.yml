@@ -1,0 +1,32 @@
+name: Moloka - Prueba descarga TCG (servidor)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  descargar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install curl_cffi beautifulsoup4 openpyxl
+
+      - name: Descargar catalogo TCG (login + boton Excel)
+        env:
+          TCG_USER: ${{ secrets.TCG_USER }}
+          TCG_PASS: ${{ secrets.TCG_PASS }}
+        run: python -u descargar_tcg.py
+
+      - name: Guardar el Excel para inspeccionarlo
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalogo-tcg
+          path: catalogo_tcg.xlsx
+          if-no-files-found: ignore
