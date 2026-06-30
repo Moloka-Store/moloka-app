@@ -11,6 +11,10 @@ on:
           - completo
         default: diario
 
+concurrency:
+  group: director-tcg
+  cancel-in-progress: false
+
 jobs:
   director:
     runs-on: ubuntu-latest
@@ -45,7 +49,10 @@ jobs:
 
       - name: 3) Escanear FBA
         env:
-          SUPABASE_URL:  ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY:  ${{ secrets.SUPABASE_KEY }}
-          KEEPA_API_KEY: ${{ secrets.KEEPA_API_KEY }}
+          SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:      ${{ secrets.SUPABASE_KEY }}
+          KEEPA_API_KEY:     ${{ secrets.KEEPA_API_KEY }}
+          GH_PAT:            ${{ secrets.GH_PAT }}
+          AUTORELANZAR_MIN:  '315'
+          AUTORELANZAR_TIPO: ${{ inputs.tipo }}
         run: python -u moloka_escaner_nube.py
