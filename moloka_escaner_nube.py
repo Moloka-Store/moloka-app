@@ -134,6 +134,10 @@ MARCA            = SOLICITUD.get('marca') or 'Funko'
 RANK_MAXIMO      = int(SOLICITUD.get('rank_maximo') or 30000)
 MODO             = (SOLICITUD.get('modo') or 'nuevos').lower()
 INCLUIR_SIN_RANK = bool(SOLICITUD.get('incluir_sin_rank', False))
+# Motor de filtros (lo usa el DIRECTOR automatico): si el recado trae 'filtros', el
+# escaner aplica reglas finas (varias marcas + idioma + estado) en vez del filtro de
+# marca simple. Si NO trae 'filtros' (escaneo manual de Fernando), todo va como siempre.
+FILTROS = SOLICITUD.get('filtros') or None
 
 # --- Guardados de arranque: sin recado o sin catalogo no se hace nada ---
 if not SOLICITUD or not PROVEEDOR:
@@ -582,8 +586,34 @@ else:
                               PERFIL['col_pa'], PERFIL['col_stock'])
         _tolerante = False
 
-    # filtro 1: marca ('TODAS' o vacio o sin columna de marca = NO filtra)
-    if MARCA and MARCA.strip().upper() != 'TODAS' and cM is not None:
+    # filtro 1: marca. Si el recado trae 'filtros' (director), NO filtramos aqui por
+    # marca: el motor decide fila a fila mas abajo (varias marcas + idioma + estado).
+    # Si no, filtro de marca simple de siempre (escaneo manual de Fernando).
+    def _pasa_filtros(row):
+        # Reglas del director. Para TCG: Oferta/Saldo entran SIEMPRE (cualquier marca);
+        # Disponible entra solo si la marca esta en 'marcas', o en 'marcas_es' Y ademas
+        # el idioma es Espanol (Magic / Yu-Gi-Oh solo en espanol explicito).
+        est = str(row.get(PERFIL.get('col_estado'), '')).strip()
+        if est in (FILTROS.get('incluir_estados') or []):
+            return True
+        marca_row = str(row.get(cM, '')).lower() if cM else ''
+        for m in (FILTROS.get('marcas') or []):
+            if m.lower() in marca_row:
+                return True
+        marcas_es = FILTROS.get('marcas_es') or []
+        if marcas_es:
+            col_idi = FILTROS.get('col_idioma')
+            idi = str(row.get(col_idi, '')).strip().lower() if col_idi else ''
+            if idi in ('español', 'espanol'):
+                for m in marcas_es:
+                    if m.lower() in marca_row:
+                        return True
+        return False
+
+    if FILTROS:
+        sel = cat.copy()
+        print(f"Motor de filtros activo (director): {len(sel)} filas a evaluar")
+    elif MARCA and MARCA.strip().upper() != 'TODAS' and cM is not None:
         sel = cat[cat[cM].str.contains(MARCA, case=False, na=False)].copy()
         print(f"Marca '{MARCA}': {len(sel)} filas")
     else:
@@ -595,6 +625,8 @@ else:
         if PERFIL.get('estados_ok'):
             if str(row.get(PERFIL['col_estado'], '')).strip() not in PERFIL['estados_ok']:
                 fuera_disp += 1; continue
+        if FILTROS and not _pasa_filtros(row):
+            fuera_disp += 1; continue
         if PERFIL.get('sin_columna_stock') or (_tolerante and cS is None):
             stock = 1.0     # sin columna de stock -> se asume disponible
         elif PERFIL.get('stock_especial') == 'osma':
