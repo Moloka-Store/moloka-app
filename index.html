@@ -899,6 +899,7 @@
             <option value="OSMA">OSMA</option>
             <option value="BIEDRO">bie-dro</option>
             <option value="OCIOSTOCK">OcioStock</option>
+            <option value="STOCKLIST">Stocklist (nórdico)</option>
             <option value="DINOTOYS">Dinotoys</option>
             <option value="ZENTRADA">Zentrada</option>
             <option value="HEO">HEO</option>
@@ -2200,6 +2201,19 @@ async function escLeerMarcasFichero(file, prov) {
     for (const r of rows) {
       if (!(num(r['stock_disponible']) > 0)) continue;
       add(r['marca']);
+    }
+    return marcas;
+  }
+  if (prov === 'STOCKLIST') {
+    // Mayorista nordico: Excel hoja 'Sheet1', cabecera fila 1, marca limpia en 'Brand',
+    // stock en 'Available' (>0). Contamos por marca. Las refs con marca vacia caen fuera
+    // del desplegable (solo entran via TODAS), que es lo correcto: se escanea por marca.
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets['Sheet1'] || wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    for (const r of rows) {
+      if (!(num(r['Available']) > 0)) continue;
+      add(r['Brand']);
     }
     return marcas;
   }
