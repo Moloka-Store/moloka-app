@@ -1,0 +1,43 @@
+# ============================================================
+# Moloka - Actualizador web TCG  (mantenimiento de lo publicado)
+# Ubicacion: .github/workflows/actualizar-tcg.yml
+#
+# Lanza moloka_actualizar_tcg.py: repasa las fichas origen='tcg' contra el
+# Excel recien subido (web_rank/catalogo.xlsx) y corrige precios/ofertas,
+# despublica lo sin stock y reactiva lo que vuelve. NO gasta Keepa. Rapido.
+#
+# >>> SIN RELOJ <<<  Solo se ejecuta cuando TU lo lanzas (boton al subir el Excel).
+# ============================================================
+name: Moloka - Actualizar TCG
+
+on:
+  workflow_dispatch:        # SOLO disparo por boton. SIN reloj.
+
+concurrency:
+  group: actualizar-tcg
+  cancel-in-progress: false   # si hay una en marcha, la nueva espera (no se solapan)
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15      # es comparacion de datos: minutos de sobra
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install supabase openpyxl requests
+
+      - name: Ejecutar actualizador
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:         ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          TELEGRAM_TOKEN:       ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -u moloka_actualizar_tcg.py
