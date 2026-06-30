@@ -188,6 +188,19 @@ PERFILES = {
         'col_estado':None, 'estados_ok':None,
         'col_volumen':'txt_precios_volumen',   # descuentos por volumen -> pestana "Precio por lote"
     },
+    'STOCKLIST': {
+        # Mayorista nordico GENERALISTA (Toys, Games and consoles, Beauty, Movies, Pet...).
+        # Stocklist Excel .xlsx, hoja 'Sheet1', cabecera fila 1 (header=0). 43.174 refs, TODAS
+        # con stock real. Multimoneda (EUR/GBP/USD/DKK) -> usamos EUR como coste, con PUNTO
+        # decimal (17.99) -> _num() lo parsea directo. Marca limpia en 'Brand' (contains) ->
+        # filtrable: Funko, Paladone, Numskull, Nemesis Now, LEGO, Ravensburger, Nintendo...
+        # Stock en 'Available' (>0). Sin columna de estado (todo lo con stock entra).
+        # 🔒 PENDIENTE VERIFICAR: que 'EUR' es el COSTE de proveedor y no el PVP recomendado.
+        # Validado contra catalogo real: 42.878 productos con EAN(12/13)+precio+stock.
+        'tipo':'excel', 'sheet':'Sheet1', 'header':0,
+        'col_marca':'Brand', 'col_ean':'CodeBars', 'col_nombre':'ItemName',
+        'col_pa':'EUR', 'col_stock':'Available', 'col_estado':None, 'estados_ok':None,
+    },
     # ============================================================
     # PROVEEDORES DE CLAUDE-IN-CHROME (formato VARIABLE) -> DETECCION TOLERANTE
     # ------------------------------------------------------------
@@ -792,10 +805,44 @@ def datos_pais(asin, dom):
             'n_of':_pos(st.get('totalOfferCount')),
             'vendidos':p.get('monthlySold')}
 
-infos = []
 lista = list(pasan.values())
-print(f"Fase 2: {len(lista)} candidatos x 3 paises")
+
+# === CHECKPOINT: reanudar la Fase 2 si un escaneo grande se corto a medias ===
+# Guarda el progreso cada CKPT_CADA candidatos en una carpeta APARTE (escaner_ckpt/,
+# que el boton NO vacia al relanzar). Al arrancar, si hay checkpoint de ESTE mismo
+# escaneo (mismos candidatos), reanuda desde donde quedo. Todo CON RED: si algo del
+# checkpoint falla, el escaner sigue como siempre (empieza de cero, no se rompe).
+import hashlib
+CKPT_CADA = 50
+_eans_lista = sorted(str(c['ean_in']) for c in lista)
+_ckpt_id = hashlib.md5(('|'.join([PROVEEDOR, str(MARCA), MODO, str(RANK_MAXIMO)] + _eans_lista)).encode()).hexdigest()[:16]
+CKPT_PATH = f'escaner_ckpt/_ckpt_{_ckpt_id}.json'
+
+infos = []
+_eans_hechos = set()
+try:
+    _d = sb.storage.from_(BUCKET).download(CKPT_PATH)
+    _prev = json.loads(_d.decode('utf-8'))
+    if isinstance(_prev, list) and _prev:
+        infos = _prev
+        _eans_hechos = {str(it.get('ean')) for it in infos}
+        print(f">>> CHECKPOINT: reanudo un escaneo a medias ({len(infos)} de {len(lista)} ya hechos).")
+except Exception:
+    pass   # sin checkpoint o ilegible -> empezar de cero, exactamente como hoy
+
+def _guardar_ckpt():
+    try:
+        sb.storage.from_(BUCKET).upload(CKPT_PATH, json.dumps(infos).encode('utf-8'),
+                                        {'upsert': 'true', 'content-type': 'application/json'})
+    except Exception as _e:
+        print("AVISO checkpoint (no se guardo, sigo igual):", _e)
+
+print(f"Fase 2: {len(lista)} candidatos x 3 paises"
+      + (f" | {len(infos)} ya hechos, faltan {len(lista)-len(infos)}" if infos else ""))
+_nuevos = 0
 for i,c in enumerate(lista,1):
+    if c['ean_in'] in _eans_hechos:
+        continue                       # ya escaneado en una pasada anterior -> saltar
     f = c['fila']
     item = {'nombre':f['nombre'],'ean':c['ean_in'],'asin':c['asin'],'marca':f['marca'],
             'pa':f['pa'],'core':f['core'],'es_chase':f['es_chase'],'propio':c['propio'],
@@ -805,9 +852,15 @@ for i,c in enumerate(lista,1):
         d = datos_pais(c['asin'], dom)
         if d: item['paises'][dom] = d
     infos.append(item)
+    _nuevos += 1
     if i%50==0:
         print(f"  {i}/{len(lista)} | tokens {api.tokens_left}")
+    if _nuevos % CKPT_CADA == 0:
+        _guardar_ckpt()
 print(f"Fase 2 completa: {len(infos)} productos")
+# Escaneo completo: el checkpoint ya no hace falta -> borrar
+try: sb.storage.from_(BUCKET).remove([CKPT_PATH])
+except Exception: pass
 
 # ============================================================
 # Celda 8 - calculo (decision + orden por margen ES)
