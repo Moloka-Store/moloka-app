@@ -139,6 +139,35 @@ INCLUIR_SIN_RANK = bool(SOLICITUD.get('incluir_sin_rank', False))
 # marca simple. Si NO trae 'filtros' (escaneo manual de Fernando), todo va como siempre.
 FILTROS = SOLICITUD.get('filtros') or None
 
+# --- Autorrelanzamiento (lo activa SOLO el director): si el escaneo se acerca al corte
+# de GitHub (6h), guarda el progreso y se relanza solo para seguir la noche entera.
+# AUTORELANZAR_MIN ausente o 0 lo DESACTIVA -> el escaneo manual NUNCA se relanza solo.
+_T_INICIO = time.time()
+_LIMITE_MIN = int(os.environ.get('AUTORELANZAR_MIN', '0') or '0')
+_GH_PAT = os.environ.get('GH_PAT')
+_GH_REPO = os.environ.get('GH_REPO', 'Moloka-Store/moloka-app')
+_WF_RELANZAR = os.environ.get('AUTORELANZAR_WORKFLOW', 'director-tcg.yml')
+_TIPO_RELANZAR = os.environ.get('AUTORELANZAR_TIPO', 'completo')
+
+def _cerca_del_corte():
+    return _LIMITE_MIN > 0 and (time.time() - _T_INICIO) > _LIMITE_MIN * 60
+
+def _relanzarme():
+    if not _GH_PAT:
+        print("AVISO: sin GH_PAT no puedo relanzarme. Guardo y salgo; relanza a mano.")
+        return False
+    try:
+        import requests as _rq
+        url = f'https://api.github.com/repos/{_GH_REPO}/actions/workflows/{_WF_RELANZAR}/dispatches'
+        r = _rq.post(url, json={'ref': 'main', 'inputs': {'tipo': _TIPO_RELANZAR}}, timeout=30,
+                     headers={'Authorization': f'Bearer {_GH_PAT}',
+                              'Accept': 'application/vnd.github+json',
+                              'X-GitHub-Api-Version': '2022-11-28'})
+        print(f">>> Autorrelanzamiento: dispatch {_WF_RELANZAR} ({_TIPO_RELANZAR}) -> {r.status_code}")
+        return r.status_code in (200, 201, 204)
+    except Exception as _e:
+        print("AVISO: no pude relanzarme:", _e); return False
+
 # --- Guardados de arranque: sin recado o sin catalogo no se hace nada ---
 if not SOLICITUD or not PROVEEDOR:
     print('Buzon del escaner SIN recado valido: nada que escanear. Fin.')
@@ -850,6 +879,10 @@ if filas:
             for prod in prods: registra(prod, pool, vistos)
             if n % 5 == 0: _guardar_rankcache()
             print(f"  lote {n}/{len(lotes)} | tokens {api.tokens_left}")
+            if _cerca_del_corte():
+                _guardar_rankcache()
+                print(">>> Cerca del corte de GitHub: guardo el rank y me relanzo para seguir.")
+                _relanzarme(); sys.exit(0)
         _guardar_rankcache()
         return vistos
 
@@ -952,6 +985,10 @@ for i,c in enumerate(lista,1):
         print(f"  {i}/{len(lista)} | tokens {api.tokens_left}")
     if _nuevos % CKPT_CADA == 0:
         _guardar_ckpt()
+    if _cerca_del_corte():
+        _guardar_ckpt()
+        print(">>> Cerca del corte de GitHub: guardo el progreso y me relanzo para seguir.")
+        _relanzarme(); sys.exit(0)
 print(f"Fase 2 completa: {len(infos)} productos")
 # Escaneo completo: el checkpoint ya no hace falta -> borrar
 try: sb.storage.from_(BUCKET).remove([CKPT_PATH, RANKCACHE_PATH])
