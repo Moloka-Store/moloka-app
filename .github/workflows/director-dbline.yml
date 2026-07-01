@@ -1,0 +1,45 @@
+name: Moloka - Director DBLine
+
+on:
+  workflow_dispatch:
+    inputs:
+      tipo:
+        description: 'diario (solo novedades) o completo (todo, jueves noche)'
+        type: choice
+        options:
+          - diario
+          - completo
+        default: diario
+
+concurrency:
+  group: director-dbline
+  cancel-in-progress: false
+
+jobs:
+  director:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install curl_cffi openpyxl supabase keepa pandas requests xlrd
+
+      - name: 1) Preparar (descarga DBLine + recado)
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          DBLINE_USER:          ${{ secrets.DBLINE_USER }}
+          DBLINE_PASS:          ${{ secrets.DBLINE_PASS }}
+        run: python -u director_dbline_prep.py --tipo ${{ inputs.tipo }}
+
+      - name: 2) Escanear FBA (Keepa API, solo Funko + Pyramid)
+        env:
+          SUPABASE_URL:  ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:  ${{ secrets.SUPABASE_KEY }}
+          KEEPA_API_KEY: ${{ secrets.KEEPA_API_KEY }}
+        run: python -u moloka_escaner_nube.py
