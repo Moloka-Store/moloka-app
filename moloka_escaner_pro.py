@@ -52,6 +52,7 @@ CSV_COLS = {
     'vendidos':'Tendencias de ventas mensuales: Ventas mensuales (Último conocido)',
     'vendidos2':'Tendencias de ventas mensuales: Comprados el mes pasado',
     'nvar':'Recuento de variaciones',
+    'titulo':'Título principal',
 }
 
 # ===== Helpers (identicos al escaner) =====
@@ -155,6 +156,14 @@ def leer_csv_visualizador(rutas):
       with open(ruta, encoding='utf-8-sig', newline='') as f:
         rr=csv.reader(f); H=next(rr); rows=list(rr)
       idx={c:i for i,c in enumerate(H)}
+      # Columna del titulo de Amazon (robusto al nombre exacto del export de Keepa)
+      _tit=None
+      for _cand in ('Título principal','Titulo principal','Título','Titulo','Title'):
+        if _cand in idx: _tit=_cand; break
+      if _tit is None:
+        for _c in H:
+          _cl=str(_c).lower()
+          if 'tulo' in _cl or 'title' in _cl: _tit=_c; break
       def col(row,key):
         c=CSV_COLS.get(key); return row[idx[c]] if (c and c in idx) else ''
       for row in rows:
@@ -166,7 +175,8 @@ def leer_csv_visualizador(rutas):
                  fba=_num_csv(col(row,'fba')), compct=_num_csv(col(row,'compct')),
                  nof=_num_csv(col(row,'nof')),
                  vendidos=(_num_csv(col(row,'vendidos')) or _num_csv(col(row,'vendidos2'))),
-                 nvar=_num_csv(col(row,'nvar')))
+                 nvar=_num_csv(col(row,'nvar')),
+                 titulo=((row[idx[_tit]].strip() if (_tit and idx[_tit]<len(row)) else '')))
         for e in col(row,'ean').split(','):
             e=norm(e)
             if e: data[e]=rec
@@ -177,6 +187,21 @@ def buscar(fila, csvdata):
         vn=norm(v)
         if vn in csvdata: return csvdata[vn]
     return None
+
+import unicodedata, re as _re
+_STOP_TIT={'the','and','with','de','del','la','el','los','las','un','una','uno','con','para','por',
+           'pop','figura','figure','set','pack','edition','deluxe','vinilo','vinyl',
+           'peluche','plush','muneco','doll','juguete','juguetes','toy','coche','coches','car'}
+def _tokens_tit(t):
+    t=unicodedata.normalize('NFKD',str(t or '')).encode('ascii','ignore').decode()
+    t=_re.sub(r'[^a-zA-Z0-9]+',' ',t).lower()
+    return {w for w in t.split() if len(w)>=3 and w not in _STOP_TIT}
+def _coincide_titulo(nombre_prov, titulo_amz):
+    # '?' = sin titulo de Amazon (no marcamos). SI = comparten palabra distintiva. NO = nada en comun.
+    if not str(titulo_amz or '').strip(): return '?'
+    a=_tokens_tit(nombre_prov); b=_tokens_tit(titulo_amz)
+    if not a or not b: return '?'
+    return 'SÍ' if (a & b) else '⚠ NO'
 
 # ===== Motor Pro =====
 def escanear_pro(prov, marca, ruta_excel, paises, rank_maximo=30000, sup=None):
@@ -236,7 +261,9 @@ def escanear_pro(prov, marca, ruta_excel, paises, rank_maximo=30000, sup=None):
             if s: enbd=f"OK Alm:{s.get('stock_moloka',0)} FBA:{s.get('stock_fba',0)}"
         registros.append({'nombre':f['nombre'],'ean':f['ean_in'],'asin':base['asin'],'marca':marca,
                           'pa':pa,'volumen':f['volumen'],'ambiguo':(nvar and nvar>0),'nvar':nvar,
-                          'en_bd':enbd,'paises':paises_calc})
+                          'en_bd':enbd,'paises':paises_calc,
+                          'titulo_amz':base.get('titulo',''),
+                          'coincide':_coincide_titulo(f['nombre'], base.get('titulo',''))})
     registros.sort(key=lambda x:(x['paises'].get(dom_base,{}).get('margen')
                                  if x['paises'].get(dom_base,{}).get('margen') is not None else -9e9), reverse=True)
     return dict(registros=registros, doms=doms, dom_base=dom_base,
@@ -247,7 +274,7 @@ def escanear_pro(prov, marca, ruta_excel, paises, rank_maximo=30000, sup=None):
 COLS=['Nombre','EAN','ASIN','Marca','PA (€)','País','Rank actual','Rank 90d','Vendidos/mes',
       'Precio venta (€)','Canal BB','Nº ofertas','% Comisión',
       'Com. Amazon (€)','Fee Logística (€)','Almacén (€)','Promo activa',
-      'Beneficio (€)','ROI','Margen','Decisión','En mi BD','EAN ambiguo']
+      'Beneficio (€)','ROI','Margen','Decisión','En mi BD','EAN ambiguo','Amazon (título)','Coincide']
 COLS_LOTE=['Nombre','EAN','ASIN','Marca','País','Precio venta (€)','PA suelto (€)','PA lote (€)',
            'Ahorro/ud (€)','Beneficio lote (€)','Margen lote','Decisión lote','Uds. para ese precio']
 def _cf_fill(h): return PatternFill(start_color=h, end_color=h, fill_type='solid')
@@ -275,7 +302,8 @@ def escribir_excel(res, ruta_salida):
                  f"-{L['Fee Logística (€)']}{r}-{L['Almacén (€)']}{r}") if (div and d.get('precio') and pct is not None) else None,
                 f"={L['Beneficio (€)']}{r}/{L['PA (€)']}{r}" if (div and d.get('precio') and pct is not None and item['pa']) else None,
                 f"={L['Beneficio (€)']}{r}/{L['Precio venta (€)']}{r}" if (div and d.get('precio') and pct is not None) else None,
-                d.get('decision'), item.get('en_bd',''), amb])
+                d.get('decision'), item.get('en_bd',''), amb,
+                item.get('titulo_amz',''), item.get('coincide','?')])
             cell=ws.cell(row=r, column=3)
             cell.hyperlink=f"https://www.{DOM_AMZ[dom]}/dp/{item['asin']}"
             cell.font=Font(color='0563C1', underline='single')
@@ -286,7 +314,7 @@ def escribir_excel(res, ruta_salida):
         fmt(nm,'0.00')
     fmt('% Comisión','0.00%'); fmt('ROI','0.0%'); fmt('Margen','0.0%')
     for c in range(1,len(COLS)+1): ws.cell(row=1,column=c).font=Font(bold=True)
-    for nm,w in {'Nombre':50,'EAN':14,'ASIN':12,'Marca':12,'En mi BD':20,'Decisión':15}.items():
+    for nm,w in {'Nombre':50,'EAN':14,'ASIN':12,'Marca':12,'En mi BD':20,'Decisión':15,'Amazon (título)':50,'Coincide':11}.items():
         ws.column_dimensions[L[nm]].width=w
     ws.freeze_panes='A2'
     if last>=2:
@@ -294,6 +322,9 @@ def escribir_excel(res, ruta_salida):
         tab.tableStyleInfo=TableStyleInfo(name='TableStyleMedium2', showRowStripes=False,
                                           showColumnStripes=False, showFirstColumn=False, showLastColumn=False)
         ws.add_table(tab)
+        coi=L['Coincide']; rng_coi=f'{coi}2:{coi}{last}'
+        ws.conditional_formatting.add(rng_coi, FormulaRule(formula=[f'ISNUMBER(SEARCH("NO",{coi}2))'],
+                                      fill=_cf_fill('FFC7CE'), font=Font(color='9C0006')))
         dec=L['Decisión']; rng=f'{dec}2:{dec}{last}'
         for txt,fill,fnt in [('NO COMPRAR','FFC7CE','9C0006'),('VALORAR','FFEB9C','9C6500'),
                              ('COMPRAR','C6EFCE','006100'),('Sin datos','E7E6E6','808080')]:
