@@ -106,6 +106,11 @@ def decision_de(margen):
     if margen*100>=1:  return 'VALORAR'
     return 'NO COMPRAR'
 
+# Umbral anti-basura para precios de volumen: OcioStock mete valores fijos absurdos
+# (p.ej. 5.99 de volumen en un casco de 109.99). Un descuento por volumen REAL rara vez
+# baja del 50% del precio suelto; por debajo lo tratamos como dato basura y lo ignoramos.
+MIN_RATIO_LOTE = 0.5
+
 # ===== Lectura del catalogo del proveedor (misma logica que el escaner) =====
 def leer_proveedor(prov, marca, ruta):
     P=PERFILES[prov]
@@ -139,7 +144,9 @@ def leer_proveedor(prov, marca, ruta):
         vol=None
         if P.get('col_volumen'):
             mv=_mejor_volumen(row.get(P['col_volumen'],''))
-            if mv and pa and mv[1]<pa: vol={'uds':mv[0],'pa':round(mv[1],4)}
+            # solo si es un descuento REAL (por debajo del suelto pero no un valor basura absurdo)
+            if mv and pa and (pa*MIN_RATIO_LOTE) <= mv[1] < pa:
+                vol={'uds':mv[0],'pa':round(mv[1],4)}
         filas.append({'ean_in':ean_in,'core':core,'nombre':row.get(P['col_nombre'],''),
                       'marca':marca,'pa':pa,'es_chase':es_chase_ean(ean_in),
                       'variantes':variantes_ean(core),'volumen':vol})
