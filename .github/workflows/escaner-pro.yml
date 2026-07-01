@@ -1,0 +1,37 @@
+# ============================================================
+# Moloka - Escaner PRO en la nube (lee CSV del Visualizador de Keepa, CERO tokens)
+# Ubicacion: .github/workflows/escaner-pro.yml
+#
+# Corre moloka_escaner_pro_nube.py: lee del buzon informes/escaner_pro/ el Excel del
+# proveedor + los CSV del Visualizador (uno o varios por pais), FUNDE los CSV, compone
+# el Excel de siempre, lo deja en la Biblioteca (escaner_resultados) y actualiza la
+# memoria (escaner_memoria). No usa Keepa API -> no gasta tokens.
+#
+# >>> SIN RELOJ <<<  Solo cuando lo lanza el boton de la app.
+# ============================================================
+name: Moloka - Escaner Pro
+
+on:
+  workflow_dispatch:
+
+jobs:
+  escanear-pro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install supabase openpyxl pandas xlrd   # xlrd: catalogos .xls (OSMA)
+
+      - name: Ejecutar Escaner Pro
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python -u moloka_escaner_pro_nube.py
