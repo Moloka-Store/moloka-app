@@ -15,6 +15,45 @@ BASE = 'https://shop.dbline.it'
 LOGIN_URL = f'{BASE}/include/login_ajax.php'
 DOWNLOAD_URL = f'{BASE}/include/Servizi/listini_ajax.php'
 
+
+# Mapa cabeceras INGLES -> ITALIANO. DBLine exporta por servidor en ingles y por navegador
+# en italiano; el perfil del escaner usa los nombres italianos. Traducimos para que el
+# escaner lea igual venga como venga (sin tocar el escaner).
+_MAP_ITA = {
+    'Genre': 'Genere', 'Price List ID': 'ID Listino', 'Image Link': 'Link immagine',
+    'Code/Link': 'Codice/Link', 'Description': 'Descrizione', 'Notes': 'Note',
+    'Release date': 'Data uscita', 'Available': 'Disponibili', 'List Price (\u20ac)': 'Listino (\u20ac)',
+    'Discount 1 (%)': 'Sconto 1 (%)', 'Discount 2 (%)': 'Sconto 2 (%)', 'Price (\u20ac)': 'Prezzo (\u20ac)',
+    'VAT (%)': 'Iva (%)', 'Promo Expiration': 'Scadenza promo', 'Promo Price (\u20ac)': 'Prezzo promo (\u20ac)',
+    'Weight (gr)': 'Peso (gr)',
+}
+
+
+def _normalizar_cabeceras(cont):
+    import openpyxl, io as _io
+    wb = openpyxl.load_workbook(_io.BytesIO(cont))
+    ws = wb[wb.sheetnames[0]]
+    hdr = None
+    for r in range(1, 7):
+        vals = [str(ws.cell(row=r, column=c).value or '').strip() for c in range(1, ws.max_column + 1)]
+        if 'Publisher' in vals and 'EAN' in vals:
+            hdr = r; break
+    if hdr is None:
+        print('   AVISO: no encuentro la fila de cabecera; dejo el Excel tal cual.', flush=True)
+        return cont
+    cambiadas = 0
+    for c in range(1, ws.max_column + 1):
+        cell = ws.cell(row=hdr, column=c)
+        v = str(cell.value or '').strip()
+        if v in _MAP_ITA:
+            cell.value = _MAP_ITA[v]; cambiadas += 1
+    if cambiadas:
+        print(f'   Cabeceras traducidas ingles->italiano: {cambiadas} columnas (fila {hdr}).', flush=True)
+        out = _io.BytesIO(); wb.save(out); return out.getvalue()
+    print('   Cabeceras ya en italiano; no toco nada.', flush=True)
+    return cont
+
+
 def descargar_catalogo_dbline():
     USER, PASS = os.environ.get('DBLINE_USER'), os.environ.get('DBLINE_PASS')
     if not USER or not PASS:
@@ -66,6 +105,7 @@ def descargar_catalogo_dbline():
     wb = openpyxl.load_workbook(io.BytesIO(cont), read_only=True, data_only=True)
     ws = wb[wb.sheetnames[0]]
     print(f'   Excel VALIDO: hoja "{wb.sheetnames[0]}", ~{ws.max_row} filas | hojas: {wb.sheetnames}', flush=True)
+    cont = _normalizar_cabeceras(cont)   # ingles -> italiano para que el escaner lo lea
     return cont
 
 
