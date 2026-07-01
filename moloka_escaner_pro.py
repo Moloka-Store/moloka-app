@@ -36,7 +36,7 @@ PERFILES = {
                'sin_columna_stock':True},
     'OCIOSTOCK': {'tipo':'csv','sep':';','header':0,'col_marca':'marca','col_ean':'ean',
                   'col_nombre':'nombre','col_pa':'precio_distribuidores','col_stock':'stock_disponible',
-                  'col_volumen':'txt_precios_volumen'},   # -> pestana "Precio por lote"
+                  'col_volumen':'txt_precios_volumen','cajas_sufijo':'C6'},   # volumen + cajas (C6 = caja de 6)
     'STOCKLIST': {'tipo':'excel','sheet':'Sheet1','header':0,'col_marca':'Brand','col_ean':'CodeBars',
                   'col_nombre':'ItemName','col_pa':'EUR','col_stock':'Available'},
     # Proveedores de Claude-in-Chrome (formato variable) se anaden con deteccion tolerante.
@@ -121,7 +121,28 @@ def leer_proveedor(prov, marca, ruta):
     cM=P.get('col_marca')
     if marca and marca.strip().upper()!='TODAS' and cM:
         cat=cat[cat[cM].str.contains(marca, case=False, na=False)]
-    filas=[]; problematicos=[]
+    # ---- CAJAS (OcioStock mete la caja como "EAN base + C6"): coste el mas barato ----
+    import re as _re2
+    cajas={}
+    _suf=P.get('cajas_sufijo')
+    if _suf:
+        _patc=_re2.compile(r'^(\d{12,13})\s+'+_re2.escape(_suf)+r'$')
+        for _,row in cat.iterrows():
+            e=str(row.get(P['col_ean'],'')).strip()
+            mm=_patc.match(e)
+            if not mm: continue
+            base=mm.group(1)
+            pd_=_num(row.get(P['col_pa'],''))
+            mv=_mejor_volumen(row.get(P['col_volumen'],'')) if P.get('col_volumen') else None
+            cand=[]
+            if pd_ and pd_>0: cand.append((6, pd_))          # comprar 1 caja (6 ud)
+            if mv: cand.append((mv[0], mv[1]))               # tramo de volumen (uds, precio)
+            if not cand: continue
+            barato=min(cand, key=lambda x:x[1])              # el mas barato
+            if base not in cajas or barato[1]<cajas[base]['pa']:
+                cajas[base]={'pa':round(barato[1],4),'uds':barato[0],'nombre':row.get(P['col_nombre'],'')}
+
+    filas=[]; problematicos=[]; vistos=set()
     for _,row in cat.iterrows():
         if P.get('estados_ok') and str(row.get(P['col_estado'],'')).strip() not in P['estados_ok']:
             continue
@@ -147,9 +168,20 @@ def leer_proveedor(prov, marca, ruta):
             # solo si es un descuento REAL (por debajo del suelto pero no un valor basura absurdo)
             if mv and pa and (pa*MIN_RATIO_LOTE) <= mv[1] < pa:
                 vol={'uds':mv[0],'pa':round(mv[1],4)}
+        es_caja=False; uds_caja=None
+        if core in cajas and (pa is None or cajas[core]['pa'] < pa):
+            pa=cajas[core]['pa']; es_caja=True; uds_caja=cajas[core]['uds']; vol=None
+        vistos.add(core)
         filas.append({'ean_in':ean_in,'core':core,'nombre':row.get(P['col_nombre'],''),
                       'marca':marca,'pa':pa,'es_chase':es_chase_ean(ean_in),
-                      'variantes':variantes_ean(core),'volumen':vol})
+                      'variantes':variantes_ean(core),'volumen':vol,
+                      'es_caja':es_caja,'uds_caja':uds_caja})
+    # cajas cuyo individual NO esta (OcioStock solo vende la caja): usar el EAN base igual
+    for base,info in cajas.items():
+        if base in vistos: continue
+        filas.append({'ean_in':base,'core':base,'nombre':info['nombre'],'marca':marca,
+                      'pa':info['pa'],'es_chase':False,'variantes':variantes_ean(base),
+                      'volumen':None,'es_caja':True,'uds_caja':info['uds']})
     return filas, problematicos
 
 # ===== Lectura del CSV del Visualizador (indexado por CADA EAN; celdas multi-EAN) =====
@@ -270,7 +302,8 @@ def escanear_pro(prov, marca, ruta_excel, paises, rank_maximo=30000, sup=None):
                           'pa':pa,'volumen':f['volumen'],'ambiguo':(nvar and nvar>0),'nvar':nvar,
                           'en_bd':enbd,'paises':paises_calc,
                           'titulo_amz':base.get('titulo',''),
-                          'coincide':_coincide_titulo(f['nombre'], base.get('titulo',''))})
+                          'coincide':_coincide_titulo(f['nombre'], base.get('titulo','')),
+                          'es_caja':f.get('es_caja',False),'uds_caja':f.get('uds_caja')})
     registros.sort(key=lambda x:(x['paises'].get(dom_base,{}).get('margen')
                                  if x['paises'].get(dom_base,{}).get('margen') is not None else -9e9), reverse=True)
     return dict(registros=registros, doms=doms, dom_base=dom_base,
@@ -281,7 +314,7 @@ def escanear_pro(prov, marca, ruta_excel, paises, rank_maximo=30000, sup=None):
 COLS=['Nombre','EAN','ASIN','Marca','PA (€)','País','Rank actual','Rank 90d','Vendidos/mes',
       'Precio venta (€)','Canal BB','Nº ofertas','% Comisión',
       'Com. Amazon (€)','Fee Logística (€)','Almacén (€)','Promo activa',
-      'Beneficio (€)','ROI','Margen','Decisión','En mi BD','EAN ambiguo','Amazon (título)','Coincide']
+      'Beneficio (€)','ROI','Margen','Decisión','En mi BD','EAN ambiguo','Amazon (título)','Coincide','Compra']
 COLS_LOTE=['Nombre','EAN','ASIN','Marca','País','Precio venta (€)','PA suelto (€)','PA lote (€)',
            'Ahorro/ud (€)','Beneficio lote (€)','Margen lote','Decisión lote','Uds. para ese precio']
 def _cf_fill(h): return PatternFill(start_color=h, end_color=h, fill_type='solid')
@@ -310,7 +343,8 @@ def escribir_excel(res, ruta_salida):
                 f"={L['Beneficio (€)']}{r}/{L['PA (€)']}{r}" if (div and d.get('precio') and pct is not None and item['pa']) else None,
                 f"={L['Beneficio (€)']}{r}/{L['Precio venta (€)']}{r}" if (div and d.get('precio') and pct is not None) else None,
                 d.get('decision'), item.get('en_bd',''), amb,
-                item.get('titulo_amz',''), item.get('coincide','?')])
+                item.get('titulo_amz',''), item.get('coincide','?'),
+                (f"CAJA x{item['uds_caja']}" if item.get('es_caja') else 'individual')])
             cell=ws.cell(row=r, column=3)
             cell.hyperlink=f"https://www.{DOM_AMZ[dom]}/dp/{item['asin']}"
             cell.font=Font(color='0563C1', underline='single')
@@ -321,7 +355,7 @@ def escribir_excel(res, ruta_salida):
         fmt(nm,'0.00')
     fmt('% Comisión','0.00%'); fmt('ROI','0.0%'); fmt('Margen','0.0%')
     for c in range(1,len(COLS)+1): ws.cell(row=1,column=c).font=Font(bold=True)
-    for nm,w in {'Nombre':50,'EAN':14,'ASIN':12,'Marca':12,'En mi BD':20,'Decisión':15,'Amazon (título)':50,'Coincide':11}.items():
+    for nm,w in {'Nombre':50,'EAN':14,'ASIN':12,'Marca':12,'En mi BD':20,'Decisión':15,'Amazon (título)':50,'Coincide':11,'Compra':14}.items():
         ws.column_dimensions[L[nm]].width=w
     ws.freeze_panes='A2'
     if last>=2:
