@@ -35,6 +35,47 @@ if not regla.get('activo'):
     print("TCG esta desactivado en reglas_director. Nada que hacer."); sys.exit(0)
 print(f">>> Regla TCG cargada. Tipo de pasada: {TIPO} -> modo escaner '{MODO}'.")
 
+# 1.5) ¿Reanudacion de un escaneo a medias? (CONGELADO DE CATALOGO)
+# Si el escaner se corto y se esta reanudando, quedan checkpoints FRESCOS en
+# escaner_ckpt/. En ese caso NO re-descargamos el catalogo: lo dejamos "congelado"
+# tal cual estaba, para que el _ckpt_id no cambie y la caja de rank se reconozca.
+# (Este era el bug del salto 1->2: al re-descargar, si TCG habia cambiado su catalogo
+# a media tarde, cambiaba el id y se re-pagaba TODA la Fase 1.) Un checkpoint viejo
+# (>7h) se considera huerfano de un escaneo abandonado: se ignora y se limpia.
+from datetime import datetime, timezone
+_frescos, _viejos = [], []
+try:
+    _ck = sb.storage.from_(BUCKET).list('escaner_ckpt') or []
+    for o in _ck:
+        nm = o.get('name', '')
+        if not (nm.startswith('_ckpt_') or nm.startswith('_rankcache_')):
+            continue
+        _ts = o.get('updated_at') or o.get('created_at')
+        es_viejo = True
+        if _ts:
+            try:
+                _dt = datetime.fromisoformat(str(_ts).replace('Z', '+00:00'))
+                _horas = (datetime.now(timezone.utc) - _dt).total_seconds() / 3600
+                es_viejo = _horas >= 7
+            except Exception:
+                es_viejo = False  # sin fecha fiable: por prudencia, tratar como fresco
+        (_viejos if es_viejo else _frescos).append(nm)
+except Exception as e:
+    print("AVISO comprobando escaner_ckpt/:", e)
+
+if _frescos:
+    print(f">>> Reanudacion detectada: checkpoint fresco en escaner_ckpt/ ({_frescos}).")
+    print(">>> NO re-descargo el catalogo: lo dejo CONGELADO para no romper la caja de rank.")
+    print(">>> PREP OK (reanudacion). El workflow seguira con: actualizar web -> escanear.")
+    sys.exit(0)
+
+if _viejos:
+    print(f">>> Limpio {len(_viejos)} checkpoint(s) huerfano(s) viejo(s) (>7h): {_viejos}")
+    try:
+        sb.storage.from_(BUCKET).remove([f'escaner_ckpt/{n}' for n in _viejos])
+    except Exception as e:
+        print("AVISO limpiando huerfanos:", e)
+
 # 2) Descargar el Excel de TCG (login PrestaShop + boton)
 BASE = 'https://tcgfactory.com'
 LOGIN_URLS = [f'{BASE}/es/iniciar-sesion', f'{BASE}/es/mi-cuenta']
