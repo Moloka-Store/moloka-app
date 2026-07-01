@@ -884,6 +884,13 @@
       <div><div class="page-title">🔍 Escanear proveedor</div><div class="page-sub">Busca oportunidades rentables en un catálogo</div></div>
     </div>
 
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      <button id="esctab-biblioteca" class="btn btn-ghost btn-sm" onclick="escSubTab('biblioteca')">📚 Biblioteca</button>
+      <button id="esctab-api"        class="btn btn-primary btn-sm" onclick="escSubTab('api')">🔑 Escáner API</button>
+      <button id="esctab-pro"        class="btn btn-ghost btn-sm" onclick="escSubTab('pro')">⚡ Escáner Pro</button>
+    </div>
+
+    <div id="esc-sub-api">
     <div class="info-box" style="margin-bottom:16px;border-left:3px solid #2e7d32">
       🔍 Elige el proveedor y sube su catálogo (para <strong>MOLOKA</strong> no hace falta: lee tu propio inventario). El escaneo corre en la nube y deja el Excel en la biblioteca de abajo. El modo <strong>«todo»</strong> puede tardar (hasta ~3-4 h en TCG); el <strong>«nuevos»</strong> son minutos.
     </div>
@@ -937,11 +944,76 @@
       <button class="btn btn-ghost" onclick="cargarBibliotecaEscaneos()">🔄 Refrescar biblioteca</button>
       <div id="esc-log" style="margin-top:14px"></div>
     </div>
+    </div><!-- /esc-sub-api -->
 
+    <div id="esc-sub-biblioteca" style="display:none">
     <div class="card" style="margin-top:16px">
       <div class="inv-field-label" style="margin-bottom:8px">📚 Biblioteca de escaneos</div>
       <div id="esc-biblioteca"><span style="color:#888780">Cargando…</span></div>
     </div>
+    </div><!-- /esc-sub-biblioteca -->
+
+    <div id="esc-sub-pro" style="display:none">
+      <div class="info-box" style="margin-bottom:16px;border-left:3px solid #7c3aed">
+        ⚡ <strong>Escáner Pro</strong> — evalúa catálogos grandes con datos del Visualizador de Keepa, <strong>sin gastar tokens</strong>.<br>
+        <strong>Paso 1:</strong> sube el catálogo y genera la(s) lista(s) de EAN (de 5.000 en 5.000). <strong>Paso 2:</strong> en Keepa exporta un CSV por país y súbelos aquí (puedes subir varios por país; el robot los funde y saca <strong>un solo Excel</strong>).
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="form-row">
+          <div class="input-group">
+            <div class="input-label">Proveedor</div>
+            <select class="input" id="pro-proveedor" onchange="proCargarMarcas()">
+            <option value="TCG">TCG</option>
+            <option value="BEMS">BEMS</option>
+            <option value="DBLINE">DBLine</option>
+            <option value="OSMA">OSMA</option>
+            <option value="BIEDRO">bie-dro</option>
+            <option value="OCIOSTOCK">OcioStock</option>
+            <option value="STOCKLIST">Stocklist (nórdico)</option>
+            <option value="DINOTOYS">Dinotoys</option>
+            <option value="ZENTRADA">Zentrada</option>
+            <option value="HEO">HEO</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <div class="input-label">Marca</div>
+            <select class="input" id="pro-marca"><option value="TODAS">TODAS — sube el catálogo para ver marcas</option></select>
+          </div>
+          <div class="input-group">
+            <div class="input-label">Rank máximo</div>
+            <input class="input" id="pro-rank" type="number" value="30000" min="1">
+          </div>
+        </div>
+        <div class="input-group" style="margin-top:8px">
+          <div class="input-label">Países a evaluar (marca solo los que vayas a exportar de Keepa)</div>
+          <label style="margin-right:18px;cursor:pointer"><input type="checkbox" class="pro-pais" value="ES" checked onchange="proRenderZonas()"> ES</label>
+          <label style="margin-right:18px;cursor:pointer"><input type="checkbox" class="pro-pais" value="IT" onchange="proRenderZonas()"> IT</label>
+          <label style="cursor:pointer"><input type="checkbox" class="pro-pais" value="FR" onchange="proRenderZonas()"> FR</label>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="inv-field-label" style="margin-bottom:8px">1) Catálogo del proveedor → generar la(s) lista(s) de EAN</div>
+        <label id="pro-drop" style="display:block;border:2px dashed #b4b2a9;border-radius:10px;padding:22px;text-align:center;cursor:pointer">
+          <input type="file" id="pro-file" style="display:none" onchange="proCargarMarcas()">
+          <div style="color:#888780">Arrastra aquí el catálogo o haz clic para elegir</div>
+          <div class="inv-field-label" id="pro-sel" style="margin-top:6px">ningún fichero seleccionado</div>
+        </label>
+        <button class="btn btn-sm" style="margin-top:10px" onclick="proGenerarEANs()">📄 Generar lista(s) de EAN</button>
+        <div id="pro-eans-log" style="margin-top:10px"></div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="inv-field-label" style="margin-bottom:8px">2) CSV del Visualizador de Keepa (uno o varios por país)</div>
+        <div id="pro-csv-zonas"><span style="color:#888780;font-size:13px">Marca al menos un país arriba.</span></div>
+      </div>
+
+      <div class="card">
+        <button class="btn" id="pro-go" onclick="lanzarEscaneoPro()">⚡ Correr Escáner Pro</button>
+        <div id="pro-log" style="margin-top:14px"></div>
+      </div>
+    </div><!-- /esc-sub-pro -->
   </div>
 
   <div class="page" id="page-funkos-tcg">
@@ -1449,7 +1521,7 @@ function showPage(id, el) {
   if (id === 'envios-historial') cargarEnviosHistorial();
   if (id === 'movimientos') cargarMovimientos();
   if (id === 'actualizar') initActualizar();
-  if (id === 'escanear') initEscanear();
+  if (id === 'escanear') { initEscanear(); escSubTab('api'); }
   if (id === 'fabrica') fabSubTab('nueva');
 }
 
@@ -2339,6 +2411,235 @@ function escPoblarMarcasBems(arr) {
     html += '<option value="' + esc(idman) + '">' + esc(nombre) + ' (' + n + ')</option>';
   }
   sm.innerHTML = html; sm.disabled = false;
+}
+
+// ============================================================
+// ESCÁNER PROVEEDOR — sub-pestañas (Biblioteca / API / Pro)
+// ============================================================
+function escSubTab(cual) {
+  ['biblioteca', 'api', 'pro'].forEach(t => {
+    const el = document.getElementById('esc-sub-' + t);
+    if (el) el.style.display = (t === cual) ? 'block' : 'none';
+    const b = document.getElementById('esctab-' + t);
+    if (b) b.className = 'btn btn-sm ' + (t === cual ? 'btn-primary' : 'btn-ghost');
+  });
+  if (cual === 'biblioteca') cargarBibliotecaEscaneos();
+  if (cual === 'pro') proRenderZonas();
+}
+
+const PRO_CHUNK = 5000;   // Keepa recomienda listas <= 5.000
+
+// Saca los EAN del proveedor+marca elegidos (misma lectura por proveedor que escLeerMarcasFichero)
+async function escExtraerEANs(file, prov, marca) {
+  const buf = await file.arrayBuffer();
+  const eans = [];
+  const num = (x) => { const v = parseFloat(String(x == null ? '' : x).replace(',', '.')); return isNaN(v) ? null : v; };
+  const esEan = (s) => { s = String(s == null ? '' : s).trim(); return /^\d+$/.test(s) && (s.length === 12 || s.length === 13); };
+  const push = (e) => { e = String(e == null ? '' : e).trim(); if (esEan(e)) eans.push(e); };
+  const marcaOk = (m) => (marca === 'TODAS' || String(m || '').toLowerCase().includes(marca.toLowerCase()));
+
+  if (prov === 'OSMA') {
+    const wb = XLSX.read(buf, { type: 'array' });
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+    const stk = (x) => { let s = String(x == null ? '' : x).trim(); if (!s) return null; s = s.replace(/^>/, '').trim().replace(/\./g, ''); const v = parseFloat(s); return isNaN(v) ? null : v; };
+    for (const r of rows) { if (stk(r['verf\u00fcgbar']) > 0) push(r['EAN 1']); }
+    return eans;
+  }
+  if (prov === 'BIEDRO') {
+    const wb = XLSX.read(buf, { type: 'array' });
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { range: 3, defval: '' });
+    for (const r of rows) push(r['St\u00fcck-EAN']);
+    return eans;
+  }
+  if (prov === 'OCIOSTOCK') {
+    const txt = new TextDecoder('utf-8').decode(buf).replace(/^\ufeff/, '');
+    const wb = XLSX.read(txt, { type: 'string', FS: ';' });
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+    for (const r of rows) { if (!(num(r['stock_disponible']) > 0)) continue; if (marcaOk(r['marca'])) push(r['ean']); }
+    return eans;
+  }
+  if (prov === 'STOCKLIST') {
+    const wb = XLSX.read(buf, { type: 'array' });
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets['Sheet1'] || wb.Sheets[wb.SheetNames[0]], { defval: '' });
+    for (const r of rows) { if (!(num(r['Available']) > 0)) continue; if (marcaOk(r['Brand'])) push(r['CodeBars']); }
+    return eans;
+  }
+  if (prov === 'ZENTRADA' || prov === 'HEO' || prov === 'DINOTOYS') {
+    let rows = [];
+    const bytes = new Uint8Array(buf);
+    const esXlsx = bytes.length >= 2 && bytes[0] === 0x50 && bytes[1] === 0x4B;
+    if (esXlsx) { const wb = XLSX.read(buf, { type: 'array' }); rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }); }
+    else {
+      const txt = new TextDecoder('utf-8').decode(buf).replace(/^\ufeff/, '');
+      const wb = XLSX.read(txt, { type: 'string' });
+      rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+    }
+    if (!rows.length) return eans;
+    const cols = Object.keys(rows[0]); const low = {}; cols.forEach(c => low[c] = String(c).trim().toLowerCase());
+    let colEan = cols.find(c => ['ean', 'gtin', 'barcode', 'upc', 'c\u00f3digo de barras', 'codigo de barras'].some(k => low[c].includes(k)));
+    if (!colEan) { let best = null, bs = 0; for (const c of cols) { const sc = rows.filter(r => esEan(r[c])).length / rows.length; if (sc > bs) { best = c; bs = sc; } } if (bs >= 0.30) colEan = best; }
+    const colMarca = cols.find(c => ['marca', 'brand', 'licencia', 'license', 'licens', 'fabricante', 'manufacturer', 'publisher', 'fabricant'].some(k => low[c].includes(k)));
+    for (const r of rows) { if (colMarca && !marcaOk(r[colMarca])) continue; if (colEan) push(r[colEan]); }
+    return eans;
+  }
+  if (prov === 'BEMS') {
+    const txt = new TextDecoder('utf-8').decode(buf);
+    const lineas = txt.split(/\r?\n/).filter(l => l.trim());
+    if (!lineas.length) return eans;
+    const head = lineas[0].split(';').map(s => s.trim());
+    const iM = head.indexOf('FABRICANT'), iS = head.indexOf('STOCK'), iE = head.indexOf('EAN');
+    for (let k = 1; k < lineas.length; k++) {
+      const c = lineas[k].split(';');
+      if (iS >= 0) { const s = num(c[iS]); if (!(s > 0)) continue; }
+      if (iM >= 0 && !marcaOk(c[iM])) continue;
+      if (iE >= 0) push(c[iE]);
+    }
+    return eans;
+  }
+  // TCG y DBLINE (Excel)
+  const wb = XLSX.read(buf, { type: 'array' });
+  let rows, colM, colS, colE = null, okE = null, colEAN;
+  if (prov === 'TCG') {
+    rows = XLSX.utils.sheet_to_json(wb.Sheets['Cat\u00e1logo'] || wb.Sheets[wb.SheetNames[0]], { defval: '' });
+    colM = 'Marca'; colS = 'Stock'; colE = 'Estado producto'; okE = ['Disponible', 'Oferta', 'Saldo']; colEAN = 'EAN';
+  } else { // DBLINE: cabecera fila 3
+    rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { range: 2, defval: '' });
+    colM = 'Publisher'; colS = 'Disponibili'; colEAN = 'EAN';
+  }
+  for (const r of rows) {
+    if (colE && okE && !okE.includes(String(r[colE] || '').trim())) continue;
+    if (colS) { const s = num(r[colS]); if (!(s > 0)) continue; }
+    if (!marcaOk(r[colM])) continue;
+    push(r[colEAN]);
+  }
+  return eans;
+}
+
+// Al cambiar proveedor/fichero del Pro: leer marcas (reutiliza escLeerMarcasFichero) y rellenar pro-marca
+async function proCargarMarcas() {
+  const prov = document.getElementById('pro-proveedor').value;
+  const file = (document.getElementById('pro-file').files || [])[0];
+  const sel = document.getElementById('pro-marca');
+  if (!file) return;
+  document.getElementById('pro-sel').textContent = file.name;
+  try {
+    const marcas = await escLeerMarcasFichero(file, prov);
+    const arr = [...marcas.entries()].sort((a, b) => b[1] - a[1]);
+    const total = arr.reduce((s, [, n]) => s + n, 0);
+    sel.innerHTML = '<option value="TODAS">TODAS (' + total + ')</option>' +
+      arr.map(([m, n]) => '<option value="' + m.replace(/"/g, '&quot;') + '">' + m + ' (' + n + ')</option>').join('');
+  } catch (e) {
+    sel.innerHTML = '<option value="TODAS">TODAS — no pude leer marcas</option>';
+  }
+}
+
+// Paso 1: genera la(s) lista(s) de EAN de 5.000 en 5.000 y las descarga
+async function proGenerarEANs() {
+  const prov = document.getElementById('pro-proveedor').value;
+  const marca = (document.getElementById('pro-marca').value || 'TODAS').trim() || 'TODAS';
+  const file = (document.getElementById('pro-file').files || [])[0];
+  const log = document.getElementById('pro-eans-log');
+  if (!file) { log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">\u26a0\ufe0f Sube el catálogo primero.</div>'; return; }
+  log.innerHTML = '<div class="info-box">Leyendo el catálogo…</div>';
+  try {
+    let eans = await escExtraerEANs(file, prov, marca);
+    eans = [...new Set(eans)];
+    if (!eans.length) { log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">No encontré EAN para esa marca.</div>'; return; }
+    const trozos = [];
+    for (let i = 0; i < eans.length; i += PRO_CHUNK) trozos.push(eans.slice(i, i + PRO_CHUNK));
+    let html = '<div class="info-box" style="border-left:3px solid #2e7d32">\u2705 ' + eans.length + ' EAN en ' + trozos.length + ' lista(s). Descarga cada una y súbela al Visualizador de Keepa (cambiando el marketplace si escaneas varios países):</div><div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">';
+    trozos.forEach((t, i) => {
+      const url = URL.createObjectURL(new Blob([t.join('\n')], { type: 'text/plain' }));
+      const nom = prov + '_' + marca.replace(/[^A-Za-z0-9]/g, '') + '_EAN_' + (i + 1) + 'de' + trozos.length + '.txt';
+      html += '<a class="btn btn-sm" href="' + url + '" download="' + nom + '">\u2b07\ufe0f Lista ' + (i + 1) + ' (' + t.length + ')</a>';
+    });
+    log.innerHTML = html + '</div>';
+  } catch (e) {
+    log.innerHTML = '<div class="info-box" style="border-left:3px solid #b00020">\u26a0\ufe0f Error leyendo el catálogo: ' + e.message + '</div>';
+  }
+}
+
+// Dibuja una zona de subida de CSV por cada país marcado
+function proRenderZonas() {
+  const cont = document.getElementById('pro-csv-zonas');
+  if (!cont) return;
+  const paises = [...document.querySelectorAll('.pro-pais:checked')].map(c => c.value);
+  if (!paises.length) { cont.innerHTML = '<span style="color:#888780;font-size:13px">Marca al menos un país arriba.</span>'; return; }
+  cont.innerHTML = paises.map(p =>
+    '<div style="margin-bottom:10px">' +
+    '<div class="inv-field-label" style="margin-bottom:4px">CSV de ' + p + ' (puedes seleccionar varios a la vez)</div>' +
+    '<input type="file" class="pro-csv" data-pais="' + p + '" accept=".csv" multiple>' +
+    '</div>').join('');
+}
+
+// Paso 2 + Correr: sube el catálogo + los CSV al buzón y dispara el robot Pro
+async function lanzarEscaneoPro() {
+  const prov = document.getElementById('pro-proveedor').value;
+  const marca = (document.getElementById('pro-marca').value || 'TODAS').trim() || 'TODAS';
+  const rank = parseInt(document.getElementById('pro-rank').value || '30000', 10);
+  const file = (document.getElementById('pro-file').files || [])[0];
+  const log = document.getElementById('pro-log');
+  const go = document.getElementById('pro-go');
+  const csvPorPais = {};
+  [...document.querySelectorAll('.pro-csv')].forEach(z => { const fs = [...(z.files || [])]; if (fs.length) csvPorPais[z.dataset.pais] = fs; });
+  if (prov !== 'MOLOKA' && !file) { log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">\u26a0\ufe0f Sube el catálogo del proveedor.</div>'; return; }
+  if (!Object.keys(csvPorPais).length) { log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">\u26a0\ufe0f Sube al menos un CSV de Keepa.</div>'; return; }
+  go.disabled = true;
+  log.innerHTML = '<div class="info-box">Preparando el Escáner Pro de ' + prov + '…</div>';
+  try {
+    try {
+      const { data: viejos } = await db.storage.from('informes').list('escaner_pro', { limit: 200 });
+      const borrar = (viejos || []).filter(o => !o.name.startsWith('.')).map(o => 'escaner_pro/' + o.name);
+      if (borrar.length) await db.storage.from('informes').remove(borrar);
+    } catch (e) {}
+    const gz = async (f, nombre) => {
+      try {
+        if (typeof CompressionStream !== 'undefined') {
+          const flujo = f.stream().pipeThrough(new CompressionStream('gzip'));
+          const b = await new Response(flujo).arrayBuffer();
+          return { blob: new Blob([b], { type: 'application/gzip' }), nombre: nombre + '.gz' };
+        }
+      } catch (e) {}
+      return { blob: f, nombre: nombre };
+    };
+    let catNombre = '';
+    if (prov !== 'MOLOKA' && file) {
+      const g = await gz(file, file.name);
+      catNombre = g.nombre;
+      log.innerHTML = '<div class="info-box">Subiendo el catálogo…</div>';
+      const { error } = await db.storage.from('informes').upload('escaner_pro/' + catNombre, g.blob, { upsert: true });
+      if (error) throw new Error('subiendo el catálogo: ' + error.message);
+    }
+    const csvNombres = {};
+    let idx = 0;
+    for (const [pais, fs] of Object.entries(csvPorPais)) {
+      csvNombres[pais] = [];
+      for (const f of fs) {
+        idx++;
+        const g = await gz(f, pais + '_' + idx + '_' + f.name);
+        log.innerHTML = '<div class="info-box">Subiendo CSV ' + idx + '…</div>';
+        const { error } = await db.storage.from('informes').upload('escaner_pro/' + g.nombre, g.blob, { upsert: true });
+        if (error) throw new Error('subiendo CSV ' + f.name + ': ' + error.message);
+        csvNombres[pais].push(g.nombre);
+      }
+    }
+    const recado = { proveedor: prov, marca: marca, rank_maximo: rank, catalogo: catNombre, csv_paises: csvNombres, fecha: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(recado)], { type: 'application/json' });
+    const { error: e2 } = await db.storage.from('informes').upload('escaner_pro/_solicitud_pro.json', blob, { upsert: true });
+    if (e2) throw new Error('dejando el recado: ' + e2.message);
+    const resp = await fetch('/api/disparar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ secreto: DISPARO_SECRET, workflow: 'escaner-pro.yml' }) });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      log.innerHTML = '<div class="info-box" style="border-left:3px solid #2e7d32">\u2705 Escáner Pro de ' + prov + ' lanzado. El robot funde los CSV y deja el Excel en la Biblioteca (unos minutos). Míralo en la pestaña 📚 Biblioteca.</div>';
+    } else if (resp.status === 409) {
+      log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">\u23f3 ' + (data.error || 'Ya hay un Pro en marcha.') + '</div>';
+    } else {
+      log.innerHTML = '<div class="info-box" style="border-left:3px solid #b00020">\u26a0\ufe0f No se pudo lanzar: ' + (data.error || ('HTTP ' + resp.status)) + '.</div>';
+    }
+  } catch (e) {
+    log.innerHTML = '<div class="info-box" style="border-left:3px solid #b00020">\u26a0\ufe0f Error: ' + e.message + '</div>';
+  }
+  go.disabled = false;
 }
 
 async function lanzarEscaneo() {
