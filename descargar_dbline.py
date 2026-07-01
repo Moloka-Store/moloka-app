@@ -19,7 +19,10 @@ def descargar_catalogo_dbline():
     USER, PASS = os.environ.get('DBLINE_USER'), os.environ.get('DBLINE_PASS')
     if not USER or not PASS:
         raise RuntimeError('Faltan los secrets DBLINE_USER / DBLINE_PASS.')
-    s = cr.Session(impersonate='chrome120')
+    # verify=False: DBLine tiene la cadena SSL mal montada (le falta el intermedio) y el
+    # runner no puede validar su certificado (curl error 60). La conexion sigue cifrada por
+    # HTTPS; solo nos saltamos la validacion de la cadena, que es lo que su servidor rompe.
+    s = cr.Session(impersonate='chrome120', verify=False)
     ajax = {'X-Requested-With': 'XMLHttpRequest', 'Origin': BASE, 'Referer': BASE + '/'}
 
     # 0) Home -> cookies de sesion iniciales
