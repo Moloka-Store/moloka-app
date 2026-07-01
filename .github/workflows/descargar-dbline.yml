@@ -1,0 +1,22 @@
+# Prueba: descargar el catalogo de DBLine por servidor (login + POST). Manual.
+name: Moloka - Descargar DBLine (prueba)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  descargar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Instalar dependencias
+        run: pip install curl_cffi openpyxl
+      - name: Descargar DBLine
+        env:
+          DBLINE_USER: ${{ secrets.DBLINE_USER }}
+          DBLINE_PASS: ${{ secrets.DBLINE_PASS }}
+        run: python -u descargar_dbline.py
