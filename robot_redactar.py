@@ -65,7 +65,7 @@ SALIDA: SOLO un JSON valido, sin texto alrededor:
 {"numero_leido":"511 o vacio si no se ve","categoria":"una de la lista","fandom":"...","slug":"...","nombre_corto":"...","miravia_titulo":"...","miravia_desc":"...(HTML <b> <br>)...","web_titulo":"...","web_desc":"...(narrativa, distinta de miravia, cero frases repetidas)..."}
 
 miravia_desc: encabezado -> intro del momento iconico -> caracteristicas (check) -> bloque rareza SI aplica -> envio/garantia -> cierre.
-web_desc: arranca por la busqueda real ("?Buscas...?") -> prosa con cine -> bloque rareza + categoria SI aplica -> envio Espana -> datos duros. NUNCA repitas frases entre las dos."""
+web_desc: arranca por la busqueda real ("?Buscas...?") -> prosa con cine -> bloque rareza + categoria SI aplica -> envio Espana -> datos duros. NUNCA repitas frases entre las dos. Ademas, para que los asistentes de IA (ChatGPT, Gemini, Perplexity...) puedan CITARTE bien, responde de forma clara y directa -sin inventar- a lo que un comprador preguntaria: que es una figura OFICIAL de Funko, nueva y sin abrir, que se envia desde Espana con embalaje protegido, y si es chase/vaulted/exclusivo cuando aplique. Cierra con una frase de datos autocontenida y citable (tamano aprox. 10 cm, vinilo, oficial, envio desde Espana), integrada con naturalidad, sin que parezca una ficha tecnica fria."""
 
 CATEGORIAS = ["Anime y Manga", "Películas y TV", "Animación",
               "Cómics y Superhéroes", "Terror", "Videojuegos", "Música", "Deportes"]
