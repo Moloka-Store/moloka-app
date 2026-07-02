@@ -1,0 +1,29 @@
+name: Moloka - HEO catalogo completo
+
+on:
+  workflow_dispatch:
+
+jobs:
+  catalogo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Instalar dependencias
+        run: pip install requests
+      - name: Descargar catalogo HEO completo (+ EANs en tandas)
+        env:
+          HEO_USER: ${{ secrets.HEO_USER }}
+          HEO_PASS: ${{ secrets.HEO_PASS }}
+          HEO_FULL: '1'
+        run: python -u descargar_heo.py
+      - name: Subir catalogo + EANs como artefactos
+        uses: actions/upload-artifact@v4
+        with:
+          name: heo-catalogo
+          path: |
+            heo_catalogo.csv
+            heo_eans_*.txt
+          retention-days: 7
