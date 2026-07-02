@@ -36,9 +36,19 @@ def probe(nombre, url, params=None):
             for k, v in data.items():
                 if isinstance(v, list):
                     print(f"  '{k}': lista de {len(v)} items.")
-                    if v:
+                    if v and isinstance(v[0], dict):
+                        it = v[0]
+                        print("   CLAVES del item:", list(it.keys()))
+                        # Campos que necesito ver ENTEROS (EAN, marca, categoria, imagen, flags):
+                        for campo in ('barcodes', 'manufacturers', 'categories', 'media',
+                                      'isEndOfLife', 'preorder', 'availabilityState',
+                                      'availability', 'availableToOrder', 'inStock',
+                                      'discountedPricePerUnit', 'basePricePerUnit'):
+                            if campo in it:
+                                print(f"   >> {campo}: " + json.dumps(it[campo], ensure_ascii=False)[:1200])
+                    elif v:
                         print("   EJEMPLO item[0]:")
-                        print("   " + json.dumps(v[0], indent=1, ensure_ascii=False)[:2600])
+                        print("   " + json.dumps(v[0], ensure_ascii=False)[:1200])
                 elif isinstance(v, dict):
                     print(f"  '{k}' (dict): " + json.dumps(v, ensure_ascii=False)[:500])
                 else:
