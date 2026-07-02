@@ -53,8 +53,9 @@ def probe(nombre, url, params=None):
 
 
 # Limites pequenos (probamos varios nombres de parametro a la vez; los que no
-# valgan, la API los ignora). Solo queremos ver la forma, no bajar el catalogo.
-peq = {'size': 2, 'limit': 2, 'page': 0, 'pageSize': 2}
+# valgan, la API los ignora). OJO: la paginacion de heo empieza en 1, no en 0.
+# Solo queremos ver la forma, no bajar el catalogo.
+peq = {'size': 2, 'limit': 2, 'page': 1, 'pageSize': 2}
 probe("PRODUCTS",       f"{BASE}/catalog/products",       peq)
 probe("PRICES",         f"{BASE}/catalog/prices",         peq)
 probe("AVAILABILITIES", f"{BASE}/catalog/availabilities", peq)
