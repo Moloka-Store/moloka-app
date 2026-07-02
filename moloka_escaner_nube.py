@@ -1334,3 +1334,42 @@ else:
     print('El Excel no se subio: dejo el buzon del escaner intacto para reintentar.')
 
 print("=== ESCANER FIN ===")
+
+# ============================================================
+# AVISO TELEGRAM: chollos de la pasada (productos COMPRAR). Se dispara SOLO si el
+# workflow pasa TELEGRAM_TOKEN/CHAT_ID en el paso de escaneo (o sea, en los directores
+# que quieran aviso: DBLine, OcioStock). TCG no las pasa aqui -> no duplica su aviso.
+# Envuelto en try/except: si Telegram falla, la corrida ya termino igual.
+# ============================================================
+try:
+    _tg_token = os.environ.get('TELEGRAM_TOKEN')
+    _tg_chat  = os.environ.get('TELEGRAM_CHAT_ID')
+    if _tg_token and _tg_chat:
+        _compras = []
+        for _it in registros:
+            _mejor = None
+            for _dom, _d in (_it.get('_paises_calc') or {}).items():
+                if _d.get('decision') == 'COMPRAR' and _d.get('margen') is not None:
+                    if _mejor is None or _d['margen'] > _mejor[1]:
+                        _mejor = (_dom, _d['margen'], _d.get('precio'))
+            if _mejor:
+                _compras.append((_it, _mejor))
+        if _compras:
+            _lineas = [f"🟢 <b>Director {PROVEEDOR}</b> ({MODO}): {len(_compras)} para COMPRAR"]
+            for _it, (_dom, _mg, _pv) in _compras[:20]:
+                _nom = str(_it.get('nombre') or '')[:45]
+                _pvs = f"{_pv:.2f}€" if _pv else "s/precio"
+                _lineas.append(f"• {_nom} — {_mg*100:.0f}% — {_pvs} ({_dom}) — {_it.get('marca','')}")
+            if len(_compras) > 20:
+                _lineas.append(f"…y {len(_compras)-20} más (mira el Excel de la Biblioteca).")
+            import requests as _rq_tg
+            _rq_tg.post(f"https://api.telegram.org/bot{_tg_token}/sendMessage",
+                        data={'chat_id': _tg_chat, 'text': "\n".join(_lineas),
+                              'parse_mode': 'HTML', 'disable_web_page_preview': 'true'}, timeout=20)
+            print(f">>> Telegram enviado: {len(_compras)} COMPRAR.")
+        else:
+            print(">>> Telegram: 0 COMPRAR en esta pasada -> no se envia aviso.")
+    else:
+        print(">>> Telegram: sin claves en este paso -> no se envia (normal en TCG o app).")
+except Exception as _e_tg:
+    print("AVISO Telegram (no se envio, la corrida ya termino igual):", _e_tg)
