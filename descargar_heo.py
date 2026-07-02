@@ -92,6 +92,27 @@ def _categoria(prod):
     return _trad(cs[0].get('translations')) if (cs and isinstance(cs[0], dict)) else ''
 
 
+def _amt(d):
+    """amount de un dict de precio {amount, currencyIsoCode}, o None."""
+    if isinstance(d, dict):
+        v = d.get('amount')
+        try:
+            return float(str(v).replace(',', '.'))
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _campana(pr):
+    """Nombre/id de la campana si la hay, o '' si no."""
+    c = pr.get('campaign')
+    if not c:
+        return ''
+    if isinstance(c, dict):
+        return str(c.get('name') or c.get('title') or c.get('id') or 'SI')
+    return str(c)
+
+
 def descargar_catalogo_heo(max_paginas=None):
     """Baja y cruza los 3 endpoints. Devuelve lista de dicts (una fila por producto CON EAN)."""
     print(">>> Bajando PRODUCTS...", flush=True)
@@ -111,8 +132,16 @@ def descargar_catalogo_heo(max_paginas=None):
         pn = prod.get('productNumber')
         pr = precios.get(pn) or {}
         av = dispo.get(pn) or {}
-        dpu = pr.get('discountedPricePerUnit') or pr.get('basePricePerUnit') or {}
-        # Servible = se puede pedir (aunque sea fin de vida, si hay stock: decision de Fernando).
+        # Precios: base (estable), discounted (lo que pagas hoy, con promo), descuento y campana.
+        base  = _amt(pr.get('basePricePerUnit'))
+        disc  = _amt(pr.get('discountedPricePerUnit'))
+        dto   = _amt(pr.get('retailerProductDiscount'))
+        strike = _amt(pr.get('strikePricePerUnit'))
+        campana = _campana(pr)
+        precio = disc if disc is not None else base   # el coste real de hoy
+        # En oferta si: hay campana, o descuento>0, o el precio de hoy es menor que el base.
+        en_oferta = bool(campana) or (dto is not None and dto > 0) or \
+                    (base is not None and precio is not None and precio < base - 0.001)
         orderable = bool(av.get('availableToOrder')) and str(av.get('availabilityState', '')).upper() == 'AVAILABLE'
         img = ((prod.get('media') or {}).get('mainImage') or {}).get('url') or ''
         filas.append({
@@ -121,7 +150,10 @@ def descargar_catalogo_heo(max_paginas=None):
             'nombre':         _trad(prod.get('name')),
             'marca':          _marca(prod),
             'categoria':      _categoria(prod),
-            'precio':         (dpu.get('amount') or ''),
+            'precio':         ('' if precio is None else round(precio, 2)),
+            'precio_base':    ('' if base is None else round(base, 2)),
+            'en_oferta':      ('SI' if en_oferta else ''),
+            'campana':        campana,
             'estado':         ('disponible' if orderable else 'agotado'),
             'disponibilidad': (av.get('availability') or ''),        # GREEN / YELLOW / RED
             'imagen':         img,
@@ -129,11 +161,13 @@ def descargar_catalogo_heo(max_paginas=None):
             'preorder':       ('SI' if prod.get('preorderDeadline') else ''),
         })
     print(f">>> Catalogo cruzado: {len(filas)} filas con EAN (descartadas {sin_ean} sin GTIN)")
+    en_of = sum(1 for f in filas if f['en_oferta'])
+    print(f">>> En oferta (campana/descuento/precio<base): {en_of}")
     return filas
 
 
-COLS = ['productNumber', 'ean', 'nombre', 'marca', 'categoria', 'precio', 'estado',
-        'disponibilidad', 'imagen', 'fin_de_vida', 'preorder']
+COLS = ['productNumber', 'ean', 'nombre', 'marca', 'categoria', 'precio', 'precio_base',
+        'en_oferta', 'campana', 'estado', 'disponibilidad', 'imagen', 'fin_de_vida', 'preorder']
 
 
 def a_csv_bytes(filas):
