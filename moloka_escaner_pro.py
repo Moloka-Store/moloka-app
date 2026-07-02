@@ -40,6 +40,11 @@ PERFILES = {
                   'col_url':'product_url'},   # enlace a la ficha de OcioStock (para verificar el volumen real en su web)
     'STOCKLIST': {'tipo':'excel','sheet':'Sheet1','header':0,'col_marca':'Brand','col_ean':'CodeBars',
                   'col_nombre':'ItemName','col_pa':'EUR','col_stock':'Available'},
+    # HEO (heoGATE Retailer API): catalogo cruzado por descargar_heo.py. Sin stock numerico:
+    # el estado 'disponible' (availableToOrder + AVAILABLE) ya filtra lo servible.
+    'HEO': {'tipo':'csv','sep':';','header':0,'col_marca':'marca','col_ean':'ean',
+            'col_nombre':'nombre','col_pa':'precio','col_stock':None,
+            'col_estado':'estado','estados_ok':['disponible']},
     # Proveedores de Claude-in-Chrome (formato variable) se anaden con deteccion tolerante.
 }
 
