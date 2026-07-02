@@ -2289,11 +2289,24 @@ async function escLeerMarcasFichero(file, prov) {
     }
     return marcas;
   }
-  // Proveedores de Claude-in-Chrome (formato variable): ZENTRADA, HEO, DINOTOYS.
+  if (prov === 'HEO') {
+    // HEO: catalogo CSV ';' (de descargar_heo.py), columnas fijas. Contamos por marca,
+    // solo estado 'disponible' (servible; el resto es agotado/RED).
+    const txt = new TextDecoder('utf-8').decode(buf).replace(/^\uFEFF/, '');
+    const wb = XLSX.read(txt, { type: 'string', FS: ';' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    for (const r of rows) {
+      if (String(r['estado']).trim() !== 'disponible') continue;
+      add(r['marca']);
+    }
+    return marcas;
+  }
+  // Proveedores de Claude-in-Chrome (formato variable): ZENTRADA, DINOTOYS.
   // Detectamos el formato por los bytes ('PK' = xlsx) y las columnas por su contenido,
   // igual que el motor: EAN = columna con números de 12-13 díg; marca = por nombre.
   // Si hay columna de marca, poblamos marcas; si no, una sola entrada 'TODAS (N)'.
-  if (prov === 'ZENTRADA' || prov === 'HEO' || prov === 'DINOTOYS') {
+  if (prov === 'ZENTRADA' || prov === 'DINOTOYS') {
     const splitCsv = (line) => {       // CSV que respeta comillas y comas internas
       const out = []; let cur = '', q = false;
       for (let i = 0; i < line.length; i++) {
@@ -2464,7 +2477,15 @@ async function escExtraerEANs(file, prov, marca) {
     for (const r of rows) { if (!(num(r['Available']) > 0)) continue; if (marcaOk(r['Brand'])) push(r['CodeBars']); }
     return eans;
   }
-  if (prov === 'ZENTRADA' || prov === 'HEO' || prov === 'DINOTOYS') {
+  if (prov === 'HEO') {
+    // HEO: CSV ';' de descargar_heo.py. EANs servibles (estado 'disponible') de la marca elegida.
+    const txt = new TextDecoder('utf-8').decode(buf).replace(/^\ufeff/, '');
+    const wb = XLSX.read(txt, { type: 'string', FS: ';' });
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+    for (const r of rows) { if (String(r['estado']).trim() !== 'disponible') continue; if (marcaOk(r['marca'])) push(r['ean']); }
+    return eans;
+  }
+  if (prov === 'ZENTRADA' || prov === 'DINOTOYS') {
     let rows = [];
     const bytes = new Uint8Array(buf);
     const esXlsx = bytes.length >= 2 && bytes[0] === 0x50 && bytes[1] === 0x4B;
