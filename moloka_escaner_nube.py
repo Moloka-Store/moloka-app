@@ -271,6 +271,7 @@ PERFILES = {
         'col_marca':'marca', 'col_ean':'ean', 'col_nombre':'nombre',
         'col_pa':'precio', 'col_stock':None,
         'col_estado':'estado', 'estados_ok':['disponible'],
+        'sin_columna_stock':True,   # HEO no da stock numerico -> estado 'disponible' ya filtra
     },
     'MOLOKA': {'tipo':'supabase'},   # inventario propio: se lee de la tabla productos
 }
