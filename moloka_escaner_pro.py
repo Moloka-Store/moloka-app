@@ -222,14 +222,30 @@ def leer_csv_visualizador(rutas):
                  titulo=((row[idx[_tit]].strip() if (_tit and idx[_tit]<len(row)) else '')))
         for e in col(row,'ean').split(','):
             e=norm(e)
-            if e: data[e]=rec
+            if e: data.setdefault(e,[]).append(rec)   # LISTA de candidatos (un EAN puede tener varias fichas)
     return data
 
-def buscar(fila, csvdata):
+def buscar(fila, csvdata, prefer_asin=None):
+    # Recopila TODOS los candidatos del EAN (dedupe por ASIN, orden estable) y elige el bueno.
+    cands=[]; vistos=set()
     for v in fila['variantes']:
-        vn=norm(v)
-        if vn in csvdata: return csvdata[vn]
-    return None
+        for rec in csvdata.get(norm(v), []):
+            a=rec.get('asin')
+            if a and a not in vistos:
+                vistos.add(a); cands.append(rec)
+    if not cands: return None
+    if len(cands)==1: return cands[0]
+    # 1) Si nos piden un ASIN concreto (para cuadrar el MISMO producto en otro país), ese.
+    if prefer_asin:
+        for rec in cands:
+            if rec.get('asin')==prefer_asin: return rec
+    # 2) Elegir la ficha cuyo título coincide con el nombre del proveedor (evita el "peluche->juego PS4").
+    nombre=fila.get('nombre','')
+    mejor=max(cands, key=lambda rec: _score_titulo(nombre, rec.get('titulo','')))
+    if _score_titulo(nombre, mejor.get('titulo',''))>0: return mejor
+    # 3) Si ninguna coincide por título, preferir la que tiene rank real (producto de verdad).
+    con_rank=[rec for rec in cands if (rec.get('rank') or 0)>0 or (rec.get('rank90') or 0)>0]
+    return con_rank[0] if con_rank else cands[0]
 
 import unicodedata, re as _re
 _STOP_TIT={'the','and','with','de','del','la','el','los','las','un','una','uno','con','para','por',
@@ -245,6 +261,10 @@ def _coincide_titulo(nombre_prov, titulo_amz):
     a=_tokens_tit(nombre_prov); b=_tokens_tit(titulo_amz)
     if not a or not b: return '?'
     return 'SÍ' if (a & b) else '⚠ NO'
+def _score_titulo(nombre_prov, titulo_amz):
+    # nº de palabras distintivas en común (para ELEGIR entre varias fichas del mismo EAN)
+    a=_tokens_tit(nombre_prov); b=_tokens_tit(titulo_amz)
+    return len(a & b) if (a and b) else 0
 
 # ===== Motor Pro =====
 def escanear_pro(prov, marca, ruta_excel, paises, rank_maximo=30000, sup=None):
@@ -276,7 +296,7 @@ def escanear_pro(prov, marca, ruta_excel, paises, rank_maximo=30000, sup=None):
 
         paises_calc={}
         for dom in doms:
-            c = base if dom==dom_base else buscar(f, csvs[dom])
+            c = base if dom==dom_base else buscar(f, csvs[dom], prefer_asin=base['asin'])
             if not c or not c.get('asin'):
                 paises_calc[dom]={'precio':None,'canal':'sin datos','ref_pct':None,'fee':None,
                                   'iva':IVA[dom],'rank_act':None,'rank90':None,'vendidos':None,
