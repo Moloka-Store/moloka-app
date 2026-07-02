@@ -27,13 +27,20 @@ auth = HTTPBasicAuth(USER, PASS)
 
 
 def _get(url, page):
-    for intento in range(4):
+    global PAGE_SIZE
+    for intento in range(5):
         try:
             r = requests.get(url, auth=auth, params={'page': page, 'pageSize': PAGE_SIZE},
                              headers={'Accept': 'application/json'}, timeout=120)
             if r.status_code == 200:
                 return r.json()
-            print(f"  HTTP {r.status_code} {url} page {page}: {r.text[:180]}")
+            txt = r.text[:180]
+            print(f"  HTTP {r.status_code} {url} page {page}: {txt}")
+            # Si el pageSize es demasiado grande, lo reduzco y reintento (se estabiliza en la 1a pagina).
+            if r.status_code == 400 and 'size' in txt.lower() and PAGE_SIZE > 50:
+                PAGE_SIZE = max(50, PAGE_SIZE // 2)
+                print(f"  -> reduzco pageSize a {PAGE_SIZE} y reintento")
+                continue
         except Exception as e:
             print(f"  error {url} page {page}: {e}")
         time.sleep(3 * (intento + 1))
@@ -140,19 +147,39 @@ def a_csv_bytes(filas):
 
 if __name__ == '__main__':
     from collections import Counter
-    # 1) DESCUBRIMIENTO: todas las marcas de HEO (solo /products) para elegir el filtro.
-    print(">>> DESCUBRIMIENTO de marcas (bajando todos los productos)...", flush=True)
-    prods = _paginar('catalog/products')
-    marcas = Counter(_marca(p) for p in prods if _marca(p))
-    con_ean = sum(1 for p in prods if _ean(p))
-    print(f"\n=== {len(prods)} productos ({con_ean} con EAN GTIN) | {len(marcas)} marcas distintas ===")
-    print("=== TOP 50 marcas por nº de referencias (elige de aqui el filtro) ===")
-    for m, n in marcas.most_common(50):
-        print(f"  {n:5}  {m}")
-    # 2) MUESTRA de cruce (pocas paginas) para confirmar EAN/precio/estado.
-    print("\n>>> MUESTRA de cruce (2 paginas) para confirmar campos...")
-    filas = descargar_catalogo_heo(max_paginas=2)
-    print(f"=== {min(8, len(filas))} filas de muestra ===")
-    for f in filas[:8]:
-        print(f"  {f['ean']} | {f['marca'][:22]:22} | {str(f['precio']):>7} EUR | {f['estado']:11} | fdv={f['fin_de_vida'] or '-'} | {f['nombre'][:40]}")
-    print("\n=== FIN PRUEBA HEO ===")
+
+    if os.environ.get('HEO_FULL'):
+        # ===== MODO COMPLETO: catalogo entero + EANs para el Visualizador =====
+        filas = descargar_catalogo_heo()
+        with open('heo_catalogo.csv', 'wb') as fh:
+            fh.write(a_csv_bytes(filas))
+        # EANs SERVIBLES (disponible), sin repetir, en tandas de 10.000 para el Visualizador.
+        eans = list(dict.fromkeys(f['ean'] for f in filas if f['estado'] == 'disponible'))
+        TANDA = int(os.environ.get('HEO_TANDA', '10000'))
+        n_tandas = (len(eans) + TANDA - 1) // TANDA
+        for i in range(n_tandas):
+            with open(f'heo_eans_{i+1}.txt', 'w') as fh:
+                fh.write('\n'.join(eans[i*TANDA:(i+1)*TANDA]))
+        print(f"\n>>> heo_catalogo.csv: {len(filas)} filas")
+        print(f">>> EANs servibles: {len(eans)} -> {n_tandas} tandas de <= {TANDA} (heo_eans_1.txt ...)")
+        marcas = Counter(f['marca'] for f in filas if f['marca'])
+        print(f"\n=== {len(marcas)} marcas en el catalogo servible. TOP 40 ===")
+        for m, k in marcas.most_common(40):
+            print(f"  {k:5}  {m}")
+        print("\n=== FIN MODO COMPLETO ===")
+    else:
+        # ===== MODO PRUEBA: descubre marcas + muestra de cruce =====
+        print(">>> DESCUBRIMIENTO de marcas (bajando todos los productos)...", flush=True)
+        prods = _paginar('catalog/products')
+        marcas = Counter(_marca(p) for p in prods if _marca(p))
+        con_ean = sum(1 for p in prods if _ean(p))
+        print(f"\n=== {len(prods)} productos ({con_ean} con EAN GTIN) | {len(marcas)} marcas distintas ===")
+        print("=== TOP 50 marcas por nº de referencias ===")
+        for m, k in marcas.most_common(50):
+            print(f"  {k:5}  {m}")
+        print("\n>>> MUESTRA de cruce (2 paginas)...")
+        filas = descargar_catalogo_heo(max_paginas=2)
+        print(f"=== {min(8, len(filas))} filas de muestra ===")
+        for f in filas[:8]:
+            print(f"  {f['ean']} | {f['marca'][:22]:22} | {str(f['precio']):>7} EUR | {f['estado']:11} | fdv={f['fin_de_vida'] or '-'} | {f['nombre'][:40]}")
+        print("\n=== FIN PRUEBA HEO ===")
