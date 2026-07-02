@@ -1,0 +1,20 @@
+name: Moloka - Test descarga HEO
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Instalar dependencias
+        run: pip install requests
+      - name: Descargar + cruzar HEO (lista marcas + muestra)
+        env:
+          HEO_USER: ${{ secrets.HEO_USER }}
+          HEO_PASS: ${{ secrets.HEO_PASS }}
+        run: python -u descargar_heo.py
