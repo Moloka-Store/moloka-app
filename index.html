@@ -2623,13 +2623,25 @@ async function lanzarEscaneoPro() {
       } catch (e) {}
       return { blob: f, nombre: nombre };
     };
+    // Subida con reintentos: un microcorte de red daba "Failed to fetch" y tiraba toda la corrida.
+    const subirReintento = async (path, blob, que) => {
+      let ultimo;
+      for (let i = 0; i < 4; i++) {
+        try {
+          const { error } = await db.storage.from('informes').upload(path, blob, { upsert: true });
+          if (!error) return;
+          ultimo = error;
+        } catch (e) { ultimo = e; }
+        if (i < 3) await new Promise(r => setTimeout(r, 1500 * (i + 1)));
+      }
+      throw new Error('subiendo ' + que + ': ' + ((ultimo && ultimo.message) || 'fallo de red tras varios intentos'));
+    };
     let catNombre = '';
     if (prov !== 'MOLOKA' && file) {
       const g = await gz(file, file.name);
       catNombre = g.nombre;
       log.innerHTML = '<div class="info-box">Subiendo el catálogo…</div>';
-      const { error } = await db.storage.from('informes').upload('escaner_pro/' + catNombre, g.blob, { upsert: true });
-      if (error) throw new Error('subiendo el catálogo: ' + error.message);
+      await subirReintento('escaner_pro/' + catNombre, g.blob, 'el catálogo');
     }
     const csvNombres = {};
     let idx = 0;
@@ -2639,15 +2651,13 @@ async function lanzarEscaneoPro() {
         idx++;
         const g = await gz(f, pais + '_' + idx + '_' + f.name);
         log.innerHTML = '<div class="info-box">Subiendo CSV ' + idx + '…</div>';
-        const { error } = await db.storage.from('informes').upload('escaner_pro/' + g.nombre, g.blob, { upsert: true });
-        if (error) throw new Error('subiendo CSV ' + f.name + ': ' + error.message);
+        await subirReintento('escaner_pro/' + g.nombre, g.blob, 'CSV ' + f.name);
         csvNombres[pais].push(g.nombre);
       }
     }
     const recado = { proveedor: prov, marca: marca, rank_maximo: rank, catalogo: catNombre, csv_paises: csvNombres, fecha: new Date().toISOString() };
     const blob = new Blob([JSON.stringify(recado)], { type: 'application/json' });
-    const { error: e2 } = await db.storage.from('informes').upload('escaner_pro/_solicitud_pro.json', blob, { upsert: true });
-    if (e2) throw new Error('dejando el recado: ' + e2.message);
+    await subirReintento('escaner_pro/_solicitud_pro.json', blob, 'el recado');
     const resp = await fetch('/api/disparar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ secreto: DISPARO_SECRET, workflow: 'escaner-pro.yml' }) });
     const data = await resp.json().catch(() => ({}));
     if (resp.ok) {
