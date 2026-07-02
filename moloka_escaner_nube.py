@@ -233,6 +233,7 @@ PERFILES = {
         'col_pa':'precio_distribuidores', 'col_stock':'stock_disponible',
         'col_estado':None, 'estados_ok':None,
         'col_volumen':'txt_precios_volumen',   # descuentos por volumen -> pestana "Precio por lote"
+        'col_url':'product_url',   # enlace a la ficha de OcioStock (verificar volumen/precio en su web)
     },
     'STOCKLIST': {
         # Mayorista nordico GENERALISTA (Toys, Games and consoles, Beauty, Movies, Pet...).
@@ -451,6 +452,28 @@ def _mejor_volumen(s):
         if mejor is None or precio < mejor[1]:
             mejor = (uds, precio)
     return mejor
+
+# Umbral anti-basura de volumen: OcioStock mete valores fijos absurdos (p.ej. 5.99 de
+# volumen en un casco de 109.99). Un descuento por volumen REAL rara vez baja del 50%
+# del precio suelto; por debajo lo tratamos como basura y lo ignoramos.
+MIN_RATIO_LOTE = 0.5
+
+# Salvavidas de titulo: compara el nombre del proveedor con el titulo de Amazon para
+# detectar EANs mal catalogados en Amazon (p.ej. un peluche cuyo ASIN es un juego de PS4).
+import unicodedata as _ud, re as _reT
+_STOP_TIT = {'the','and','with','de','del','la','el','los','las','un','una','uno','con','para','por',
+             'pop','figura','figure','set','pack','edition','deluxe','vinilo','vinyl',
+             'peluche','plush','muneco','doll','juguete','juguetes','toy','coche','coches','car'}
+def _tokens_tit(t):
+    t = _ud.normalize('NFKD', str(t or '')).encode('ascii','ignore').decode()
+    t = _reT.sub(r'[^a-zA-Z0-9]+',' ', t).lower()
+    return {w for w in t.split() if len(w) >= 3 and w not in _STOP_TIT}
+def _coincide_titulo(nombre_prov, titulo_amz):
+    # '?' = sin titulo (no marcamos). SI = comparten palabra distintiva. NO = nada en comun.
+    if not str(titulo_amz or '').strip(): return '?'
+    a = _tokens_tit(nombre_prov); b = _tokens_tit(titulo_amz)
+    if not a or not b: return '?'
+    return 'SÍ' if (a & b) else '⚠ NO'
 
 def _es_ean_valido(s):
     """True si s es un EAN/UPC utilizable: 12 o 13 digitos."""
@@ -682,14 +705,16 @@ else:
         if PERFIL.get('col_volumen'):
             try:
                 mv = _mejor_volumen(row.get(PERFIL['col_volumen'], ''))
-                # solo guardamos el lote si REBAJA de verdad el precio suelto
-                if mv and pa and mv[1] < pa:
+                # solo si es un descuento REAL: rebaja el suelto pero no es un valor basura absurdo
+                if mv and pa and (pa*MIN_RATIO_LOTE) <= mv[1] < pa:
                     vol = {'uds': mv[0], 'pa': round(mv[1], 4)}
             except Exception:
                 vol = None
+        _cu = PERFIL.get('col_url')
+        url = str(row.get(_cu,'')).strip() if _cu else ''
         filas.append({'ean_in':ean_in, 'core':core, 'variantes':variantes_ean(core),
                       'nombre':row.get(cN,''), 'marca':MARCA, 'pa':pa,
-                      'es_chase':es_chase_ean(ean_in), 'volumen':vol})
+                      'es_chase':es_chase_ean(ean_in), 'volumen':vol, 'url':url})
     print(f"Disponibles a escanear: {len(filas)} | fuera por estado/stock: {fuera_disp} | "
           f"EAN problematicos: {len(problematicos)} | CHASE: {sum(f['es_chase'] for f in filas)}")
 
@@ -933,7 +958,8 @@ def datos_pais(asin, dom):
             'rank_act':cur[IDX_RANK] if len(cur)>IDX_RANK else -1,
             'rank90':a90[IDX_RANK] if len(a90)>IDX_RANK else -1,
             'n_of':_pos(st.get('totalOfferCount')),
-            'vendidos':p.get('monthlySold')}
+            'vendidos':p.get('monthlySold'),
+            'titulo':(p.get('title') or '')}
 
 lista = list(pasan.values())
 
@@ -974,11 +1000,15 @@ for i,c in enumerate(lista,1):
     f = c['fila']
     item = {'nombre':f['nombre'],'ean':c['ean_in'],'asin':c['asin'],'marca':f['marca'],
             'pa':f['pa'],'core':f['core'],'es_chase':f['es_chase'],'propio':c['propio'],
-            'volumen':f.get('volumen'),
+            'volumen':f.get('volumen'),'url':f.get('url',''),'titulo_amz':'',
             'ambiguo':c['ean_in'] in amb_eans,'paises':{}}
     for dom in ('ES','IT','FR'):
         d = datos_pais(c['asin'], dom)
-        if d: item['paises'][dom] = d
+        if d:
+            item['paises'][dom] = d
+            if dom=='ES' and not item['titulo_amz']:
+                item['titulo_amz'] = d.get('titulo','')
+    item['coincide'] = _coincide_titulo(item['nombre'], item['titulo_amz'])
     infos.append(item)
     _nuevos += 1
     if i%50==0:
@@ -1041,7 +1071,7 @@ from openpyxl.formatting.rule import FormulaRule, CellIsRule
 COLS = ['Nombre','EAN','ASIN','Marca','PA (€)','País','Rank actual','Rank 90d','Vendidos/mes',
         'Precio venta (€)','Canal BB','Nº ofertas','% Comisión',
         'Com. Amazon (€)','Fee Logística (€)','Almacén (€)','Promo activa',
-        'Beneficio (€)','ROI','Margen','Decisión','En mi BD','EAN ambiguo']
+        'Beneficio (€)','ROI','Margen','Decisión','En mi BD','EAN ambiguo','Amazon (título)','Coincide','OcioStock']
 L = {name:get_column_letter(i+1) for i,name in enumerate(COLS)}
 DOM_AMZ = {'ES':'amazon.es','IT':'amazon.it','FR':'amazon.fr'}
 
@@ -1071,10 +1101,16 @@ for item in registros:
              f"-{L['Fee Logística (€)']}{r}-{L['Almacén (€)']}{r}") if (div and d['precio'] and pct is not None) else None,
             f"={L['Beneficio (€)']}{r}/{L['PA (€)']}{r}" if (div and d['precio'] and pct is not None and item['pa']) else None,
             f"={L['Beneficio (€)']}{r}/{L['Precio venta (€)']}{r}" if (div and d['precio'] and pct is not None) else None,
-            d['decision'], en_bd, amb])
+            d['decision'], en_bd, amb,
+            item.get('titulo_amz',''), item.get('coincide','?'),
+            ('Ver ficha ↗' if item.get('url') else '')])
         cell = ws.cell(row=r, column=3)
         cell.hyperlink = f"https://www.{DOM_AMZ[dom]}/dp/{item['asin']}"
         cell.font = Font(color='0563C1', underline='single')
+        if item.get('url'):
+            cocel = ws.cell(row=r, column=len(COLS))   # ultima columna = OcioStock
+            cocel.hyperlink = item['url']
+            cocel.font = Font(color='0563C1', underline='single')
 
 last = ws.max_row
 def fmt(colname, code):
@@ -1087,7 +1123,8 @@ fmt('% Comisión','0.00%'); fmt('ROI','0.0%'); fmt('Margen','0.0%')
 
 for c in range(1,len(COLS)+1):
     ws.cell(row=1,column=c).font = Font(bold=True)
-anchos = {'Nombre':50,'EAN':14,'ASIN':12,'Marca':12,'En mi BD':20,'Decisión':15}
+anchos = {'Nombre':50,'EAN':14,'ASIN':12,'Marca':12,'En mi BD':20,'Decisión':15,
+          'Amazon (título)':50,'Coincide':11,'OcioStock':13}
 for nm,w in anchos.items(): ws.column_dimensions[L[nm]].width = w
 
 ws.freeze_panes = 'A2'
@@ -1111,6 +1148,9 @@ if last >= 2:
         fill=_cf_fill('E7E6E6'), font=Font(color='808080'), stopIfTrue=True))
     ws.conditional_formatting.add(f"{L['Margen']}2:{L['Margen']}{last}",
         CellIsRule(operator='greaterThan', formula=['0.1'], font=Font(color='006100')))
+    coi = L['Coincide']; rng_coi = f'{coi}2:{coi}{last}'
+    ws.conditional_formatting.add(rng_coi, FormulaRule(formula=[f'ISNUMBER(SEARCH("NO",{coi}2))'],
+        fill=_cf_fill('FFC7CE'), font=Font(color='9C0006')))
     ws.conditional_formatting.add(f'A2:{get_column_letter(len(COLS))}{last}',
         FormulaRule(formula=['ISODD(INT((ROW()-2)/3))'], fill=_cf_fill('D9D9D9')))
 
