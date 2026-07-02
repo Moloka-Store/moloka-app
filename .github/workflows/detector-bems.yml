@@ -21,12 +21,15 @@
 name: Moloka - Detector BEMS
 
 on:
-  schedule:
-    # min hora(UTC) * * dia-semana(1-5 = L-V)
-    - cron: '0,30 7-12 * * 1-5'    # cada 30 min de 07:00 a 12:30 UTC (L-V)
-    - cron: '0 13 * * 1-5'         # repaso 13:00 UTC (15:00 verano)
-    - cron: '0 15 * * 1-5'         # repaso 15:00 UTC (17:00 verano)
-  workflow_dispatch:               # disparo manual para pruebas
+  # RELOJ EN PAUSA (2-jul-2026): BEMS lleva ~1 mes sin acceso a la API (sin compra
+  # que lo reactive), asi que el detector saltaba y no hacia nada. Se deja SOLO el
+  # disparo manual. Cuando se reactive la API de BEMS, descomentar el 'schedule:'
+  # de abajo y volver a desplegar.
+  # schedule:
+  #   - cron: '0,30 7-12 * * 1-5'    # cada 30 min de 07:00 a 12:30 UTC (L-V)
+  #   - cron: '0 13 * * 1-5'         # repaso 13:00 UTC (15:00 verano)
+  #   - cron: '0 15 * * 1-5'         # repaso 15:00 UTC (17:00 verano)
+  workflow_dispatch:               # disparo manual (unica via mientras BEMS este en pausa)
 
 concurrency:
   group: detector-bems
