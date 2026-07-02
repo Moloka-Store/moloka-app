@@ -261,7 +261,17 @@ PERFILES = {
     # ============================================================
     'DINOTOYS': {'tipo':'auto', 'deteccion':'tolerante'},   # mayorista holandes (Logic4)
     'ZENTRADA': {'tipo':'auto', 'deteccion':'tolerante'},   # marketplace mayorista (xlsx/csv)
-    'HEO':      {'tipo':'auto', 'deteccion':'tolerante'},   # B2B aleman (Funko via API interna)
+    'HEO': {
+        # heoGATE Retailer API -> catalogo cruzado por descargar_heo.py (CSV ';', columnas
+        # fijas). El director de HEO PRE-FILTRA a Funko+Ultimate Guard+ofertas y sube el
+        # resultado, asi que aqui se escanea con marca=TODAS. Sin stock numerico: el estado
+        # 'disponible' (availableToOrder + AVAILABLE) filtra lo servible. PA = 'precio' (coste
+        # de hoy, con oferta si la hay; el escaneo diario se autocorrige si la oferta acaba).
+        'tipo':'csv', 'sep':';', 'header':0,
+        'col_marca':'marca', 'col_ean':'ean', 'col_nombre':'nombre',
+        'col_pa':'precio', 'col_stock':None,
+        'col_estado':'estado', 'estados_ok':['disponible'],
+    },
     'MOLOKA': {'tipo':'supabase'},   # inventario propio: se lee de la tabla productos
 }
 if PROVEEDOR not in PERFILES:
