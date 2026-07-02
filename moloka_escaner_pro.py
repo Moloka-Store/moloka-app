@@ -36,7 +36,8 @@ PERFILES = {
                'sin_columna_stock':True},
     'OCIOSTOCK': {'tipo':'csv','sep':';','header':0,'col_marca':'marca','col_ean':'ean',
                   'col_nombre':'nombre','col_pa':'precio_distribuidores','col_stock':'stock_disponible',
-                  'col_volumen':'txt_precios_volumen','cajas_sufijo':'C6'},   # volumen + cajas (C6 = caja de 6)
+                  'col_volumen':'txt_precios_volumen','cajas_sufijo':'C6',      # volumen + cajas (C6 = caja de 6)
+                  'col_url':'product_url'},   # enlace a la ficha de OcioStock (para verificar el volumen real en su web)
     'STOCKLIST': {'tipo':'excel','sheet':'Sheet1','header':0,'col_marca':'Brand','col_ean':'CodeBars',
                   'col_nombre':'ItemName','col_pa':'EUR','col_stock':'Available'},
     # Proveedores de Claude-in-Chrome (formato variable) se anaden con deteccion tolerante.
@@ -140,7 +141,8 @@ def leer_proveedor(prov, marca, ruta):
             if not cand: continue
             barato=min(cand, key=lambda x:x[1])              # el mas barato
             if base not in cajas or barato[1]<cajas[base]['pa']:
-                cajas[base]={'pa':round(barato[1],4),'uds':barato[0],'nombre':row.get(P['col_nombre'],'')}
+                cajas[base]={'pa':round(barato[1],4),'uds':barato[0],'nombre':row.get(P['col_nombre'],''),
+                             'url':str(row.get(P['col_url'],'')).strip() if P.get('col_url') else ''}
 
     filas=[]; problematicos=[]; vistos=set()
     for _,row in cat.iterrows():
@@ -172,16 +174,18 @@ def leer_proveedor(prov, marca, ruta):
         if core in cajas and (pa is None or cajas[core]['pa'] < pa):
             pa=cajas[core]['pa']; es_caja=True; uds_caja=cajas[core]['uds']; vol=None
         vistos.add(core)
+        _cu=P.get('col_url')
+        url=str(row.get(_cu,'')).strip() if _cu else ''
         filas.append({'ean_in':ean_in,'core':core,'nombre':row.get(P['col_nombre'],''),
                       'marca':marca,'pa':pa,'es_chase':es_chase_ean(ean_in),
                       'variantes':variantes_ean(core),'volumen':vol,
-                      'es_caja':es_caja,'uds_caja':uds_caja})
+                      'es_caja':es_caja,'uds_caja':uds_caja,'url':url})
     # cajas cuyo individual NO esta (OcioStock solo vende la caja): usar el EAN base igual
     for base,info in cajas.items():
         if base in vistos: continue
         filas.append({'ean_in':base,'core':base,'nombre':info['nombre'],'marca':marca,
                       'pa':info['pa'],'es_chase':False,'variantes':variantes_ean(base),
-                      'volumen':None,'es_caja':True,'uds_caja':info['uds']})
+                      'volumen':None,'es_caja':True,'uds_caja':info['uds'],'url':info.get('url','')})
     return filas, problematicos
 
 # ===== Lectura del CSV del Visualizador (indexado por CADA EAN; celdas multi-EAN) =====
@@ -303,7 +307,8 @@ def escanear_pro(prov, marca, ruta_excel, paises, rank_maximo=30000, sup=None):
                           'en_bd':enbd,'paises':paises_calc,
                           'titulo_amz':base.get('titulo',''),
                           'coincide':_coincide_titulo(f['nombre'], base.get('titulo','')),
-                          'es_caja':f.get('es_caja',False),'uds_caja':f.get('uds_caja')})
+                          'es_caja':f.get('es_caja',False),'uds_caja':f.get('uds_caja'),
+                          'url':f.get('url','')})
     registros.sort(key=lambda x:(x['paises'].get(dom_base,{}).get('margen')
                                  if x['paises'].get(dom_base,{}).get('margen') is not None else -9e9), reverse=True)
     return dict(registros=registros, doms=doms, dom_base=dom_base,
@@ -314,7 +319,7 @@ def escanear_pro(prov, marca, ruta_excel, paises, rank_maximo=30000, sup=None):
 COLS=['Nombre','EAN','ASIN','Marca','PA (€)','País','Rank actual','Rank 90d','Vendidos/mes',
       'Precio venta (€)','Canal BB','Nº ofertas','% Comisión',
       'Com. Amazon (€)','Fee Logística (€)','Almacén (€)','Promo activa',
-      'Beneficio (€)','ROI','Margen','Decisión','En mi BD','EAN ambiguo','Amazon (título)','Coincide','Compra']
+      'Beneficio (€)','ROI','Margen','Decisión','En mi BD','EAN ambiguo','Amazon (título)','Coincide','Compra','OcioStock']
 COLS_LOTE=['Nombre','EAN','ASIN','Marca','País','Precio venta (€)','PA suelto (€)','PA lote (€)',
            'Ahorro/ud (€)','Beneficio lote (€)','Margen lote','Decisión lote','Uds. para ese precio']
 def _cf_fill(h): return PatternFill(start_color=h, end_color=h, fill_type='solid')
@@ -344,10 +349,15 @@ def escribir_excel(res, ruta_salida):
                 f"={L['Beneficio (€)']}{r}/{L['Precio venta (€)']}{r}" if (div and d.get('precio') and pct is not None) else None,
                 d.get('decision'), item.get('en_bd',''), amb,
                 item.get('titulo_amz',''), item.get('coincide','?'),
-                (f"CAJA x{item['uds_caja']}" if item.get('es_caja') else 'individual')])
+                (f"CAJA x{item['uds_caja']}" if item.get('es_caja') else 'individual'),
+                ('Ver ficha ↗' if item.get('url') else '')])
             cell=ws.cell(row=r, column=3)
             cell.hyperlink=f"https://www.{DOM_AMZ[dom]}/dp/{item['asin']}"
             cell.font=Font(color='0563C1', underline='single')
+            if item.get('url'):
+                cocel=ws.cell(row=r, column=len(COLS))   # ultima columna = OcioStock
+                cocel.hyperlink=item['url']
+                cocel.font=Font(color='0563C1', underline='single')
     last=ws.max_row
     def fmt(nm,code):
         for row in range(2,last+1): ws[f'{L[nm]}{row}'].number_format=code
@@ -355,7 +365,7 @@ def escribir_excel(res, ruta_salida):
         fmt(nm,'0.00')
     fmt('% Comisión','0.00%'); fmt('ROI','0.0%'); fmt('Margen','0.0%')
     for c in range(1,len(COLS)+1): ws.cell(row=1,column=c).font=Font(bold=True)
-    for nm,w in {'Nombre':50,'EAN':14,'ASIN':12,'Marca':12,'En mi BD':20,'Decisión':15,'Amazon (título)':50,'Coincide':11,'Compra':14}.items():
+    for nm,w in {'Nombre':50,'EAN':14,'ASIN':12,'Marca':12,'En mi BD':20,'Decisión':15,'Amazon (título)':50,'Coincide':11,'Compra':14,'OcioStock':13}.items():
         ws.column_dimensions[L[nm]].width=w
     ws.freeze_panes='A2'
     if last>=2:
