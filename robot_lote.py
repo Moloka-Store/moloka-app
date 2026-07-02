@@ -18,14 +18,16 @@
 # Secrets (ya en fabrica-lote.yml): KEEPA_API_KEY, SUPABASE_URL, SUPABASE_KEY,
 #   SUPABASE_SERVICE_KEY, ANTHROPIC_API_KEY
 # ============================================================================
-import json, datetime, sys, io, re, math, unicodedata, requests
+import json, datetime, sys, io, re, math, unicodedata, requests, os
 import openpyxl
 import robot_preparar as R   # reusa (solo lectura): cliente, PROMPT_SISTEMA, MODELO, CATEGORIAS, slugify, descargar_b64, sb
 
 sys.stdout.reconfigure(line_buffering=True)
 
 BUCKET      = 'informes'
-RECADO_LOTE = 'fabrica_lote/_solicitud_lote.json'
+# Path del recado configurable por entorno: el director de novedades usa uno APARTE
+# (_solicitud_auto.json) para NO pisar el recado del lote manual de la app.
+RECADO_LOTE = os.environ.get('RECADO_LOTE_PATH') or 'fabrica_lote/_solicitud_lote.json'
 CAT_PATH    = 'web_rank/catalogo.xlsx'   # el catalogo que dejo el Paso 1
 FOTOS_PATH  = 'web_rank/ranking_tcg_fotos.xlsx'  # fotos Keepa (alta res) del corte
 
@@ -499,6 +501,7 @@ def main():
         print("  Montaje: " + " | ".join(f"{k}={v}" for k, v in sorted(c.items())))
 
     # HOJA DE CONTACTOS: mosaico del lote para revisar en borrador, antes de publicar.
+    url = None
     if revision:
         try:
             html = generar_hoja_revision(tanda, revision)
@@ -511,6 +514,21 @@ def main():
             print(f"\n  >>> HOJA DE REVISION: {url}")
         except Exception as e:
             print(f"  (aviso: no pude generar la hoja de revision: {e})")
+
+    # Aviso Telegram (SOLO si el workflow pasa las claves; p.ej. el director de TCG).
+    # En las corridas manuales de la app no van esas claves -> no avisa.
+    _tok = os.environ.get('TELEGRAM_TOKEN'); _chat = os.environ.get('TELEGRAM_CHAT_ID')
+    if _tok and _chat and ok:
+        try:
+            _txt = (f"🏭 <b>Fichas TCG borrador</b>: {len(ok)} nueva(s) generada(s), "
+                    f"listas para revisar y activar en la fabrica.")
+            if url:
+                _txt += f"\nHoja de revision: {url}"
+            requests.post(f"https://api.telegram.org/bot{_tok}/sendMessage",
+                          data={'chat_id': _chat, 'text': _txt, 'parse_mode': 'HTML',
+                                'disable_web_page_preview': 'true'}, timeout=20)
+        except Exception as _e:
+            print("  (aviso telegram:", _e, ")")
     print("Fin.")
 
 if __name__ == '__main__':
