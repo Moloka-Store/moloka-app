@@ -46,4 +46,8 @@ jobs:
           KEEPA_API_KEY: ${{ secrets.KEEPA_API_KEY }}
           TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_PAT:                ${{ secrets.GH_PAT }}
+          AUTORELANZAR_MIN:      '315'
+          AUTORELANZAR_WORKFLOW: director-ociostock.yml
+          AUTORELANZAR_TIPO:     ${{ inputs.tipo }}
         run: python -u moloka_escaner_nube.py
