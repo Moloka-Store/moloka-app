@@ -22,6 +22,8 @@ MODO = 'nuevos' if TIPO == 'diario' else 'todo'
 
 sb = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_SERVICE_KEY'])
 BUCKET = 'informes'
+CARPETA_ESCANER = os.environ.get('CARPETA_ESCANER') or 'escaner'   # buzon propio por director
+
 
 # 1) Regla OCIOSTOCK
 try:
@@ -40,15 +42,15 @@ print(f">>> Feed OcioStock descargado: {len(contenido)} bytes (CSV plano)")
 
 # 3) Dejar el catalogo COMPRIMIDO en el buzon (limpiar escaner/ SIN tocar escaner_ckpt/)
 try:
-    viejos = sb.storage.from_(BUCKET).list('escaner') or []
-    borrar = [f'escaner/{o["name"]}' for o in viejos
+    viejos = sb.storage.from_(BUCKET).list(CARPETA_ESCANER) or []
+    borrar = [f'{CARPETA_ESCANER}/{o["name"]}' for o in viejos
               if o.get('name') and not o['name'].startswith('.')]
     if borrar:
         sb.storage.from_(BUCKET).remove(borrar)
 except Exception as e:
     print("AVISO limpiando escaner/:", e)
 contenido_gz = gzip.compress(contenido)
-sb.storage.from_(BUCKET).upload('escaner/catalogo.csv.gz', contenido_gz,
+sb.storage.from_(BUCKET).upload(f'{CARPETA_ESCANER}/catalogo.csv.gz', contenido_gz,
                                 {'upsert': 'true', 'content-type': 'application/gzip'})
 print(f">>> Catalogo dejado en escaner/catalogo.csv.gz ({len(contenido_gz)} bytes comprimidos)")
 
@@ -65,7 +67,7 @@ recado_esc = {
         'incluir_estados': regla.get('incluir_estados') or [],
     },
 }
-sb.storage.from_(BUCKET).upload('escaner/_solicitud_escaner.json',
+sb.storage.from_(BUCKET).upload(f'{CARPETA_ESCANER}/_solicitud_escaner.json',
                                 json.dumps(recado_esc, ensure_ascii=False).encode('utf-8'),
                                 {'upsert': 'true', 'content-type': 'application/json'})
 print(f">>> Recado puesto. Escaner OCIOSTOCK modo '{MODO}', marcas {recado_esc['filtros']['marcas']}, rank<= {recado_esc['rank_maximo']}.")
