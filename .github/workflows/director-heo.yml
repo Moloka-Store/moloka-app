@@ -18,6 +18,9 @@ concurrency:
 jobs:
   director:
     runs-on: ubuntu-latest
+    env:
+      CARPETA_ESCANER: escaner_heo
+      CARPETA_CKPT: escaner_ckpt_heo
     timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
@@ -44,4 +47,8 @@ jobs:
           KEEPA_API_KEY:    ${{ secrets.KEEPA_API_KEY }}
           TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_PAT:               ${{ secrets.GH_PAT }}
+          AUTORELANZAR_MIN:     '315'
+          AUTORELANZAR_WORKFLOW: director-heo.yml
+          AUTORELANZAR_TIPO:    ${{ inputs.tipo }}
         run: python -u moloka_escaner_nube.py
