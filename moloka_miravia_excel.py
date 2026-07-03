@@ -48,6 +48,34 @@ def set(ws, fila, col, valor):
 
 _PRE = ('Funko Pop!', 'FUNKO POP!', 'Funko POP!', 'Funko Pop', 'FUNKO POP', 'POP!', 'Pop!')
 
+def precio_descuento(precio):
+    """Precio con descuento para el badge rojo: -5% redondeado ABAJO al ,99 mas cercano.
+    Ej: 19.99 -> 18.99 | 34.95 -> 32.99 | 28.95 -> 26.99. Siempre queda por debajo del
+    original (badge rojo garantizado) y cumple la norma de 'precio antes' real."""
+    try:
+        p = float(precio)
+    except (TypeError, ValueError):
+        return None
+    rebajado = p * 0.95
+    entero = int(rebajado)              # parte entera hacia abajo
+    val = entero - 0.01 if rebajado < entero + 0.99 else entero + 0.99
+    if val >= p:                        # seguridad: nunca >= al original
+        val = p - 0.01
+    return round(val, 2)
+
+
+def desc_con_imagenes(html, imgs):
+    """Incrusta hasta 3 imagenes dentro del HTML de la descripcion (requisito de content
+    score de Miravia: '3+ imagenes en la descripcion'). No duplica si ya las lleva."""
+    html = html or ''
+    if '<img' in html.lower():
+        return html
+    trozos = ''.join(
+        f'<br><img src="{u}" alt="Funko Pop" style="max-width:100%;height:auto;" />'
+        for u in (imgs or [])[:3] if u)
+    return (html + trozos) if trozos else html
+
+
 def titulo_miravia(p):
     """Ensambla el título con el formato que mejor posiciona en Miravia (sacado del
     analisis real de la competencia):
@@ -121,7 +149,7 @@ def main():
             set(ws, fila, 4 + i, url)
         set(ws, fila, 13, LOCAL)                    # originalLocalName
         set(ws, fila, 14, MONEDA)                   # currencyCode
-        set(ws, fila, 16, p.get('miravia_desc'))    # Descripción
+        set(ws, fila, 16, desc_con_imagenes(p.get('miravia_desc'), imgs))  # Descripción (+3 imágenes)
         set(ws, fila, 17, ENVIO)                    # Método de envío
         set(ws, fila, 18, p.get('licencia') or 'Funko')   # Marca
         set(ws, fila, 19, EDAD)                     # Edad recomendada
@@ -134,7 +162,8 @@ def main():
         set(ws, fila, 31, ADV_TEXTO)                # Contenido de la advertencia
         set(ws, fila, 34, str(ean))                 # Código EAN
         set(ws, fila, 35, slug)                     # SKU de vendedor (= slug)
-        set(ws, fila, 36, precio)                   # Precio original
+        set(ws, fila, 36, precio)                   # Precio original (tachado)
+        set(ws, fila, 37, precio_descuento(precio)) # Precio con descuento -> badge rojo
         set(ws, fila, 38, stock if stock is not None else 0)  # Stock
         set(ws, fila, 40, FABRICANTE)               # Fabricante
         set(ws, fila, 41, RESP_UE)                  # Persona Responsable de la UE
