@@ -21,6 +21,8 @@ MODO = 'nuevos' if TIPO == 'diario' else 'todo'
 
 sb = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_SERVICE_KEY'])
 BUCKET = 'informes'
+CARPETA_ESCANER = os.environ.get('CARPETA_ESCANER') or 'escaner'   # buzon propio por director
+
 XLSX_CT = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
 # 1) Regla DBLINE
@@ -40,14 +42,14 @@ print(f">>> Catalogo DBLine descargado: {len(contenido)} bytes")
 
 # 3) Dejar el catalogo en el buzon del escaner (limpiar escaner/ SIN tocar escaner_ckpt/)
 try:
-    viejos = sb.storage.from_(BUCKET).list('escaner') or []
-    borrar = [f'escaner/{o["name"]}' for o in viejos
+    viejos = sb.storage.from_(BUCKET).list(CARPETA_ESCANER) or []
+    borrar = [f'{CARPETA_ESCANER}/{o["name"]}' for o in viejos
               if o.get('name') and not o['name'].startswith('.')]
     if borrar:
         sb.storage.from_(BUCKET).remove(borrar)
 except Exception as e:
     print("AVISO limpiando escaner/:", e)
-sb.storage.from_(BUCKET).upload('escaner/catalogo.xlsx', contenido,
+sb.storage.from_(BUCKET).upload(f'{CARPETA_ESCANER}/catalogo.xlsx', contenido,
                                 {'upsert': 'true', 'content-type': XLSX_CT})
 print(">>> Catalogo dejado en escaner/catalogo.xlsx")
 
@@ -63,7 +65,7 @@ recado_esc = {
         'incluir_estados': regla.get('incluir_estados') or [],
     },
 }
-sb.storage.from_(BUCKET).upload('escaner/_solicitud_escaner.json',
+sb.storage.from_(BUCKET).upload(f'{CARPETA_ESCANER}/_solicitud_escaner.json',
                                 json.dumps(recado_esc, ensure_ascii=False).encode('utf-8'),
                                 {'upsert': 'true', 'content-type': 'application/json'})
 print(f">>> Recado puesto. Escaner DBLINE modo '{MODO}', marcas {recado_esc['filtros']['marcas']}, rank<= {recado_esc['rank_maximo']}.")
