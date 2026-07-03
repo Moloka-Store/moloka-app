@@ -22,6 +22,9 @@ MODO = 'nuevos' if TIPO == 'diario' else 'todo'
 
 sb = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_SERVICE_KEY'])
 BUCKET = 'informes'
+CARPETA_ESCANER = os.environ.get('CARPETA_ESCANER') or 'escaner'   # buzon propio por director
+CARPETA_CKPT    = os.environ.get('CARPETA_CKPT') or 'escaner_ckpt'  # checkpoint propio por director
+
 XLSX_CT = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
 # 1) Regla de TCG
@@ -45,7 +48,7 @@ print(f">>> Regla TCG cargada. Tipo de pasada: {TIPO} -> modo escaner '{MODO}'."
 from datetime import datetime, timezone
 _frescos, _viejos = [], []
 try:
-    _ck = sb.storage.from_(BUCKET).list('escaner_ckpt') or []
+    _ck = sb.storage.from_(BUCKET).list(CARPETA_CKPT) or []
     for o in _ck:
         nm = o.get('name', '')
         if not (nm.startswith('_ckpt_') or nm.startswith('_rankcache_')):
@@ -72,7 +75,7 @@ if _frescos:
 if _viejos:
     print(f">>> Limpio {len(_viejos)} checkpoint(s) huerfano(s) viejo(s) (>7h): {_viejos}")
     try:
-        sb.storage.from_(BUCKET).remove([f'escaner_ckpt/{n}' for n in _viejos])
+        sb.storage.from_(BUCKET).remove([f'{CARPETA_CKPT}/{n}' for n in _viejos])
     except Exception as e:
         print("AVISO limpiando huerfanos:", e)
 
@@ -118,14 +121,14 @@ sb.storage.from_(BUCKET).upload('web_rank/catalogo.xlsx', contenido,
                                 {'upsert': 'true', 'content-type': XLSX_CT})
 # Limpiar escaner/ (como hace el boton) sin tocar escaner_ckpt/ (carpeta aparte)
 try:
-    viejos = sb.storage.from_(BUCKET).list('escaner') or []
-    borrar = [f'escaner/{o["name"]}' for o in viejos
+    viejos = sb.storage.from_(BUCKET).list(CARPETA_ESCANER) or []
+    borrar = [f'{CARPETA_ESCANER}/{o["name"]}' for o in viejos
               if o.get('name') and not o['name'].startswith('.')]
     if borrar:
         sb.storage.from_(BUCKET).remove(borrar)
 except Exception as e:
     print("AVISO limpiando escaner/:", e)
-sb.storage.from_(BUCKET).upload('escaner/catalogo.xlsx', contenido,
+sb.storage.from_(BUCKET).upload(f'{CARPETA_ESCANER}/catalogo.xlsx', contenido,
                                 {'upsert': 'true', 'content-type': XLSX_CT})
 print(">>> Catalogo dejado en web_rank/ y escaner/")
 
@@ -146,7 +149,7 @@ recado_esc = {
         'incluir_estados': regla.get('incluir_estados', []),
     },
 }
-sb.storage.from_(BUCKET).upload('escaner/_solicitud_escaner.json',
+sb.storage.from_(BUCKET).upload(f'{CARPETA_ESCANER}/_solicitud_escaner.json',
                                 json.dumps(recado_esc, ensure_ascii=False).encode('utf-8'),
                                 {'upsert': 'true', 'content-type': 'application/json'})
 print(f">>> Recados puestos. Escaner en modo '{MODO}'.")
