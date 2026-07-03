@@ -18,6 +18,9 @@ concurrency:
 jobs:
   director:
     runs-on: ubuntu-latest
+    env:
+      CARPETA_ESCANER: escaner_tcg
+      CARPETA_CKPT: escaner_ckpt_tcg
     timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
