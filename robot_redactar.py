@@ -113,7 +113,7 @@ def redactar(f, instruccion=None):
             contenido.insert(0, {"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":b64}})
         except Exception as e:
             print(f"    (aviso: no pude bajar la imagen, redacto sin ella: {e})")
-    msg = cliente.messages.create(model=MODELO, max_tokens=1800, system=PROMPT_SISTEMA,
+    msg = cliente.messages.create(model=MODELO, max_tokens=1800, system=[{"type": "text", "text": PROMPT_SISTEMA, "cache_control": {"type": "ephemeral"}}],
         messages=[{"role":"user","content":contenido}])
     texto = msg.content[0].text.strip()
     if texto.startswith("```"):
