@@ -83,7 +83,11 @@ def keepa_query(items, **kwargs):
 # BUZON DEL ESCANER: leer recado + descargar catalogo
 # ============================================================
 BUCKET = 'informes'
-CARPETA_ESCANER = 'escaner'        # recado + catalogo crudo del proveedor
+# Buzon y checkpoint configurables por entorno: cada director usa su PROPIA carpeta
+# (escaner_tcg/, escaner_heo/, ...) para no pisarse entre ellos. Por defecto, las de
+# siempre -> la app de Elena y los escaneos manuales NO cambian.
+CARPETA_ESCANER = os.environ.get('CARPETA_ESCANER') or 'escaner'   # recado + catalogo del proveedor
+CARPETA_CKPT    = os.environ.get('CARPETA_CKPT') or 'escaner_ckpt'  # checkpoint (carpeta aparte)
 CARPETA_RESULTADOS = 'resultados'  # Excel de salida
 RECADO = '_solicitud_escaner.json'
 
@@ -827,7 +831,7 @@ _ckpt_id = hashlib.md5(('|'.join([PROVEEDOR, str(MARCA), MODO, str(RANK_MAXIMO)]
 # --- Cache de rank (Fase 1): lo unico caro de la Fase 1 es consultar el rank a Keepa.
 # Guardamos por lote lo minimo que usa registra() (asin, rank actual, rank 90, EANs).
 # Si el escaneo se corta y se relanza, la Fase 1 se rehace LEYENDO de aqui: 0 tokens.
-RANKCACHE_PATH = f'escaner_ckpt/_rankcache_{_ckpt_id}.json'
+RANKCACHE_PATH = f'{CARPETA_CKPT}/_rankcache_{_ckpt_id}.json'
 _rankcache = {}
 try:
     _d = sb.storage.from_(BUCKET).download(RANKCACHE_PATH)
@@ -981,7 +985,7 @@ lista = list(pasan.values())
 # checkpoint falla, el escaner sigue como siempre (empieza de cero, no se rompe).
 import hashlib
 CKPT_CADA = 50
-CKPT_PATH = f'escaner_ckpt/_ckpt_{_ckpt_id}.json'   # _ckpt_id: el mismo de la Fase 1
+CKPT_PATH = f'{CARPETA_CKPT}/_ckpt_{_ckpt_id}.json'   # _ckpt_id: el mismo de la Fase 1
 
 infos = []
 _eans_hechos = set()
