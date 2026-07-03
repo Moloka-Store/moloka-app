@@ -21,6 +21,9 @@ MODO = 'nuevos' if TIPO == 'diario' else 'todo'
 
 sb = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_SERVICE_KEY'])
 BUCKET = 'informes'
+CARPETA_ESCANER = os.environ.get('CARPETA_ESCANER') or 'escaner'   # buzon propio por director
+CARPETA_CKPT    = os.environ.get('CARPETA_CKPT') or 'escaner_ckpt'  # checkpoint propio por director
+
 
 # 1) Regla HEO
 try:
@@ -37,6 +40,42 @@ quiere_ofertas = any(str(m).strip().upper() == 'OFERTAS' for m in marcas)
 marcas_reales = [str(m).strip() for m in marcas if str(m).strip().upper() != 'OFERTAS']
 rank_max = regla.get('rank_maximo', 30000)
 print(f">>> Regla HEO. Tipo {TIPO} -> modo '{MODO}'. Marcas: {marcas_reales} | ofertas: {quiere_ofertas} | rank<= {rank_max}")
+
+# 1.5) ¿Reanudacion de un escaneo a medias? (CONGELADO DE CATALOGO, igual que TCG)
+# Si el escaner se corto y se relanza, quedan checkpoints FRESCOS en CARPETA_CKPT.
+# En ese caso NO re-descargamos el catalogo: el buzon (escaner_heo/) ya tiene el
+# catalogo y el recado de la corrida que se reanuda -> el _ckpt_id no cambia y la
+# caja de rank se reconoce (0 tokens). Un checkpoint viejo (>7h) = huerfano: se limpia.
+from datetime import datetime, timezone
+_frescos, _viejos = [], []
+try:
+    _ck = sb.storage.from_(BUCKET).list(CARPETA_CKPT) or []
+    for o in _ck:
+        nm = o.get('name', '')
+        if not (nm.startswith('_ckpt_') or nm.startswith('_rankcache_')):
+            continue
+        _ts = o.get('updated_at') or o.get('created_at')
+        es_viejo = True
+        if _ts:
+            try:
+                _dt = datetime.fromisoformat(str(_ts).replace('Z', '+00:00'))
+                es_viejo = (datetime.now(timezone.utc) - _dt).total_seconds() / 3600 >= 7
+            except Exception:
+                es_viejo = False
+        (_viejos if es_viejo else _frescos).append(nm)
+except Exception as e:
+    print("AVISO comprobando checkpoint:", e)
+
+if _frescos:
+    print(f">>> Reanudacion detectada: checkpoint fresco ({_frescos}).")
+    print(">>> NO re-descargo el catalogo: lo dejo CONGELADO. El workflow seguira con: escanear.")
+    sys.exit(0)
+if _viejos:
+    print(f">>> Limpio {len(_viejos)} checkpoint(s) huerfano(s) (>7h): {_viejos}")
+    try:
+        sb.storage.from_(BUCKET).remove([f'{CARPETA_CKPT}/{n}' for n in _viejos])
+    except Exception as e:
+        print("AVISO limpiando huerfanos:", e)
 
 # 2) Descargar + cruzar el catalogo HEO por API (los 3 endpoints)
 filas = descargar_catalogo_heo()
@@ -68,15 +107,15 @@ contenido = buf.getvalue().encode('utf-8-sig')
 
 # 4) Limpiar buzon (SIN tocar escaner_ckpt/) + subir comprimido + recado
 try:
-    viejos = sb.storage.from_(BUCKET).list('escaner') or []
-    borrar = [f'escaner/{o["name"]}' for o in viejos if o.get('name') and not o['name'].startswith('.')]
+    viejos = sb.storage.from_(BUCKET).list(CARPETA_ESCANER) or []
+    borrar = [f'{CARPETA_ESCANER}/{o["name"]}' for o in viejos if o.get('name') and not o['name'].startswith('.')]
     if borrar:
         sb.storage.from_(BUCKET).remove(borrar)
 except Exception as e:
     print("AVISO limpiando escaner/:", e)
 
 contenido_gz = gzip.compress(contenido)
-sb.storage.from_(BUCKET).upload('escaner/catalogo.csv.gz', contenido_gz,
+sb.storage.from_(BUCKET).upload(f'{CARPETA_ESCANER}/catalogo.csv.gz', contenido_gz,
                                 {'upsert': 'true', 'content-type': 'application/gzip'})
 print(f">>> Catalogo HEO filtrado en escaner/catalogo.csv.gz ({len(contenido_gz)} bytes comprimidos)")
 
@@ -86,7 +125,7 @@ recado_esc = {
     'modo': MODO,
     'rank_maximo': rank_max,
 }
-sb.storage.from_(BUCKET).upload('escaner/_solicitud_escaner.json',
+sb.storage.from_(BUCKET).upload(f'{CARPETA_ESCANER}/_solicitud_escaner.json',
                                 json.dumps(recado_esc, ensure_ascii=False).encode('utf-8'),
                                 {'upsert': 'true', 'content-type': 'application/json'})
 print(f">>> Recado puesto. Escaner HEO modo '{MODO}', marca TODAS (pre-filtrado), rank<= {rank_max}.")
