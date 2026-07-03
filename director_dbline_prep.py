@@ -22,6 +22,7 @@ MODO = 'nuevos' if TIPO == 'diario' else 'todo'
 sb = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_SERVICE_KEY'])
 BUCKET = 'informes'
 CARPETA_ESCANER = os.environ.get('CARPETA_ESCANER') or 'escaner'   # buzon propio por director
+CARPETA_CKPT    = os.environ.get('CARPETA_CKPT') or 'escaner_ckpt'  # checkpoint propio por director
 
 XLSX_CT = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
@@ -37,6 +38,39 @@ if not regla.get('activo'):
 print(f">>> Regla DBLINE cargada. Tipo: {TIPO} -> modo escaner '{MODO}'.")
 
 # 2) Descargar el Excel de DBLine (login + POST). Si falla, corta aqui (no escanea).
+# 1.5) Reanudacion (CONGELADO de catalogo, igual que TCG/HEO): si hay checkpoint
+# fresco en CARPETA_CKPT, NO re-descargamos -> el _ckpt_id no cambia y la caja de
+# rank se reconoce (0 tokens). Checkpoint viejo (>7h) = huerfano abandonado: se limpia.
+from datetime import datetime, timezone
+_frescos, _viejos = [], []
+try:
+    _ck = sb.storage.from_(BUCKET).list(CARPETA_CKPT) or []
+    for o in _ck:
+        nm = o.get('name', '')
+        if not (nm.startswith('_ckpt_') or nm.startswith('_rankcache_')):
+            continue
+        _ts = o.get('updated_at') or o.get('created_at')
+        es_viejo = True
+        if _ts:
+            try:
+                _dt = datetime.fromisoformat(str(_ts).replace('Z', '+00:00'))
+                es_viejo = (datetime.now(timezone.utc) - _dt).total_seconds() / 3600 >= 7
+            except Exception:
+                es_viejo = False
+        (_viejos if es_viejo else _frescos).append(nm)
+except Exception as e:
+    print("AVISO comprobando checkpoint:", e)
+if _frescos:
+    print(f">>> Reanudacion detectada: checkpoint fresco ({_frescos}). NO re-descargo el catalogo.")
+    print(">>> PREP OK (reanudacion). El workflow seguira con: escanear.")
+    sys.exit(0)
+if _viejos:
+    print(f">>> Limpio {len(_viejos)} checkpoint(s) huerfano(s) (>7h): {_viejos}")
+    try:
+        sb.storage.from_(BUCKET).remove([f'{CARPETA_CKPT}/{n}' for n in _viejos])
+    except Exception as e:
+        print("AVISO limpiando huerfanos:", e)
+
 contenido = descargar_catalogo_dbline()
 print(f">>> Catalogo DBLine descargado: {len(contenido)} bytes")
 
