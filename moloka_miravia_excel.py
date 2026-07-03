@@ -46,6 +46,33 @@ def set(ws, fila, col, valor):
     if valor not in (None, ''):
         ws.cell(row=fila, column=col, value=valor)
 
+_PRE = ('Funko Pop!', 'FUNKO POP!', 'Funko POP!', 'Funko Pop', 'FUNKO POP', 'POP!', 'Pop!')
+
+def titulo_miravia(p):
+    """Ensambla el título con el formato que mejor posiciona en Miravia (sacado del
+    analisis real de la competencia):
+        Funko Pop! [Franquicia] [Personaje #Nº] - Figura Vinilo Coleccionable 10 cm Oficial [- Edicion Chase]
+    Usa 'fandom' (franquicia limpia) + 'nombre_corto' (que ya trae personaje y numero).
+    El 'Chase' va AL FINAL, nunca al principio (romperia el match con la busqueda base:
+    la gente busca 'funko bridgerton penelope', no 'funko penelope chase')."""
+    fandom = (p.get('fandom') or '').strip()
+    corto  = (p.get('nombre_corto') or '').strip()
+    # quitar un 'Funko Pop!' inicial si lo trajera, para no duplicarlo
+    for pre in _PRE:
+        if corto.lower().startswith(pre.lower()):
+            corto = corto[len(pre):].strip(' -:·')
+            break
+    if not corto:                                   # sin nombre_corto -> lo que hubiera
+        return (p.get('miravia_titulo') or p.get('nombre') or '').strip()
+    partes = ['Funko Pop!']
+    if fandom and fandom.lower() not in corto.lower():   # no repetir franquicia si ya está
+        partes.append(fandom)
+    partes.append(corto)
+    base = ' '.join(partes) + ' - Figura Vinilo Coleccionable 10 cm Oficial'
+    if p.get('es_chase'):
+        base += ' - Edición Chase'
+    return base
+
 def main():
     # 1) Productos pendientes de subir a Miravia
     r = (sb.table('web_productos')
@@ -68,7 +95,8 @@ def main():
     avisos = []
     fila = FILA_INI
     for p in productos:
-        nombre = p.get('miravia_titulo') or p.get('nombre') or ''
+        titulo_viejo = (p.get('miravia_titulo') or p.get('nombre') or '')
+        nombre = titulo_miravia(p)                  # <-- formato ganador ensamblado
         ean    = p.get('ean') or ''
         slug   = p.get('slug') or ''
         precio = p.get('precio_miravia')
@@ -116,7 +144,11 @@ def main():
         set(ws, fila, 53, ALTO)                     # Altura (cm)
         set(ws, fila, 55, PELIGROSOS)               # Materiales peligrosos
 
-        print(f"    fila {fila}: {nombre[:55]}  | EAN {ean} | SKU {slug}")
+        print(f"    fila {fila}: {ean} | SKU {slug}")
+        print(f"        viejo: {titulo_viejo[:75]}")
+        print(f"        NUEVO: {nombre[:110]}")
+        if len(nombre) > 150:
+            avisos.append(f"{ean or slug}: título de {len(nombre)} caracteres (revisa el límite de Miravia)")
         fila += 1
 
     wb.save(SALIDA)
