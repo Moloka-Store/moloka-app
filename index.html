@@ -424,6 +424,16 @@
     </div>
 
     <div id="fab-sub-precios" style="display:none">
+      <div class="card" style="padding:16px;margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div style="flex:1;min-width:200px">
+            <div style="font-weight:600;margin-bottom:2px">🛒 Excel de carga de Miravia</div>
+            <div style="font-size:13px;color:var(--gray-500)">Genera el Excel con todas las fichas marcadas 🛒 y aún no subidas, y lo descarga. Luego lo subes tú al Seller de Miravia.</div>
+          </div>
+          <button id="fab-miravia-btn" class="btn btn-primary" onclick="fabGenerarExcelMiravia(this)">📥 Generar y descargar Excel</button>
+        </div>
+        <div id="fab-miravia-log" style="font-size:13px;color:var(--gray-500);margin-top:10px"></div>
+      </div>
       <div class="card" style="padding:0;overflow:hidden">
         <div style="padding:14px 16px;border-bottom:1px solid var(--gray-200);display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <input type="text" id="fab-buscar" placeholder="🔍 Buscar producto..." oninput="renderFabrica()" style="flex:1;min-width:180px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">
@@ -1577,6 +1587,67 @@ async function fabBorrarBorrador(id) {
 }
 
 // ============================================================
+// FABRICA WEB — Generar y descargar el Excel de Miravia (sub-pestana Precios web).
+// Dispara miravia-excel.yml, espera a que el .xlsm NUEVO aparezca en Storage
+// (informes/miravia/) y lo descarga. Si no habia fichas pendientes, avisa al final.
+// ============================================================
+async function fabGenerarExcelMiravia(btn) {
+  const log = document.getElementById('fab-miravia-log');
+  const RUTA = 'miravia/carga_miravia.xlsm';
+  btn.disabled = true;
+  log.innerHTML = '⏳ Lanzando la generación en la nube...';
+
+  // marca de tiempo del Excel actual (para detectar cuándo aparece el nuevo)
+  let antes = null;
+  try {
+    const { data } = await db.storage.from('informes').list('miravia', { limit: 100 });
+    const prev = (data || []).find(o => o.name === 'carga_miravia.xlsm');
+    if (prev) antes = prev.updated_at || prev.created_at || '';
+  } catch (e) {}
+
+  // 1) disparar el workflow
+  try {
+    const resp = await fetch('/api/disparar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secreto: DISPARO_SECRET, workflow: 'miravia-excel.yml' })
+    });
+    const d = await resp.json().catch(() => ({}));
+    if (!resp.ok) { log.innerHTML = '⚠️ No se pudo lanzar: ' + (d.error || ('HTTP ' + resp.status)); btn.disabled = false; return; }
+  } catch (e) {
+    log.innerHTML = '⚠️ Error de red al lanzar: ' + e.message; btn.disabled = false; return;
+  }
+  log.innerHTML = '⏳ Generando el Excel... (1-2 min, no cierres la pantalla).';
+
+  // 2) esperar a que aparezca un Excel MÁS NUEVO y descargarlo
+  let intentos = 0;
+  const timer = setInterval(async () => {
+    intentos++;
+    try {
+      const { data } = await db.storage.from('informes').list('miravia', { limit: 100 });
+      const f = (data || []).find(o => o.name === 'carga_miravia.xlsm');
+      const ahora = f ? (f.updated_at || f.created_at || '') : null;
+      if (f && ahora && ahora !== antes) {
+        clearInterval(timer);
+        const { data: blob, error } = await db.storage.from('informes').download(RUTA);
+        if (error || !blob) { log.innerHTML = '⚠️ El Excel se generó pero no pude descargarlo: ' + (error ? error.message : 'vacío'); btn.disabled = false; return; }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'carga_miravia.xlsm';
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+        log.innerHTML = '✅ Excel descargado. Revísalo y súbelo al Seller de Miravia (Agregar producto por lotes).';
+        btn.disabled = false;
+      }
+    } catch (e) {}
+    if (intentos > 40) {   // ~3,5 min
+      clearInterval(timer);
+      log.innerHTML = '⚠️ Está tardando, o no había fichas 🛒 pendientes de subir. Mira el run en GitHub → Actions, o inténtalo de nuevo.';
+      btn.disabled = false;
+    }
+  }, 5000);
+}
+
+// ============================================================
 // FÁBRICA WEB — Nueva ficha (uno a uno): Generar -> espera -> revisar -> Publicar
 // ============================================================
 let _fabActual = null;   // { id, ean, tanda, fotos:[], papeles:[], web_desc, ... }
@@ -1627,7 +1698,7 @@ async function fabGenerarFicha() {
   document.getElementById('fab-vaulted').checked = false;
   document.getElementById('fab-protector').checked = false;
   document.getElementById('fab-en-web').checked = true;       // la web vuelve a SI por defecto
-  document.getElementById('fab-en-miravia').checked = false;  // Miravia vuelve a NO por defecto
+  /* Miravia NO se resetea: mantiene tu ultima eleccion (se queda marcado para la siguiente ficha) */
   const _te = document.getElementById('fab-tipoexc'); if (_te) _te.value = '';
 
   try {
