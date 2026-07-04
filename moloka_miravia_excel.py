@@ -138,7 +138,10 @@ def main():
         if not nombre:  avisos.append(f"{ean or slug}: sin título de Miravia")
         if not precio:  avisos.append(f"{ean or slug}: sin precio_miravia")
         if not imgs:    avisos.append(f"{ean or slug}: sin imágenes")
-        if not p.get('foto_caja'): avisos.append(f"{ean or slug}: sin foto de la caja (GPSR)")
+        if not (p.get('foto_culo') or p.get('foto_caja')):
+            avisos.append(f"{ean or slug}: sin foto para la etiqueta UE (GPSR)")
+        elif not p.get('foto_culo'):
+            avisos.append(f"{ean or slug}: sin foto del culo; va la de frente en la etiqueta UE (revisa GPSR)")
         if stock in (None, 0):     avisos.append(f"{ean or slug}: stock {stock} (¿sincronizar?)")
 
         # --- Mapeo a las columnas de la plantilla ---
@@ -157,7 +160,7 @@ def main():
         set(ws, fila, 21, MATERIAL)                 # Material
         set(ws, fila, 22, CERT)                     # Certificaciones
         set(ws, fila, 23, p.get('miravia_atributos'))     # Atributos adicionales
-        set(ws, fila, 24, p.get('foto_caja'))       # Foto etiqueta UE (GPSR)
+        set(ws, fila, 24, p.get('foto_culo') or p.get('foto_caja'))  # Foto etiqueta UE (GPSR): la TRASERA (culo); si falta, la de frente
         set(ws, fila, 30, ADVERTENCIA)              # ¿Advertencia de seguridad?
         set(ws, fila, 31, ADV_TEXTO)                # Contenido de la advertencia
         set(ws, fila, 34, str(ean))                 # Código EAN
@@ -181,6 +184,16 @@ def main():
         fila += 1
 
     wb.save(SALIDA)
+    # Subir el .xlsm a Storage para que el boton de la app lo pueda descargar
+    try:
+        with open(SALIDA, 'rb') as _fh:
+            _datos = _fh.read()
+        sb.storage.from_('informes').upload(
+            'miravia/carga_miravia.xlsm', _datos,
+            {'content-type': 'application/vnd.ms-excel.sheet.macroEnabled.12', 'upsert': 'true'})
+        print('>>> Excel subido a Storage: informes/miravia/carga_miravia.xlsm')
+    except Exception as _e:
+        print(f'   (aviso: no pude subir el Excel a Storage: {_e})')
     print(f"\n>>> LISTO. {len(productos)} producto(s) escritos en {SALIDA}")
     if avisos:
         print("\n⚠️  REVISA antes de subir:")
