@@ -294,6 +294,7 @@ def volcar_a_web(f, indice, stock_inv):
         'imagen_principal': principal, 'imagenes': imgs or None,
         'miravia_titulo': f.get('miravia_titulo'), 'miravia_desc': f.get('miravia_desc'),
         'miravia_atributos': _atrs, 'foto_caja': _foto_caja, 'miravia_imagenes': _mimgs or None,
+        'foto_culo': f.get('foto_culo'),
         'origen': 'fabrica', 'activo': bool(f.get('en_web', True)),
         # origen_id = id del producto dentro de la fabrica. Como chase y comun
         # comparten EAN, la chase lleva sufijo -chase para no colisionar (igual
