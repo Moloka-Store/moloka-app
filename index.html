@@ -451,6 +451,7 @@
           <span style="font-size:12px;color:var(--gray-500)" id="fab-contador">—</span>
           <button class="btn btn-ghost btn-sm" onclick="cargarFabrica()" title="Recargar la lista">🔄 Actualizar</button>
           <button class="btn btn-primary btn-sm" onclick="fabActualizarWeb(this)" title="Reconstruye la web pública con los precios y ofertas actuales (tarda 1-2 min)">🚀 Actualizar web</button>
+          <button class="btn btn-ghost btn-sm" onclick="fabSincronizarStock(this)" title="Cruza el inventario con las fichas de fábrica y pone el stock real (oculta lo agotado). Tarda 1-2 min.">📦 Sincronizar stock</button>
           <span id="fab-web-log" style="font-size:12px;color:var(--gray-500)"></span>
         </div>
         <div class="table-wrap" style="max-height:75vh;overflow:auto">
@@ -2135,6 +2136,31 @@ async function fabPublicar() {
 // FÁBRICA WEB — precios por canal (web / miravia) de los productos publicados
 // ============================================================
 let _fabProductos = [];
+
+async function fabSincronizarStock(btn) {
+  const log = document.getElementById('fab-web-log');
+  if (!confirm('\u00bfSincronizar el stock de la web con el inventario?\nPondr\u00e1 el stock real y ocultar\u00e1 lo agotado. Tarda 1-2 min.')) return;
+  if (btn) btn.disabled = true;
+  if (log) { log.style.color = 'var(--gray-500)'; log.textContent = '\u23f3 Sincronizando stock...'; }
+  try {
+    const resp = await fetch('/api/disparar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secreto: DISPARO_SECRET, workflow: 'sync-stock-web.yml' })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      if (log) { log.style.color = '#2e7d32'; log.textContent = '\u2705 Sincronizando y reconstruyendo. En 1-2 min. Detalle en GitHub \u2192 Actions.'; setTimeout(() => { if (log) log.textContent = ''; }, 9000); }
+    } else if (resp.status === 409) {
+      if (log) { log.style.color = '#ba7517'; log.textContent = '\u23f3 ' + (data.error || 'Ya hay una sincronizaci\u00f3n en marcha.'); }
+    } else {
+      if (log) { log.style.color = '#b91c1c'; log.textContent = '\u26a0\ufe0f ' + (data.error || ('HTTP ' + resp.status)); }
+    }
+  } catch (e) {
+    if (log) { log.style.color = '#b91c1c'; log.textContent = 'Error: ' + e.message; }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
 
 async function fabActualizarWeb(btn) {
   const log = document.getElementById('fab-web-log');
