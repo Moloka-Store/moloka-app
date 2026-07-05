@@ -1,0 +1,28 @@
+name: Moloka - Sincronizar Stock Web
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [sync-stock-web]
+
+jobs:
+  sincronizar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias
+        run: pip install -U supabase
+
+      - name: Sincronizar stock de la web con el inventario
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: python moloka_sync_stock_web.py
