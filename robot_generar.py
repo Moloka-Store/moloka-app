@@ -272,7 +272,7 @@ def volcar_a_web(f, indice, stock_inv):
     _foto_caja = (f.get('fotos_elegidas') or {}).get('caja')
     # Imágenes para Miravia: PRINCIPAL en fondo blanco (figura Keepa) primero, luego caja y montajes M7
     _fg = f.get('fotos_generadas') or {}
-    _mimgs = [_fg.get('figura'), _fg.get('caja'), _fg.get('portada'), _fg.get('ficha')] + list(secundarias or [])
+    _mimgs = [_fg.get('portada'), _fg.get('caja'), _fg.get('figura'), _fg.get('ficha')] + list(secundarias or [])
     _vist = set(); _mimgs = [u for u in _mimgs if u and not (u in _vist or _vist.add(u))]
     # Stock REAL del almacén (inventario). Una joya que tienes NO nace agotada; y la que
     # no tengas sale agotada de verdad. Común y chase cruzan por (EAN, es_chase) por separado.
