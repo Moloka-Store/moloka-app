@@ -217,15 +217,51 @@ def cargar_web_productos():
         desde += 1000
     return filas
 
-def galeria(fg, secundarias=None):
-    """Orden: portada, caja, figura, ficha (M7), [secundarias], protector."""
-    fg = fg or {}
-    out = [fg[k] for k in ('portada','caja','figura','ficha') if fg.get(k)]
-    for u in (secundarias or []):
-        if u and u not in out: out.append(u)
-    if fg.get('protector') and fg['protector'] not in out:
-        out.append(fg['protector'])
+_CACHE_CLAVE_IMG = {}
+def _clave_contenido(url):
+    """Clave para deduplicar por CONTENIDO (misma imagen subida con distinto nombre/URL).
+    Usa el ETag de Supabase (hash del archivo) o, si no, el tamaño; via HEAD (sin descargar).
+    Si el HEAD falla, cae a la propia URL (no rompe). Cachea para no repetir HEADs."""
+    if url in _CACHE_CLAVE_IMG:
+        return _CACHE_CLAVE_IMG[url]
+    import urllib.request
+    clave = url
+    try:
+        req = urllib.request.Request(url, method='HEAD')
+        with urllib.request.urlopen(req, timeout=15) as r:
+            et = r.headers.get('ETag')
+            cl = r.headers.get('Content-Length')
+            if et: clave = 'etag:' + et.strip('"')
+            elif cl: clave = 'len:' + cl
+    except Exception:
+        pass
+    _CACHE_CLAVE_IMG[url] = clave
+    return clave
+
+
+def _dedup_contenido(urls):
+    """Quita imagenes con el mismo CONTENIDO (misma imagen, distinto nombre/URL), en orden."""
+    vistos, out = {}, []
+    for u in urls:
+        if not (isinstance(u, str) and u.strip()):
+            continue
+        k = _clave_contenido(u)
+        if k in vistos:
+            continue
+        vistos[k] = 1
+        out.append(u)
     return out
+
+
+def galeria(fg, secundarias=None):
+    """Orden: portada, caja, figura, ficha (M7), [secundarias], protector.
+    Dedup por CONTENIDO (ETag): quita la misma imagen subida con distinto nombre."""
+    fg = fg or {}
+    cand = [fg[k] for k in ('portada','caja','figura','ficha') if fg.get(k)]
+    cand += list(secundarias or [])
+    if fg.get('protector'):
+        cand.append(fg['protector'])
+    return _dedup_contenido(cand)
 
 def cargar_stock_inventario():
     """Índice {(ean_norm, es_chase): stock_moloka} desde el inventario (tabla 'productos').
@@ -272,8 +308,7 @@ def volcar_a_web(f, indice, stock_inv):
     _foto_caja = (f.get('fotos_elegidas') or {}).get('caja')
     # Imágenes para Miravia: PRINCIPAL en fondo blanco (figura Keepa) primero, luego caja y montajes M7
     _fg = f.get('fotos_generadas') or {}
-    _mimgs = [_fg.get('portada'), _fg.get('caja'), _fg.get('figura'), _fg.get('ficha')] + list(secundarias or [])
-    _vist = set(); _mimgs = [u for u in _mimgs if u and not (u in _vist or _vist.add(u))]
+    _mimgs = _dedup_contenido([_fg.get('portada'), _fg.get('caja'), _fg.get('figura'), _fg.get('ficha')] + list(secundarias or []))
     # Stock REAL del almacén (inventario). Una joya que tienes NO nace agotada; y la que
     # no tengas sale agotada de verdad. Común y chase cruzan por (EAN, es_chase) por separado.
     stock_real = stock_inv.get((norm_ean(ean), bool(f.get('es_chase'))), 0)
