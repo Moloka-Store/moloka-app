@@ -133,6 +133,11 @@ def main():
         if isinstance(imgs, str):
             try: imgs = json.loads(imgs)
             except Exception: imgs = []
+        # La PORTADA (montaje caja+funko) va SIEMPRE de principal, igual que en la web.
+        # Recoloca las fichas ya generadas cuyo miravia_imagenes se guardó con la figura suelta delante.
+        _port = [u for u in imgs if isinstance(u, str) and 'portada.jpg' in u.lower()]
+        _rest = [u for u in imgs if not (isinstance(u, str) and 'portada.jpg' in u.lower())]
+        imgs  = _port + _rest
 
         # Avisos de calidad (para que sepas qué revisar antes de subir)
         if not nombre:  avisos.append(f"{ean or slug}: sin título de Miravia")
