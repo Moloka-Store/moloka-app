@@ -94,6 +94,8 @@ RECADO = '_solicitud_escaner.json'
 SOLICITUD = {}
 catalogo_local = None
 catalogo_nombre = None
+N_CRUDO = None            # nº de filas del catalogo crudo (para el blindaje anti-vaciado)
+UMBRAL_PARCIAL = 0.35     # si el catalogo crudo trae <35% de lo que hay en memoria -> NO marcar agotados
 try:
     objs = sb.storage.from_(BUCKET).list(CARPETA_ESCANER) or []
     for o in objs:
@@ -265,6 +267,7 @@ PERFILES = {
     # ============================================================
     'DINOTOYS': {'tipo':'auto', 'deteccion':'tolerante'},   # mayorista holandes (Logic4)
     'ZENTRADA': {'tipo':'auto', 'deteccion':'tolerante'},   # marketplace mayorista (xlsx/csv)
+    'MIS_COMPRAS': {'tipo':'auto', 'deteccion':'tolerante', 'efimero':True},   # compras ad-hoc: deteccion tolerante y NO toca la memoria de ningun proveedor
     'HEO': {
         # heoGATE Retailer API -> catalogo cruzado por descargar_heo.py (CSV ';', columnas
         # fijas). El director de HEO PRE-FILTRA a Funko+Ultimate Guard+ofertas y sube el
@@ -283,6 +286,8 @@ if PROVEEDOR not in PERFILES:
     print(f'Proveedor desconocido: {PROVEEDOR}. Validos: {list(PERFILES)}. Fin.')
     sys.exit(0)
 PERFIL = PERFILES[PROVEEDOR]
+if PERFIL.get('efimero'):
+    MODO = 'todo'   # las compras ad-hoc se escanean enteras (no hay memoria previa que filtre)
 
 # ============================================================
 # BEMS POR API (cliente integrado)
@@ -636,6 +641,7 @@ else:
                           encoding='utf-8', on_bad_lines='skip').fillna('')
     cat.columns = [str(c).strip() for c in cat.columns]   # BEMS trae espacios en los nombres
     print(f"Catalogo crudo: {len(cat)} filas")
+    N_CRUDO = len(cat)
 
     if PERFIL.get('deteccion') == 'tolerante':
         det = detectar_columnas(cat)
@@ -1282,40 +1288,48 @@ except Exception as ex:
 # ============================================================
 ahora = datetime.now(timezone.utc).isoformat()
 regs = []; vistos_up = set()
-for f in filas_hoy:
-    k = (PROVEEDOR, norm(f['core']), bool(f['es_chase']))
-    if k in vistos_up: continue
-    vistos_up.add(k)
-    regs.append({'proveedor':PROVEEDOR, 'ean':f['core'], 'es_case':bool(f['es_chase']),
-                 'marca':MARCA, 'pa': float(f['pa']) if f['pa'] is not None else None,
-                 'presente':True, 'fecha':ahora})
-# Agotados SOLO si el catalogo de hoy trajo productos. Si vino vacio (fichero
-# equivocado, marca que no existe...), NO marcar todo como agotado: seria un
-# falso vaciado que ensucia la memoria. Mejor no tocar nada.
-if filas_hoy:
-    for (ean_norm, es_case), info in ausentes:
-        k = (PROVEEDOR, ean_norm, es_case)
+if PERFIL.get('efimero'):
+    print(f"Perfil EFIMERO ({PROVEEDOR}): NO se escribe en escaner_memoria; ningun proveedor real se ve afectado.")
+else:
+    for f in filas_hoy:
+        k = (PROVEEDOR, norm(f['core']), bool(f['es_chase']))
         if k in vistos_up: continue
         vistos_up.add(k)
-        pa_ant = info.get('pa')
-        regs.append({'proveedor':PROVEEDOR, 'ean':info['ean_db'], 'es_case':es_case,
-                     'marca':MARCA, 'pa': float(pa_ant) if pa_ant is not None else None,
-                     'presente':False, 'fecha':ahora})
-else:
-    print("Catalogo vacio (0 productos): NO se marcan agotados (evita falso vaciado de la memoria).")
-if not regs:
-    print("Memoria sin cambios.")
-else:
-    n_ok = 0
-    for i in range(0, len(regs), 500):
-        lote = regs[i:i+500]
-        try:
-            sb.table('escaner_memoria').upsert(lote, on_conflict='proveedor,ean,es_case').execute()
-            n_ok += len(lote)
-        except Exception as ex:
-            print(f"  AVISO lote memoria {i//500+1}: {ex}")
-    n_pres = sum(1 for x in regs if x['presente']); n_aus = len(regs) - n_pres
-    print(f"Memoria actualizada: {n_ok}/{len(regs)} ({n_pres} presentes, {n_aus} agotados) [{PROVEEDOR}/{MARCA}]")
+        regs.append({'proveedor':PROVEEDOR, 'ean':f['core'], 'es_case':bool(f['es_chase']),
+                     'marca':MARCA, 'pa': float(f['pa']) if f['pa'] is not None else None,
+                     'presente':True, 'fecha':ahora})
+    # Agotados SOLO si el catalogo llego COMPLETO. Blindaje anti-vaciado:
+    #  - catalogo vacio (0 filas) -> no marcar (fichero equivocado / marca inexistente)
+    #  - catalogo PARCIAL (crudo < UMBRAL_PARCIAL de lo que hay en memoria) -> no marcar
+    #    (descarga incompleta). Una REBAJA no reduce el nº de filas crudas -> NO salta aqui.
+    if not filas_hoy:
+        print("Catalogo vacio (0 productos): NO se marcan agotados (evita falso vaciado de la memoria).")
+    elif N_CRUDO is not None and len(mem) > 0 and N_CRUDO < UMBRAL_PARCIAL * len(mem):
+        print(f"BLINDAJE: catalogo PARCIAL ({N_CRUDO} filas crudas vs {len(mem)} en memoria, "
+              f"<{int(UMBRAL_PARCIAL*100)}%): NO se marcan agotados. Huele a descarga incompleta o "
+              f"fichero equivocado; la memoria queda intacta.")
+    else:
+        for (ean_norm, es_case), info in ausentes:
+            k = (PROVEEDOR, ean_norm, es_case)
+            if k in vistos_up: continue
+            vistos_up.add(k)
+            pa_ant = info.get('pa')
+            regs.append({'proveedor':PROVEEDOR, 'ean':info['ean_db'], 'es_case':es_case,
+                         'marca':MARCA, 'pa': float(pa_ant) if pa_ant is not None else None,
+                         'presente':False, 'fecha':ahora})
+    if not regs:
+        print("Memoria sin cambios.")
+    else:
+        n_ok = 0
+        for i2 in range(0, len(regs), 500):
+            lote = regs[i2:i2+500]
+            try:
+                sb.table('escaner_memoria').upsert(lote, on_conflict='proveedor,ean,es_case').execute()
+                n_ok += len(lote)
+            except Exception as ex:
+                print(f"  AVISO lote memoria {i2//500+1}: {ex}")
+        n_pres = sum(1 for x in regs if x['presente']); n_aus = len(regs) - n_pres
+        print(f"Memoria actualizada: {n_ok}/{len(regs)} ({n_pres} presentes, {n_aus} agotados) [{PROVEEDOR}/{MARCA}]")
 
 # ============================================================
 # LIMPIAR EL BUZON DEL ESCANER (recado + catalogo) - VERIFICADO
