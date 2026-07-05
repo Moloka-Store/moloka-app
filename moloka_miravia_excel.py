@@ -120,6 +120,23 @@ def marcar_subido(sb, ids):
         print(f">>> Marcados como subidos (True): {len(ids)}")
 
 
+def _clave_contenido(url):
+    """Clave para deduplicar por CONTENIDO (misma imagen subida con distinto nombre/URL).
+    Usa el ETag de Supabase (hash del archivo) o, si no, el tamaño; se obtienen con un HEAD
+    (sin descargar la imagen). Si el HEAD falla, cae a la propia URL (no rompe)."""
+    import urllib.request
+    try:
+        req = urllib.request.Request(url, method='HEAD')
+        with urllib.request.urlopen(req, timeout=15) as r:
+            et = r.headers.get('ETag')
+            if et: return 'etag:' + et.strip('"')
+            cl = r.headers.get('Content-Length')
+            if cl: return 'len:' + cl
+    except Exception:
+        pass
+    return url
+
+
 def main():
     # 1) Productos pendientes de subir a Miravia
     r = (sb.table('web_productos')
@@ -158,7 +175,14 @@ def main():
         _rest = [u for u in imgs if not (isinstance(u, str) and 'portada.jpg' in u.lower())]
         imgs  = _port + _rest
         # Dedup por URL (capa extra anti 'duplicate image' de Miravia), manteniendo el orden.
-        imgs = list(dict.fromkeys(u for u in imgs if isinstance(u, str) and u.strip()))  # dedup manteniendo orden (sin set(), que aquí es una función propia)
+        # Dedup por CONTENIDO: quita la misma imagen subida con distinto nombre (caja_ vs secundaria_).
+        _vist_c = {}; _out = []
+        for _u in imgs:
+            if not (isinstance(_u, str) and _u.strip()): continue
+            _k = _clave_contenido(_u)
+            if _k in _vist_c: continue
+            _vist_c[_k] = 1; _out.append(_u)
+        imgs = _out
 
         # Avisos de calidad (para que sepas qué revisar antes de subir)
         if not nombre:  avisos.append(f"{ean or slug}: sin título de Miravia")
