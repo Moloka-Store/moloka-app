@@ -180,7 +180,8 @@ def main():
         set(ws, fila, 14, MONEDA)                   # currencyCode
         set(ws, fila, 16, desc_con_imagenes(p.get('miravia_desc'), imgs))  # Descripción (+3 imágenes)
         set(ws, fila, 17, ENVIO)                    # Método de envío
-        set(ws, fila, 18, p.get('licencia') or 'Funko')   # Marca
+        set(ws, fila, 18, 'Funko')   # Marca: SIEMPRE Funko (fabricante). La licencia/franquicia
+        # (Disney, Marvel...) NO es la marca en Miravia y da 'unauthorized' -> va en atributos (Franchise).
         set(ws, fila, 19, EDAD)                     # Edad recomendada
         set(ws, fila, 20, BATERIA)                  # Batería requerida
         set(ws, fila, 21, MATERIAL)                 # Material
