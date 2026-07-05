@@ -434,6 +434,17 @@
         </div>
         <div id="fab-miravia-log" style="font-size:13px;color:var(--gray-500);margin-top:10px"></div>
       </div>
+      <div class="card" style="padding:16px;margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div style="flex:1;min-width:200px">
+            <div style="font-weight:600;margin-bottom:2px">📋 Procesar resultado de Miravia</div>
+            <div style="font-size:13px;color:var(--gray-500)">Tras subir el Excel al Seller, sube aquí el informe de resultados de Miravia. Marca como subidas las que entraron y devuelve a la cola las que fallaron.</div>
+          </div>
+          <input type="file" id="fab-mrv-res-file" accept=".xlsm,.xlsx" style="display:none" onchange="fabProcesarResultadoMiravia(this)">
+          <button id="fab-mrv-res-btn" class="btn btn-primary" onclick="document.getElementById('fab-mrv-res-file').click()">📤 Subir informe de Miravia</button>
+        </div>
+        <div id="fab-mrv-res-log" style="font-size:13px;color:var(--gray-500);margin-top:10px"></div>
+      </div>
       <div class="card" style="padding:0;overflow:hidden">
         <div style="padding:14px 16px;border-bottom:1px solid var(--gray-200);display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <input type="text" id="fab-buscar" placeholder="🔍 Buscar producto..." oninput="renderFabrica()" style="flex:1;min-width:180px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px">
@@ -1645,6 +1656,40 @@ async function fabGenerarExcelMiravia(btn) {
       btn.disabled = false;
     }
   }, 5000);
+}
+
+// ============================================================
+// FABRICA WEB — Procesar el informe de resultados de Miravia.
+// Sube el informe al buzon informes/miravia_resultado/ y dispara
+// miravia-resultado.yml (desmarca las fichas que fallaron para reintentarlas).
+// ============================================================
+async function fabProcesarResultadoMiravia(input) {
+  const log = document.getElementById('fab-mrv-res-log');
+  const btn = document.getElementById('fab-mrv-res-btn');
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  btn.disabled = true;
+  log.innerHTML = '\u23F3 Subiendo el informe...';
+  const ruta = 'miravia_resultado/' + file.name.replace(/[^\w.\-]/g, '_');
+  try {
+    const { error } = await db.storage.from('informes').upload(ruta, file, { upsert: true });
+    if (error) { log.innerHTML = '\u26A0\uFE0F No pude subir el informe: ' + error.message; btn.disabled = false; return; }
+  } catch (e) {
+    log.innerHTML = '\u26A0\uFE0F Error de red al subir: ' + e.message; btn.disabled = false; return;
+  }
+  try {
+    const resp = await fetch('/api/disparar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secreto: DISPARO_SECRET, workflow: 'miravia-resultado.yml' })
+    });
+    const d = await resp.json().catch(() => ({}));
+    if (!resp.ok) { log.innerHTML = '\u26A0\uFE0F Informe subido, pero no se pudo lanzar el procesado: ' + (d.error || ('HTTP ' + resp.status)); btn.disabled = false; return; }
+  } catch (e) {
+    log.innerHTML = '\u26A0\uFE0F Error de red al lanzar: ' + e.message; btn.disabled = false; return;
+  }
+  log.innerHTML = '\u2705 Informe subido y procesandose (~1 min). Las fichas que fallaron vuelven a la cola para el proximo Excel. Detalle en GitHub \u2192 Actions.';
+  btn.disabled = false;
 }
 
 // ============================================================
