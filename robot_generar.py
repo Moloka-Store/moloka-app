@@ -307,6 +307,11 @@ def volcar_a_web(f, indice, stock_inv):
     existente = indice.get(clave)
     nombre_log = (contenido.get('nombre') or f.get('web_titulo') or '')[:50]
     if existente:
+        # Si el producto venía de otro origen (TCG/BEMS) y ahora pasa a fábrica, limpiar el
+        # precio_oferta HEREDADO: el de TCG lo puso el director automático y aquí quedaría
+        # colgado (el director ya no toca los de fábrica). Las ofertas de fábrica se ponen a mano.
+        if (existente.get('origen') or '') != 'fabrica':
+            contenido['precio_oferta'] = None
         sb.table('web_productos').update(contenido).eq('id', existente['id']).execute()
         return 'actualizado', nombre_log
     # stock y disponibilidad ya van en 'contenido' con el valor REAL del inventario
