@@ -158,7 +158,7 @@ def main():
         _rest = [u for u in imgs if not (isinstance(u, str) and 'portada.jpg' in u.lower())]
         imgs  = _port + _rest
         # Dedup por URL (capa extra anti 'duplicate image' de Miravia), manteniendo el orden.
-        _vist = set(); imgs = [u for u in imgs if isinstance(u, str) and u.strip() and not (u in _vist or _vist.add(u))]
+        imgs = list(dict.fromkeys(u for u in imgs if isinstance(u, str) and u.strip()))  # dedup manteniendo orden (sin set(), que aquí es una función propia)
 
         # Avisos de calidad (para que sepas qué revisar antes de subir)
         if not nombre:  avisos.append(f"{ean or slug}: sin título de Miravia")
