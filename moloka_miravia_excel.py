@@ -101,6 +101,25 @@ def titulo_miravia(p):
         base += ' - Edición Chase'
     return base
 
+def marcar_subido(sb, ids):
+    """Marca miravia_subido en los productos recién volcados al Excel, para que el
+    próximo Excel no los repita (arregla el 'acumula'). Los que fallen o queden en
+    borrador se DESMARCAN luego con moloka_miravia_resultado.py leyendo el informe.
+    Robustez: intenta con fecha ISO; si la columna fuese boolean, cae a True."""
+    ids = [i for i in ids if i is not None]
+    if not ids:
+        return
+    from datetime import datetime, timezone
+    valor = datetime.now(timezone.utc).isoformat()
+    try:
+        sb.table('web_productos').update({'miravia_subido': valor}).in_('id', ids).execute()
+        print(f">>> Marcados como subidos (miravia_subido={valor[:10]}): {len(ids)}")
+    except Exception as e:
+        print(f"   (miravia_subido no aceptó fecha: {e}; reintento con True)")
+        sb.table('web_productos').update({'miravia_subido': True}).in_('id', ids).execute()
+        print(f">>> Marcados como subidos (True): {len(ids)}")
+
+
 def main():
     # 1) Productos pendientes de subir a Miravia
     r = (sb.table('web_productos')
@@ -138,6 +157,8 @@ def main():
         _port = [u for u in imgs if isinstance(u, str) and 'portada.jpg' in u.lower()]
         _rest = [u for u in imgs if not (isinstance(u, str) and 'portada.jpg' in u.lower())]
         imgs  = _port + _rest
+        # Dedup por URL (capa extra anti 'duplicate image' de Miravia), manteniendo el orden.
+        _vist = set(); imgs = [u for u in imgs if isinstance(u, str) and u.strip() and not (u in _vist or _vist.add(u))]
 
         # Avisos de calidad (para que sepas qué revisar antes de subir)
         if not nombre:  avisos.append(f"{ean or slug}: sin título de Miravia")
@@ -200,6 +221,7 @@ def main():
     except Exception as _e:
         print(f'   (aviso: no pude subir el Excel a Storage: {_e})')
     print(f"\n>>> LISTO. {len(productos)} producto(s) escritos en {SALIDA}")
+    marcar_subido(sb, [p.get('id') for p in productos])
     if avisos:
         print("\n⚠️  REVISA antes de subir:")
         for a in avisos: print("   -", a)
