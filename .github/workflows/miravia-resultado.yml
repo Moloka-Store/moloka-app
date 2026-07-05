@@ -1,0 +1,27 @@
+name: Moloka - Resultado Miravia
+
+on:
+  workflow_dispatch:        # lanzar a mano desde la pestaña Actions
+  repository_dispatch:      # lo disparará el botón de la app
+    types: [miravia-resultado]
+
+jobs:
+  procesar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias
+        run: pip install -U openpyxl supabase
+
+      - name: Procesar el informe de resultados de Miravia
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python moloka_miravia_resultado.py
