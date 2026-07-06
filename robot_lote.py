@@ -216,6 +216,10 @@ def redactar_tcg(nombre_tcg, img_url, rarezas):
                                  "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}})
         except Exception as e:
             print(f"    (aviso: no pude bajar la imagen TCG, redacto sin ella: {e})")
+    # Busquedas reales de Google (best-effort) con el nombre del catalogo TCG.
+    blk = R.bloque_busquedas(nombre_tcg)
+    if blk:
+        contenido.append(blk)
     msg = R.cliente.messages.create(model=R.MODELO, max_tokens=1800,
                                     system=R.PROMPT_SISTEMA,
                                     messages=[{"role": "user", "content": contenido}])

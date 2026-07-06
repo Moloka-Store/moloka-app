@@ -16,10 +16,19 @@
 # Los clientes de Supabase NO viven aquí: cada robot crea el suyo.
 # ============================================================================
 import os, json, base64, re, unicodedata, requests
+import xml.etree.ElementTree as ET
 from anthropic import Anthropic
 
 cliente = Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
 MODELO  = "claude-sonnet-4-6"
+
+HEADERS = {"User-Agent": "Mozilla/5.0"}   # UA de navegador (para bajar imagenes y para Google)
+
+# --- Autocompletar de Google (busquedas reales de la gente, para SEO) ---
+GOOGLE_SUGGEST_URL = "https://suggestqueries.google.com/complete/search"
+MAX_SUGERENCIAS    = 10
+# Freno rapido por si Google limita: SUGERENCIAS_GOOGLE=0 desactiva la consulta.
+SUGERENCIAS_ON = os.environ.get('SUGERENCIAS_GOOGLE', '1').strip().lower() not in ('0', 'false', 'no', '')
 
 CATEGORIAS = ["Anime y Manga", "Películas y TV", "Animación",
               "Cómics y Superhéroes", "Terror", "Videojuegos", "Música", "Deportes"]
@@ -108,6 +117,73 @@ def foto_caja(f):
     fk = f.get('fotos_keepa') or []
     return fk[0] if fk else None
 
+# --- Autocompletar de Google: busquedas reales de la gente para el SEO ---
+_MULETILLAS = {"pop", "pop!", "vinyl", "figure", "figura", "figuras", "television",
+               "tv", "vinilo", "collectible", "coleccionable", "de", "the"}
+
+def _limpiar_semilla(texto):
+    """De un titulo ruidoso (p.ej. de Keepa) saca una semilla corta y buscable, con
+    el prefijo 'funko' (asi es como busca la gente: 'funko eleven 511')."""
+    if not texto:
+        return ''
+    t = str(texto).lower()
+    t = re.sub(r'[^a-z0-9áéíóúñü ]+', ' ', t)          # fuera puntuacion/simbolos
+    palabras = [w for w in t.split() if w and w not in _MULETILLAS]
+    palabras = palabras[:6]                             # primeras palabras distintivas
+    if not palabras:
+        return ''
+    if palabras[0] != 'funko':
+        palabras = ['funko'] + palabras
+    return ' '.join(palabras).strip()
+
+def sugerencias_google(consulta):
+    """Busquedas reales del autocompletar de Google (endpoint gratuito 'suggestqueries',
+    output=toolbar -> XML). BEST-EFFORT: ante cualquier fallo devuelve [] y no rompe nada.
+    Devuelve una lista de sugerencias normalizadas (minusculas, sin duplicados, cap)."""
+    consulta = (consulta or '').strip()
+    if not consulta:
+        return []
+    try:
+        r = requests.get(GOOGLE_SUGGEST_URL,
+                         params={"output": "toolbar", "hl": "es", "gl": "ES", "q": consulta},
+                         headers=HEADERS, timeout=8)
+        r.raise_for_status()
+        # Parsear los BYTES: el XML de toolbar declara ISO-8859-1 y ET respeta esa cabecera.
+        raiz = ET.fromstring(r.content)
+        out, vistos = [], set()
+        base = consulta.lower()
+        for sug in raiz.iter('suggestion'):
+            data = (sug.get('data') or '').strip().lower()
+            if not data or data == base or data in vistos:
+                continue
+            vistos.add(data)
+            out.append(data)
+            if len(out) >= MAX_SUGERENCIAS:
+                break
+        return out
+    except Exception as e:
+        print(f"    (aviso: autocompletar de Google no disponible, sigo sin el: {e})")
+        return []
+
+def bloque_busquedas(semilla):
+    """Bloque de texto (dict para 'contenido') con las busquedas reales de Google para
+    orientar el SEO de la redaccion. Devuelve None si el toggle esta off, no hay semilla
+    o Google no devuelve nada. Las sugerencias son PISTAS DE FRASEO, nunca datos."""
+    if not SUGERENCIAS_ON:
+        return None
+    limpia = _limpiar_semilla(semilla)
+    if not limpia:
+        return None
+    sugs = sugerencias_google(limpia)
+    if not sugs:
+        return None
+    lista = "; ".join(sugs)
+    return {"type": "text", "text":
+        "BUSQUEDAS REALES EN GOOGLE (autocomplete, hl=es) para orientar el SEO — la gente "
+        "busca cosas asi: " + lista + ". Usa estas palabras clave con naturalidad en "
+        "web_titulo y web_desc SOLO si encajan y son CIERTAS para este producto. Son pistas "
+        "de fraseo, NO datos: no inventes ni fuerces, el rigor manda."}
+
 def redactar(f, instruccion=None, incluir_geo=False):
     """Redacta la ficha (web+miravia) con Claude a partir del expediente f.
     - instruccion: texto libre del usuario que tiene prioridad sobre el estilo por
@@ -121,6 +197,10 @@ def redactar(f, instruccion=None, incluir_geo=False):
         "\n\nLee el numero de coleccion de la imagen de la caja (esquina sup. derecha). Si no se ve claro, no pongas numero."}]
     if instruccion:
         contenido.append({"type":"text","text":"INSTRUCCION DEL USUARIO (tiene prioridad sobre el estilo por defecto, sin romper el rigor ni inventar): "+str(instruccion)})
+    # Busquedas reales de Google (best-effort): en Regenerar hay nombre_corto; en Preparar, titulo_keepa.
+    blk = bloque_busquedas(f.get('nombre_corto') or f.get('titulo_keepa') or '')
+    if blk:
+        contenido.append(blk)
     url = foto_caja(f)
     if url:
         try:
