@@ -15,7 +15,7 @@ from PIL import Image, ImageOps, ImageEnhance
 import motor_fotos as M
 # Cerebro de redaccion centralizado. Este import RE-EXPORTA estos nombres en el
 # namespace de robot_preparar, que es de donde los lee robot_lote (import robot_preparar as R).
-from fabrica_cerebro import cliente, MODELO, CATEGORIAS, PROMPT_SISTEMA, slugify, construir_datos, foto_caja, descargar_b64, redactar, bloque_busquedas, sugerencias_google
+from fabrica_cerebro import cliente, MODELO, MODELO_LOTE, CATEGORIAS, PROMPT_SISTEMA, slugify, construir_datos, foto_caja, descargar_b64, redactar, bloque_busquedas, sugerencias_google
 
 sys.stdout.reconfigure(line_buffering=True)
 

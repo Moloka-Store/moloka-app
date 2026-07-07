@@ -20,7 +20,10 @@ import xml.etree.ElementTree as ET
 from anthropic import Anthropic
 
 cliente = Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
-MODELO  = "claude-sonnet-4-6"
+# Motor por carril (env-configurable): la fabrica actual (PREPARAR/Regenerar/GENERAR)
+# va con Sonnet; los lotes / TCG (robot_lote) van con Haiku, mas barato/rapido.
+MODELO      = os.environ.get('MODELO_FABRICA', 'claude-sonnet-4-6')  # carril fabrica
+MODELO_LOTE = os.environ.get('MODELO_LOTE',    'claude-haiku-4-5')   # carril lotes / TCG
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}   # UA de navegador (para bajar imagenes y para Google)
 
