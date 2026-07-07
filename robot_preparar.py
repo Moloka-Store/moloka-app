@@ -199,6 +199,7 @@ def preparar_item(ean, item, foto_culo_url):
             'web_titulo': out.get('web_titulo'), 'web_desc': out.get('web_desc'),
             'categoria': categoria, 'fandom': out.get('fandom'),
             'slug': slug, 'nombre_corto': nombre_corto,
+            'sinonimos': out.get('sinonimos'), 'alt': out.get('alt'),
         })
         print(f"      redactado: {nombre_corto[:50]} | cat={categoria}")
     except Exception as e:

@@ -218,6 +218,7 @@ def volcar_a_web(f, indice, stock_inv):
         'stock': stock_real, 'disponibilidad': disponible,
         'titulo_seo': f.get('web_titulo'),
         'nombre': nombre_titulo,
+        'sinonimos': f.get('sinonimos'), 'alt': f.get('alt'),
         'descripcion_html': f.get('web_desc'),
         'licencia': f.get('marca'),
         'categoria': f.get('categoria'), 'fandom': f.get('fandom'),

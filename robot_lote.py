@@ -459,6 +459,7 @@ def main():
                 'seccion': 'funko',
                 'titulo_seo': out.get('web_titulo'),
                 'nombre': nombre_corto,
+                'sinonimos': out.get('sinonimos'), 'alt': out.get('alt'),
                 'descripcion_html': web_desc or None,
                 'licencia': 'Funko',
                 'categoria': categoria, 'fandom': fandom_norm,

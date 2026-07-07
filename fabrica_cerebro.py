@@ -74,10 +74,13 @@ CLASIFICACION Y METADATOS WEB (son DATOS para la tienda, NO texto de la descripc
   ["Anime y Manga","Películas y TV","Animación","Cómics y Superhéroes","Terror","Videojuegos","Música","Deportes"]
 - fandom: la franquicia o licencia concreta del personaje, en su nombre corto y canonico (ej. "Stranger Things","Harry Potter","Hello Kitty","Marvel","AC/DC"). UNA sola, la principal. Es para el filtro por franquicia de la web; usa siempre el mismo nombre para la misma franquicia.
 - slug: identificador para la URL. Minusculas, solo letras/numeros/guiones, sin acentos ni simbolos, formato personaje-detalle-numero (ej. "eleven-hospital-gown-511"). Si no hay numero, omitelo. Sin "funko" ni "pop" dentro.
-- nombre_corto: nombre legible y corto para la tarjeta de producto (ej. "Eleven (Hospital Gown) #511"). SIN "Funko Pop!" delante ni coletillas de marketing. Incluye el numero con # si lo leiste.
+- nombre_corto: nombre legible y corto para la TARJETA de producto (ej. "Eleven (Hospital Gown) #511"). SIN "Funko Pop!" delante ni coletillas de marketing. Incluye el numero con # si lo leiste. Este es el nombre corto de la tarjeta: NO metas aqui palabras clave de SEO (eso va en web_titulo y sinonimos), mantenlo limpio.
+- web_titulo: titulo SEO para el <title>/<h1> de la web (distinto de nombre_corto, que es la tarjeta). Rico en las palabras que la gente busca DE VERDAD: "Funko Pop!" + franquicia + personaje + #numero si lo leiste, y algun termino del bloque BUSQUEDAS REALES cuando encaje y sea CIERTO para este producto. Legible y natural, sin amontonar palabras clave.
+- sinonimos: cadena separada por comas con nombres alternativos y terminos de busqueda para el buscador (variantes espanol/ingles del personaje y la franquicia, alias, numero de coleccion, con y sin "funko"). Solo terminos CIERTOS y relevantes para este producto; apoyate en las BUSQUEDAS REALES cuando encajen. No inventes. Vacio si no hay nada claro.
+- alt: texto alternativo de la imagen principal (accesibilidad y SEO de imagen). UNA sola frase concisa que describe lo que SE VE ("Funko Pop! de <personaje> (#<num> si lo hay) de <franquicia>, figura de vinilo"). Cierto y sin marketing.
 
 SALIDA: SOLO un JSON valido, sin texto alrededor:
-{"numero_leido":"511 o vacio si no se ve","categoria":"una de la lista","fandom":"...","slug":"...","nombre_corto":"...","miravia_titulo":"...","miravia_desc":"...(HTML <b> <br>)...","web_titulo":"...","web_desc":"...(narrativa, distinta de miravia, cero frases repetidas)..."}
+{"numero_leido":"511 o vacio si no se ve","categoria":"una de la lista","fandom":"...","slug":"...","nombre_corto":"...","sinonimos":"...","alt":"...","miravia_titulo":"...","miravia_desc":"...(HTML <b> <br>)...","web_titulo":"...","web_desc":"...(narrativa, distinta de miravia, cero frases repetidas)..."}
 
 miravia_desc: encabezado -> intro del momento iconico -> caracteristicas (check) -> bloque rareza SI aplica -> envio/garantia -> cierre.
 web_desc: arranca por la busqueda real ("?Buscas...?") -> prosa con cine -> bloque rareza + categoria SI aplica -> envio Espana -> datos duros. NUNCA repitas frases entre las dos."""
