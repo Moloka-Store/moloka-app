@@ -13,14 +13,16 @@
 #     activo=false (oculto) -> se revisa y se activa cuando esta OK.
 # NO toca robot_preparar / robot_generar / motor_fotos: la fabrica "joya" de
 # Elena queda 100% intacta. Solo reutiliza de robot_preparar (lectura): el
-# cliente de Anthropic, el PROMPT, el MODELO, las CATEGORIAS, slugify y sb.
+# cliente de Anthropic, el PROMPT, las CATEGORIAS, slugify y sb. Redacta con
+# MODELO_LOTE (Haiku): el carril de lotes/TCG va con Haiku, no con el Sonnet
+# de la fabrica.
 # Resumible: si un EAN ya esta en web_productos, lo salta.
 # Secrets (ya en fabrica-lote.yml): KEEPA_API_KEY, SUPABASE_URL, SUPABASE_KEY,
 #   SUPABASE_SERVICE_KEY, ANTHROPIC_API_KEY
 # ============================================================================
 import json, datetime, sys, io, re, math, unicodedata, requests, os
 import openpyxl
-import robot_preparar as R   # reusa (solo lectura): cliente, PROMPT_SISTEMA, MODELO, CATEGORIAS, slugify, descargar_b64, sb
+import robot_preparar as R   # reusa (solo lectura): cliente, PROMPT_SISTEMA, MODELO_LOTE, CATEGORIAS, slugify, descargar_b64, sb
 
 sys.stdout.reconfigure(line_buffering=True)
 
@@ -216,7 +218,11 @@ def redactar_tcg(nombre_tcg, img_url, rarezas):
                                  "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}})
         except Exception as e:
             print(f"    (aviso: no pude bajar la imagen TCG, redacto sin ella: {e})")
-    msg = R.cliente.messages.create(model=R.MODELO, max_tokens=1800,
+    # Busquedas reales de Google (best-effort) con el nombre del catalogo TCG.
+    blk = R.bloque_busquedas(nombre_tcg)
+    if blk:
+        contenido.append(blk)
+    msg = R.cliente.messages.create(model=R.MODELO_LOTE, max_tokens=1800,
                                     system=R.PROMPT_SISTEMA,
                                     messages=[{"role": "user", "content": contenido}])
     texto = msg.content[0].text.strip()
@@ -455,6 +461,7 @@ def main():
                 'seccion': 'funko',
                 'titulo_seo': out.get('web_titulo'),
                 'nombre': nombre_corto,
+                'sinonimos': out.get('sinonimos'), 'alt': out.get('alt'),
                 'descripcion_html': web_desc or None,
                 'licencia': 'Funko',
                 'categoria': categoria, 'fandom': fandom_norm,

@@ -4,17 +4,33 @@ MOLOKA · FÁBRICA DE FICHAS · MOTOR DE FOTOS (núcleo)
 Funciones de imagen: recorte + montajes (neón, regla, portada) + control de calidad.
 Calibrado para Funko Pop estándar (~10 cm) sobre fondo blanco de Keepa.
 """
+import os
 import numpy as np
 from PIL import Image, ImageFilter, ImageDraw, ImageFont
 from scipy import ndimage
 
-# ---------- RECORTE (IA: rembg / U²-Net, como Canva) ----------
+# ---------- RECORTE (IA: rembg / BiRefNet-general, fallback u2net) ----------
+# Modelo configurable por entorno. Por defecto BiRefNet general (mejores bordes:
+# pelo, contornos finos, transparencias). Si no carga (rembg antiguo, descarga
+# fallida...), cae a u2net. REMBG_MODELO=u2net vuelve al comportamiento anterior;
+# REMBG_MODELO=birefnet-general-lite usa una variante más ligera (~180 MB).
+_MODELO_RECORTE = os.environ.get('REMBG_MODELO', 'birefnet-general').strip() or 'birefnet-general'
 _rembg_session = None
+_rembg_modelo_activo = None
 def _get_rembg():
-    global _rembg_session
+    global _rembg_session, _rembg_modelo_activo
     if _rembg_session is None:
         from rembg import new_session
-        _rembg_session = new_session('u2net')   # se descarga la 1ª vez (~170MB)
+        try:
+            _rembg_session = new_session(_MODELO_RECORTE)   # birefnet-general se descarga la 1ª vez (~900MB)
+            _rembg_modelo_activo = _MODELO_RECORTE
+        except Exception as e:
+            if _MODELO_RECORTE != 'u2net':
+                print(f"   (aviso: modelo de recorte '{_MODELO_RECORTE}' no disponible ({e}); caigo a u2net)")
+                _rembg_session = new_session('u2net')       # se descarga la 1ª vez (~170MB)
+                _rembg_modelo_activo = 'u2net'
+            else:
+                raise
     return _rembg_session
 
 def recortar(fig_rgb):
