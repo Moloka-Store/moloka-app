@@ -22,7 +22,10 @@ from datetime import datetime, timezone
 # Formula y parsers CLONADOS del trackeador (no reimplementamos aritmetica).
 from moloka_tracker_snapshot import calc_rentabilidad, num, txt
 
-# --- IVA por pais (para recomputar margen a un precio hipotetico) ---
+# --- IVA para recomputar margen a un precio hipotetico ---
+# Se usa el iva_pct EXACTO de cada producto (tabla productos): hay articulos con
+# IVA reducido (p.ej. alimentacion al 10%) que si no descuadran. El IVA por pais
+# es solo un ULTIMO recurso si un producto no tiene iva_pct.
 IVA_PAIS    = {'ES': 0.21, 'IT': 0.22, 'FR': 0.20}
 IVA_DEFAULT = 0.21
 PAISES_CONOCIDOS = ['ES', 'IT', 'FR']
@@ -66,6 +69,23 @@ def leer_umbral(sb):
             if v is not None: return v, 'app_datos'
     except Exception: pass
     return UMBRAL_DEFAULT, 'default'
+
+def leer_iva_productos(sb):
+    """IVA (en FRACCION, p.ej. 0.10 / 0.21) por ASIN, de la tabla productos.
+    Normaliza igual que el trackeador: si viene > 1 (p.ej. 10 o 21) -> /100."""
+    out, desde = {}, 0
+    while True:
+        res = sb.table('productos').select('asin,iva_pct').eq('activo', True).range(desde, desde+999).execute()
+        lote = res.data or []
+        for p in lote:
+            a = txt(p.get('asin'))
+            if not a: continue
+            iva = num(p.get('iva_pct'))
+            if iva is None: continue
+            out[a] = iva/100.0 if iva > 1 else iva
+        if len(lote) < 1000: break
+        desde += 1000
+    return out
 
 def ultima_carga(sb, pais):
     """Devuelve (filas, snapshot_ts) de la ULTIMA carga de ese pais, o ([],None)."""
@@ -218,9 +238,12 @@ def decidir(s, umbral, iva):
         'estado': 'PENDIENTE',
     }
 
-def construir_recomendaciones(filas, umbral, iva, snapshot_ts, ahora):
+def construir_recomendaciones(filas, umbral, iva_map, iva_fallback, snapshot_ts, ahora):
     recos = []
     for s in filas:
+        # IVA EXACTO del producto (tabla productos); pais solo como ultimo recurso.
+        iva = iva_map.get(txt(s.get('asin')))
+        if iva is None: iva = iva_fallback
         r = decidir(s, umbral, iva)
         if r['accion'] == SIN_DATOS and r['precio_actual'] is None:
             continue   # nada que decir
@@ -235,14 +258,15 @@ def construir_recomendaciones(filas, umbral, iva, snapshot_ts, ahora):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-def procesar_pais(sb, pais, umbral, iva, dry_run):
+def procesar_pais(sb, pais, umbral, iva_map, dry_run):
     filas, ts = ultima_carga(sb, pais)
     if not filas:
         print(f"[{pais}] sin snapshots. Saltando.")
         return
     print(f"[{pais}] ultima carga: {ts} · {len(filas)} productos")
     ahora = datetime.now(timezone.utc).isoformat()
-    recos = construir_recomendaciones(filas, umbral, iva, ts, ahora)
+    iva_fallback = IVA_PAIS.get(pais, IVA_DEFAULT)
+    recos = construir_recomendaciones(filas, umbral, iva_map, iva_fallback, ts, ahora)
 
     from collections import Counter
     tal = Counter(r['accion'] for r in recos)
@@ -288,10 +312,12 @@ def main():
     umbral, fuente_umbral = leer_umbral(sb)
     print(f"    Umbral de rentabilidad: {umbral:.1f}% (fuente: {fuente_umbral})")
 
+    iva_map = leer_iva_productos(sb)
+    print(f"    IVA por producto: {len(iva_map)} ASINs con iva_pct en productos")
+
     paises = PAISES_CONOCIDOS if args.pais.upper() == 'ALL' else [args.pais.upper()]
     for pais in paises:
-        iva = IVA_PAIS.get(pais, IVA_DEFAULT)
-        procesar_pais(sb, pais, umbral, iva, args.dry_run)
+        procesar_pais(sb, pais, umbral, iva_map, args.dry_run)
 
 if __name__ == '__main__':
     main()
