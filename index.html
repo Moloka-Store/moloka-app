@@ -37,6 +37,15 @@
   .nav-item .nav-icon { font-size: 16px; width: 20px; text-align: center; }
   .nav-badge { margin-left: auto; background: var(--red); color: white; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 10px; min-width: 18px; text-align: center; }
   .nav-badge.amber { background: var(--amber); }
+  /* Grupos desplegables del menu lateral (aditivo; NO toca las reglas .nav-item) */
+  .nav-group { display: flex; flex-direction: column; gap: 2px; }
+  .nav-group-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; cursor: pointer; transition: all 0.15s; color: var(--navy-light); font-size: 13.5px; font-weight: 500; list-style: none; }
+  .nav-group-head::-webkit-details-marker { display: none; }
+  .nav-group-head:hover { background: rgba(255,255,255,0.06); color: white; }
+  .nav-group-head .nav-icon { font-size: 16px; width: 20px; text-align: center; }
+  .nav-chevron { margin-left: auto; font-size: 11px; opacity: 0.6; transition: transform 0.15s; }
+  .nav-group[open] > .nav-group-head .nav-chevron { transform: rotate(90deg); }
+  .nav-group .nav-item { padding-left: 34px; }   /* sangrado de subitems */
   .sidebar-footer { padding: 16px 20px; border-top: 1px solid rgba(255,255,255,0.07); font-size: 11px; color: var(--navy-light); }
 
   /* MAIN */
@@ -260,37 +269,47 @@
     <div class="nav-item" data-page="rotacion" onclick="showPage('rotacion',this)">
       <span class="nav-icon">🛒</span> Rotación de ventas
     </div>
-    <div class="nav-item" data-page="entrada" onclick="showPage('entrada',this)">
-      <span class="nav-icon">🔄</span> Entrada mercancía
-    </div>
-    <div class="nav-item" data-page="envio" onclick="showPage('envio',this)">
-      <span class="nav-icon">🚚</span> Envío FBA
-    </div>
-    <div class="nav-item" data-page="envios-historial" onclick="showPage('envios-historial',this)">
-      <span class="nav-icon">📋</span> Envíos pasados
-    </div>
-    <div class="nav-item" data-page="facturas" onclick="showPage('facturas',this)">
-      <span class="nav-icon">📄</span> Facturas
-    </div>
+
+    <details class="nav-group">
+      <summary class="nav-group-head"><span class="nav-icon">📦</span> Almacén<span class="nav-chevron">▸</span></summary>
+      <div class="nav-item" data-page="entrada" onclick="showPage('entrada',this)">
+        <span class="nav-icon">🔄</span> Entrada mercancía
+      </div>
+      <div class="nav-item" data-page="envio" onclick="showPage('envio',this)">
+        <span class="nav-icon">🚚</span> Envío FBA
+      </div>
+      <div class="nav-item" data-page="envios-historial" onclick="showPage('envios-historial',this)">
+        <span class="nav-icon">📋</span> Envíos pasados
+      </div>
+      <div class="nav-item" data-page="facturas" onclick="showPage('facturas',this)">
+        <span class="nav-icon">📄</span> Facturas
+      </div>
+      <div class="nav-item" data-page="inventario" onclick="showPage('inventario',this)">
+        <span class="nav-icon">📦</span> Inventario
+      </div>
+      <div class="nav-item" data-page="movimientos" onclick="showPage('movimientos',this)">
+        <span class="nav-icon">🧾</span> Movimientos
+      </div>
+    </details>
+
     <div class="nav-item" data-page="tareas" onclick="showPage('tareas',this)">
       <span class="nav-icon">📝</span> Tareas
       <span class="nav-badge amber" id="badge-tareas" style="display:none">0</span>
     </div>
-    <div class="nav-item" data-page="inventario" onclick="showPage('inventario',this)">
-      <span class="nav-icon">📦</span> Inventario
-    </div>
-    <div class="nav-item" data-page="rentabilidad" onclick="showPage('rentabilidad',this)">
-      <span class="nav-icon">📊</span> Rentabilidad
-    </div>
-    <div class="nav-item" data-page="devoluciones" onclick="showPage('devoluciones',this)">
-      <span class="nav-icon">📦</span> Devoluciones
-    </div>
-    <div class="nav-item" data-page="movimientos" onclick="showPage('movimientos',this)">
-      <span class="nav-icon">🧾</span> Movimientos
-    </div>
-    <div class="nav-item" data-page="actualizar" onclick="showPage('actualizar',this)">
-      <span class="nav-icon">☁️</span> Actualizar datos
-    </div>
+
+    <details class="nav-group">
+      <summary class="nav-group-head"><span class="nav-icon">📈</span> Rendimiento<span class="nav-chevron">▸</span></summary>
+      <div class="nav-item" data-page="rentabilidad" onclick="showPage('rentabilidad',this)">
+        <span class="nav-icon">📊</span> Rentabilidad
+      </div>
+      <div class="nav-item" data-page="devoluciones" onclick="showPage('devoluciones',this)">
+        <span class="nav-icon">📦</span> Devoluciones
+      </div>
+      <div class="nav-item" data-page="actualizar" onclick="showPage('actualizar',this)">
+        <span class="nav-icon">☁️</span> Actualizar datos
+      </div>
+    </details>
+
     <div class="nav-item" data-page="escanear" onclick="showPage('escanear',this)">
       <span class="nav-icon">🔍</span> Escanear proveedor
     </div>
@@ -1636,6 +1655,9 @@ function showPage(id, el) {
   if (id === 'actualizar') initActualizar();
   if (id === 'escanear') { initEscanear(); escSubTab('api'); }
   if (id === 'fabrica') fabSubTab('nueva');
+
+  // Si el item pulsado esta dentro de un grupo desplegable, abrelo (para ver el resaltado).
+  const g = el && el.closest('details'); if (g) g.open = true;
 }
 
 // ============================================================
