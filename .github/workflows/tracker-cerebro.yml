@@ -34,7 +34,7 @@ jobs:
           python-version: '3.11'
 
       - name: Instalar dependencias
-        run: pip install supabase
+        run: pip install supabase pandas   # pandas lo arrastra el import de moloka_tracker_snapshot
 
       - name: Ejecutar Cerebro
         env:
