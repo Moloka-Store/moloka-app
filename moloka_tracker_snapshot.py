@@ -18,6 +18,7 @@
 # ============================================================================
 
 import os, sys, argparse
+from collections import Counter
 from datetime import datetime, timezone
 import pandas as pd
 
@@ -26,6 +27,29 @@ ALMACEN         = 0.15
 COM_DIGITALES   = 1.03          # 3% servicios digitales de Amazon
 IVA_DEFAULT_ES  = 0.21
 SELLER_ID_MOLOKA = 'A2R25VOCZPEH8K'
+
+# --- Cascada de comision% y fee/envio por pais (MISMOS datos que la pestana
+#     "Rotacion de ventas" de la app) --------------------------------------
+# Por cada pais y magnitud hay tres fuentes en prelacion:
+#   1) 'real'      -> columna real de la tabla productos (comision_pct / comision_envio, etc.)
+#   2) 'keepa_bd'  -> dato de Keepa cacheado en productos (comision_pct_keepa_es / keepa_fba_fee_*)
+#   3) 'keepa_csv' -> del CSV de Keepa "Resumen del Vendedor" (ref_pct / fee_fba)
+# ES no tiene columna 'keepa_bd' de comision distinta de comision_pct_keepa_es;
+# IT/FR quedan preparados (misma estructura, con respaldo final al CSV de Keepa).
+PAIS_CFG = {
+    'ES': {'com_real': 'comision_pct',    'com_keepa': 'comision_pct_keepa_es',
+           'fee_real': 'comision_envio',  'fee_keepa': 'keepa_fba_fee_es'},
+    'IT': {'com_real': 'comision_pct_it', 'com_keepa': None,
+           'fee_real': 'envio_it',        'fee_keepa': 'keepa_fba_fee_it'},
+    'FR': {'com_real': 'comision_pct_fr', 'com_keepa': None,
+           'fee_real': 'envio_fr',        'fee_keepa': 'keepa_fba_fee_fr'},
+}
+
+# Columnas de 'productos' que hay que leer para poder resolver la cascada de cualquier pais.
+_COLS_PRODUCTO = ['asin', 'sku', 'ean', 'pvd', 'iva_pct',
+                  'comision_pct', 'comision_pct_keepa_es', 'comision_pct_it', 'comision_pct_fr',
+                  'comision_envio', 'keepa_fba_fee_es', 'envio_it', 'envio_fr',
+                  'keepa_fba_fee_it', 'keepa_fba_fee_fr']
 
 # --- Nombres EXACTOS de columnas del Keepa "Resumen del Vendedor" ---
 K = {
@@ -65,6 +89,17 @@ def txt(v):
     if v is None: return None
     s = str(v).strip()
     return None if s in ('', '-', 'nan', 'None', 'NaN') else s
+
+# ---------------------------------------------------------------------------
+# Cascada de fuentes: primer valor no-NULL, con etiqueta de origen para auditar
+# ---------------------------------------------------------------------------
+def cascada(*candidatos):
+    """candidatos = pares (valor, fuente). Devuelve el primer (valor, fuente)
+    cuyo valor no es None; (None, None) si no hay ninguno."""
+    for valor, fuente in candidatos:
+        if valor is not None:
+            return valor, fuente
+    return None, None
 
 # ---------------------------------------------------------------------------
 # Formula de rentabilidad — CLONADA del escaner (validada al centimo)
@@ -135,12 +170,13 @@ def leer_keepa(ruta):
     return out
 
 def leer_productos_supabase(sb):
-    """Lee pvd, iva_pct, ean, sku por ASIN de la tabla productos (paginado)."""
+    """Lee coste (pvd), iva y las comisiones/fees por pais de la tabla productos
+    (paginado). Guarda cada columna con su nombre real para la cascada."""
     out = {}
     desde = 0
     while True:
         res = sb.table('productos').select(
-            'asin,sku,ean,pvd,iva_pct').eq('activo', True).range(desde, desde+999).execute()
+            ','.join(_COLS_PRODUCTO)).eq('activo', True).range(desde, desde+999).execute()
         filas = res.data or []
         for p in filas:
             asin = txt(p.get('asin'))
@@ -150,6 +186,17 @@ def leer_productos_supabase(sb):
                 'iva_pct': num(p.get('iva_pct')),
                 'ean'    : txt(p.get('ean')),
                 'sku'    : txt(p.get('sku')),
+                # Comision% y fee/envio por pais (real + respaldo Keepa cacheado).
+                'comision_pct'          : num(p.get('comision_pct')),
+                'comision_pct_keepa_es' : num(p.get('comision_pct_keepa_es')),
+                'comision_pct_it'       : num(p.get('comision_pct_it')),
+                'comision_pct_fr'       : num(p.get('comision_pct_fr')),
+                'comision_envio'        : num(p.get('comision_envio')),
+                'keepa_fba_fee_es'      : num(p.get('keepa_fba_fee_es')),
+                'envio_it'              : num(p.get('envio_it')),
+                'envio_fr'              : num(p.get('envio_fr')),
+                'keepa_fba_fee_it'      : num(p.get('keepa_fba_fee_it')),
+                'keepa_fba_fee_fr'      : num(p.get('keepa_fba_fee_fr')),
             }
         if len(filas) < 1000: break
         desde += 1000
@@ -160,6 +207,7 @@ def leer_productos_supabase(sb):
 # ---------------------------------------------------------------------------
 def construir_snapshots(fba, keepa, prod, pais, origen):
     ahora = datetime.now(timezone.utc).isoformat()
+    cfg = PAIS_CFG.get(pais, PAIS_CFG['ES'])   # ES por defecto
     filas, sin_pvd, sin_keepa = [], 0, 0
     for asin, f in fba.items():
         k = keepa.get(asin, {})
@@ -167,10 +215,21 @@ def construir_snapshots(fba, keepa, prod, pais, origen):
         if not k: sin_keepa += 1
         if not p or not p.get('pvd'): sin_pvd += 1
 
+        # Cascada (misma prelacion que la pestana Rotacion): real -> keepa cacheado
+        # en productos -> CSV de Keepa. Guardamos la fuente para poder auditar.
+        com_pct, com_fuente = cascada(
+            (p.get(cfg['com_real']),                              'real'),
+            (p.get(cfg['com_keepa']) if cfg['com_keepa'] else None, 'keepa_bd'),
+            (k.get('ref_pct'),                                   'keepa_csv'))
+        fee, fee_fuente = cascada(
+            (p.get(cfg['fee_real']),                             'real'),
+            (p.get(cfg['fee_keepa']) if cfg['fee_keepa'] else None, 'keepa_bd'),
+            (k.get('fee_fba'),                                   'keepa_csv'))
+
         iva = p.get('iva_pct')
         iva = (iva/100.0 if iva and iva > 1 else iva) if iva is not None else IVA_DEFAULT_ES
         benef, margen = calc_rentabilidad(
-            f.get('mi_precio'), p.get('pvd'), k.get('ref_pct'), k.get('fee_fba'), iva)
+            f.get('mi_precio'), p.get('pvd'), com_pct, fee, iva)
 
         # buy box mia: por Keepa (vendedor) o, si no hay Keepa, por precio ~ featuredoffer
         bb_mia = k.get('bb_es_mia')
@@ -184,6 +243,9 @@ def construir_snapshots(fba, keepa, prod, pais, origen):
             'mis_ventas_t7': f.get('v_t7'), 'mis_ventas_t30': f.get('v_t30'),
             'mis_ventas_t90': f.get('v_t90'), 'pvd': p.get('pvd'),
             'mi_beneficio_ud': benef, 'mi_margen_pct': margen,
+            # Datos usados en el calculo + de que fuente salieron (auditoria):
+            'comision_pct_usada': com_pct, 'comision_fuente': com_fuente,
+            'fee_fba_usada': fee, 'fee_fuente': fee_fuente,
             'buybox_precio': f.get('bb_precio'), 'buybox_vendedor': k.get('bb_vendedor'),
             'buybox_es_mia': bb_mia, 'buybox_es_fba': k.get('bb_es_fba'),
             'fba_min_precio': k.get('fba_min'), 'fba_min_vendedor': k.get('fba_min_v'),
@@ -238,12 +300,18 @@ def main():
         margenes = sorted(f['mi_margen_pct'] for f in con_margen)
         print(f"      margen calculado en {len(con_margen)} · "
               f"min {margenes[0]:.1f}% · mediana {margenes[len(margenes)//2]:.1f}% · max {margenes[-1]:.1f}%")
+    # Auditoria: de que fuente salio la comision y el fee (real / keepa_bd / keepa_csv / None)
+    tal_com = Counter(f['comision_fuente'] for f in filas)
+    tal_fee = Counter(f['fee_fuente'] for f in filas)
+    print(f"      fuentes comision: {dict(tal_com)} · fuentes fee/envio: {dict(tal_fee)}")
 
     if args.dry_run:
         print("\n--- EJEMPLOS (primeros 5 con margen) ---")
         for f in con_margen[:5]:
             print(f"  {f['asin']} | precio {f['mi_precio']} | bb {f['buybox_precio']} "
-                  f"| mia={f['buybox_es_mia']} | margen {f['mi_margen_pct']}% | benef {f['mi_beneficio_ud']}€")
+                  f"| com {f['comision_pct_usada']}% ({f['comision_fuente']}) "
+                  f"| fee {f['fee_fba_usada']}€ ({f['fee_fuente']}) "
+                  f"| margen {f['mi_margen_pct']}% | benef {f['mi_beneficio_ud']}€")
         print("\nDRY-RUN OK — no se ha escrito nada en Supabase.")
         return
 
