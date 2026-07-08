@@ -1052,7 +1052,7 @@
             </select>
           </div>
           <div id="trk-reco-resumen" style="flex:1;min-width:180px;font-size:14px;font-weight:600;color:var(--navy)">—</div>
-          <button class="btn btn-sm" onclick="trackerGenerar()">🔄 Generar recomendaciones</button>
+          <button class="btn btn-sm btn-ghost" onclick="trackerRenderRecos()">🔄 Refrescar</button>
         </div>
       </div>
       <div id="trk-reco-lista"></div>
@@ -1095,7 +1095,7 @@
       </div>
 
       <div class="card">
-        <button class="btn" id="trk-go" onclick="lanzarTracker()">📸 Guardar snapshot</button>
+        <button class="btn" id="trk-go" onclick="lanzarTracker()">🔎 Analizar informe</button>
         <div id="trk-log" style="margin-top:14px"></div>
       </div>
       </details>
@@ -2960,10 +2960,12 @@ async function lanzarTracker() {
     const recado = { fba: gFba.nombre, keepa: gKeepa.nombre, pais: pais, fecha: new Date().toISOString() };
     const blob = new Blob([JSON.stringify(recado)], { type: 'application/json' });
     await subirReintento('tracker/_solicitud_tracker.json', blob, 'el recado');
+    const tsAntes = await trkLeerEstadoTs();   // marca de la ULTIMA corrida ANTES de disparar
     const resp = await fetch('/api/disparar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ secreto: DISPARO_SECRET, workflow: 'tracker-app.yml' }) });
     const data = await resp.json().catch(() => ({}));
     if (resp.ok) {
-      log.innerHTML = '<div class="info-box" style="border-left:3px solid #2e7d32">\u2705 Trackeador de ' + pais + ' lanzado. El robot cruza los ficheros y guarda los snapshots en monitor_snapshots (unos minutos).</div>';
+      // Encadenado en la nube: snapshot -> cerebro. Entramos en modo espera y refrescamos solos.
+      trkEsperarResultado(tsAntes);
     } else if (resp.status === 409) {
       log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">\u23f3 ' + (data.error || 'Ya hay un trackeador en marcha.') + '</div>';
     } else {
@@ -2973,6 +2975,42 @@ async function lanzarTracker() {
     log.innerHTML = '<div class="info-box" style="border-left:3px solid #b00020">\u26a0\ufe0f Error: ' + e.message + '</div>';
   }
   go.disabled = false;
+}
+
+// Lee el 'ts' de la marca de fin de corrida del cerebro (app_datos/tracker_estado). Null si no hay.
+async function trkLeerEstadoTs() {
+  try {
+    const { data } = await db.from('app_datos').select('contenido').eq('clave', 'tracker_estado').maybeSingle();
+    return (data && data.contenido && data.contenido.ts) ? data.contenido.ts : null;
+  } catch (e) { return null; }
+}
+
+// Modo espera: sondea cada 15s la marca; cuando el 'ts' cambia -> refresca la tabla sola.
+let TRK_POLL = null;
+function trkEsperarResultado(tsAntes) {
+  const log = document.getElementById('trk-log');
+  const t0 = Date.now();
+  const LIMITE_MS = 8 * 60 * 1000;   // timeout de seguridad: 8 min
+  if (TRK_POLL) { clearInterval(TRK_POLL); TRK_POLL = null; }
+  if (log) log.innerHTML = '<div class="info-box">\u23f3 Procesando datos\u2026 generando recomendaciones\u2026 (esto tarda unos minutos; no cierres la pesta\u00f1a)</div>';
+  TRK_POLL = setInterval(async () => {
+    if (Date.now() - t0 > LIMITE_MS) {
+      clearInterval(TRK_POLL); TRK_POLL = null;
+      if (log) log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">\u26a0\ufe0f Est\u00e1 tardando m\u00e1s de lo normal. Revisa Actions en GitHub; cuando termine, dale a \ud83d\udd04 Refrescar.</div>';
+      return;
+    }
+    let est = null;
+    try {
+      const { data } = await db.from('app_datos').select('contenido').eq('clave', 'tracker_estado').maybeSingle();
+      est = data && data.contenido;
+    } catch (e) { return; }   // fallo puntual de red: se reintenta en el siguiente sondeo
+    if (est && est.ts && est.ts !== tsAntes) {
+      clearInterval(TRK_POLL); TRK_POLL = null;
+      await trackerRenderRecos();
+      const n = (est.n != null) ? est.n : '';
+      if (log) log.innerHTML = '<div class="info-box" style="border-left:3px solid #2e7d32">\u2705 Listo \u00b7 ' + n + ' recomendaciones.</div>';
+    }
+  }, 15000);
 }
 
 // ============================================================
@@ -3090,7 +3128,12 @@ function trkTablaHTML(filas, fichaPorAsin) {
       escalon = '<div style="font-size:10px;color:var(--gray-500);margin-top:2px">→ objetivo (esta pasada) · techo ' + trkEur(r.precio_techo) + '</div>';
     }
     let bb = '';
-    if (r.competidor_aterrizado != null) {
+    if (r.hay_buybox === false) {
+      // No hay caja adjudicada: no pintamos "BB"; mostramos el FBA mas barato si lo hay.
+      bb = (r.competidor_precio != null)
+        ? '<div style="font-size:10px;color:var(--gray-500);margin-top:3px">sin caja · FBA más barato ' + trkEur(r.competidor_precio) + '</div>'
+        : '';   // si no hay competidor_precio, se omite
+    } else if (r.competidor_aterrizado != null) {
       if (r.competidor_envio && r.competidor_envio > 0) {
         bb = '<div style="font-size:10px;color:var(--gray-500);margin-top:3px">BB: ' + trkEur(r.competidor_precio) + ' + ' + trkEur(r.competidor_envio) + ' = <strong>' + trkEur(r.competidor_aterrizado) + '</strong></div>';
       } else {

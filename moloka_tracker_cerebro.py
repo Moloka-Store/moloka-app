@@ -301,6 +301,7 @@ def decidir(s, umbral, iva):
         'ventas_mes': ventas_mes, 'impacto_eur_mes': round(impacto, 2),
         'competidor_precio': bb_prec, 'competidor_vendedor': bb_vend,
         'buybox_es_mia': bb_mia, 'buybox_es_fba': bb_fba,
+        'hay_buybox': (not sin_bb),
         'guerra_activa': bool(guerra),
         'fuente_margen': com_fte, 'confianza': confianza,
         # --- Fase 1: recomendacion autocontenida (para pintar tabla estilo Seller) ---
@@ -335,6 +336,18 @@ def construir_recomendaciones(filas, umbral, iva_map, iva_fallback, snapshot_ts,
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+def marcar_estado(sb, pais, n):
+    """Marca de fin de corrida en app_datos (clave 'tracker_estado') para que la
+    app sepa que las recomendaciones ya estan y refresque la tabla sola."""
+    try:
+        cont = {'ts': datetime.now(timezone.utc).isoformat(), 'pais': pais, 'n': n}
+        sb.table('app_datos').upsert(
+            {'clave': 'tracker_estado', 'contenido': cont,
+             'actualizado': datetime.now().astimezone().isoformat()},
+            on_conflict='clave').execute()
+    except Exception as ex:
+        print(f"[{pais}] AVISO: no se pudo escribir tracker_estado:", ex)
+
 def procesar_pais(sb, pais, umbral, iva_map, dry_run):
     filas, ts = ultima_carga(sb, pais)
     if not filas:
@@ -363,12 +376,14 @@ def procesar_pais(sb, pais, umbral, iva_map, dry_run):
            .eq('snapshot_ts', ts).limit(1).execute()
     if ya.data:
         print(f"[{pais}] ya hay recomendaciones para la carga {ts}. No se reescribe.")
+        marcar_estado(sb, pais, len(recos))   # avisa a la app aunque no se reescriba
         return
 
     print(f"[{pais}] escribiendo {len(recos)} recomendaciones...")
     for i in range(0, len(recos), 200):
         sb.table('monitor_recomendaciones').insert(recos[i:i+200]).execute()
         print(f"  {min(i+200, len(recos))}/{len(recos)}")
+    marcar_estado(sb, pais, len(recos))       # marca de fin de corrida (auto-refresco de la app)
     print(f"[{pais}] OK")
 
 def main():
