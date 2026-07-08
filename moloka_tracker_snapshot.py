@@ -17,7 +17,7 @@
 # Variables de entorno (GitHub Secrets): SUPABASE_URL, SUPABASE_KEY
 # ============================================================================
 
-import os, sys, argparse
+import os, sys, argparse, json
 from collections import Counter
 from datetime import datetime, timezone
 import pandas as pd
@@ -202,12 +202,41 @@ def leer_productos_supabase(sb):
         desde += 1000
     return out
 
+def leer_venta_actual_supabase(sb):
+    """Comision y envio EFECTIVOS de transacciones (SOLO ES) — la MISMA fuente
+    que la pestana Rotacion. Vive en Supabase: tabla app_datos, clave='rentabilidad'
+    (campo 'contenido', el rentabilidad.json entero) -> venta_actual[asin].
+    Devuelve dict por ASIN con {comision_pct_mediana, envio_mediana}. Ambos ya en
+    sus unidades finales (comision en PORCENTAJE, p.ej. 15.04; envio en euros)."""
+    try:
+        res = sb.table('app_datos').select('contenido').eq('clave', 'rentabilidad').limit(1).execute()
+    except Exception as ex:
+        print('  AVISO: no se pudo leer app_datos/rentabilidad (se ignora tx):', ex)
+        return {}
+    filas = res.data or []
+    cont = filas[0].get('contenido') if filas else None
+    if isinstance(cont, str):            # por si el jsonb llega como texto
+        try: cont = json.loads(cont)
+        except ValueError: cont = None
+    va = (cont or {}).get('venta_actual') or {}
+    out = {}
+    for asin, v in va.items():
+        a = txt(asin)
+        if not a or not isinstance(v, dict): continue
+        out[a] = {
+            'comision_pct_mediana': num(v.get('comision_pct_mediana')),
+            'envio_mediana'       : num(v.get('envio_mediana')),
+        }
+    return out
+
 # ---------------------------------------------------------------------------
 # Cruce y construccion de snapshots
 # ---------------------------------------------------------------------------
-def construir_snapshots(fba, keepa, prod, pais, origen):
+def construir_snapshots(fba, keepa, prod, pais, origen, venta_tx=None):
     ahora = datetime.now(timezone.utc).isoformat()
     cfg = PAIS_CFG.get(pais, PAIS_CFG['ES'])   # ES por defecto
+    tx = venta_tx or {}
+    usa_tx = (pais == 'ES')   # la comision/envio efectivos de transacciones son SOLO-ES
     filas, sin_pvd, sin_keepa = [], 0, 0
     for asin, f in fba.items():
         k = keepa.get(asin, {})
@@ -215,16 +244,20 @@ def construir_snapshots(fba, keepa, prod, pais, origen):
         if not k: sin_keepa += 1
         if not p or not p.get('pvd'): sin_pvd += 1
 
-        # Cascada (misma prelacion que la pestana Rotacion): real -> keepa cacheado
-        # en productos -> CSV de Keepa. Guardamos la fuente para poder auditar.
+        # Cascada (misma prelacion que la pestana Rotacion):
+        #   ES : real_tx (transacciones) -> ficha -> keepa cacheado -> CSV Keepa
+        #   IT/FR: ficha -> keepa cacheado -> CSV Keepa   (no hay dato real, es solo-ES)
+        vt = tx.get(asin, {}) if usa_tx else {}
         com_pct, com_fuente = cascada(
-            (p.get(cfg['com_real']),                              'real'),
+            (vt.get('comision_pct_mediana'),                    'real_tx'),
+            (p.get(cfg['com_real']),                            'real'),
             (p.get(cfg['com_keepa']) if cfg['com_keepa'] else None, 'keepa_bd'),
-            (k.get('ref_pct'),                                   'keepa_csv'))
+            (k.get('ref_pct'),                                  'keepa_csv'))
         fee, fee_fuente = cascada(
-            (p.get(cfg['fee_real']),                             'real'),
+            (vt.get('envio_mediana'),                           'real_tx'),
+            (p.get(cfg['fee_real']),                            'real'),
             (p.get(cfg['fee_keepa']) if cfg['fee_keepa'] else None, 'keepa_bd'),
-            (k.get('fee_fba'),                                   'keepa_csv'))
+            (k.get('fee_fba'),                                  'keepa_csv'))
 
         # Normalizar la comision a PORCENTAJE (mismo criterio que el IVA): el campo
         # real 'comision_pct' viene en DECIMAL (0.155 = 15,5%) y los de Keepa en
@@ -290,16 +323,19 @@ def main():
 
     sb = None
     prod = {}
+    venta_tx = {}
     if not args.dry_run:
         from supabase import create_client
         sb = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
         print("[3/4] Leyendo PVD/IVA de Supabase (productos)...")
         prod = leer_productos_supabase(sb); print(f"      {len(prod)} productos con coste")
+        venta_tx = leer_venta_actual_supabase(sb)
+        print(f"      {len(venta_tx)} ASINs con comision/envio efectivos (venta_actual, solo ES)")
     else:
         print("[3/4] DRY-RUN: no se lee Supabase (PVD=0, IVA=21% para la prueba)")
 
     print("[4/4] Cruzando y calculando margen...")
-    filas, sin_pvd, sin_keepa = construir_snapshots(fba, keepa, prod, args.pais, origen)
+    filas, sin_pvd, sin_keepa = construir_snapshots(fba, keepa, prod, args.pais, origen, venta_tx)
     print(f"      {len(filas)} snapshots construidos "
           f"({sin_keepa} sin datos Keepa, {sin_pvd} sin PVD)")
 

@@ -26,7 +26,8 @@ from supabase import create_client
 # Motor validado (mismo repo). NO re-implementamos formulas ni parseo: se
 # reutilizan tal cual las funciones de la version CLI.
 from moloka_tracker_snapshot import (
-    leer_fba, leer_keepa, leer_productos_supabase, construir_snapshots)
+    leer_fba, leer_keepa, leer_productos_supabase, leer_venta_actual_supabase,
+    construir_snapshots)
 
 SUPABASE_URL = os.environ['SUPABASE_URL']
 SUPABASE_KEY = os.environ.get('SUPABASE_SERVICE_KEY') or os.environ['SUPABASE_KEY']
@@ -83,9 +84,11 @@ def main():
 
     print("[3/4] Leyendo PVD/IVA de Supabase (productos)...")
     prod = leer_productos_supabase(sb); print(f"      {len(prod)} productos con coste")
+    venta_tx = leer_venta_actual_supabase(sb)
+    print(f"      {len(venta_tx)} ASINs con comision/envio efectivos (venta_actual, solo ES)")
 
     print("[4/4] Cruzando y calculando margen...")
-    filas, sin_pvd, sin_keepa = construir_snapshots(fba, keepa, prod, pais, origen)
+    filas, sin_pvd, sin_keepa = construir_snapshots(fba, keepa, prod, pais, origen, venta_tx)
     print(f"      {len(filas)} snapshots construidos "
           f"({sin_keepa} sin datos Keepa, {sin_pvd} sin PVD)")
 
