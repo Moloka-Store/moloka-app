@@ -1,0 +1,38 @@
+# ============================================================
+# Moloka - Trackeador de precios (snapshots) en la nube
+# Ubicacion: .github/workflows/tracker-app.yml
+#
+# Corre moloka_tracker_snapshot_nube.py: lee del buzon informes/tracker/ el
+# informe de inventario FBA + el CSV del Keepa "Resumen del Vendedor" (los sube
+# la app), cruza por ASIN con la tabla productos, calcula el margen con la
+# formula validada del escaner y guarda una foto por producto en
+# monitor_snapshots. No usa Keepa API -> no gasta tokens.
+#
+# >>> SIN RELOJ <<<  Solo cuando lo lanza el boton de la app.
+# ============================================================
+name: Moloka - Trackeador
+
+on:
+  workflow_dispatch:
+
+jobs:
+  trackear:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install supabase pandas
+
+      - name: Ejecutar Trackeador
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python -u moloka_tracker_snapshot_nube.py
