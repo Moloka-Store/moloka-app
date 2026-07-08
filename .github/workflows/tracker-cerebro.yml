@@ -1,0 +1,43 @@
+# ============================================================
+# Moloka - Cerebro del trackeador (recomendaciones de precio)
+# Ubicacion: .github/workflows/tracker-cerebro.yml
+#
+# Corre moloka_tracker_cerebro.py: lee la ULTIMA carga de monitor_snapshots por
+# pais, decide que hacer con cada precio (subir/bajar/mantener/recuperar BB/no
+# rentable/guerra/malvendiendo) y escribe recomendaciones en
+# monitor_recomendaciones con estado PENDIENTE. NO cambia precios. No usa Keepa.
+#
+# >>> SIN RELOJ <<<  Solo cuando lo lanzas tu (Run workflow).
+# Parametro 'pais': ES | IT | FR | ALL (por defecto ES).
+# ============================================================
+name: Moloka - Cerebro Trackeador
+
+on:
+  workflow_dispatch:
+    inputs:
+      pais:
+        description: 'Pais a procesar (ES | IT | FR | ALL)'
+        required: false
+        default: 'ES'
+
+jobs:
+  cerebro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install supabase
+
+      - name: Ejecutar Cerebro
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python -u moloka_tracker_cerebro.py --pais "${{ github.event.inputs.pais || 'ES' }}"
