@@ -49,7 +49,7 @@ PAIS_CFG = {
 _COLS_PRODUCTO = ['asin', 'sku', 'ean', 'pvd', 'iva_pct',
                   'comision_pct', 'comision_pct_keepa_es', 'comision_pct_it', 'comision_pct_fr',
                   'comision_envio', 'keepa_fba_fee_es', 'envio_it', 'envio_fr',
-                  'keepa_fba_fee_it', 'keepa_fba_fee_fr']
+                  'keepa_fba_fee_it', 'keepa_fba_fee_fr', 'stock_moloka']
 
 # --- Nombres EXACTOS de columnas del Keepa "Resumen del Vendedor" ---
 K = {
@@ -197,6 +197,7 @@ def leer_productos_supabase(sb):
                 'envio_fr'              : num(p.get('envio_fr')),
                 'keepa_fba_fee_it'      : num(p.get('keepa_fba_fee_it')),
                 'keepa_fba_fee_fr'      : num(p.get('keepa_fba_fee_fr')),
+                'stock_moloka'          : ent(p.get('stock_moloka')),
             }
         if len(filas) < 1000: break
         desde += 1000
@@ -281,6 +282,7 @@ def construir_snapshots(fba, keepa, prod, pais, origen, venta_tx=None):
             'snapshot_ts': ahora, 'pais': pais, 'asin': asin,
             'sku': f.get('sku') or p.get('sku'), 'ean': p.get('ean'),
             'mi_precio': f.get('mi_precio'), 'mi_stock': f.get('mi_stock'),
+            'stock_almacen': p.get('stock_moloka'),
             'mis_ventas_t7': f.get('v_t7'), 'mis_ventas_t30': f.get('v_t30'),
             'mis_ventas_t90': f.get('v_t90'), 'pvd': p.get('pvd'),
             'mi_beneficio_ud': benef, 'mi_margen_pct': margen,
