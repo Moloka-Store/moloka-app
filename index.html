@@ -1040,7 +1040,27 @@
     </div><!-- /esc-sub-pro -->
 
     <div id="esc-sub-tracker" style="display:none">
-      <div class="info-box" style="margin-bottom:16px;border-left:3px solid #0277bd">
+      <!-- ============ FASE 2 · RECOMENDACIONES (monitor_recomendaciones) ============ -->
+      <div class="card" style="margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+          <div class="input-group" style="max-width:120px">
+            <div class="input-label">País</div>
+            <select class="input" id="trk-reco-pais" onchange="trackerRenderRecos()">
+              <option value="ES" selected>ES</option>
+              <option value="IT">IT</option>
+              <option value="FR">FR</option>
+            </select>
+          </div>
+          <div id="trk-reco-resumen" style="flex:1;min-width:180px;font-size:14px;font-weight:600;color:var(--navy)">—</div>
+          <button class="btn btn-sm" onclick="trackerGenerar()">🔄 Generar recomendaciones</button>
+        </div>
+      </div>
+      <div id="trk-reco-lista"></div>
+
+      <!-- ============ Cargar datos nuevos (snapshot) — parte existente, envuelta ============ -->
+      <details style="margin-top:18px">
+        <summary style="cursor:pointer;font-weight:600;color:var(--navy);padding:10px 0">📸 Cargar datos nuevos (snapshot)</summary>
+      <div class="info-box" style="margin-bottom:16px;margin-top:8px;border-left:3px solid #0277bd">
         📸 <strong>Trackeador de precios</strong> — cruza tu inventario con la competencia y guarda una <strong>foto histórica</strong> de cada producto (precio, buy box, margen, stock, ventas) en <code>monitor_snapshots</code>. <strong>Sin gastar tokens</strong>.<br>
         Sube los <strong>dos</strong> ficheros: el <strong>informe de inventario FBA</strong> de Amazon y el <strong>CSV del Keepa «Resumen del Vendedor»</strong>. El robot los cruza por ASIN con tu tabla de productos y calcula el margen con la fórmula validada del escáner.
       </div>
@@ -1078,6 +1098,7 @@
         <button class="btn" id="trk-go" onclick="lanzarTracker()">📸 Guardar snapshot</button>
         <div id="trk-log" style="margin-top:14px"></div>
       </div>
+      </details>
     </div><!-- /esc-sub-tracker -->
   </div>
 
@@ -1351,6 +1372,33 @@
     <div id="selector-lista" style="display:flex;flex-direction:column;gap:10px;max-height:60vh;overflow-y:auto"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="cancelarSelector()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL DESCARTAR RECOMENDACIÓN (Fase 2 trackeador) -->
+<div class="modal-overlay" id="modal-descartar-reco">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-title">🗑️ Descartar recomendación</div>
+    <div style="font-size:13px;color:var(--gray-500);margin-bottom:14px">¿Por qué la descartas? Queda registrado en el motivo.</div>
+    <div class="input-group" style="margin-bottom:12px">
+      <div class="input-label">Motivo</div>
+      <select class="input" id="descarte-motivo">
+        <option value="El rival se queda sin stock ya">El rival se queda sin stock ya</option>
+        <option value="Es producto mío exclusivo, no toco">Es producto mío exclusivo, no toco</option>
+        <option value="Prefiero no bajar por marca">Prefiero no bajar por marca</option>
+        <option value="Dato Keepa poco fiable">Dato Keepa poco fiable</option>
+        <option value="Lo subo pero por tramos">Lo subo pero por tramos</option>
+        <option value="Otro">Otro</option>
+      </select>
+    </div>
+    <div class="input-group" style="margin-bottom:6px">
+      <div class="input-label">Detalle (opcional; obligatorio si eliges «Otro»)</div>
+      <textarea class="input" id="descarte-texto" rows="3" placeholder="Matiza el motivo…"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modal-descartar-reco')">Cancelar</button>
+      <button class="btn btn-green" onclick="confirmarDescarte()">🗑️ Descartar</button>
     </div>
   </div>
 </div>
@@ -2623,6 +2671,7 @@ function escSubTab(cual) {
   });
   if (cual === 'biblioteca') cargarBibliotecaEscaneos();
   if (cual === 'pro') proRenderZonas();
+  if (cual === 'tracker') trackerRenderRecos();
 }
 
 const PRO_CHUNK = 5000;   // Keepa recomienda listas <= 5.000
@@ -2924,6 +2973,192 @@ async function lanzarTracker() {
     log.innerHTML = '<div class="info-box" style="border-left:3px solid #b00020">\u26a0\ufe0f Error: ' + e.message + '</div>';
   }
   go.disabled = false;
+}
+
+// ============================================================
+// FASE 2 · Trackeador — tabla de recomendaciones (monitor_recomendaciones)
+// ============================================================
+const TRK_ACC_BLOQUES = [
+  { titulo: '💰 Dinero encima de la mesa', acciones: ['SUBIR', 'RECUPERAR_BB', 'MALVENDIENDO'], colapsable: false },
+  { titulo: '🛡️ Defensivo / a confirmar',  acciones: ['BAJAR', 'GUERRA_ACTIVA', 'NO_RENTABLE_COMPETIR'], colapsable: false },
+  { titulo: '😴 Sin acción',                 acciones: ['MANTENER', 'SIN_ACCION', 'SIN_DATOS'], colapsable: true },
+];
+const TRK_ACC_LABEL = {
+  SUBIR: 'SUBIR', RECUPERAR_BB: 'RECUPERAR BB', MALVENDIENDO: 'MALVENDIENDO',
+  BAJAR: 'BAJAR', GUERRA_ACTIVA: 'GUERRA', NO_RENTABLE_COMPETIR: 'NO RENTABLE',
+  MANTENER: 'MANTENER', SIN_ACCION: 'SIN ACCIÓN', SIN_DATOS: 'SIN DATOS'
+};
+const TRK_ACCIONABLES = ['SUBIR', 'RECUPERAR_BB', 'MALVENDIENDO', 'BAJAR'];
+function trkBadgeColor(a) {
+  if (a === 'MALVENDIENDO') return '#b00020';
+  if (a === 'SUBIR') return '#2e7d32';
+  if (a === 'RECUPERAR_BB') return '#0277bd';
+  if (a === 'BAJAR' || a === 'GUERRA_ACTIVA') return '#ba7517';
+  return '#888780';
+}
+const trkEur = v => (v == null || isNaN(v)) ? '—' : (Math.round(v * 100) / 100).toFixed(2) + '€';
+
+let TRK_RECOS_ACTUAL = [];
+
+async function trackerRenderRecos() {
+  const pais = (document.getElementById('trk-reco-pais').value || 'ES').trim().toUpperCase();
+  const cont = document.getElementById('trk-reco-lista');
+  const resumen = document.getElementById('trk-reco-resumen');
+  if (!cont) return;
+  cont.innerHTML = '<div class="info-box">Cargando recomendaciones…</div>';
+  try {
+    const { data: recos, error } = await db.from('monitor_recomendaciones')
+      .select('*').eq('pais', pais).eq('estado', 'PENDIENTE');
+    if (error) throw error;
+    TRK_RECOS_ACTUAL = recos || [];
+    if (!TRK_RECOS_ACTUAL.length) {
+      cont.innerHTML = '<div class="info-box">No hay recomendaciones PENDIENTE para ' + pais + '. Genera unas nuevas con el botón de arriba (necesita un snapshot reciente).</div>';
+      if (resumen) resumen.textContent = '0 accionables';
+      return;
+    }
+    // Nombres de producto por ASIN (opcional; si falla, se usa "(sin nombre)")
+    const asins = [...new Set(TRK_RECOS_ACTUAL.map(r => r.asin).filter(Boolean))];
+    const nombrePorAsin = {};
+    if (asins.length) {
+      try {
+        const { data: prods } = await db.from('productos').select('asin,nombre').in('asin', asins);
+        (prods || []).forEach(p => { if (p.asin) nombrePorAsin[p.asin] = p.nombre; });
+      } catch (e) {}
+    }
+    // Agrupar por accion
+    const porAccion = {};
+    TRK_RECOS_ACTUAL.forEach(r => { (porAccion[r.accion] = porAccion[r.accion] || []).push(r); });
+    // Resumen: accionables + suma de impacto
+    let nAcc = 0, impTotal = 0;
+    TRK_RECOS_ACTUAL.forEach(r => {
+      if (TRK_ACCIONABLES.includes(r.accion)) { nAcc++; impTotal += (r.impacto_eur_mes || 0); }
+    });
+    if (resumen) resumen.textContent = nAcc + ' accionables · ' + (Math.round(impTotal * 100) / 100).toFixed(2) + ' €/mes';
+    // Pintar bloques
+    let html = '';
+    TRK_ACC_BLOQUES.forEach(bloque => {
+      const filas = bloque.acciones.flatMap(a => porAccion[a] || []);
+      if (!filas.length) return;
+      filas.sort((a, b) => (b.impacto_eur_mes || 0) - (a.impacto_eur_mes || 0));
+      const tabla = trkTablaHTML(filas, nombrePorAsin);
+      const cab = bloque.titulo + ' (' + filas.length + ')';
+      if (bloque.colapsable) {
+        html += '<details style="margin-bottom:16px"><summary style="cursor:pointer;font-weight:700;color:var(--navy);padding:8px 0">' + cab + '</summary>' + tabla + '</details>';
+      } else {
+        html += '<div style="margin-bottom:16px"><div style="font-weight:700;color:var(--navy);margin-bottom:8px">' + cab + '</div>' + tabla + '</div>';
+      }
+    });
+    cont.innerHTML = html || '<div class="info-box">Sin filas que mostrar.</div>';
+  } catch (e) {
+    cont.innerHTML = '<div class="info-box" style="border-left:3px solid #b00020">⚠️ Error cargando recomendaciones: ' + (e.message || e) + '</div>';
+  }
+}
+
+function trkTablaHTML(filas, nombrePorAsin) {
+  const rows = filas.map(r => {
+    const color = trkBadgeColor(r.accion);
+    const badge = '<span style="background:' + color + ';color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;white-space:nowrap">' + (TRK_ACC_LABEL[r.accion] || r.accion) + '</span>';
+    const objAcc = (r.precio_objetivo != null) ? '<div style="font-size:11px;color:var(--gray-500);margin-top:4px">→ objetivo ' + trkEur(r.precio_objetivo) + '</div>' : '';
+    // Producto
+    const nombre = nombrePorAsin[r.asin] || '(sin nombre)';
+    const prod = '<div style="font-weight:600;font-size:12px;color:var(--navy);max-width:230px">' + nombre + '</div>' +
+                 '<div style="font-family:\'DM Mono\',monospace;font-size:10px;color:var(--gray-500)">' + (r.asin || '') + (r.sku ? ' · ' + r.sku : '') + '</div>';
+    // Precio actual -> objetivo + buy box aterrizada
+    const precioObj = (r.precio_objetivo != null) ? ' → <span style="color:var(--green);font-weight:700">' + trkEur(r.precio_objetivo) + '</span>' : '';
+    let bb = '';
+    if (r.competidor_aterrizado != null) {
+      if (r.competidor_envio && r.competidor_envio > 0) {
+        bb = '<div style="font-size:10px;color:var(--gray-500);margin-top:3px">BB: ' + trkEur(r.competidor_precio) + ' + ' + trkEur(r.competidor_envio) + ' = <strong>' + trkEur(r.competidor_aterrizado) + '</strong></div>';
+      } else {
+        bb = '<div style="font-size:10px;color:var(--gray-500);margin-top:3px">BB: <strong>' + trkEur(r.competidor_aterrizado) + '</strong></div>';
+      }
+    }
+    const precio = '<div style="font-family:\'DM Mono\',monospace;font-size:12px">' + trkEur(r.precio_actual) + precioObj + '</div>' + bb;
+    // Tarifas
+    const com = (r.comision_pct != null) ? (Math.round(r.comision_pct * 100) / 100) + '%' : '—';
+    const margen = (r.margen_objetivo_pct != null) ? (Math.round(r.margen_objetivo_pct * 10) / 10) + '%' : '—';
+    const tarifas = '<div style="font-size:11px;color:var(--gray-600)">Com ' + com + ' · Log ' + trkEur(r.fee_logistica) + '</div>' +
+                    '<div style="font-size:11px;color:var(--gray-500)">Margen obj: <strong>' + margen + '</strong></div>';
+    // Inventario
+    const inv = '<div style="font-size:11px">FBA <strong>' + (r.stock_fba != null ? r.stock_fba : '—') + '</strong></div>' +
+                '<div style="font-size:11px;color:var(--gray-500)">Alm ' + (r.stock_almacen != null ? r.stock_almacen : '—') + '</div>';
+    // Impacto + semáforo + descartar
+    const sem = (r.confianza === 'alta' || r.fuente_margen === 'real_tx') ? '#2e7d32' : '#ba7517';
+    const semTxt = (r.fuente_margen || '—') + (r.confianza ? ' · ' + r.confianza : '');
+    const impacto = '<div style="font-weight:700;color:var(--navy)">' + (Math.round((r.impacto_eur_mes || 0) * 100) / 100).toFixed(2) + ' €/mes</div>' +
+                    '<div style="font-size:10px;color:' + sem + '">● ' + semTxt + '</div>' +
+                    '<button class="btn btn-ghost btn-sm" style="margin-top:5px;padding:2px 8px;font-size:11px" onclick="abrirDescarte(' + r.id + ')">Descartar</button>';
+    return '<tr style="border-bottom:1px solid var(--gray-100)">' +
+      '<td style="vertical-align:top;padding:8px 6px">' + badge + objAcc + '</td>' +
+      '<td style="vertical-align:top;padding:8px 6px">' + prod + '</td>' +
+      '<td style="vertical-align:top;padding:8px 6px;text-align:right">' + (r.ventas_30d != null ? r.ventas_30d : '—') + '</td>' +
+      '<td style="vertical-align:top;padding:8px 6px">' + inv + '</td>' +
+      '<td style="vertical-align:top;padding:8px 6px">' + precio + '</td>' +
+      '<td style="vertical-align:top;padding:8px 6px">' + tarifas + '</td>' +
+      '<td style="vertical-align:top;padding:8px 6px;text-align:right">' + impacto + '</td>' +
+    '</tr>';
+  }).join('');
+  return '<div class="table-wrap" style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">' +
+    '<thead><tr style="text-align:left;color:var(--gray-500);font-size:11px;border-bottom:1px solid var(--gray-200)">' +
+    '<th style="padding:6px">Acción</th><th style="padding:6px">Producto</th><th style="padding:6px;text-align:right">V.30d</th>' +
+    '<th style="padding:6px">Inventario</th><th style="padding:6px">Precio</th><th style="padding:6px">Tarifas</th><th style="padding:6px;text-align:right">Impacto</th>' +
+    '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+}
+
+// Generar recomendaciones: dispara el cerebro (tracker-cerebro.yml) con el pais elegido
+async function trackerGenerar() {
+  const pais = (document.getElementById('trk-reco-pais').value || 'ES').trim().toUpperCase();
+  const resumen = document.getElementById('trk-reco-resumen');
+  try {
+    const resp = await fetch('/api/disparar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secreto: DISPARO_SECRET, workflow: 'tracker-cerebro.yml', inputs: { pais: pais } })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      showToast('Generando recomendaciones… en unos minutos vuelve a abrir la pestaña', 'success');
+      if (resumen) resumen.textContent = 'Generando… (unos minutos)';
+    } else if (resp.status === 409) {
+      showToast(data.error || 'Ya hay una generación en marcha.', 'warning');
+    } else {
+      showToast('No se pudo lanzar: ' + (data.error || ('HTTP ' + resp.status)), 'error');
+    }
+  } catch (e) {
+    showToast('Error: ' + (e.message || e), 'error');
+  }
+}
+
+// Descartar una recomendación (modal-descartar-reco)
+let TRK_DESCARTE_ID = null;
+function abrirDescarte(id) {
+  TRK_DESCARTE_ID = id;
+  const sel = document.getElementById('descarte-motivo'); if (sel) sel.selectedIndex = 0;
+  const txt = document.getElementById('descarte-texto'); if (txt) txt.value = '';
+  openModal('modal-descartar-reco');
+}
+async function confirmarDescarte() {
+  if (TRK_DESCARTE_ID == null) { closeModal('modal-descartar-reco'); return; }
+  const sel = document.getElementById('descarte-motivo');
+  const detalle = (document.getElementById('descarte-texto').value || '').trim();
+  let motivo = sel ? sel.value : '';
+  if (motivo === 'Otro') {
+    if (!detalle) { showToast('Escribe el motivo en el detalle', 'warning'); return; }
+    motivo = detalle;
+  } else if (detalle) {
+    motivo = motivo + ' — ' + detalle;
+  }
+  try {
+    const { error } = await db.from('monitor_recomendaciones')
+      .update({ estado: 'DESCARTADA', motivo_descarte: motivo, descartada_en: new Date().toISOString() })
+      .eq('id', TRK_DESCARTE_ID);
+    if (error) throw error;
+    closeModal('modal-descartar-reco');
+    TRK_DESCARTE_ID = null;
+    showToast('Recomendación descartada', 'success');
+    trackerRenderRecos();
+  } catch (e) {
+    showToast('No se pudo descartar: ' + (e.message || e), 'error');
+  }
 }
 
 async function lanzarEscaneo() {
