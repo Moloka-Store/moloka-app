@@ -226,6 +226,14 @@ def construir_snapshots(fba, keepa, prod, pais, origen):
             (p.get(cfg['fee_keepa']) if cfg['fee_keepa'] else None, 'keepa_bd'),
             (k.get('fee_fba'),                                   'keepa_csv'))
 
+        # Normalizar la comision a PORCENTAJE (mismo criterio que el IVA): el campo
+        # real 'comision_pct' viene en DECIMAL (0.155 = 15,5%) y los de Keepa en
+        # PORCENTAJE (15.03). Si el valor resuelto es < 1 es decimal -> x100; la
+        # formula ya divide /100, asi que un decimal acaba multiplicando el precio
+        # directamente. Aplica a ES e IT/FR (va despues de la cascada, sin importar pais).
+        if com_pct is not None and com_pct < 1:
+            com_pct = com_pct * 100.0
+
         iva = p.get('iva_pct')
         iva = (iva/100.0 if iva and iva > 1 else iva) if iva is not None else IVA_DEFAULT_ES
         benef, margen = calc_rentabilidad(
