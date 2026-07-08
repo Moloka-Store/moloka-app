@@ -224,6 +224,24 @@ def decidir(s, umbral, iva):
                  else 'media' if com_fte in ('real', 'keepa_bd')
                  else 'baja' if com_fte == 'keepa_csv' else None)
 
+    # --- Fase 1: competidor de referencia ATERRIZADO (precio + envio) segun la accion ---
+    # ref_aterrizado = precio del competidor de referencia; ref_pelado = su precio "pelado"
+    # (sin el diferencial de envio). El envio del competidor es la diferencia entre ambos.
+    if accion == RECUPERAR_BB:
+        ref_aterrizado, ref_pelado = fbm_min, bb_prec
+    elif accion in (BAJAR, GUERRA):
+        ref_aterrizado, ref_pelado = bb_prec, bb_prec
+    elif accion == SUBIR:
+        ref_aterrizado, ref_pelado = fba_min, fba_min
+    else:
+        ref_aterrizado = (fbm_min if bb_fba is False else bb_prec)
+        ref_pelado = bb_prec
+    ref_envio = ((ref_aterrizado - ref_pelado)
+                 if (ref_aterrizado is not None and ref_pelado is not None and ref_aterrizado > ref_pelado)
+                 else 0.0)
+
+    _eur = lambda x: round(x, 2) if x is not None else None   # redondeo a centimos
+
     return {
         'pais': s.get('pais'), 'asin': s.get('asin'), 'sku': s.get('sku'),
         'accion': accion, 'motivo': motivo,
@@ -235,6 +253,15 @@ def decidir(s, umbral, iva):
         'buybox_es_mia': bb_mia, 'buybox_es_fba': bb_fba,
         'guerra_activa': bool(guerra),
         'fuente_margen': com_fte, 'confianza': confianza,
+        # --- Fase 1: recomendacion autocontenida (para pintar tabla estilo Seller) ---
+        'comision_pct': com_pct,
+        'fee_logistica': _eur(fee),
+        'stock_fba': s.get('mi_stock'),
+        'stock_almacen': s.get('stock_almacen'),
+        'ventas_30d': v_t30,
+        'indice_ventas': s.get('rank'),
+        'competidor_aterrizado': _eur(ref_aterrizado),
+        'competidor_envio': _eur(ref_envio),
         'estado': 'PENDIENTE',
     }
 
