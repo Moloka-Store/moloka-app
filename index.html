@@ -3016,13 +3016,13 @@ async function trackerRenderRecos() {
       if (resumen) resumen.textContent = '0 accionables';
       return;
     }
-    // Nombres de producto por ASIN (opcional; si falla, se usa "(sin nombre)")
+    // Ficha por ASIN (nombre + foto de Keepa). Opcional; si falla, "(sin nombre)" y placeholder.
     const asins = [...new Set(TRK_RECOS_ACTUAL.map(r => r.asin).filter(Boolean))];
-    const nombrePorAsin = {};
+    const fichaPorAsin = {};
     if (asins.length) {
       try {
-        const { data: prods } = await db.from('productos').select('asin,nombre').in('asin', asins);
-        (prods || []).forEach(p => { if (p.asin) nombrePorAsin[p.asin] = p.nombre; });
+        const { data: prods } = await db.from('productos').select('asin,nombre,keepa_image').in('asin', asins);
+        (prods || []).forEach(p => { if (p.asin) fichaPorAsin[p.asin] = { nombre: p.nombre, keepa_image: p.keepa_image }; });
       } catch (e) {}
     }
     // Agrupar por accion
@@ -3040,7 +3040,7 @@ async function trackerRenderRecos() {
       const filas = bloque.acciones.flatMap(a => porAccion[a] || []);
       if (!filas.length) return;
       filas.sort((a, b) => (b.impacto_eur_mes || 0) - (a.impacto_eur_mes || 0));
-      const tabla = trkTablaHTML(filas, nombrePorAsin);
+      const tabla = trkTablaHTML(filas, fichaPorAsin);
       const cab = bloque.titulo + ' (' + filas.length + ')';
       if (bloque.colapsable) {
         html += '<details style="margin-bottom:16px"><summary style="cursor:pointer;font-weight:700;color:var(--navy);padding:8px 0">' + cab + '</summary>' + tabla + '</details>';
@@ -3054,17 +3054,41 @@ async function trackerRenderRecos() {
   }
 }
 
-function trkTablaHTML(filas, nombrePorAsin) {
+function trkTablaHTML(filas, fichaPorAsin) {
   const rows = filas.map(r => {
+    const ficha = fichaPorAsin[r.asin] || {};
+    const asin = r.asin || '';
     const color = trkBadgeColor(r.accion);
     const badge = '<span style="background:' + color + ';color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;white-space:nowrap">' + (TRK_ACC_LABEL[r.accion] || r.accion) + '</span>';
     const objAcc = (r.precio_objetivo != null) ? '<div style="font-size:11px;color:var(--gray-500);margin-top:4px">→ objetivo ' + trkEur(r.precio_objetivo) + '</div>' : '';
-    // Producto
-    const nombre = nombrePorAsin[r.asin] || '(sin nombre)';
-    const prod = '<div style="font-weight:600;font-size:12px;color:var(--navy);max-width:230px">' + nombre + '</div>' +
-                 '<div style="font-family:\'DM Mono\',monospace;font-size:10px;color:var(--gray-500)">' + (r.asin || '') + (r.sku ? ' · ' + r.sku : '') + '</div>';
-    // Precio actual -> objetivo + buy box aterrizada
+    // Producto: foto Keepa (thumbnail 34px) + nombre enlazado a Amazon + ASIN/SKU con copiar
+    const foto = ficha.keepa_image
+      ? '<img src="' + ficha.keepa_image + '" alt="" loading="lazy" style="width:34px;height:34px;object-fit:contain;border-radius:6px;background:#fff;border:1px solid var(--gray-200);flex-shrink:0">'
+      : '<div style="width:34px;height:34px;border-radius:6px;background:var(--gray-100);border:1px solid var(--gray-200);flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--gray-300);font-size:14px">📦</div>';
+    const nombreTxt = escapeHtml(ficha.nombre || '(sin nombre)');
+    const nombreHtml = asin
+      ? '<a href="https://www.amazon.es/dp/' + asin + '" target="_blank" rel="noopener" style="font-weight:600;font-size:12px;color:var(--navy);text-decoration:none" title="Abrir ficha en Amazon">' + nombreTxt + '</a>'
+      : '<span style="font-weight:600;font-size:12px;color:var(--navy)">' + nombreTxt + '</span>';
+    const copiar = asin
+      ? ' <span style="cursor:pointer" title="Copiar ASIN" onclick="navigator.clipboard.writeText(\'' + asin + '\');showToast(\'ASIN copiado\',\'success\')">📋</span>'
+      : '';
+    const prod = '<div style="display:flex;align-items:center;gap:9px">' + foto +
+      '<div style="min-width:0;max-width:220px">' +
+        '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + nombreHtml + '</div>' +
+        '<div style="font-family:\'DM Mono\',monospace;font-size:10px;color:var(--gray-500);margin-top:2px">' + asin + (r.sku ? ' · ' + r.sku : '') + copiar + '</div>' +
+      '</div></div>';
+    // Ventas: V.7d principal + T30 pequeno
+    const ventas = '<div style="font-weight:600">' + (r.ventas_7d != null ? r.ventas_7d : '—') + '</div>' +
+                   '<div style="font-size:10px;color:var(--gray-500)">T30: ' + (r.ventas_30d != null ? r.ventas_30d : '—') + '</div>';
+    // Inventario
+    const inv = '<div style="font-size:11px">FBA <strong>' + (r.stock_fba != null ? r.stock_fba : '—') + '</strong></div>' +
+                '<div style="font-size:11px;color:var(--gray-500)">Alm ' + (r.stock_almacen != null ? r.stock_almacen : '—') + '</div>';
+    // Precio actual -> objetivo (esta pasada) + techo si hay escalonado + buy box aterrizada
     const precioObj = (r.precio_objetivo != null) ? ' → <span style="color:var(--green);font-weight:700">' + trkEur(r.precio_objetivo) + '</span>' : '';
+    let escalon = '';
+    if (r.precio_objetivo != null && r.precio_techo != null && Math.abs(r.precio_techo - r.precio_objetivo) > 0.001) {
+      escalon = '<div style="font-size:10px;color:var(--gray-500);margin-top:2px">→ objetivo (esta pasada) · techo ' + trkEur(r.precio_techo) + '</div>';
+    }
     let bb = '';
     if (r.competidor_aterrizado != null) {
       if (r.competidor_envio && r.competidor_envio > 0) {
@@ -3073,15 +3097,19 @@ function trkTablaHTML(filas, nombrePorAsin) {
         bb = '<div style="font-size:10px;color:var(--gray-500);margin-top:3px">BB: <strong>' + trkEur(r.competidor_aterrizado) + '</strong></div>';
       }
     }
-    const precio = '<div style="font-family:\'DM Mono\',monospace;font-size:12px">' + trkEur(r.precio_actual) + precioObj + '</div>' + bb;
-    // Tarifas
+    const precio = '<div style="font-family:\'DM Mono\',monospace;font-size:12px">' + trkEur(r.precio_actual) + precioObj + '</div>' + escalon + bb;
+    // Tarifas (detalle) + margen objetivo
     const com = (r.comision_pct != null) ? (Math.round(r.comision_pct * 100) / 100) + '%' : '—';
     const margen = (r.margen_objetivo_pct != null) ? (Math.round(r.margen_objetivo_pct * 10) / 10) + '%' : '—';
-    const tarifas = '<div style="font-size:11px;color:var(--gray-600)">Com ' + com + ' · Log ' + trkEur(r.fee_logistica) + '</div>' +
+    const tarifas = '<div style="font-size:11px;color:var(--gray-500)">Com ' + com + ' · Log ' + trkEur(r.fee_logistica) + '</div>' +
                     '<div style="font-size:11px;color:var(--gray-500)">Margen obj: <strong>' + margen + '</strong></div>';
-    // Inventario
-    const inv = '<div style="font-size:11px">FBA <strong>' + (r.stock_fba != null ? r.stock_fba : '—') + '</strong></div>' +
-                '<div style="font-size:11px;color:var(--gray-500)">Alm ' + (r.stock_almacen != null ? r.stock_almacen : '—') + '</div>';
+    // Tarifas TOTALES (estilo Seller): precio*comision% + logistica
+    let tarTot = '—';
+    if (r.precio_actual != null && r.comision_pct != null) {
+      const tot = r.precio_actual * r.comision_pct / 100 + (r.fee_logistica || 0);
+      tarTot = (Math.round(tot * 100) / 100).toFixed(2) + '€';
+    }
+    const tarifasTot = '<div style="font-weight:700;color:var(--navy);font-size:12px">' + tarTot + '</div>';
     // Impacto + semáforo + descartar
     const sem = (r.confianza === 'alta' || r.fuente_margen === 'real_tx') ? '#2e7d32' : '#ba7517';
     const semTxt = (r.fuente_margen || '—') + (r.confianza ? ' · ' + r.confianza : '');
@@ -3091,17 +3119,19 @@ function trkTablaHTML(filas, nombrePorAsin) {
     return '<tr style="border-bottom:1px solid var(--gray-100)">' +
       '<td style="vertical-align:top;padding:8px 6px">' + badge + objAcc + '</td>' +
       '<td style="vertical-align:top;padding:8px 6px">' + prod + '</td>' +
-      '<td style="vertical-align:top;padding:8px 6px;text-align:right">' + (r.ventas_30d != null ? r.ventas_30d : '—') + '</td>' +
+      '<td style="vertical-align:top;padding:8px 6px;text-align:right">' + ventas + '</td>' +
       '<td style="vertical-align:top;padding:8px 6px">' + inv + '</td>' +
       '<td style="vertical-align:top;padding:8px 6px">' + precio + '</td>' +
       '<td style="vertical-align:top;padding:8px 6px">' + tarifas + '</td>' +
+      '<td style="vertical-align:top;padding:8px 6px;text-align:right">' + tarifasTot + '</td>' +
       '<td style="vertical-align:top;padding:8px 6px;text-align:right">' + impacto + '</td>' +
     '</tr>';
   }).join('');
   return '<div class="table-wrap" style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">' +
     '<thead><tr style="text-align:left;color:var(--gray-500);font-size:11px;border-bottom:1px solid var(--gray-200)">' +
-    '<th style="padding:6px">Acción</th><th style="padding:6px">Producto</th><th style="padding:6px;text-align:right">V.30d</th>' +
-    '<th style="padding:6px">Inventario</th><th style="padding:6px">Precio</th><th style="padding:6px">Tarifas</th><th style="padding:6px;text-align:right">Impacto</th>' +
+    '<th style="padding:6px">Acción</th><th style="padding:6px">Producto</th><th style="padding:6px;text-align:right">V.7d</th>' +
+    '<th style="padding:6px">Inventario</th><th style="padding:6px">Precio</th><th style="padding:6px">Tarifas</th>' +
+    '<th style="padding:6px;text-align:right">Tarifas tot.</th><th style="padding:6px;text-align:right">Impacto</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div>';
 }
 

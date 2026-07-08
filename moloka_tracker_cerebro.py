@@ -37,6 +37,9 @@ UNDERCUT_FBA          = 0.01    # € por debajo del rival FBA para ganarle la B
 PREMIUM_FBA_SOBRE_FBM = 0.99    # € por encima del FBM (la ventaja Prime/FBA gana la BB)
 GUERRA_MIN_GANADORES  = 5       # nº de ganadores de BB en 90d para sospechar guerra
 GUERRA_DESVIACION_REL = 0.05    # desviacion_bb_90d / precio_bb >= 5% -> volatil
+ESCALON_SUBIDA        = 0.10    # sube como mucho +10% por pasada
+SONDEO_BAJADA         = 0.05    # baja 5 cts para sondear cuando no hay caja
+ALARMA_RITMO          = 0.50    # T7 por debajo del 50% del ritmo T30 = alarma
 EPS = 0.01                      # tolerancia de 1 centimo
 
 # --- Acciones (valores del campo 'accion') ---
@@ -125,6 +128,7 @@ def decidir(s, umbral, iva):
     mi_margen  = num(s.get('mi_margen_pct'))
     mi_benef   = num(s.get('mi_beneficio_ud'))
     v_t30      = num(s.get('mis_ventas_t30')) or 0.0
+    v_t7       = num(s.get('mis_ventas_t7')) or 0.0
     v_list     = num(s.get('ventas_listado_mes')) or 0.0
 
     def margen_en(px):
@@ -135,6 +139,12 @@ def decidir(s, umbral, iva):
     guerra = (ganadores is not None and desviacion is not None and bb_prec and bb_prec > 0
               and ganadores >= GUERRA_MIN_GANADORES
               and (desviacion / bb_prec) >= GUERRA_DESVIACION_REL)
+
+    # ¿No hay caja adjudicada? (bb_es_fba None Y sin vendedor de caja)
+    sin_bb = (bb_fba is None) and (not bb_vend)
+    # Ritmo hundido: proyeccion mensual del T7 muy por debajo del T30.
+    ritmo_t7 = v_t7 / 7.0 * 30.0
+    alarma_ventas = (v_t30 > 0) and (ritmo_t7 < v_t30 * ALARMA_RITMO)
 
     accion, objetivo, motivo = SIN_ACCION, None, ''
 
@@ -165,8 +175,38 @@ def decidir(s, umbral, iva):
 
     else:
         # --- No tengo la Buy Box ---
-        if bb_fba is False:
-            # La tiene un FBM y yo soy FBA -> recuperarla quedandome por encima del FBM
+        if sin_bb:
+            # No hay caja adjudicada: NUNCA subir por encima de un FBM aqui.
+            if fba_min is not None and precio is not None and fba_min < precio - EPS:
+                # Hay un FBA mas barato -> bajar a su nivel si el margen aguanta (igual que la rama FBA).
+                objetivo = round(fba_min - UNDERCUT_FBA, 2)
+                _, m = margen_en(objetivo)
+                if m is not None and m >= umbral:
+                    accion = BAJAR
+                    motivo = (f"Sin buy box adjudicada y hay un FBA mas barato ({fba_min:.2f}€); "
+                              f"bajar a {objetivo:.2f}€ mantiene margen {m:.1f}% >= {umbral:.0f}%.")
+                else:
+                    accion, objetivo = NO_RENTABLE, None
+                    motivo = (f"Sin buy box y un FBA mas barato ({fba_min:.2f}€), pero bajar dejaria el "
+                              f"margen por debajo del {umbral:.0f}%: NO rentable competir.")
+            else:
+                # Soy el mas barato o empate.
+                if alarma_ventas:
+                    objetivo = round(precio - SONDEO_BAJADA, 2) if precio is not None else None
+                    _, m = margen_en(objetivo)
+                    if objetivo is not None and m is not None and m >= umbral:
+                        accion = BAJAR
+                        motivo = ("Sin buy box y ventas hundidas (T7 muy por debajo de tu media): "
+                                  "sondeo bajando 5 cts para ver la reaccion de la competencia.")
+                    else:
+                        accion, objetivo = NO_RENTABLE, None
+                        motivo = ("Sin buy box y ventas hundidas, pero el sondeo bajando dejaria el margen "
+                                  f"por debajo del {umbral:.0f}%: NO rentable competir.")
+                else:
+                    accion = MANTENER
+                    motivo = "Sin buy box pero mantienes ritmo de ventas: mantener posiciones."
+        elif bb_fba is False:
+            # La tiene un FBM (SI hay caja) y yo soy FBA -> recuperarla quedandome por encima del FBM
             if fbm_min is not None:
                 objetivo = round(fbm_min + PREMIUM_FBA_SOBRE_FBM, 2)
                 _, m = margen_en(objetivo)
@@ -204,7 +244,15 @@ def decidir(s, umbral, iva):
                 accion = MANTENER
                 motivo = "No tienes la Buy Box, pero no hay un rival mas barato accionable por precio."
 
-    # --- Margen objetivo e impacto en €/mes ---
+    # --- Escalonado de subidas: no subir mas de +ESCALON_SUBIDA por pasada ---
+    # La decision (RECUPERAR_BB vs NO_RENTABLE) ya se hizo sobre el TECHO (objetivo final).
+    # Aqui solo recortamos la subida de ESTA pasada y guardamos el techo teorico.
+    precio_techo = objetivo
+    if accion in (SUBIR, RECUPERAR_BB, MALVENDIENDO) and objetivo is not None and precio is not None and objetivo > precio:
+        escalon  = round(precio * (1 + ESCALON_SUBIDA), 2)
+        objetivo = min(escalon, objetivo)
+
+    # --- Margen objetivo e impacto en €/mes (sobre el objetivo de esta pasada) ---
     benef_obj, margen_obj = margen_en(objetivo) if objetivo is not None else (None, None)
 
     if accion in (SUBIR, MALVENDIENDO, MANTENER):
@@ -246,6 +294,7 @@ def decidir(s, umbral, iva):
         'pais': s.get('pais'), 'asin': s.get('asin'), 'sku': s.get('sku'),
         'accion': accion, 'motivo': motivo,
         'precio_actual': precio, 'precio_objetivo': objetivo,
+        'precio_techo': _eur(precio_techo),
         'margen_actual_pct': mi_margen, 'margen_objetivo_pct': margen_obj,
         'beneficio_actual_ud': mi_benef, 'beneficio_objetivo_ud': benef_obj,
         'ventas_mes': ventas_mes, 'impacto_eur_mes': round(impacto, 2),
@@ -258,7 +307,7 @@ def decidir(s, umbral, iva):
         'fee_logistica': _eur(fee),
         'stock_fba': s.get('mi_stock'),
         'stock_almacen': s.get('stock_almacen'),
-        'ventas_30d': v_t30,
+        'ventas_30d': v_t30, 'ventas_7d': v_t7,
         'indice_ventas': s.get('rank'),
         'competidor_aterrizado': _eur(ref_aterrizado),
         'competidor_envio': _eur(ref_envio),
