@@ -316,8 +316,8 @@
     <div class="nav-item" data-page="fabrica" onclick="showPage('fabrica',this)">
       <span class="nav-icon">🏭</span> Fábrica web
     </div>
-    <div class="nav-item" data-page="funkos-tcg" onclick="showPage('funkos-tcg',this)">
-      <span class="nav-icon">🧪</span> Funkos TCG
+    <div class="nav-item" data-page="trackeador" onclick="showPage('trackeador',this)">
+      <span class="nav-icon">🎰</span> Trackeador
     </div>
   </nav>
   <div class="sidebar-footer" id="conn-status">Conectando...</div>
@@ -377,6 +377,7 @@
     <!-- Sub-pestañas de la Fábrica -->
     <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
       <button id="fabtab-nueva"   class="btn btn-primary btn-sm" onclick="fabSubTab('nueva')">➕ Nueva ficha</button>
+      <button id="fabtab-tcg"     class="btn btn-ghost btn-sm" onclick="fabSubTab('tcg')">🧪 Funkos TCG</button>
       <button id="fabtab-borradores" class="btn btn-ghost btn-sm" onclick="fabSubTab('borradores')">📋 Borradores</button>
       <button id="fabtab-precios" class="btn btn-ghost btn-sm"   onclick="fabSubTab('precios')">🏷️ Precios web</button>
     </div>
@@ -493,6 +494,66 @@
         </div>
       </div>
     </div>
+
+    <!-- ============ SUB-PESTAÑA: FUNKOS TCG (movida desde page-funkos-tcg) ============ -->
+    <div id="fab-sub-tcg" style="display:none">
+    <div class="info-box" style="margin-top:8px">
+      🧪 <strong>Paso 1 — Analizar rank.</strong> Sube el catálogo de TCG. La nube saca el rank de Amazon (solo España, barato) de los Funkos en stock y deja un ranking. <strong>Paso 2 — Fabricar.</strong> Eliges el corte de rank y la fábrica genera las fichas (Keepa + montaje Moloka) como borrador para revisar y publicar.
+    </div>
+
+    <div class="card" style="margin-top:16px;border-left:3px solid #7c3aed">
+      <div class="inv-field-label" style="margin-bottom:8px">🔄 Mantenimiento diario · Actualizar precios y stock</div>
+      <div style="font-size:13px;color:var(--gray-500);margin-bottom:10px">
+        Sube el Excel de TCG y la web se pone al día sola: corrige precios, aplica o quita ofertas y <b>despublica al instante lo que se quedó sin stock</b> (por debajo de 2 uds) para no vender lo que no puedes servir. Solo toca lo de TCG; las joyas no se rozan. No gasta Keepa.
+      </div>
+      <label class="btn btn-ghost" style="display:inline-block;cursor:pointer">
+        📄 Subir catálogo TCG (.xlsx)
+        <input type="file" id="at-file" accept=".xlsx,.xls" style="display:none" onchange="document.getElementById('at-sel').textContent=(this.files[0]||{}).name||'ningún fichero seleccionado'">
+      </label>
+      <div class="inv-field-label" id="at-sel" style="margin-top:6px">ningún fichero seleccionado</div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="at-prueba" checked> Modo prueba (solo me dice qué haría, sin tocar la web)
+      </label>
+      <button class="btn" id="at-go" style="margin-top:12px" onclick="actualizarWebTcg()">🔄 Actualizar precios y stock</button>
+      <div id="at-log" style="margin-top:14px"></div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="inv-field-label" style="margin-bottom:8px">Paso 1 · Analizar rank de TCG</div>
+      <label class="btn btn-ghost" style="display:inline-block;cursor:pointer">
+        📄 Subir catálogo TCG (.xlsx)
+        <input type="file" id="rw-file" accept=".xlsx,.xls" style="display:none" onchange="document.getElementById('rw-sel').textContent=(this.files[0]||{}).name||'ningún fichero seleccionado'">
+      </label>
+      <div class="inv-field-label" id="rw-sel" style="margin-top:6px">ningún fichero seleccionado</div>
+      <div style="margin-top:12px">
+        <label class="inv-field-label">Rank máximo (generoso, para recolectar amplio; el corte fino va en el Paso 2)</label>
+        <input class="input" id="rw-rank" type="number" value="150000" min="1" style="max-width:200px">
+      </div>
+      <button class="btn" id="rw-go" style="margin-top:12px" onclick="lanzarRankWeb()">🧪 Analizar rank en la nube</button>
+      <div id="rw-log" style="margin-top:14px"></div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="inv-field-label" style="margin-bottom:8px">Paso 2 · Fabricar fichas del lote (tras el análisis)</div>
+      <div style="margin-top:4px">
+        <label class="inv-field-label">Corte de rank: se fabrican los Funkos con rank ≤ este número</label>
+        <input class="input" id="rl-rank" type="number" value="60000" min="1" style="max-width:200px">
+      </div>
+      <button class="btn" id="rl-go" style="margin-top:12px" onclick="lanzarLoteWeb()">🏭 Fabricar fichas del lote</button>
+      <div id="rl-log" style="margin-top:14px"></div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="inv-field-label" style="margin-bottom:8px">Paso 3 · Revisar y publicar</div>
+      <div style="font-size:13px;color:var(--gray-500);margin-bottom:10px">
+        Estas son las fichas que se van a publicar. Por defecto van todas en <b style="color:#16a34a">OK (verde)</b>, con su montaje. Marca en <b style="color:#dc2626">No vale (rojo)</b> solo las que estén mal: esas se publican con la <b>foto plana de TCG</b>, sin montaje. Cuando termines, pulsa Publicar.
+      </div>
+      <button class="btn btn-ghost" id="rev-tcg-cargar" onclick="cargarRevisionTcg()">🔍 Cargar fichas a revisar</button>
+      <div id="rev-tcg-acciones" style="margin-top:12px;display:none"></div>
+      <div id="rev-tcg-lista" style="margin-top:14px"></div>
+      <div id="rev-tcg-log" style="margin-top:10px;font-size:13px"></div>
+    </div>
+    </div><!-- /fab-sub-tcg -->
   </div>
 
   <div class="page" id="page-inventario">
@@ -929,7 +990,6 @@
       <button id="esctab-biblioteca" class="btn btn-ghost btn-sm" onclick="escSubTab('biblioteca')">📚 Biblioteca</button>
       <button id="esctab-api"        class="btn btn-primary btn-sm" onclick="escSubTab('api')">🔑 Escáner API</button>
       <button id="esctab-pro"        class="btn btn-ghost btn-sm" onclick="escSubTab('pro')">⚡ Escáner Pro</button>
-      <button id="esctab-tracker"    class="btn btn-ghost btn-sm" onclick="escSubTab('tracker')">📸 Trackeador</button>
     </div>
 
     <div id="esc-sub-api">
@@ -1057,8 +1117,12 @@
         <div id="pro-log" style="margin-top:14px"></div>
       </div>
     </div><!-- /esc-sub-pro -->
+  </div>
 
-    <div id="esc-sub-tracker" style="display:none">
+  <div class="page" id="page-trackeador">
+    <div class="page-head">
+      <div><div class="page-title">🎰 Trackeador de precios</div><div class="page-sub">Sube el informe FBA y el CSV de Keepa, analiza y trabaja las recomendaciones (estilo Seller).</div></div>
+    </div>
       <!-- ============ FASE 2 · RECOMENDACIONES (monitor_recomendaciones) ============ -->
       <div class="card" style="margin-bottom:16px">
         <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
@@ -1118,71 +1182,7 @@
         <div id="trk-log" style="margin-top:14px"></div>
       </div>
       </details>
-    </div><!-- /esc-sub-tracker -->
-  </div>
-
-  <div class="page" id="page-funkos-tcg">
-    <div class="page-head">
-      <div><div class="page-title">🧪 Funkos TCG → Web</div><div class="page-sub">Llena la web con Funkos de TCG bajo pedido (48 h). Dos pasos: analizar rank y fabricar fichas.</div></div>
-    </div>
-
-    <div class="info-box" style="margin-top:8px">
-      🧪 <strong>Paso 1 — Analizar rank.</strong> Sube el catálogo de TCG. La nube saca el rank de Amazon (solo España, barato) de los Funkos en stock y deja un ranking. <strong>Paso 2 — Fabricar.</strong> Eliges el corte de rank y la fábrica genera las fichas (Keepa + montaje Moloka) como borrador para revisar y publicar.
-    </div>
-
-    <div class="card" style="margin-top:16px;border-left:3px solid #7c3aed">
-      <div class="inv-field-label" style="margin-bottom:8px">🔄 Mantenimiento diario · Actualizar precios y stock</div>
-      <div style="font-size:13px;color:var(--gray-500);margin-bottom:10px">
-        Sube el Excel de TCG y la web se pone al día sola: corrige precios, aplica o quita ofertas y <b>despublica al instante lo que se quedó sin stock</b> (por debajo de 2 uds) para no vender lo que no puedes servir. Solo toca lo de TCG; las joyas no se rozan. No gasta Keepa.
-      </div>
-      <label class="btn btn-ghost" style="display:inline-block;cursor:pointer">
-        📄 Subir catálogo TCG (.xlsx)
-        <input type="file" id="at-file" accept=".xlsx,.xls" style="display:none" onchange="document.getElementById('at-sel').textContent=(this.files[0]||{}).name||'ningún fichero seleccionado'">
-      </label>
-      <div class="inv-field-label" id="at-sel" style="margin-top:6px">ningún fichero seleccionado</div>
-      <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;cursor:pointer">
-        <input type="checkbox" id="at-prueba" checked> Modo prueba (solo me dice qué haría, sin tocar la web)
-      </label>
-      <button class="btn" id="at-go" style="margin-top:12px" onclick="actualizarWebTcg()">🔄 Actualizar precios y stock</button>
-      <div id="at-log" style="margin-top:14px"></div>
-    </div>
-
-    <div class="card" style="margin-top:16px">
-      <div class="inv-field-label" style="margin-bottom:8px">Paso 1 · Analizar rank de TCG</div>
-      <label class="btn btn-ghost" style="display:inline-block;cursor:pointer">
-        📄 Subir catálogo TCG (.xlsx)
-        <input type="file" id="rw-file" accept=".xlsx,.xls" style="display:none" onchange="document.getElementById('rw-sel').textContent=(this.files[0]||{}).name||'ningún fichero seleccionado'">
-      </label>
-      <div class="inv-field-label" id="rw-sel" style="margin-top:6px">ningún fichero seleccionado</div>
-      <div style="margin-top:12px">
-        <label class="inv-field-label">Rank máximo (generoso, para recolectar amplio; el corte fino va en el Paso 2)</label>
-        <input class="input" id="rw-rank" type="number" value="150000" min="1" style="max-width:200px">
-      </div>
-      <button class="btn" id="rw-go" style="margin-top:12px" onclick="lanzarRankWeb()">🧪 Analizar rank en la nube</button>
-      <div id="rw-log" style="margin-top:14px"></div>
-    </div>
-
-    <div class="card" style="margin-top:16px">
-      <div class="inv-field-label" style="margin-bottom:8px">Paso 2 · Fabricar fichas del lote (tras el análisis)</div>
-      <div style="margin-top:4px">
-        <label class="inv-field-label">Corte de rank: se fabrican los Funkos con rank ≤ este número</label>
-        <input class="input" id="rl-rank" type="number" value="60000" min="1" style="max-width:200px">
-      </div>
-      <button class="btn" id="rl-go" style="margin-top:12px" onclick="lanzarLoteWeb()">🏭 Fabricar fichas del lote</button>
-      <div id="rl-log" style="margin-top:14px"></div>
-    </div>
-
-    <div class="card" style="margin-top:16px">
-      <div class="inv-field-label" style="margin-bottom:8px">Paso 3 · Revisar y publicar</div>
-      <div style="font-size:13px;color:var(--gray-500);margin-bottom:10px">
-        Estas son las fichas que se van a publicar. Por defecto van todas en <b style="color:#16a34a">OK (verde)</b>, con su montaje. Marca en <b style="color:#dc2626">No vale (rojo)</b> solo las que estén mal: esas se publican con la <b>foto plana de TCG</b>, sin montaje. Cuando termines, pulsa Publicar.
-      </div>
-      <button class="btn btn-ghost" id="rev-tcg-cargar" onclick="cargarRevisionTcg()">🔍 Cargar fichas a revisar</button>
-      <div id="rev-tcg-acciones" style="margin-top:12px;display:none"></div>
-      <div id="rev-tcg-lista" style="margin-top:14px"></div>
-      <div id="rev-tcg-log" style="margin-top:10px;font-size:13px"></div>
-    </div>
-  </div>
+  </div><!-- /page-trackeador -->
 
 </main>
 
@@ -1655,6 +1655,7 @@ function showPage(id, el) {
   if (id === 'actualizar') initActualizar();
   if (id === 'escanear') { initEscanear(); escSubTab('api'); }
   if (id === 'fabrica') fabSubTab('nueva');
+  if (id === 'trackeador') trackerRenderRecos();
 
   // Si el item pulsado esta dentro de un grupo desplegable, abrelo (para ver el resaltado).
   const g = el && el.closest('details'); if (g) g.open = true;
@@ -1664,7 +1665,7 @@ function showPage(id, el) {
 // FÁBRICA WEB — sub-pestañas (Nueva ficha / Precios)
 // ============================================================
 function fabSubTab(cual) {
-  const tabs = ['nueva', 'borradores', 'precios'];
+  const tabs = ['nueva', 'borradores', 'precios', 'tcg'];
   tabs.forEach(t => {
     document.getElementById('fab-sub-' + t).style.display = (t === cual) ? 'block' : 'none';
     document.getElementById('fabtab-' + t).className = 'btn btn-sm ' + (t === cual ? 'btn-primary' : 'btn-ghost');
@@ -2685,7 +2686,7 @@ function escPoblarMarcasBems(arr) {
 // ESCÁNER PROVEEDOR — sub-pestañas (Biblioteca / API / Pro)
 // ============================================================
 function escSubTab(cual) {
-  ['biblioteca', 'api', 'pro', 'tracker'].forEach(t => {
+  ['biblioteca', 'api', 'pro'].forEach(t => {
     const el = document.getElementById('esc-sub-' + t);
     if (el) el.style.display = (t === cual) ? 'block' : 'none';
     const b = document.getElementById('esctab-' + t);
@@ -2693,7 +2694,6 @@ function escSubTab(cual) {
   });
   if (cual === 'biblioteca') cargarBibliotecaEscaneos();
   if (cual === 'pro') proRenderZonas();
-  if (cual === 'tracker') trackerRenderRecos();
 }
 
 const PRO_CHUNK = 5000;   // Keepa recomienda listas <= 5.000
