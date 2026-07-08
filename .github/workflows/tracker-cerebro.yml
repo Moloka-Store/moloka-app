@@ -7,8 +7,10 @@
 # rentable/guerra/malvendiendo) y escribe recomendaciones en
 # monitor_recomendaciones con estado PENDIENTE. NO cambia precios. No usa Keepa.
 #
-# >>> SIN RELOJ <<<  Solo cuando lo lanzas tu (Run workflow).
-# Parametro 'pais': ES | IT | FR | ALL (por defecto ES).
+# Se dispara de DOS formas:
+#   - Manual (Run workflow), con parametro 'pais': ES | IT | FR | ALL (def. ES).
+#   - Encadenado: automaticamente cuando el snapshot ("Moloka - Trackeador")
+#     termina bien (workflow_run). En ese caso el pais se queda en ES (default).
 # ============================================================
 name: Moloka - Cerebro Trackeador
 
@@ -19,10 +21,15 @@ on:
         description: 'Pais a procesar (ES | IT | FR | ALL)'
         required: false
         default: 'ES'
+  workflow_run:
+    workflows: ["Moloka - Trackeador"]
+    types: [completed]
 
 jobs:
   cerebro:
     runs-on: ubuntu-latest
+    # Corre si es disparo manual, o si el snapshot encadenado acabo bien.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     timeout-minutes: 30
     steps:
       - name: Descargar el repo
