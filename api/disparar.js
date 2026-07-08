@@ -15,7 +15,7 @@
 // ============================================================
 
 const REPO = 'Moloka-Store/moloka-app';
-const WORKFLOWS_OK = ['actualizar-app.yml', 'escaner-app.yml', 'escaner-pro.yml', 'fabrica-preparar.yml', 'fabrica-generar.yml', 'fabrica-redactar.yml', 'fabrica-rehacer.yml', 'web-rebuild.yml', 'web-rank.yml', 'fabrica-lote.yml', 'actualizar-tcg.yml', 'miravia-excel.yml', 'miravia-resultado.yml', 'sync-stock-web.yml', 'tracker-app.yml'];   // lista blanca
+const WORKFLOWS_OK = ['actualizar-app.yml', 'escaner-app.yml', 'escaner-pro.yml', 'fabrica-preparar.yml', 'fabrica-generar.yml', 'fabrica-redactar.yml', 'fabrica-rehacer.yml', 'web-rebuild.yml', 'web-rank.yml', 'fabrica-lote.yml', 'actualizar-tcg.yml', 'miravia-excel.yml', 'miravia-resultado.yml', 'sync-stock-web.yml', 'tracker-app.yml', 'tracker-cerebro.yml'];   // lista blanca
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -67,10 +67,12 @@ export default async function handler(req, res) {
 
     // --- Disparar ---
     const dispUrl = `https://api.github.com/repos/${REPO}/actions/workflows/${WORKFLOW}/dispatches`;
+    const payload = { ref: 'main' };
+    if (body.inputs && typeof body.inputs === 'object') payload.inputs = body.inputs;
     const dispResp = await fetch(dispUrl, {
       method: 'POST',
       headers: ghHeaders,
-      body: JSON.stringify({ ref: 'main' }),
+      body: JSON.stringify(payload),
     });
 
     if (dispResp.status === 204) {
