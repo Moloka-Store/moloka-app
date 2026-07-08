@@ -90,6 +90,14 @@ def txt(v):
     s = str(v).strip()
     return None if s in ('', '-', 'nan', 'None', 'NaN') else s
 
+def _tri_fba(v):
+    """'Es FBA' de la caja en TRES estados: True (FBA), False (FBM) o None
+    (vacio = no hay buy box adjudicada, para poder distinguir FBM de 'sin caja')."""
+    s = str(v).strip().lower() if v is not None else ''
+    if s in ('sí', 'si', 'yes', 'true', '1'): return True
+    if s in ('no', 'false', '0'):             return False
+    return None
+
 # ---------------------------------------------------------------------------
 # Cascada de fuentes: primer valor no-NULL, con etiqueta de origen para auditar
 # ---------------------------------------------------------------------------
@@ -154,7 +162,8 @@ def leer_keepa(ruta):
             'fee_fba'    : num(r.get(K['fee_fba'])),
             'bb_vendedor': bb_v,
             'bb_es_mia'  : SELLER_ID_MOLOKA in bb_v,
-            'bb_es_fba'  : str(r.get(K['bb_es_fba'], '')).strip().lower() in ('sí','si','yes','true','1'),
+            # TRES estados: True=FBA, False=FBM, None=no hay caja adjudicada (vacio).
+            'bb_es_fba'  : _tri_fba(r.get(K['bb_es_fba'], '')),
             'umbral'     : num(r.get(K['umbral'])),
             'fba_min'    : num(r.get(K['fba_min'])),
             'fbm_min'    : num(r.get(K['fbm_min'])),
