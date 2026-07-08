@@ -34,7 +34,7 @@ PAISES_CONOCIDOS = ['ES', 'IT', 'FR']
 UMBRAL_DEFAULT        = 2.0     # % de margen minimo para competir (si no hay regla)
 SUBIR_BAJO_COMPETIDOR = 0.20    # € por debajo del competidor FBA de arriba al subir
 UNDERCUT_FBA          = 0.01    # € por debajo del rival FBA para ganarle la Buy Box
-PREMIUM_FBA_SOBRE_FBM = 0.01    # € por encima del FBM (la ventaja FBA gana la BB)
+PREMIUM_FBA_SOBRE_FBM = 0.99    # € por encima del FBM (la ventaja Prime/FBA gana la BB)
 GUERRA_MIN_GANADORES  = 5       # nº de ganadores de BB en 90d para sospechar guerra
 GUERRA_DESVIACION_REL = 0.05    # desviacion_bb_90d / precio_bb >= 5% -> volatil
 EPS = 0.01                      # tolerancia de 1 centimo
