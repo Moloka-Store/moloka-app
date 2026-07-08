@@ -910,6 +910,7 @@
       <button id="esctab-biblioteca" class="btn btn-ghost btn-sm" onclick="escSubTab('biblioteca')">📚 Biblioteca</button>
       <button id="esctab-api"        class="btn btn-primary btn-sm" onclick="escSubTab('api')">🔑 Escáner API</button>
       <button id="esctab-pro"        class="btn btn-ghost btn-sm" onclick="escSubTab('pro')">⚡ Escáner Pro</button>
+      <button id="esctab-tracker"    class="btn btn-ghost btn-sm" onclick="escSubTab('tracker')">📸 Trackeador</button>
     </div>
 
     <div id="esc-sub-api">
@@ -1037,6 +1038,47 @@
         <div id="pro-log" style="margin-top:14px"></div>
       </div>
     </div><!-- /esc-sub-pro -->
+
+    <div id="esc-sub-tracker" style="display:none">
+      <div class="info-box" style="margin-bottom:16px;border-left:3px solid #0277bd">
+        📸 <strong>Trackeador de precios</strong> — cruza tu inventario con la competencia y guarda una <strong>foto histórica</strong> de cada producto (precio, buy box, margen, stock, ventas) en <code>monitor_snapshots</code>. <strong>Sin gastar tokens</strong>.<br>
+        Sube los <strong>dos</strong> ficheros: el <strong>informe de inventario FBA</strong> de Amazon y el <strong>CSV del Keepa «Resumen del Vendedor»</strong>. El robot los cruza por ASIN con tu tabla de productos y calcula el margen con la fórmula validada del escáner.
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="input-group" style="max-width:220px">
+          <div class="input-label">País</div>
+          <select class="input" id="trk-pais">
+            <option value="ES" selected>ES</option>
+            <option value="IT">IT</option>
+            <option value="FR">FR</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="inv-field-label" style="margin-bottom:8px">1) Informe de inventario FBA (Amazon)</div>
+        <label id="trk-fba-drop" style="display:block;border:2px dashed #b4b2a9;border-radius:10px;padding:22px;text-align:center;cursor:pointer">
+          <input type="file" id="trk-fba" accept=".txt,.tsv,.csv" style="display:none" onchange="document.getElementById('trk-fba-sel').textContent=(this.files[0]||{}).name||'ningún fichero seleccionado'">
+          <div style="color:#888780">Arrastra aquí el informe FBA o haz clic para elegir</div>
+          <div class="inv-field-label" id="trk-fba-sel" style="margin-top:6px">ningún fichero seleccionado</div>
+        </label>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="inv-field-label" style="margin-bottom:8px">2) CSV del Keepa «Resumen del Vendedor»</div>
+        <label id="trk-keepa-drop" style="display:block;border:2px dashed #b4b2a9;border-radius:10px;padding:22px;text-align:center;cursor:pointer">
+          <input type="file" id="trk-keepa" accept=".csv" style="display:none" onchange="document.getElementById('trk-keepa-sel').textContent=(this.files[0]||{}).name||'ningún fichero seleccionado'">
+          <div style="color:#888780">Arrastra aquí el CSV de Keepa o haz clic para elegir</div>
+          <div class="inv-field-label" id="trk-keepa-sel" style="margin-top:6px">ningún fichero seleccionado</div>
+        </label>
+      </div>
+
+      <div class="card">
+        <button class="btn" id="trk-go" onclick="lanzarTracker()">📸 Guardar snapshot</button>
+        <div id="trk-log" style="margin-top:14px"></div>
+      </div>
+    </div><!-- /esc-sub-tracker -->
   </div>
 
   <div class="page" id="page-funkos-tcg">
@@ -2573,7 +2615,7 @@ function escPoblarMarcasBems(arr) {
 // ESCÁNER PROVEEDOR — sub-pestañas (Biblioteca / API / Pro)
 // ============================================================
 function escSubTab(cual) {
-  ['biblioteca', 'api', 'pro'].forEach(t => {
+  ['biblioteca', 'api', 'pro', 'tracker'].forEach(t => {
     const el = document.getElementById('esc-sub-' + t);
     if (el) el.style.display = (t === cual) ? 'block' : 'none';
     const b = document.getElementById('esctab-' + t);
@@ -2807,6 +2849,74 @@ async function lanzarEscaneoPro() {
       log.innerHTML = '<div class="info-box" style="border-left:3px solid #2e7d32">\u2705 Escáner Pro de ' + prov + ' lanzado. El robot funde los CSV y deja el Excel en la Biblioteca (unos minutos). Míralo en la pestaña 📚 Biblioteca.</div>';
     } else if (resp.status === 409) {
       log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">\u23f3 ' + (data.error || 'Ya hay un Pro en marcha.') + '</div>';
+    } else {
+      log.innerHTML = '<div class="info-box" style="border-left:3px solid #b00020">\u26a0\ufe0f No se pudo lanzar: ' + (data.error || ('HTTP ' + resp.status)) + '.</div>';
+    }
+  } catch (e) {
+    log.innerHTML = '<div class="info-box" style="border-left:3px solid #b00020">\u26a0\ufe0f Error: ' + e.message + '</div>';
+  }
+  go.disabled = false;
+}
+
+// Trackeador: sube el informe FBA + el CSV de Keepa al buzon informes/tracker/,
+// escribe el recado _solicitud_tracker.json y dispara tracker-app.yml. Clon del
+// bloque del Escaner Pro, adaptado a los dos ficheros del trackeador.
+async function lanzarTracker() {
+  const pais = (document.getElementById('trk-pais').value || 'ES').trim().toUpperCase();
+  const fbaFile = (document.getElementById('trk-fba').files || [])[0];
+  const keepaFile = (document.getElementById('trk-keepa').files || [])[0];
+  const log = document.getElementById('trk-log');
+  const go = document.getElementById('trk-go');
+  if (!fbaFile) { log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">\u26a0\ufe0f Sube el informe de inventario FBA.</div>'; return; }
+  if (!keepaFile) { log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">\u26a0\ufe0f Sube el CSV del Keepa \u00abResumen del Vendedor\u00bb.</div>'; return; }
+  go.disabled = true;
+  log.innerHTML = '<div class="info-box">Preparando el trackeador (' + pais + ')\u2026</div>';
+  try {
+    // 1) Vaciar el buzon (por si quedo un fichero o recado viejo)
+    try {
+      const { data: viejos } = await db.storage.from('informes').list('tracker', { limit: 200 });
+      const borrar = (viejos || []).filter(o => !o.name.startsWith('.')).map(o => 'tracker/' + o.name);
+      if (borrar.length) await db.storage.from('informes').remove(borrar);
+    } catch (e) {}
+    // gzip en el navegador (la nube lo descomprime); mismo mecanismo que el Pro
+    const gz = async (f, nombre) => {
+      try {
+        if (typeof CompressionStream !== 'undefined') {
+          const flujo = f.stream().pipeThrough(new CompressionStream('gzip'));
+          const b = await new Response(flujo).arrayBuffer();
+          return { blob: new Blob([b], { type: 'application/gzip' }), nombre: nombre + '.gz' };
+        }
+      } catch (e) {}
+      return { blob: f, nombre: nombre };
+    };
+    // Subida con reintentos (un microcorte de red daba "Failed to fetch")
+    const subirReintento = async (path, blob, que) => {
+      let ultimo;
+      for (let i = 0; i < 4; i++) {
+        try {
+          const { error } = await db.storage.from('informes').upload(path, blob, { upsert: true });
+          if (!error) return;
+          ultimo = error;
+        } catch (e) { ultimo = e; }
+        if (i < 3) await new Promise(r => setTimeout(r, 1500 * (i + 1)));
+      }
+      throw new Error('subiendo ' + que + ': ' + ((ultimo && ultimo.message) || 'fallo de red tras varios intentos'));
+    };
+    log.innerHTML = '<div class="info-box">Subiendo el informe FBA\u2026</div>';
+    const gFba = await gz(fbaFile, 'fba_' + fbaFile.name);
+    await subirReintento('tracker/' + gFba.nombre, gFba.blob, 'el informe FBA');
+    log.innerHTML = '<div class="info-box">Subiendo el CSV de Keepa\u2026</div>';
+    const gKeepa = await gz(keepaFile, 'keepa_' + keepaFile.name);
+    await subirReintento('tracker/' + gKeepa.nombre, gKeepa.blob, 'el CSV de Keepa');
+    const recado = { fba: gFba.nombre, keepa: gKeepa.nombre, pais: pais, fecha: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(recado)], { type: 'application/json' });
+    await subirReintento('tracker/_solicitud_tracker.json', blob, 'el recado');
+    const resp = await fetch('/api/disparar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ secreto: DISPARO_SECRET, workflow: 'tracker-app.yml' }) });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      log.innerHTML = '<div class="info-box" style="border-left:3px solid #2e7d32">\u2705 Trackeador de ' + pais + ' lanzado. El robot cruza los ficheros y guarda los snapshots en monitor_snapshots (unos minutos).</div>';
+    } else if (resp.status === 409) {
+      log.innerHTML = '<div class="info-box" style="border-left:3px solid #ba7517">\u23f3 ' + (data.error || 'Ya hay un trackeador en marcha.') + '</div>';
     } else {
       log.innerHTML = '<div class="info-box" style="border-left:3px solid #b00020">\u26a0\ufe0f No se pudo lanzar: ' + (data.error || ('HTTP ' + resp.status)) + '.</div>';
     }
