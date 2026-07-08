@@ -140,8 +140,9 @@ def decidir(s, umbral, iva):
               and ganadores >= GUERRA_MIN_GANADORES
               and (desviacion / bb_prec) >= GUERRA_DESVIACION_REL)
 
-    # ¿No hay caja adjudicada? (bb_es_fba None Y sin vendedor de caja)
-    sin_bb = (bb_fba is None) and (not bb_vend)
+    # ¿No hay caja adjudicada? La señal fiable es que NO hay vendedor de la caja
+    # (Keepa pone "No" en "Es FBA" cuando no hay caja, no lo deja vacío).
+    sin_bb = (not bb_vend)
     # Ritmo hundido: proyeccion mensual del T7 muy por debajo del T30.
     ritmo_t7 = v_t7 / 7.0 * 30.0
     alarma_ventas = (v_t30 > 0) and (ritmo_t7 < v_t30 * ALARMA_RITMO)
