@@ -8552,19 +8552,21 @@ function parseTCG(rawText) {
   }
 
   // Lineas: " {CANT} {PRECIO} {NUM_LINEA} {EAN}{C?} {TOTAL} {IVA}{DESCRIPCION}"
-  const lineaRegex = /\s+(\d+)\s+(\d+,\d{2})\s+(\d+)\s+(\d{12,13})(C?)\s+(\d+,\d{2})\s+(\d+,\d{2})(.+?)(?=\s+\d+\s+\d+,\d{2}\s+\d+\s+\d{12}|Subtotal|P\u00e1gina|$)/gs;
+  const lineaRegex = /\s+(\d+)\s+(\d+,\d{2})\s+(\d+)\s+(\d{12,25})(C?)\s+(\d+,\d{2})\s+(\d+,\d{2})(.+?)(?=\s+\d+\s+\d+,\d{2}\s+\d+\s+\d{12}|Subtotal|P\u00e1gina|$)/gs;
 
   let m;
   while ((m = lineaRegex.exec(rawText)) !== null) {
     const cantFacturada = parseInt(m[1]);
     const precioFacturado = parseFloat(m[2].replace(',', '.'));
     const numLinea = parseInt(m[3]);
-    const ean = m[4];
+    let ean = m[4];
     const sufijoC = m[5];
     const totalLinea = parseFloat(m[6].replace(',', '.'));
     let descripcion = m[8].replace(/\s+/g, ' ').trim();
+    let eanRevisar = false;
+    if (ean.length > 13) { eanRevisar = true; ean = ''; }
 
-    const esCaseChase = (sufijoC === 'C') && /case\s*5\s*\+\s*1/i.test(descripcion);
+    const esCaseChase = (sufijoC === 'C' || eanRevisar) && /case\s*5\s*\+\s*1/i.test(descripcion);
     let cantReal, precioEfectBruto, mencionaChase;
     if (esCaseChase) {
       cantReal = cantFacturada * 6;
@@ -8589,7 +8591,8 @@ function parseTCG(rawText) {
       total_linea: totalLinea,
       precio_efectivo: precioEfectivoFinal,
       menciona_chase: mencionaChase,
-      es_case_chase: esCaseChase
+      es_case_chase: esCaseChase,
+      ean_revisar: eanRevisar
     });
   }
   return result;
