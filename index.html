@@ -9432,6 +9432,9 @@ function renderLinea(l, idx) {
       + opciones
       + '</select>'
       + panelReparto;
+  } else if (l.ean_revisar) {
+    estadoBadge = '<span class="badge" style="background:#fdecea;color:#c01616;border:1px solid #f5c6c2">\u26a0\ufe0f EAN ilegible \u2014 asigna el producto</span>';
+    productoTexto = '<div style="font-size:11px;color:#c01616">El EAN de esta l\u00ednea (CASE 5+1) no se pudo leer. Pulsa \u201cBuscar producto en BD\u201d para asignarla, o b\u00f3rrala. No podr\u00e1s confirmar la factura hasta resolverla.</div>';
   } else {
     estadoBadge = '<span class="badge badge-orange">\u2728 Producto nuevo</span>';
     productoTexto = '<div style="font-size:11px;color:var(--gray-400)">Se crear\u00e1 con asin_pendiente</div>';
@@ -9765,6 +9768,13 @@ async function confirmarFactura() {
   });
   if (repartosMal.length > 0) {
     showToast('Hay ' + repartosMal.length + ' linea(s) con reparto incompleto. La suma debe cuadrar con la cantidad facturada.', 'error');
+    return;
+  }
+  const eanIlegibleSinResolver = _facturaLineas.filter(function(l) {
+    return l.ean_revisar && l.match_estado === 'no_encontrado';
+  });
+  if (eanIlegibleSinResolver.length > 0) {
+    showToast('Hay ' + eanIlegibleSinResolver.length + ' línea(s) con EAN ilegible (CASE 5+1) sin producto. Asígnalas con "Buscar producto en BD" o bórralas antes de confirmar.', 'error');
     return;
   }
   const btn = document.getElementById('btn-confirmar-factura');
