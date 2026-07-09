@@ -8926,6 +8926,70 @@ function parseOSMA(rawText) {
 // ----------------------------------------------------------------
 // 1c. ROUTER DE PARSERS: detecta el proveedor y aplica el parser correcto
 // ----------------------------------------------------------------
+function parseOcioStock(rawText) {
+  if (!(/TOTAL\s*UDS\.?\s*PEDIDO/i.test(rawText) && /DESCUENTO\s*TRANS/i.test(rawText))) {
+    return null;
+  }
+  const num = s => parseFloat(String(s).replace(/\./g, '').replace(',', '.'));
+  const result = {
+    proveedor: 'OcioStock', numero: null, fecha: null,
+    total_con_iva: null, total_sin_iva: null, base_imponible: null,
+    subtotal: null, descuento_eur: null, descuento_pct: 0,
+    iva_pct: 0.21, gastos_envio: 0, lineas: []
+  };
+
+  const mNum = rawText.match(/FACTURA[:\s]+(\d{2}-\d+-S\d)/i);
+  if (mNum) result.numero = mNum[1];
+  const mF = rawText.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (mF) result.fecha = mF[3] + '-' + mF[2] + '-' + mF[1];
+
+  const mT = rawText.match(/([\d.]+,\d{2})\s*€\s+([\d.]+,\d{2})\s*%\s+([\d.]+,\d{2})\s*€\s+([\d.]+,\d{2})\s*€/);
+  if (mT) {
+    result.subtotal = num(mT[1]);
+    result.descuento_pct = num(mT[2]);
+    result.base_imponible = num(mT[3]);
+    result.total_sin_iva = result.base_imponible;
+    result.descuento_eur = +(result.subtotal - result.base_imponible).toFixed(2);
+  }
+  const mTot = rawText.match(/([\d.]+,\d{2})\s*€\s*TOTAL\b/);
+  if (mTot) result.total_con_iva = num(mTot[1]);
+
+  const dto = result.descuento_pct || 0;
+  const COLA = /(\d+)\s+([\d.]+,\d{2})\s*€\s+([\d.]+,\d{2})\s*€\s+21[.,]00\s*%\s+([\d.]+,\d{2})\s*€/;
+  for (const ln of rawText.split('\n')) {
+    const mc = ln.match(COLA);
+    if (!mc) continue;
+    const uds = parseInt(mc[1], 10);
+    if (uds <= 0 || /log[ií]stica|gastos\s*de\s*env/i.test(ln)) {
+      result.gastos_envio = Math.max(result.gastos_envio, num(mc[3]));
+      continue;
+    }
+    const me = ln.match(/\b(\d{12,13})\b/);
+    if (!me) continue;
+    const ean = me[1];
+    const pvd = num(mc[2]);
+    const neto = num(mc[3]);
+    let desc = ln.slice(0, mc.index).replace(ean, ' ');
+    desc = desc.replace(/\s+/g, ' ').trim().replace(/^[-\s]+|[-\s]+$/g, '');
+    const precioEfectivo = +(pvd * (1 - dto / 100)).toFixed(4);
+    result.lineas.push({
+      ean_raw: ean,
+      ean_alt_12: (ean.length === 13 && ean.startsWith('0')) ? ean.substring(1) : null,
+      ref_proveedor: ean,
+      descripcion: desc,
+      cantidad: uds,
+      cantidad_facturada: uds,
+      precio_bruto: pvd,
+      descuento: dto.toFixed(2) + '%',
+      total_linea: neto,
+      precio_efectivo: precioEfectivo,
+      menciona_chase: /\bchase\b/i.test(ln),
+      es_case_chase: false
+    });
+  }
+  return result;
+}
+
 function parseFacturaPDF(rawText) {
   // Probar todos los parsers; el primero que retorne resultado valido gana.
   const parsers = [
@@ -8934,7 +8998,8 @@ function parseFacturaPDF(rawText) {
     { nombre: 'TCG', fn: parseTCG },
     { nombre: 'Zentrada', fn: parseZentrada },
     { nombre: 'HEO', fn: parseHEO },
-    { nombre: 'OSMA', fn: parseOSMA }
+    { nombre: 'OSMA', fn: parseOSMA },
+    { nombre: 'OcioStock', fn: parseOcioStock }
   ];
   for (const p of parsers) {
     const result = p.fn(rawText);
