@@ -8956,7 +8956,9 @@ function parseOcioStock(rawText) {
 
   const dto = result.descuento_pct || 0;
   const COLA = /(\d+)\s+([\d.]+,\d{2})\s*€\s+([\d.]+,\d{2})\s*€\s+21[.,]00\s*%\s+([\d.]+,\d{2})\s*€/;
-  for (const ln of rawText.split('\n')) {
+  const L = rawText.split('\n');
+  for (let i = 0; i < L.length; i++) {
+    const ln = L[i];
     const mc = ln.match(COLA);
     if (!mc) continue;
     const uds = parseInt(mc[1], 10);
@@ -8964,13 +8966,28 @@ function parseOcioStock(rawText) {
       result.gastos_envio = Math.max(result.gastos_envio, num(mc[3]));
       continue;
     }
-    const me = ln.match(/\b(\d{12,13})\b/);
-    if (!me) continue;
-    const ean = me[1];
+    let ean = '', desc = '';
+    const meSame = ln.match(/\b(\d{12,13})\b/);
+    if (meSame) {
+      ean = meSame[1];
+      desc = ln.slice(0, mc.index).replace(ean, ' ');
+    } else {
+      let j = i - 1;
+      const parts = [];
+      while (j >= 0) {
+        const p = L[j].trim();
+        if (/^\d{12,13}$/.test(p)) { ean = p; break; }
+        if (p && !/\d+,\d{2}/.test(p)) { parts.unshift(p); j--; }
+        else break;
+      }
+      if (!ean) continue;
+      desc = parts.join(' ');
+      const pre = ln.slice(0, mc.index).trim();
+      if (pre) desc += ' ' + pre;
+    }
+    desc = desc.replace(/\s+/g, ' ').trim().replace(/^[-\s]+|[-\s]+$/g, '');
     const pvd = num(mc[2]);
     const neto = num(mc[3]);
-    let desc = ln.slice(0, mc.index).replace(ean, ' ');
-    desc = desc.replace(/\s+/g, ' ').trim().replace(/^[-\s]+|[-\s]+$/g, '');
     const precioEfectivo = +(pvd * (1 - dto / 100)).toFixed(4);
     result.lineas.push({
       ean_raw: ean,
