@@ -42,6 +42,13 @@ SONDEO_BAJADA         = 0.05    # baja 5 cts para sondear cuando no hay caja
 ALARMA_RITMO          = 0.50    # T7 por debajo del 50% del ritmo T30 = alarma
 EPS = 0.01                      # tolerancia de 1 centimo
 
+# --- PIEZA 2: filtro "Dinero encima de la mesa" ---
+# Una reco solo es accion real si mueve al menos este dinero/mes Y cambia el
+# precio de verdad (>= 1 centimo). Si no, su accion pasa a MANTENER (fuera del
+# bloque accionable). Se aplica AQUI, en el cerebro, para que 'accion' e
+# 'impacto_eur_mes' reflejen ya la realidad (no solo maquillaje en la pestana).
+IMPACTO_MINIMO_EUR_MES = 0.50
+
 # --- Acciones (valores del campo 'accion') ---
 SUBIR, BAJAR, MANTENER   = 'SUBIR', 'BAJAR', 'MANTENER'
 RECUPERAR_BB             = 'RECUPERAR_BB'
@@ -49,6 +56,13 @@ NO_RENTABLE              = 'NO_RENTABLE_COMPETIR'
 GUERRA                   = 'GUERRA_ACTIVA'
 MALVENDIENDO             = 'MALVENDIENDO'
 SIN_ACCION, SIN_DATOS    = 'SIN_ACCION', 'SIN_DATOS'
+
+# --- Estados del ciclo de vida (campo 'estado' de monitor_recomendaciones) ---
+# PENDIENTE: viva en la pestana. OBSOLETA: recalculada fuera en una pasada
+# posterior (PIEZA 1, reversible, no DELETE). DESCARTADA/APLICADA: criterio de
+# Fernando, NUNCA se tocan automaticamente.
+ESTADO_PENDIENTE = 'PENDIENTE'
+ESTADO_OBSOLETA  = 'OBSOLETA'
 
 # ---------------------------------------------------------------------------
 # Lecturas
@@ -269,6 +283,29 @@ def decidir(s, umbral, iva):
         ventas_mes = v_t30
         impacto    = 0.0
 
+    # --- PIEZA 2: filtro "Dinero encima de la mesa" ---
+    # Solo las acciones que PROPONEN mover el precio (tienen precio_objetivo)
+    # pasan el filtro. Una reco es accion real unicamente si:
+    #   impacto_eur_mes >= IMPACTO_MINIMO_EUR_MES  Y  abs(objetivo-actual) >= 1 cent.
+    # Si no cumple -> MANTENER, con objetivo/impacto neutralizados para que el
+    # dato no mienta (mantener el precio actual = 0 €/mes de impacto).
+    if accion in (SUBIR, BAJAR, RECUPERAR_BB, MALVENDIENDO) and objetivo is not None:
+        delta = abs(objetivo - precio) if precio is not None else 0.0
+        poco_dinero = impacto < IMPACTO_MINIMO_EUR_MES
+        delta_cero  = delta < EPS
+        if poco_dinero or delta_cero:
+            razones = []
+            if poco_dinero: razones.append(f"impacto {impacto:.2f}€/mes < {IMPACTO_MINIMO_EUR_MES:.2f}")
+            if delta_cero:  razones.append(f"precio objetivo = actual (delta {delta:.2f}€ < 0,01)")
+            accion   = MANTENER
+            objetivo = None
+            precio_techo = None
+            benef_obj, margen_obj = (None, None)
+            impacto    = 0.0
+            ventas_mes = v_t30
+            motivo = ("No es dinero encima de la mesa (" + "; ".join(razones)
+                      + "). Mantener el precio actual.")
+
     confianza = ('alta' if com_fte == 'real_tx'
                  else 'media' if com_fte in ('real', 'keepa_bd')
                  else 'baja' if com_fte == 'keepa_csv' else None)
@@ -313,7 +350,7 @@ def decidir(s, umbral, iva):
         'indice_ventas': s.get('rank'),
         'competidor_aterrizado': _eur(ref_aterrizado),
         'competidor_envio': _eur(ref_envio),
-        'estado': 'PENDIENTE',
+        'estado': ESTADO_PENDIENTE,
     }
 
 def construir_recomendaciones(filas, umbral, iva_map, iva_fallback, snapshot_ts, ahora):
@@ -378,6 +415,17 @@ def procesar_pais(sb, pais, umbral, iva_map, dry_run):
         print(f"[{pais}] ya hay recomendaciones para la carga {ts}. No se reescribe.")
         marcar_estado(sb, pais, len(recos))   # avisa a la app aunque no se reescriba
         return
+
+    # PIEZA 1: recalculo limpio. Cada pasada es una foto nueva, no se apila sobre
+    # las anteriores. Justo ANTES de insertar, se marcan como OBSOLETA todas las
+    # PENDIENTE de este pais (de cargas previas) -> la pestana (que lee solo
+    # PENDIENTE) deja de mostrar duplicados y recomendaciones caducas.
+    # NO se tocan DESCARTADA ni APLICADA (histórico + criterio de Fernando).
+    # Es un UPDATE reversible, NO un DELETE.
+    obs = sb.table('monitor_recomendaciones').update({'estado': ESTADO_OBSOLETA})\
+            .eq('pais', pais).eq('estado', ESTADO_PENDIENTE).execute()
+    n_obs = len(obs.data or [])
+    print(f"[{pais}] recalculo limpio: {n_obs} PENDIENTE de cargas previas -> OBSOLETA")
 
     print(f"[{pais}] escribiendo {len(recos)} recomendaciones...")
     for i in range(0, len(recos), 200):
