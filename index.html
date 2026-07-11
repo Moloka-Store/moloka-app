@@ -1403,6 +1403,7 @@
     <div class="input-group" style="margin-bottom:12px">
       <div class="input-label">Motivo</div>
       <select class="input" id="descarte-motivo">
+        <option value="" disabled selected>— Elige un motivo —</option>
         <option value="El rival se queda sin stock ya">El rival se queda sin stock ya</option>
         <option value="Es producto mío exclusivo, no toco">Es producto mío exclusivo, no toco</option>
         <option value="Prefiero no bajar por marca">Prefiero no bajar por marca</option>
@@ -3236,12 +3237,15 @@ async function confirmarDescarte() {
   const sel = document.getElementById('descarte-motivo');
   const detalle = (document.getElementById('descarte-texto').value || '').trim();
   let motivo = sel ? sel.value : '';
+  // PIEZA 5: el motivo es OBLIGATORIO. No se descarta sin dejar rastro del porqué.
+  if (!motivo) { showToast('Elige un motivo para descartar', 'warning'); return; }
   if (motivo === 'Otro') {
     if (!detalle) { showToast('Escribe el motivo en el detalle', 'warning'); return; }
     motivo = detalle;
   } else if (detalle) {
     motivo = motivo + ' — ' + detalle;
   }
+  if (!motivo.trim()) { showToast('Elige un motivo para descartar', 'warning'); return; }
   try {
     const { error } = await db.from('monitor_recomendaciones')
       .update({ estado: 'DESCARTADA', motivo_descarte: motivo, descartada_en: new Date().toISOString() })
