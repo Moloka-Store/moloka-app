@@ -8479,7 +8479,9 @@ function parseDBLine(rawText) {
   // El TOTAL puede estar PEGADO al EAN (pypdf) o SEPARADO por espacio (pdf.js navegador).
   // DTO2 (segundo descuento, 5%) es OPCIONAL: productos no-Funko (ej: One Piece Bandai) no lo llevan.
   // Forzamos TOTAL con 2 decimales y EAN de 12-13 digitos.
-  const lineaRegex = /([A-Z]{4}\d{4})\s+PZ\.\s+(\d+)\s+(\d+,\d{2})\s+(\d+,\d{2})\s+(\d+,\d{2})\s*(\d{12,13})\s+(\d{8})\s+((?:\d+,\d{2})?)\s*(.+?)(?=\n|$|Vs\.Rif|[A-Z]{4}\d{4}|Totale)/gs;
+  // Codigo de producto: 3 o 4 letras + 4 digitos. Los accesorios (llaveros "Portachiavi")
+  // usan 3 letras (GAF2921); el resto 4 letras. Con [A-Z]{4} se perdian en silencio. (fix 13-jul)
+  const lineaRegex = /([A-Z]{3,4}\d{4})\s+PZ\.\s+(\d+)\s+(\d+,\d{2})\s+(\d+,\d{2})\s+(\d+,\d{2})\s*(\d{12,13})\s+(\d{8})\s+((?:\d+,\d{2})?)\s*(.+?)(?=\n|$|Vs\.Rif|[A-Z]{3,4}\d{4}|Totale)/gs;
 
   let m;
   while ((m = lineaRegex.exec(rawText)) !== null) {
@@ -8509,6 +8511,17 @@ function parseDBLine(rawText) {
       precio_efectivo: precioEfectivo,
       menciona_chase: mencionaChase
     });
+  }
+  // Red de seguridad: si la suma de las lineas no cuadra con el total de factura,
+  // es que se han perdido lineas (p.ej. codigos de producto con formato no contemplado).
+  if (result.total_con_iva != null && result.lineas.length) {
+    const sumaLineas = result.lineas.reduce((s, l) => s + (l.total_linea || 0), 0);
+    const desc = Math.abs(sumaLineas - result.total_con_iva);
+    if (desc > 0.10) {
+      result.aviso_descuadre = 'Suma de lineas (' + sumaLineas.toFixed(2) +
+        ' EUR) no cuadra con el total de factura (' + result.total_con_iva.toFixed(2) +
+        ' EUR). Puede haber lineas no reconocidas.';
+    }
   }
   return result;
 }
@@ -9224,6 +9237,10 @@ async function onSeleccionarFacturaPDF(file) {
       return;
     }
     _facturaActual = parsed;
+    // Aviso anti-silencio: la suma de lineas no cuadra con el total (posibles lineas perdidas)
+    if (parsed.aviso_descuadre) {
+      showToast('⚠️ ' + parsed.aviso_descuadre, 'warning');
+    }
     // Verificar duplicado en BD
     const { data: existente } = await db.from('facturas')
       .select('id, numero, proveedor, fecha').eq('numero', parsed.numero).eq('proveedor', parsed.proveedor).maybeSingle();
