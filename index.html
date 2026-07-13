@@ -8437,16 +8437,20 @@ function parseDBLine(rawText) {
   if (!rawText.match(/Db-Line|DBLine|dbline\.it|IT02254780121/i)) {
     return null;
   }
-  // Numero factura: aparece como "Z3-00073801" en una linea propia (es el campo "Numero")
-  // Tambien aparece como "DB2026900700" en codigo de barras y como "700" en el campo Numero
-  // Vamos a usar el patron Z3-NNNNNNNN como referencia humana
-  const matchNum = rawText.match(/Z3-(\d{8})/);
-  if (matchNum) {
-    result.numero = 'Z3-' + matchNum[1];
+  // Numero factura REAL: el "Z3-00073801" es el CODIGO DE CLIENTE (Intestatario), NO el numero
+  // de factura, y se repite en TODAS las facturas -> causaba falsos "ya existe". (fix 13-jul)
+  // El numero real (10790) esta en el codigo de barras "DB2026910790" = DB + ANO + SERIE + NUMERO,
+  // que es UNICO por factura. De ahi sacamos el numero legible y un id unico anti-duplicados.
+  const matchBarcode = rawText.match(/DB(\d{4})(\d)(\d{4,6})/);
+  if (matchBarcode) {
+    const anio = matchBarcode[1];         // 2026
+    const numFactura = matchBarcode[3];   // 10790 (numero legible que ve el usuario)
+    result.numero = numFactura;                          // se muestra "10790"
+    result.numero_id = 'DB' + anio + matchBarcode[2] + numFactura;  // "DB2026910790" (unico)
   } else {
-    // Fallback: codigo de barras DB-AAAA-NNNNNN
-    const matchAlt = rawText.match(/DB(\d{4})(\d{6})/);
-    if (matchAlt) result.numero = 'DB' + matchAlt[1] + matchAlt[2];
+    // Fallback defensivo: valor de 4-6 digitos cercano a "FATTURA"
+    const matchNum = rawText.match(/\n(\d{4,6})\n[\s\S]{0,40}?FATTURA/);
+    if (matchNum) result.numero = matchNum[1];
   }
   // Fecha: formato DD-MM-YY (ej: 19-01-26) en la cabecera "FATTURA ACCOMPAGNATORIA"
   // Aparece como "FATTURA ACCOMPAGNATORIA\n19-01-26"
@@ -8458,8 +8462,10 @@ function parseDBLine(rawText) {
   // Total: aparece dos veces en la zona de totales al final
   // "41E-NON IMPONIBILE ART.41 LEGGE 427/29-10-93 4.911,79"
   // Despues vienen 3 lineas mas con el mismo numero (Totale Lordo, Totale IVA, Totale Documento)
-  // Cogemos el primero que aparece
-  const matchTotal = rawText.match(/41E-NON\s+IMPONIBILE[^\n]*?([\d.]+,\d{2})/);
+  // Cogemos el primero que aparece. En el texto real de pdf.js la etiqueta y el importe
+  // pueden quedar en LINEAS SEPARADAS -> usamos [\s\S]{0,60}? (cruza el salto) en vez de
+  // [^\n]*? (que no cruzaba y devolvia total null). (fix 13-jul)
+  const matchTotal = rawText.match(/41E-NON\s+IMPONIBILE[\s\S]{0,60}?([\d.]+,\d{2})/);
   if (matchTotal) {
     // Italian format: 4.911,79 (punto miles, coma decimal)
     const totalStr = matchTotal[1].replace(/\./g, '').replace(',', '.');
