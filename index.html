@@ -8462,8 +8462,10 @@ function parseDBLine(rawText) {
   // Total: aparece dos veces en la zona de totales al final
   // "41E-NON IMPONIBILE ART.41 LEGGE 427/29-10-93 4.911,79"
   // Despues vienen 3 lineas mas con el mismo numero (Totale Lordo, Totale IVA, Totale Documento)
-  // Cogemos el primero que aparece
-  const matchTotal = rawText.match(/41E-NON\s+IMPONIBILE[^\n]*?([\d.]+,\d{2})/);
+  // Cogemos el primero que aparece. En el texto real de pdf.js la etiqueta y el importe
+  // pueden quedar en LINEAS SEPARADAS -> usamos [\s\S]{0,60}? (cruza el salto) en vez de
+  // [^\n]*? (que no cruzaba y devolvia total null). (fix 13-jul)
+  const matchTotal = rawText.match(/41E-NON\s+IMPONIBILE[\s\S]{0,60}?([\d.]+,\d{2})/);
   if (matchTotal) {
     // Italian format: 4.911,79 (punto miles, coma decimal)
     const totalStr = matchTotal[1].replace(/\./g, '').replace(',', '.');
