@@ -17,9 +17,9 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-common >/dev/null
-          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null
+          yes '' | sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh >/dev/null 2>&1 || true
           sudo apt-get install -y -qq postgresql-client-17 >/dev/null
-          pg_dump --version
+          /usr/lib/postgresql/17/bin/pg_dump --version
 
       - name: 2) Volcar la BD (pg_dump)
         env:
@@ -27,7 +27,7 @@ jobs:
         run: |
           FECHA=$(date -u +%Y-%m-%d_%H%M)
           echo "FECHA=$FECHA" >> "$GITHUB_ENV"
-          pg_dump "$SUPABASE_DB_URL" \
+          /usr/lib/postgresql/17/bin/pg_dump "$SUPABASE_DB_URL" \
             --schema=public --no-owner --no-privileges \
             --clean --if-exists \
             | gzip > "moloka_${FECHA}.sql.gz"
