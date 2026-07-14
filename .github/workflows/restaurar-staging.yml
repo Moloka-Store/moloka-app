@@ -1,0 +1,57 @@
+name: Moloka - Restaurar backup en STAGING
+
+on:
+  workflow_dispatch:
+    inputs:
+      fichero:
+        description: "Nombre del backup (vacio = el mas reciente)"
+        required: false
+        default: ""
+
+jobs:
+  restaurar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1) Cerrojo anti-produccion
+        env:
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+        run: |
+          case "$STAGING_DB_URL" in
+            *ogfbjjdxcltzpygzuyla*)
+              echo "::error::Esa URL es la BD de PRODUCCION. Me niego."; exit 1;;
+            "")
+              echo "::error::Falta el secret STAGING_DB_URL"; exit 1;;
+          esac
+          echo "Cerrojo OK: no es produccion."
+
+      - name: 2) Instalar cliente Postgres 17
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common >/dev/null
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null
+          sudo apt-get install -y -qq postgresql-client-17 >/dev/null
+
+      - name: 3) Bajar el backup de R2
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID:         ${{ secrets.R2_ACCOUNT_ID }}
+          FICHERO: ${{ github.event.inputs.fichero }}
+        run: |
+          EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          if [ -z "$FICHERO" ]; then
+            FICHERO=$(aws s3 ls "s3://moloka-backups/bd/" --endpoint-url "$EP" --region auto \
+                      | awk '{print $4}' | sort | tail -1)
+          fi
+          echo "Restaurando: $FICHERO"
+          aws s3 cp "s3://moloka-backups/bd/$FICHERO" backup.sql.gz \
+            --endpoint-url "$EP" --region auto
+
+      - name: 4) Restaurar en staging
+        env:
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+        run: |
+          gunzip -f backup.sql.gz
+          psql "$STAGING_DB_URL" -v ON_ERROR_STOP=0 -q -f backup.sql
+          echo "--- Comprobacion: filas en productos ---"
+          psql "$STAGING_DB_URL" -c "select count(*) as productos from public.productos;"
