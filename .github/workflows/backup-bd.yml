@@ -1,0 +1,78 @@
+name: Moloka - Backup BD
+
+on:
+  schedule:
+    - cron: '15 2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: backup-bd
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1) Instalar cliente Postgres 17 (la BD es 17.6)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common >/dev/null
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null
+          sudo apt-get install -y -qq postgresql-client-17 >/dev/null
+          pg_dump --version
+
+      - name: 2) Volcar la BD (pg_dump)
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          FECHA=$(date -u +%Y-%m-%d_%H%M)
+          echo "FECHA=$FECHA" >> "$GITHUB_ENV"
+          pg_dump "$SUPABASE_DB_URL" \
+            --schema=public --no-owner --no-privileges \
+            --clean --if-exists \
+            | gzip > "moloka_${FECHA}.sql.gz"
+          ls -lh "moloka_${FECHA}.sql.gz"
+
+      - name: 3) Verificar que la copia NO es falsa
+        run: |
+          F="moloka_${FECHA}.sql.gz"
+          gunzip -t "$F"
+          BYTES=$(stat -c%s "$F")
+          if [ "$BYTES" -lt 500000 ]; then
+            echo "::error::Copia sospechosamente pequena ($BYTES bytes)"; exit 1
+          fi
+          zcat "$F" | grep -q "CREATE TABLE" || { echo "::error::Sin CREATE TABLE"; exit 1; }
+          zcat "$F" | grep -q "productos"    || { echo "::error::No aparece la tabla productos"; exit 1; }
+          echo "Copia verificada: $BYTES bytes"
+
+      - name: 4) Subir a Cloudflare R2
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID:         ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          aws s3 cp "moloka_${FECHA}.sql.gz" "s3://moloka-backups/bd/moloka_${FECHA}.sql.gz" \
+            --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+            --region auto
+          echo "Subido a R2: bd/moloka_${FECHA}.sql.gz"
+
+      - name: 5) Telegram OK
+        env:
+          TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          BYTES=$(stat -c%s "moloka_${FECHA}.sql.gz")
+          MB=$(awk "BEGIN {printf \"%.1f\", $BYTES/1048576}")
+          curl -s "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="OK Backup BD Moloka (${FECHA}, ${MB} MB) -> R2" >/dev/null
+
+      - name: 6) Telegram FALLO (solo si algo peta)
+        if: failure()
+        env:
+          TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          curl -s "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="FALLO BACKUP BD MOLOKA - mirar GitHub Actions (backup-bd)" >/dev/null
