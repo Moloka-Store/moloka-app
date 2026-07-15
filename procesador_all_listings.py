@@ -1,0 +1,287 @@
+# -*- coding: utf-8 -*-
+# ============================================================================
+# PROCESADOR ALL_LISTINGS — primera pieza de la Fase 0 de la v2 ("el bicho")
+# ----------------------------------------------------------------------------
+# Qué hace (Diseño v2 §3.2.5):
+#   1) Lee el "Informe de todos los listings" (.txt) del buzón
+#      informes/all_listings/ (Supabase Storage de PRODUCCIÓN).
+#   2) Vuelca el diccionario SKU↔ASIN completo a la tabla `listings_amazon`
+#      (nace CERRADA: RLS activado sin políticas → solo llave de servicio).
+#   3) CURA huérfanos por ASIN: rellena el SKU vacío de `productos` cuando
+#      el ASIN casa de forma inequívoca. NUNCA pisa un SKU existente.
+#      NUNCA toca el EAN (lo puso la factura).
+#
+# Modos (Diseño: primero STAGING, primero ENSAYO):
+#   DESTINO = staging | produccion   → a qué base de datos se escribe
+#   MODO    = ensayo  | aplicar      → ensayo NO escribe en productos,
+#                                      solo cuenta y lista lo que HARÍA.
+#   (El diccionario listings_amazon SÍ se escribe siempre en el destino:
+#    es tabla nueva, aislada, no toca la operativa de Elena.)
+#
+# Reglas a fuego respetadas:
+#   - Cura por ASIN, jamás por EAN (ASIN→EAN es 1:1; EAN→ASIN no).
+#   - Si un ASIN casa con varias fichas sin SKU: se prefiere la NO-chase
+#     (los chase no van a FBA, decisión 13-jul). Si aun así hay varias
+#     → AMBIGUO, no se toca, se lista.
+#   - Un SKU no se asigna dos veces (si ya lo tiene otra ficha → CONFLICTO).
+#   - Anti-vacío: si el informe trae <50 filas o le faltan columnas clave,
+#     se aborta con error claro.
+#   - Nada de DELETE/DROP. El único UPDATE es rellenar productos.sku vacío,
+#     y solo en modo 'aplicar'.
+# ============================================================================
+
+import os, sys, io, csv
+
+import psycopg2
+from supabase import create_client
+
+# ---------------------------------------------------------------------------
+# 0) Configuración
+# ---------------------------------------------------------------------------
+SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://ogfbjjdxcltzpygzuyla.supabase.co')
+SUPABASE_KEY = os.environ['SUPABASE_KEY']          # solo para LEER el Storage
+DB_URL       = os.environ['DB_URL']                # postgres del DESTINO (staging o prod)
+MODO         = os.environ.get('MODO', 'ensayo').strip().lower()      # ensayo | aplicar
+DESTINO      = os.environ.get('DESTINO', 'staging').strip().lower()  # etiqueta informativa
+
+BUCKET, CARPETA = 'informes', 'all_listings'
+MIN_FILAS = 50  # anti-vacío
+
+print(f"=== PROCESADOR ALL_LISTINGS · destino={DESTINO} · modo={MODO} ===", flush=True)
+if MODO not in ('ensayo', 'aplicar'):
+    sys.exit(f"MODO desconocido: {MODO!r} (usa 'ensayo' o 'aplicar')")
+
+# ---------------------------------------------------------------------------
+# 1) Bajar el informe más reciente del buzón (Storage de PRODUCCIÓN)
+# ---------------------------------------------------------------------------
+sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+objs = sb.storage.from_(BUCKET).list(CARPETA) or []
+txts = [o for o in objs if (o.get('name') or '').lower().endswith('.txt')]
+if not txts:
+    sys.exit(f"No hay ningún .txt en {BUCKET}/{CARPETA}/. "
+             "Sube el 'Informe de todos los listings' (descargado en .txt) y relanza.")
+txts.sort(key=lambda o: (o.get('updated_at') or o.get('created_at') or ''), reverse=True)
+nombre = txts[0]['name']
+print(f"Informe elegido (el más reciente): {nombre}")
+crudo = sb.storage.from_(BUCKET).download(f"{CARPETA}/{nombre}")
+
+# Encoding tolerante: Amazon suele dar UTF-8, a veces cp1252
+try:
+    texto = crudo.decode('utf-8-sig')
+except UnicodeDecodeError:
+    texto = crudo.decode('cp1252')
+
+# ---------------------------------------------------------------------------
+# 2) Parsear (tab-separated) con cabeceras tolerantes
+# ---------------------------------------------------------------------------
+lector = csv.reader(io.StringIO(texto), delimiter='\t')
+filas = [f for f in lector if any(c.strip() for c in f)]
+if len(filas) < 2:
+    sys.exit("El informe está vacío o no es tab-separated. Abortando.")
+
+cab = [c.strip().lower() for c in filas[0]]
+
+def col(nombre_col):
+    """Índice de columna por nombre exacto; None si no está."""
+    return cab.index(nombre_col) if nombre_col in cab else None
+
+i_sku, i_asin = col('seller-sku'), col('asin1')
+i_pid, i_nom  = col('product-id'), col('item-name')
+i_est, i_open = col('status'), col('open-date')
+i_pre, i_lid  = col('price'), col('listing-id')
+
+if i_sku is None or i_asin is None:
+    sys.exit(f"Faltan columnas clave ('seller-sku'/'asin1'). Cabecera vista: {cab[:12]}... "
+             "¿Seguro que es el Informe de todos los listings en .txt?")
+
+def celda(fila, i):
+    if i is None or i >= len(fila):
+        return ''
+    return (fila[i] or '').strip()
+
+ofertas = []
+for f in filas[1:]:
+    sku, asin = celda(f, i_sku), celda(f, i_asin).upper()
+    if not sku or not asin:
+        continue
+    ofertas.append({
+        'sku': sku, 'asin': asin,
+        'product_id': celda(f, i_pid),
+        'nombre': celda(f, i_nom)[:300],
+        'status': celda(f, i_est),
+        'open_date': celda(f, i_open),
+        'price': celda(f, i_pre),
+        'listing_id': celda(f, i_lid),
+    })
+
+if len(ofertas) < MIN_FILAS:
+    sys.exit(f"ANTI-VACÍO: solo {len(ofertas)} ofertas con SKU+ASIN (mínimo {MIN_FILAS}). "
+             "El fichero no parece completo. Abortando sin tocar nada.")
+
+n_active = sum(1 for o in ofertas if o['status'].lower() == 'active')
+print(f"Ofertas leídas: {len(ofertas)} ({n_active} Active, {len(ofertas)-n_active} otras)")
+
+# --- Mapa ASIN → SKU del informe (prefiriendo Active si hay varias) ---
+por_asin = {}
+for o in ofertas:
+    por_asin.setdefault(o['asin'], []).append(o)
+
+asin_a_sku = {}      # ASIN → sku elegido
+asin_ambiguo = {}    # ASIN → lista de SKUs (no se puede elegir)
+for asin, lst in por_asin.items():
+    skus = sorted({o['sku'] for o in lst})
+    if len(skus) == 1:
+        asin_a_sku[asin] = skus[0]
+        continue
+    activos = sorted({o['sku'] for o in lst if o['status'].lower() == 'active'})
+    if len(activos) == 1:
+        asin_a_sku[asin] = activos[0]
+    else:
+        asin_ambiguo[asin] = skus
+
+# ---------------------------------------------------------------------------
+# 3) Conectar al DESTINO y asegurar la tabla del diccionario (nace CERRADA)
+# ---------------------------------------------------------------------------
+con = psycopg2.connect(DB_URL)
+con.autocommit = False
+cur = con.cursor()
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS listings_amazon (
+    seller_sku    text PRIMARY KEY,
+    asin          text NOT NULL,
+    product_id    text,
+    item_name     text,
+    status        text,
+    open_date     text,
+    price         text,
+    listing_id    text,
+    fecha_informe timestamptz NOT NULL DEFAULT now()
+);
+""")
+cur.execute("CREATE INDEX IF NOT EXISTS idx_listings_amazon_asin ON listings_amazon(asin);")
+# Nace cerrada: RLS activo y CERO políticas → anon no puede ni leerla.
+cur.execute("ALTER TABLE listings_amazon ENABLE ROW LEVEL SECURITY;")
+
+# --- Upsert del diccionario completo (sin DELETE: lo que no venga hoy queda
+#     con su fecha_informe antigua, detectable) ---
+for o in ofertas:
+    cur.execute("""
+        INSERT INTO listings_amazon
+            (seller_sku, asin, product_id, item_name, status, open_date, price, listing_id, fecha_informe)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s, now())
+        ON CONFLICT (seller_sku) DO UPDATE SET
+            asin=EXCLUDED.asin, product_id=EXCLUDED.product_id,
+            item_name=EXCLUDED.item_name, status=EXCLUDED.status,
+            open_date=EXCLUDED.open_date, price=EXCLUDED.price,
+            listing_id=EXCLUDED.listing_id, fecha_informe=now();
+    """, (o['sku'], o['asin'], o['product_id'], o['nombre'],
+          o['status'], o['open_date'], o['price'], o['listing_id']))
+print(f"Diccionario listings_amazon: {len(ofertas)} filas volcadas (upsert).")
+
+# ---------------------------------------------------------------------------
+# 4) Cargar productos y clasificar
+# ---------------------------------------------------------------------------
+cur.execute("SELECT id, ean, asin, sku, es_chase, activo, nombre FROM productos;")
+productos = cur.fetchall()
+print(f"Fichas en productos: {len(productos)}")
+
+def vacio(v):
+    return v is None or str(v).strip() == ''
+
+# SKUs ya usados en productos (para no asignar uno dos veces)
+skus_usados = {}
+for (pid, ean, asin, sku, es_chase, activo, nom) in productos:
+    if not vacio(sku):
+        skus_usados.setdefault(str(sku).strip(), []).append(pid)
+
+# Fichas ACTIVAS sin SKU con ASIN, agrupadas por ASIN (desempate chase).
+# Solo se clasifican/curan las ACTIVAS (cifras comparables con lo medido:
+# 160 sin SKU / 135 con ASIN / 25 sin ASIN a 15-jul), pero skus_usados
+# vigila TODAS las fichas para no duplicar un SKU jamás.
+sin_sku_por_asin = {}
+for p in productos:
+    (pid, ean, asin, sku, es_chase, activo, nom) = p
+    if activo and vacio(sku) and not vacio(asin):
+        sin_sku_por_asin.setdefault(str(asin).strip().upper(), []).append(p)
+
+curables, ambiguos, conflictos, no_casa, sin_asin, discrepancias = [], [], [], [], [], []
+
+for p in productos:
+    (pid, ean, asin, sku, es_chase, activo, nom) = p
+    if not activo:
+        continue
+    et = f"[{ean}] {str(nom or '')[:50]}"
+
+    if vacio(asin):
+        if vacio(sku):
+            sin_asin.append(et)                      # los 25 (decisión pendiente)
+        continue
+
+    asin_n = str(asin).strip().upper()
+
+    if not vacio(sku):
+        # Ya tiene SKU: contrastar con el informe, sin tocar nada
+        sku_inf = asin_a_sku.get(asin_n)
+        if sku_inf and sku_inf != str(sku).strip():
+            discrepancias.append(f"{et} · BD={sku} vs informe={sku_inf} (ASIN {asin_n})")
+        continue
+
+    # --- Ficha SIN SKU con ASIN ---
+    if asin_n in asin_ambiguo:
+        ambiguos.append(f"{et} · ASIN {asin_n} tiene varios SKUs en el informe: {asin_ambiguo[asin_n]}")
+        continue
+    sku_inf = asin_a_sku.get(asin_n)
+    if not sku_inf:
+        no_casa.append(f"{et} · ASIN {asin_n} no aparece en el informe")   # los ~57
+        continue
+
+    # Desempate chase: si varias fichas sin SKU comparten el ASIN,
+    # el SKU es de la NO-chase (los chase no van a FBA)
+    hermanas = sin_sku_por_asin.get(asin_n, [])
+    if len(hermanas) > 1:
+        normales = [h for h in hermanas if not h[4]]  # es_chase == False
+        if len(normales) != 1:
+            ambiguos.append(f"{et} · {len(hermanas)} fichas sin SKU comparten el ASIN {asin_n}")
+            continue
+        if normales[0][0] != pid:
+            continue  # esta es la chase (u otra): el SKU no es suyo
+
+    if sku_inf in skus_usados:
+        conflictos.append(f"{et} · el SKU {sku_inf} ya lo tiene otra ficha (id {skus_usados[sku_inf]})")
+        continue
+
+    curables.append((pid, sku_inf, et))
+    skus_usados[sku_inf] = [pid]  # reservarlo para no repetirlo en esta pasada
+
+# ---------------------------------------------------------------------------
+# 5) Aplicar (o no) y contar en cristiano
+# ---------------------------------------------------------------------------
+if MODO == 'aplicar':
+    for (pid, sku_inf, et) in curables:
+        cur.execute(
+            "UPDATE productos SET sku=%s WHERE id=%s AND (sku IS NULL OR btrim(sku)='');",
+            (sku_inf, pid))
+    print(f"\n✅ APLICADO: {len(curables)} SKUs rellenados en productos.")
+else:
+    print(f"\n🔎 ENSAYO (no se ha tocado productos). Se rellenarían {len(curables)} SKUs.")
+
+def bloque(titulo, lista, tope=80):
+    print(f"\n--- {titulo}: {len(lista)} ---")
+    for linea in lista[:tope]:
+        print("   ·", linea)
+    if len(lista) > tope:
+        print(f"   … y {len(lista)-tope} más")
+
+bloque("CURADOS (SKU rellenado)" if MODO == 'aplicar' else "CURABLES (se rellenarían)",
+       [f"{et} → SKU {s}" for (_, s, et) in curables])
+bloque("ASIN NO CASA con el informe (revisar a mano)", no_casa)
+bloque("SIN ASIN de ninguna clase (decisión pendiente)", sin_asin)
+bloque("DISCREPANCIAS SKU BD≠informe (no se toca, solo aviso)", discrepancias)
+bloque("AMBIGUOS (no se toca)", ambiguos)
+bloque("CONFLICTOS de SKU repetido (no se toca)", conflictos)
+
+con.commit()
+cur.close(); con.close()
+print(f"\n=== FIN · destino={DESTINO} · modo={MODO} · "
+      f"curables={len(curables)} · no_casa={len(no_casa)} · sin_asin={len(sin_asin)} ===")
