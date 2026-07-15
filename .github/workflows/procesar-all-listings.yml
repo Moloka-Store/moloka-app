@@ -1,0 +1,43 @@
+name: Moloka - Procesar ALL_LISTINGS
+
+# Fase 0 de la v2. A DEMANDA, sin reloj (Diseño §3.2.5).
+# Por defecto: STAGING + ENSAYO (no toca nada de Elena).
+on:
+  workflow_dispatch:
+    inputs:
+      destino:
+        description: 'Base de datos destino'
+        type: choice
+        options: [staging, produccion]
+        default: staging
+      modo:
+        description: 'ensayo = solo cuenta; aplicar = rellena SKUs'
+        type: choice
+        options: [ensayo, aplicar]
+        default: ensayo
+
+concurrency:
+  group: procesar-all-listings
+  cancel-in-progress: false
+
+jobs:
+  procesar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install --quiet supabase psycopg2-binary
+
+      - name: Ejecutar procesador
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          DESTINO: ${{ inputs.destino }}
+          MODO: ${{ inputs.modo }}
+          DB_URL: ${{ inputs.destino == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
+        run: python -u procesador_all_listings.py
