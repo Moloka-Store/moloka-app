@@ -1,0 +1,42 @@
+name: Moloka - Cargar ASIN manual (one-off)
+
+# Carga ÚNICA a mano: 25 ASIN + 3 nombres. A DEMANDA, sin reloj.
+# Por defecto: STAGING + ENSAYO (no toca nada de Elena).
+# Mira SIEMPRE la línea MODO: del log (el desplegable se queda donde lo dejaste).
+on:
+  workflow_dispatch:
+    inputs:
+      destino:
+        description: 'Base de datos destino'
+        type: choice
+        options: [staging, produccion]
+        default: staging
+      modo:
+        description: 'ensayo = solo comprueba y lista; aplicar = escribe los 25 ASIN'
+        type: choice
+        options: [ensayo, aplicar]
+        default: ensayo
+
+concurrency:
+  group: cargar-asin-manual
+  cancel-in-progress: false
+
+jobs:
+  cargar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install --quiet psycopg2-binary
+
+      - name: Ejecutar carga
+        env:
+          DESTINO: ${{ inputs.destino }}
+          MODO: ${{ inputs.modo }}
+          DB_URL: ${{ inputs.destino == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
+        run: python -u cargar_asin_manual.py
