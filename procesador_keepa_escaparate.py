@@ -412,6 +412,20 @@ def sql_crear_tabla():
     );
     """
 
+# Normalización de EAN/GTIN/UPC para CONTRASTE (§5.1). Vive en una FUNCIÓN, no
+# copiada inline en el SQL: la misma regla que la v1 ya tiene validada (UPC-12
+# sin cero inicial, Diseño §11.8). Keepa da el EAN con cero a la izquierda
+# (0889698946933) y productos.ean va sin él (889698946933); comparados en crudo
+# encienden ean_no_confirmado en 183/203 en falso. Se comparan sin ceros a la
+# izquierda y solo dígitos.
+SQL_FUNCION = """
+CREATE OR REPLACE FUNCTION moloka_ean_norm(cod text)
+RETURNS text
+LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+    SELECT NULLIF(ltrim(regexp_replace(coalesce(cod, ''), '[^0-9]', '', 'g'), '0'), '')
+$$;
+"""
+
 # 🔒 Sin security_invoker una vista sobre tabla cerrada es una puerta trasera de
 # lectura. El descuadre vive en el DATO: una fila por ASIN del escaparate con las
 # banderas §5.1-§5.4, más las filas §5.5 (Active en listings sin export).
@@ -425,14 +439,17 @@ SELECT
     k.tarifa_fba,
     k.bb_vendedor,
     k.bb_seller_id,
-    -- §5.1 el EAN de la ficha NO aparece entre los que Keepa da para ese ASIN
+    -- §5.1 el EAN de la ficha NO aparece entre los que Keepa da para ese ASIN.
+    -- Ambos lados por moloka_ean_norm(): solo dígitos, sin ceros a la izquierda.
     ( EXISTS (SELECT 1 FROM productos p
         WHERE p.activo AND btrim(p.asin) = btrim(k.asin)
-          AND coalesce(btrim(p.ean), '') <> '')
+          AND moloka_ean_norm(p.ean) IS NOT NULL)
       AND NOT EXISTS (SELECT 1 FROM productos p
         WHERE p.activo AND btrim(p.asin) = btrim(k.asin)
-          AND btrim(p.ean) = ANY (
-              string_to_array(replace(coalesce(k.ean_keepa_crudo, ''), ' ', ''), ','))) )
+          AND moloka_ean_norm(p.ean) IN (
+              SELECT moloka_ean_norm(e)
+              FROM unnest(string_to_array(coalesce(k.ean_keepa_crudo, ''), ',')) AS e
+              WHERE moloka_ean_norm(e) IS NOT NULL)) )
       AS ean_no_confirmado,
     -- §5.2 keepa_fba_fee del dominio != tarifa_fba del CSV (tolerancia 0,01 €)
     EXISTS (SELECT 1 FROM productos p
@@ -573,6 +590,7 @@ def main():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_keepa_escaparate_asin ON keepa_escaparate(asin);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_keepa_escaparate_dominio ON keepa_escaparate(dominio);")
     cur.execute("ALTER TABLE keepa_escaparate ENABLE ROW LEVEL SECURITY;")   # nace CERRADA
+    cur.execute(SQL_FUNCION)   # moloka_ean_norm(): normaliza EAN para el cruce §5.1
     cur.execute(SQL_VISTA)
 
     cols = [c for _, c, _ in TIPADAS] + ['bb_seller_id', 'fichero', 'fecha_foto', 'seller_id', 'crudo']
