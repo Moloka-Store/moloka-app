@@ -159,8 +159,14 @@ def _clean(v):
     return ('' if v is None else str(v)).replace('﻿', '').replace('\xa0', ' ').strip()
 
 def txt(v):
+    # '-' es el marcador universal de "sin dato" de Keepa → NULL, igual que en
+    # ent()/dec(). El parser numérico ya lo trata porque float('-') casca; el de
+    # texto no casca y por eso se olvidaba, guardando "hay un vendedor llamado -"
+    # donde no hay vendedor. El crudo conserva el '-' original: la despensa no pierde.
     s = _clean(v)
-    return s or None
+    if s in ('', '-'):
+        return None
+    return s
 
 def _num_str(v):
     """String listo para float(): sin ' %', sin símbolos de moneda ni espacios."""
