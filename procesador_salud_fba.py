@@ -68,8 +68,12 @@ SOPORTE_ECUACIONES = [
 #   tipo: 't' text · 'i' integer · 'n' numeric.
 # El encabezado de origen se localiza normalizando: db_col con '_'→'-' casa
 # con 'Total Reserved Quantity', 'fc-transfer', 'Inventory Supply at FBA', etc.
-# Si algún encabezado no casa (Amazon lo renombró), la columna tipada queda
-# NULL pero el valor SIGUE en `crudo`: la despensa no pierde nada.
+# Cuando el snake_case NO se deduce del encabezado real (Amazon abrevia, o pone
+# paréntesis o signos de interrogación), el encabezado LITERAL va en ALIAS.
+# 🔒 Regla de Fernando (15-jul): NO hay cabos sueltos. Si un encabezado tipado
+# no casa, NUNCA se guarda NULL en silencio: se ABORTA (Guarda 10). Un NULL
+# calladito haría creer al módulo consumidor que Amazon no da el dato; que el
+# valor siga en `crudo` no consuela a quien lee la columna tipada.
 # ---------------------------------------------------------------------------
 TIPADAS = [
     # Identidad
@@ -107,9 +111,27 @@ TIPADAS = [
 ]
 TIPO_SQL = {'t': 'text', 'i': 'integer', 'n': 'numeric'}
 
+# ---------------------------------------------------------------------------
+# ALIAS: encabezado LITERAL del informe para las columnas tipadas cuyo nombre
+# snake_case se abrevió respecto al real (medido el 16-jul contra el fichero
+# real). La resolución es: alias si existe → si no, la regla '_'→'-'.
+# La comparación es tolerante (norm(): minúsculas, espacios/'_'→'-'), así que
+# el literal se escribe tal cual aparece en la cabecera de Amazon.
+# ⚠️ 'Total Days of Supply (...)' es la métrica de cobertura marcada 🟢 en el
+# Diseño §14.9: no es decorativa.
+# ---------------------------------------------------------------------------
+ALIAS = {
+    'total_days_of_supply_incl_open_shipments':
+        'Total Days of Supply (including units from open shipments)',
+    'low_inventory_fee_applied_current_week':
+        'Low-Inventory cost coverage fee applied in current week?',
+    'exempted_from_low_inventory_fee':
+        'Exempted from Low-Inventory cost coverage fee?',
+}
+
 
 class Aborta(Exception):
-    """Cualquier guarda 1-8 lanza esto: se imprime, NO se escribe nada y el
+    """Cualquier guarda 1-10 lanza esto: se imprime, NO se escribe nada y el
     workflow sale en rojo."""
     pass
 
@@ -180,6 +202,26 @@ def analizar(texto, fichero):
         raise Aborta("[Guarda 1] Faltan columnas necesarias para las comprobaciones "
                      "de cuadre (§4.4/§4.5): " + ", ".join(faltan_eq) + ".")
 
+    # Guarda 10: TODA columna tipada resuelve su encabezado en la cabecera, o
+    # ABORTA. Mata la clase entera de fallo "columna tipada que se guarda NULL
+    # en silencio porque Amazon renombró el encabezado". Comprueba que el
+    # ENCABEZADO exista, no que traiga valor: las columnas de estacionalidad
+    # existen aunque vengan vacías (0/195), así que NO hacen abortar.
+    col_a_norm = {}
+    no_resuelven = []
+    for db_col, _ in TIPADAS:
+        k = norm(ALIAS[db_col]) if db_col in ALIAS else norm(db_col)
+        if k in idx_por_norm:
+            col_a_norm[db_col] = k
+        else:
+            no_resuelven.append(f"{db_col} (buscaba encabezado: "
+                                f"{ALIAS.get(db_col, clave(db_col))!r})")
+    if no_resuelven:
+        raise Aborta("[Guarda 10] Columnas tipadas cuyo encabezado NO aparece en el "
+                     "informe (Amazon lo renombró; se ABORTA en vez de guardar NULL "
+                     "en silencio):\n   · " + "\n   · ".join(no_resuelven)
+                     + f"\n   Cabecera real vista ({len(cabecera)} cols): {cabecera}")
+
     def celda_norm(fila, cn):
         i = idx_por_norm.get(cn)
         if i is None or i >= len(fila):
@@ -187,7 +229,7 @@ def analizar(texto, fichero):
         return (fila[i] or '').strip()
 
     def eq_int(fila, db_col, num_fila, humano):
-        raw = celda_norm(fila, clave(db_col))
+        raw = celda_norm(fila, col_a_norm[db_col])
         if raw == '':
             raise Aborta(f"[Guarda 4/5/6] Fila {num_fila}: '{humano}' vacía; no se puede cuadrar.")
         try:
@@ -249,10 +291,10 @@ def analizar(texto, fichero):
                          f"at FBA ({isf}) ≠ available+fc-transfer+inbound-quantity "
                          f"({av}+{fct}+{iq}={av+fct+iq}).")
 
-        # Fila tipada + crudo (fila entera, encabezados originales)
+        # Fila tipada (encabezado resuelto vía col_a_norm) + crudo (fila entera)
         registro = {}
         for db_col, tipo in TIPADAS:
-            registro[db_col] = parse_val(tipo, celda_norm(fila, clave(db_col)))
+            registro[db_col] = parse_val(tipo, celda_norm(fila, col_a_norm[db_col]))
         crudo = {}
         for i, h in enumerate(cabecera):
             crudo[h] = (fila[i].strip() if i < len(fila) and fila[i] is not None else '')
