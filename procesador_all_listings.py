@@ -29,6 +29,10 @@
 #   - Anti-vacío: si el informe trae <50 filas o le faltan columnas clave,
 #     se aborta con error claro. Y anti-encogimiento: <50% de los SKU que ya
 #     había → ABORTA sin tocar nada (mismo criterio que salud_fba y keepa).
+#   - 🔒 La fecha del DATO sale del NOMBRE del fichero (MM-DD-YYYY al final),
+#     igual que en keepa. Si el nombre no la trae, ABORTA: no se inventa ni se
+#     cae a la fecha de subida (el informe de ejemplo es del 14 y se subió el
+#     15: un día de desfase ya es una cifra que miente).
 #   - 🔒 listings_amazon ES UNA FOTO (patrón común en foto_comun.py): los SKU
 #     que ya no vienen en el informe se BORRAN. El SKU nace y muere (§1.1); uno
 #     muerto que se queda en el diccionario es un fantasma que descuadra el
@@ -37,13 +41,14 @@
 #     único UPDATE es rellenar productos.sku vacío, y solo en modo 'aplicar'.
 # ============================================================================
 
-import os, sys, io, csv
+import os, sys, io, csv, re
+from datetime import date
 
 import psycopg2
 from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
-from foto_comun import (Aborta, fecha_del_dato_por_subida, guarda_anti_encogimiento,
+from foto_comun import (Aborta, guarda_anti_encogimiento,
                         claves_previas, barrer_sobrantes, resumen_foto)
 
 # ---------------------------------------------------------------------------
@@ -57,6 +62,43 @@ DESTINO      = os.environ.get('DESTINO', 'staging').strip().lower()  # etiqueta 
 
 BUCKET, CARPETA = 'informes', 'all_listings'
 MIN_FILAS = 50  # anti-vacío
+
+# ---------------------------------------------------------------------------
+# 🔒 EL NOMBRE DEL FICHERO ES DATO, no decoración. Misma regla que la Guarda 4
+# de procesador_keepa_escaparate.py.
+# Amazon nombra este informe con la fecha AL FINAL, en MM-DD-YYYY:
+#     Informe+de+todos+los+listings_07-14-2026.txt
+# Esa es la fecha del DATO. Ojo: NO es la de subida al buzón — el fichero de
+# ejemplo es del día 14 y se subió el 15. Un día de desfase es exactamente la
+# clase de mentira que hace que una cifra no se sostenga.
+# El prefijo se deja libre a propósito (Amazon lo devuelve URL-codificado y
+# traducido, y eso sí varía); lo que se exige EXACTO es el sufijo de fecha.
+# ---------------------------------------------------------------------------
+RE_FECHA_NOMBRE = re.compile(r'^.*_(\d{2})-(\d{2})-(\d{4})\.txt$', re.IGNORECASE)
+
+
+def fecha_del_nombre(nombre):
+    """MM-DD-YYYY del final del nombre → date. Si no casa, ABORTA.
+
+    🔴 No inventa fecha y NO cae a la fecha de subida: si el nombre no la trae,
+    no se sabe de qué día es la foto, y una foto sin fecha no da información
+    incompleta, da información FALSA. Se para y se grita.
+    """
+    m = RE_FECHA_NOMBRE.match(nombre or '')
+    if not m:
+        raise Aborta(
+            f"[Guarda nombre] El nombre del fichero no acaba en '_MM-DD-YYYY.txt'.\n"
+            f"   Visto: {nombre!r}. De ahí sale la fecha del DATO (el informe no la\n"
+            f"   trae dentro). Sin ella no se carga: renombra el fichero en el buzón\n"
+            f"   respetando el nombre con que lo descarga el Seller, y relanza.")
+    mes, dia, anio = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    try:
+        return date(anio, mes, dia)
+    except ValueError:
+        raise Aborta(
+            f"[Guarda nombre] La fecha del nombre no existe en el calendario: "
+            f"mes={mes:02d} día={dia:02d} año={anio} (leído de {nombre!r} como "
+            f"MM-DD-YYYY). ¿Seguro que no viene en DD-MM-YYYY?")
 
 print(f"=== PROCESADOR ALL_LISTINGS · destino={DESTINO} · modo={MODO} ===", flush=True)
 if MODO not in ('ensayo', 'aplicar'):
@@ -74,21 +116,17 @@ if not txts:
     sys.exit(f"No hay ningún .txt en {BUCKET}/{CARPETA}/. "
              "Sube el 'Informe de todos los listings' (descargado en .txt) y relanza.")
 txts.sort(key=lambda o: (o.get('updated_at') or o.get('created_at') or ''), reverse=True)
-elegido = txts[0]
-nombre = elegido['name']
+nombre = txts[0]['name']
 print(f"Informe elegido (el más reciente): {nombre}")
 
-# fecha_informe = LA FECHA DEL DATO, jamás now(). Este informe no trae fecha
-# dentro (a diferencia de salud_fba, que tiene 'snapshot-date') ni en el nombre
-# (a diferencia de keepa): el único sello honrado es cuándo se subió esta foto
-# al buzón. Mismo criterio que paneu_aptos. Si no se puede leer, ABORTA: un
-# now() de reserva fecharía HOY una foto de hace tres semanas, y eso no es
-# información incompleta sino FALSA.
+# fecha_informe = LA FECHA DEL DATO, jamás now(). Este informe no la trae dentro
+# (a diferencia de salud_fba, que tiene 'snapshot-date'), pero SÍ en el nombre,
+# igual que keepa. De ahí sale, y de ningún otro sitio.
 try:
-    fecha_dato = fecha_del_dato_por_subida(elegido, 'all_listings')
+    fecha_dato = fecha_del_nombre(nombre)
 except Aborta as e:
     sys.exit(f"\n❌ ABORTA (no se ha escrito nada):\n{e}")
-print(f"   · fecha_informe={fecha_dato.isoformat()} (subida al buzón = fecha del dato)")
+print(f"   · fecha_informe={fecha_dato.isoformat()} (leída del NOMBRE del fichero)")
 
 crudo = sb.storage.from_(BUCKET).download(f"{CARPETA}/{nombre}")
 
@@ -212,10 +250,13 @@ CREATE TABLE IF NOT EXISTS listings_amazon (
     fecha_informe timestamptz NOT NULL DEFAULT now()
 );
 """)
-# fecha_informe pasa a ser la fecha del DATO (subida al buzón). procesado_en es
-# el metadato de cuándo corrió el robot: ese sí es now(). Son dos cosas
-# distintas y a partir de aquí no se confunden. (ADD COLUMN aparte: el
-# CREATE TABLE IF NOT EXISTS no toca una tabla que ya existe.)
+# fecha_informe pasa a ser la fecha del DATO (la del NOMBRE del fichero).
+# procesado_en es el metadato de cuándo corrió el robot: ese sí es now(). Son
+# dos cosas distintas y a partir de aquí no se confunden.
+# 🔒 El TIPO de fecha_informe NO cambia: sigue siendo timestamptz, como está hoy
+# en producción. Se le pasa un `date` y Postgres lo sube a timestamptz (00:00);
+# no hay ALTER COLUMN ... TYPE por ningún lado. Y el CREATE TABLE IF NOT EXISTS
+# no toca una tabla que ya existe: por eso el ADD COLUMN va aparte.
 cur.execute("ALTER TABLE listings_amazon "
             "ADD COLUMN IF NOT EXISTS procesado_en timestamptz NOT NULL DEFAULT now();")
 cur.execute("CREATE INDEX IF NOT EXISTS idx_listings_amazon_asin ON listings_amazon(asin);")
