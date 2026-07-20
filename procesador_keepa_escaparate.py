@@ -464,10 +464,44 @@ $$;
 # 🔒 Sin security_invoker una vista sobre tabla cerrada es una puerta trasera de
 # lectura. El descuadre vive en el DATO: una fila por ASIN del escaparate con las
 # banderas §5.1-§5.4, más las filas §5.5 (Active en listings sin export).
+#
+# ---------------------------------------------------------------------------
+# TRES ESTADOS, NO DOS (decisión de 20-jul-2026, con el escaparate ya multi-país)
+# ---------------------------------------------------------------------------
+#   true  = hay descuadre
+#   false = se ha podido comprobar y NO hay descuadre
+#   NULL  = NO APLICA a este dominio: no hay con qué comparar
+#
+# 🔴 El false y el NULL NO son lo mismo, y confundirlos es el error caro. Hasta
+#    hoy las banderas eran booleanas a secas y devolvían `false` allí donde no
+#    había NADA que comparar: DE salía con 0 tarifas discrepantes no porque
+#    cuadrara, sino porque `productos` ni siquiera tiene columna de tarifa para
+#    DE. Un "0 problemas" que en realidad es "no lo he mirado" es exactamente
+#    una cifra que miente (§1.4).
+#
+# Qué aplica dónde, MEDIDO contra staging el 20-jul (no supuesto):
+#   · §5.1 EAN  → los CUATRO países. `productos.ean` es el producto FÍSICO, y
+#     casa con los ASIN de los cuatro (de 80/86 · es 199/212 · fr 81/89 · it 82/89).
+#   · §5.2 tarifa → SOLO es/fr/it. `productos` tiene keepa_fba_fee_es/_it/_fr y
+#     NO tiene _de. En DE no es que cuadre: es que no hay con qué comparar.
+#     (Que el país viva en un sufijo de columna contradice §1.2, pero eso es
+#     deuda de la v1 y no se toca aquí.)
+#   · §5.3 foto → los CUATRO. `keepa_image` es la foto del producto, universal,
+#     y una foto sacada del export de cualquier país cura la ficha igual.
+#   · §5.4 buy box → SOLO donde `salud_fba` cubra ese país. Hoy salud_fba es solo
+#     ES (195 filas, marketplace='ES'), así que hoy es solo ES. La condición se
+#     DERIVA de salud_fba en vez de escribir 'es' a fuego: el día que salud_fba
+#     traiga IT, la bandera se enciende sola en vez de quedarse en NULL callada.
+#   · §5.5 sin export → SOLO ES: `listings_amazon` no tiene columna de país, es
+#     el listado de ES. Antes cruzaba contra el escaparate SIN filtrar dominio,
+#     así que un ASIN que faltaba del export de ES pero salía en el de otro país
+#     se escapaba de la alerta (medido: 1 caso real hoy, y crece con cada país).
 SQL_VISTA = f"""
-CREATE OR REPLACE VIEW v_keepa_cruce
+DROP VIEW IF EXISTS v_keepa_cruce;
+CREATE VIEW v_keepa_cruce
 WITH (security_invoker = true) AS
 SELECT
+    'escaparate'::text AS origen,
     k.asin,
     k.dominio,
     k.titulo,
@@ -486,8 +520,11 @@ SELECT
               FROM unnest(string_to_array(coalesce(k.ean_keepa_crudo, ''), ',')) AS e
               WHERE moloka_ean_norm(e) IS NOT NULL)) )
       AS ean_no_confirmado,
-    -- §5.2 keepa_fba_fee del dominio != tarifa_fba del CSV (tolerancia 0,01 €)
-    EXISTS (SELECT 1 FROM productos p
+    -- §5.2 keepa_fba_fee del dominio != tarifa_fba del CSV (tolerancia 0,01 €).
+    -- NULL fuera de es/fr/it: productos NO tiene keepa_fba_fee_de, así que en DE
+    -- no hay nada que comparar y un `false` ahí sería un "cuadra" inventado.
+    CASE WHEN k.dominio IN ('es', 'fr', 'it') THEN
+      EXISTS (SELECT 1 FROM productos p
         WHERE p.activo AND btrim(p.asin) = btrim(k.asin)
           AND k.tarifa_fba IS NOT NULL
           AND (CASE k.dominio WHEN 'es' THEN p.keepa_fba_fee_es
@@ -496,31 +533,41 @@ SELECT
           AND abs((CASE k.dominio WHEN 'es' THEN p.keepa_fba_fee_es
                                   WHEN 'it' THEN p.keepa_fba_fee_it
                                   WHEN 'fr' THEN p.keepa_fba_fee_fr END) - k.tarifa_fba) > 0.01)
-      AS tarifa_discrepante,
+    END AS tarifa_discrepante,
     -- §5.3 ficha activa sin keepa_image y el CSV trae imágenes
     ( EXISTS (SELECT 1 FROM productos p
         WHERE p.activo AND btrim(p.asin) = btrim(k.asin)
           AND coalesce(btrim(p.keepa_image), '') = '')
       AND coalesce(array_length(k.imagenes, 1), 0) > 0 )
       AS sin_foto_curable,
-    -- §5.4 stock FBA propio en ese país y la buy box NO es nuestra (por SELLER ID)
-    ( EXISTS (SELECT 1 FROM salud_fba s
-        WHERE btrim(s.asin) = btrim(k.asin)
-          AND upper(s.marketplace) = upper(k.dominio)
-          AND coalesce(s.available, 0) > 0)
-      AND k.bb_seller_id IS NOT NULL
-      AND k.bb_seller_id <> '{NUESTRO_SELLER_ID}' )
-      AS buybox_ajena_con_stock,
-    -- §5.5 no aplica a filas del escaparate
-    false AS activo_sin_export
+    -- §5.4 stock FBA propio en ese país y la buy box NO es nuestra (por SELLER ID).
+    -- NULL donde salud_fba no cubra ese país: sin saber si tenemos stock allí, la
+    -- pregunta "¿me están quitando la buy box teniendo yo stock?" no se puede
+    -- contestar, y un `false` sería decir que no pasa nada sin haber mirado.
+    -- La condición se deriva de salud_fba: el día que traiga IT, se enciende sola.
+    CASE WHEN EXISTS (SELECT 1 FROM salud_fba s
+                      WHERE upper(s.marketplace) = upper(k.dominio)) THEN
+      ( EXISTS (SELECT 1 FROM salud_fba s
+          WHERE btrim(s.asin) = btrim(k.asin)
+            AND upper(s.marketplace) = upper(k.dominio)
+            AND coalesce(s.available, 0) > 0)
+        AND k.bb_seller_id IS NOT NULL
+        AND k.bb_seller_id <> '{NUESTRO_SELLER_ID}' )
+    END AS buybox_ajena_con_stock,
+    -- §5.5 no aplica a filas del escaparate: NULL, no false (§tres estados)
+    NULL::boolean AS activo_sin_export
 FROM keepa_escaparate k
 
 UNION ALL
 
--- §5.5 ASIN 'Active' en listings_amazon que NO aparece en el export (la red del reverso)
+-- §5.5 ASIN 'Active' en listings_amazon que NO aparece en el export (la red del reverso).
+-- El dominio es 'es' EXPLÍCITO, no NULL: listings_amazon no tiene columna de país
+-- porque ES el listado de ES. Decirlo permite desglosar el log por dominio sin un
+-- cajón "sin país" que en realidad sí tiene país.
 SELECT
+    'listing_sin_export'::text AS origen,
     l.asin,
-    NULL::text    AS dominio,
+    'es'::text    AS dominio,
     l.item_name   AS titulo,
     NULL::numeric AS tarifa_fba,
     NULL::text    AS bb_vendedor,
@@ -536,7 +583,11 @@ FROM (
     WHERE status = 'Active' AND asin IS NOT NULL AND btrim(asin) <> ''
     GROUP BY btrim(asin)
 ) l
-WHERE NOT EXISTS (SELECT 1 FROM keepa_escaparate k WHERE btrim(k.asin) = l.asin);
+-- 🔒 ACOTADO A dominio='es'. Sin esto, un ASIN que falta del export de ES pero
+-- aparece en el de IT/FR/DE se escapaba de la alerta: la pregunta es "¿falta del
+-- export DE SU PAÍS?", no "¿existe en algún sitio?".
+WHERE NOT EXISTS (SELECT 1 FROM keepa_escaparate k
+                  WHERE btrim(k.asin) = l.asin AND k.dominio = 'es');
 """
 
 
@@ -671,26 +722,60 @@ def main():
              if (f['registro']['asin'], f['registro']['dominio']) not in prev]
 
     # --- El descuadre vive en el DATO: se lee de la vista (dentro de la txn) ---
-    def cuenta_bandera(bandera):
-        cur.execute(f"SELECT count(*) FROM v_keepa_cruce WHERE {bandera} IS TRUE;")
-        return cur.fetchone()[0]
+    # 🔒 DESGLOSADO POR DOMINIO. Un "97" a secas, con cuatro países en la tabla, no
+    # dice de qué país es y por tanto no es accionable: nadie sabe dónde mirar.
+    # Por cada bandera y dominio se cuentan TRES cosas, porque son tres cosas
+    # distintas: cuántas dan descuadre (true), cuántas se han comprobado y están
+    # bien (false), y cuántas NO APLICAN a ese país (NULL).
+    BANDERAS = [('§5.1 ean_no_confirmado',       'ean_no_confirmado'),
+                ('§5.2 tarifa_discrepante',      'tarifa_discrepante'),
+                ('§5.3 sin_foto_curable',        'sin_foto_curable'),
+                ('§5.4 buybox_ajena_con_stock',  'buybox_ajena_con_stock'),
+                ('§5.5 activo_sin_export',       'activo_sin_export')]
 
-    n_ean = cuenta_bandera('ean_no_confirmado')
-    n_tarifa = cuenta_bandera('tarifa_discrepante')
-    n_foto = cuenta_bandera('sin_foto_curable')
-    n_bb = cuenta_bandera('buybox_ajena_con_stock')
-    n_sinexport = cuenta_bandera('activo_sin_export')
+    # Por dominio: total de filas + (nº de true, nº de NULL) de cada bandera.
+    sel = ", ".join(
+        f"count(*) FILTER (WHERE {c} IS TRUE), count(*) FILTER (WHERE {c} IS NULL)"
+        for _, c in BANDERAS)
+    cur.execute(f"SELECT dominio, count(*), {sel} FROM v_keepa_cruce "
+                f"GROUP BY dominio ORDER BY dominio;")
+    filas_vista = cur.fetchall()
+    dominios = [r[0] for r in filas_vista]
+    total_dom = {r[0]: r[1] for r in filas_vista}     # filas de la vista por dominio
+    por_dominio = {r[0]: r[2:] for r in filas_vista}  # pares (true, null) por bandera
+
+    # Totales del dominio que se ACABA de cargar: son los que van al === FIN ===,
+    # porque son los únicos que esta pasada ha podido cambiar.
+    # 🔒 'n/a' también aquí: si el === FIN === dijera 'tarifa_discrepante=0' para DE
+    # estaría cantando un cero que en realidad es un "no lo he mirado", que es
+    # justo lo que este desglose viene a quitar de en medio.
+    dom_actual = meta['dominio']
+
+    def cuenta_actual(i):
+        if dom_actual not in por_dominio:
+            return '0'
+        n_true, n_null = por_dominio[dom_actual][i * 2], por_dominio[dom_actual][i * 2 + 1]
+        return 'n/a' if n_null == total_dom[dom_actual] else str(n_true)
+
+    n_ean, n_tarifa, n_foto, n_bb, n_sinexport = (cuenta_actual(i) for i in range(5))
 
     # --- Resumen (se imprime siempre) ---
     print(resumen_foto('keepa_escaparate', AMBITO, previas, len(filas),
                        len(altas), borradas, MODO), flush=True)
 
-    print(f"\n--- El descuadre (vista v_keepa_cruce · NO aborta · vive en el dato) ---")
-    print(f"   · §5.1 ean_no_confirmado (ficha≠Keepa):       {n_ean}")
-    print(f"   · §5.2 tarifa_discrepante (>0,01 €):          {n_tarifa}")
-    print(f"   · §5.3 sin_foto_curable (ficha sin foto):     {n_foto}")
-    print(f"   · §5.4 buybox_ajena_con_stock (no es nuestra):{n_bb}")
-    print(f"   · §5.5 activo_sin_export (Active sin export):  {n_sinexport}")
+    print(f"\n--- El descuadre POR DOMINIO (vista v_keepa_cruce · NO aborta · vive en el dato) ---")
+    print(f"    'n/a' = la bandera NO APLICA a ese país (no hay con qué comparar).")
+    print(f"    NO es un cero: un cero dice 'lo he mirado y cuadra'.\n")
+    print(f"   {'bandera':<32}" + "".join(f"{d:>8}" for d in dominios))
+    print(f"   {'-' * (32 + 8 * len(dominios))}")
+    for i, (etiqueta, _col) in enumerate(BANDERAS):
+        celdas = []
+        for d in dominios:
+            n_true, n_null = por_dominio[d][i * 2], por_dominio[d][i * 2 + 1]
+            # La bandera NO APLICA a este dominio si TODAS sus filas son NULL.
+            celdas.append('n/a' if n_null == total_dom[d] else str(n_true))
+        print(f"   {etiqueta:<32}" + "".join(f"{c:>8}" for c in celdas))
+    print(f"\n   (el dominio recién cargado es {dom_actual!r}; el === FIN === resume ESE)")
 
     # --- Escritura (o no) ---
     if MODO == 'aplicar':
