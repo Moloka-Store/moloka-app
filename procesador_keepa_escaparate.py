@@ -19,9 +19,13 @@
 #     v_keepa_cruce (§5, security_invoker) cruza esta foto con `productos` y
 #     `salud_fba` y saca las banderas de descuadre.
 #
-# LA CLAVE es (asin, dominio). Cada pasada hace UPSERT: solo la última foto.
+# LA CLAVE es (asin, dominio). Cada pasada deja SOLO la última foto.
 #   - PK (asin, dominio). Idempotente: correr dos veces el mismo fichero deja
 #     el mismo resultado.
+#   - 🔒 ES UNA FOTO, NO UN COLLAGE (patrón común en foto_comun.py): los
+#     (asin, dominio) que ya no vienen en el export se BORRAN, no se quedan de
+#     fantasmas. El borrado va acotado AL DOMINIO del export (cada fichero es
+#     de un país) y en la MISMA transacción que la carga: o todo o nada.
 #
 # 🔒 EL NOMBRE DEL FICHERO ES DATO, no decoración. Del nombre salen la fecha de
 #   la foto, el dominio (9=ES, 10=IT, 8=FR) y el seller id. La columna
@@ -45,6 +49,10 @@ from datetime import date, datetime
 import psycopg2
 from psycopg2.extras import Json
 from supabase import create_client
+
+# El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
+from foto_comun import (Aborta, guarda_anti_encogimiento, claves_previas,
+                        barrer_sobrantes, resumen_foto)
 
 # ---------------------------------------------------------------------------
 # 0) Configuración (secrets de GitHub; jamás credenciales en el código)
@@ -145,10 +153,8 @@ TIPO_SQL = {
 }
 
 
-class Aborta(Exception):
-    """Cualquier guarda 1-10 lanza esto: se imprime, NO se escribe nada y el
-    workflow sale en rojo."""
-    pass
+# Aborta vive ahora en foto_comun (misma clase para las cuatro cañerías): una
+# guarda que aborta se imprime, NO escribe nada y el workflow sale en rojo.
 
 
 # ---------------------------------------------------------------------------
@@ -575,21 +581,21 @@ def main():
     con.autocommit = False
     cur = con.cursor()
 
-    # Recuento previo para este dominio (Guarda 10). Si la tabla no existe → 0.
-    cur.execute("SELECT to_regclass('public.keepa_escaparate');")
-    existe_tabla = cur.fetchone()[0] is not None
-    if existe_tabla:
-        cur.execute("SELECT count(*) FROM keepa_escaparate WHERE dominio = %s;", (meta['dominio'],))
-        previas = cur.fetchone()[0]
-    else:
-        previas = 0
+    # 🔒 ÁMBITO DE LA FOTO: cada export de Keepa es de UN país. La foto que este
+    # fichero sustituye es la de SU dominio, no la tabla entera: sin acotar,
+    # cargar el de ES borraría IT y FR enteros.
+    AMBITO = ('dominio', [meta['dominio']])
 
-    # Guarda 10: anti-encogimiento (< 50% de la foto anterior del mismo dominio → ABORTA)
-    if len(filas) < previas * 0.5:
-        print(f"\n❌ ABORTA [Guarda 10] anti-encogimiento: el export trae {len(filas)} filas "
-              f"y en keepa_escaparate (dominio {meta['dominio']}) ya hay {previas} "
-              f"(menos del 50%). No se escribe nada.", flush=True)
+    # Guarda 10: anti-encogimiento. Corre ANTES de borrar y ANTES de escribir.
+    try:
+        previas = guarda_anti_encogimiento(cur, 'keepa_escaparate', len(filas),
+                                           ambito=AMBITO, etiqueta='10')
+    except Aborta as e:
+        print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
+
+    # Claves que ya estaban (solo para contar altas). Antes del barrido.
+    prev = claves_previas(cur, 'keepa_escaparate', ['asin', 'dominio'], ambito=AMBITO)
 
     # --- Crear tabla + vista y volcar (todo dentro de la transacción) ---
     cur.execute(sql_crear_tabla())
@@ -605,10 +611,16 @@ def main():
     sql_upsert = (f"INSERT INTO keepa_escaparate ({', '.join(cols)}) VALUES ({ph}) "
                   f"ON CONFLICT (asin, dominio) DO UPDATE SET {set_upd}, procesado_at=now();")
 
-    claves_previas = set()
-    if existe_tabla:
-        cur.execute("SELECT asin, dominio FROM keepa_escaparate WHERE dominio = %s;", (meta['dominio'],))
-        claves_previas = {(str(a).strip().upper(), str(d).strip()) for a, d in cur.fetchall()}
+    # 🔒 LA FOTO TIRA LA HOJA VIEJA: los (asin, dominio) de ESTE dominio que ya
+    # no vienen en el export se BORRAN. Mismo commit que la carga: o todo o nada.
+    # Las claves son EXACTAMENTE los valores que el upsert va a escribir.
+    claves_nuevas = [(f['registro']['asin'], f['registro']['dominio']) for f in filas]
+    try:
+        borradas = barrer_sobrantes(cur, 'keepa_escaparate', ['asin', 'dominio'],
+                                    claves_nuevas, ambito=AMBITO)
+    except Aborta as e:
+        print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
+        con.rollback(); cur.close(); con.close(); sys.exit(1)
 
     for f in filas:
         r = f['registro']
@@ -617,8 +629,7 @@ def main():
         cur.execute(sql_upsert, vals)
 
     altas = [f for f in filas
-             if (f['asin'].strip().upper(), f['dominio']) not in claves_previas]
-    actualizaciones = len(filas) - len(altas)
+             if (f['registro']['asin'], f['registro']['dominio']) not in prev]
 
     # --- El descuadre vive en el DATO: se lee de la vista (dentro de la txn) ---
     def cuenta_bandera(bandera):
@@ -632,11 +643,8 @@ def main():
     n_sinexport = cuenta_bandera('activo_sin_export')
 
     # --- Resumen (se imprime siempre) ---
-    print(f"\n--- Lo que {'se ha escrito' if MODO == 'aplicar' else 'se escribiría'} en "
-          f"keepa_escaparate ({ENTORNO}) ---")
-    print(f"   · altas (par nuevo):        {len(altas)}")
-    print(f"   · actualizaciones (upsert): {actualizaciones}")
-    print(f"   · total filas volcadas:     {len(filas)}")
+    print(resumen_foto('keepa_escaparate', AMBITO, previas, len(filas),
+                       len(altas), borradas, MODO), flush=True)
 
     print(f"\n--- El descuadre (vista v_keepa_cruce · NO aborta · vive en el dato) ---")
     print(f"   · §5.1 ean_no_confirmado (ficha≠Keepa):       {n_ean}")
@@ -658,7 +666,7 @@ def main():
 
     cur.close(); con.close()
     print(f"\n=== FIN · entorno={ENTORNO} · modo={MODO} · filas={len(filas)} · "
-          f"altas={len(altas)} · ean_no_confirmado={n_ean} · tarifa_discrepante={n_tarifa} · "
+          f"altas={len(altas)} · bajas={borradas} · ean_no_confirmado={n_ean} · tarifa_discrepante={n_tarifa} · "
           f"sin_foto_curable={n_foto} · buybox_ajena={n_bb} · activo_sin_export={n_sinexport} ===",
           flush=True)
 
