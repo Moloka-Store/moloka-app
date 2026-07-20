@@ -28,7 +28,7 @@
 #     de un país) y en la MISMA transacción que la carga: o todo o nada.
 #
 # 🔒 EL NOMBRE DEL FICHERO ES DATO, no decoración. Del nombre salen la fecha de
-#   la foto, el dominio (9=ES, 10=IT, 8=FR) y el seller id. La columna
+#   la foto, el dominio (3=DE, 4=FR, 8=IT, 9=ES) y el seller id. La columna
 #   'Última actualización' abarca 80 h y NO es la foto de un instante: sin el
 #   nombre no se sabe de qué día ni de qué país es → si el nombre no casa con el
 #   patrón, se ABORTA.
@@ -63,6 +63,16 @@ DB_URL       = os.environ.get('DB_URL', '')         # postgres del ENTORNO (stag
 MODO         = os.environ.get('MODO', 'ensayo').strip().lower()       # ensayo | aplicar
 ENTORNO      = os.environ.get('ENTORNO', 'staging').strip().lower()   # staging | produccion
 
+# FICHERO (opcional): nombre EXACTO del .csv del buzón que se quiere procesar.
+# Vacío = el más reciente, que es el comportamiento de siempre y sigue siendo el
+# de por defecto. Existe porque cada export de Keepa es de UN país: con los cuatro
+# (DE/FR/IT/ES) subidos a la vez, "el más reciente" procesaría siempre el mismo y
+# no habría manera de cargar los otros tres sin ir subiéndolos de uno en uno.
+# 🔒 Si se pide un nombre que no está en el buzón se ABORTA: JAMÁS se cae al más
+#    reciente de reserva. Procesar en silencio un país distinto del que pediste es
+#    exactamente el error que este parámetro viene a evitar.
+FICHERO      = os.environ.get('FICHERO', '').strip()
+
 BUCKET, CARPETA = 'informes', 'keepa_escaparate'
 
 # 🔒 "¿la buy box es mía?" se resuelve por SELLER ID, JAMÁS por el nombre.
@@ -72,8 +82,16 @@ NUESTRO_SELLER_ID = 'A2R25VOCZPEH8K'
 RE_FICHERO = re.compile(
     r'^KeepaExport-(\d{4}-\d{2}-\d{2})-ResumenDelVendedor-(\d+)-([A-Za-z0-9]+)\.csv$'
 )
-# Dominio Keepa (numérico en el nombre) → Localización esperada en el fichero
-DOMINIO_NUM = {'9': 'es', '10': 'it', '8': 'fr'}
+# Dominio Keepa (numérico en el nombre) → Localización esperada en el fichero.
+# 🔒 ESTOS PARES SON EL ESTÁNDAR DE KEEPA, no una convención de Moloka:
+#     3=DE · 4=FR · 8=IT · 9=ES   (el 10 es India, NO Italia)
+# Estuvieron mal hasta el 20-jul-2026: el mapa decía {'9':'es','10':'it','8':'fr'}.
+# Con aquél, el fichero de IT (el 8) se guardaba etiquetado 'fr' —dato bueno, país
+# equivocado— y los de DE (3) y FR (4) ni existían en el dict: abortaban en la
+# Guarda 4 como "dominio desconocido". Solo no rompía porque únicamente se cargaba
+# ES. Medido contra los cuatro ficheros reales del 20-jul (DE 86 · FR 89 · IT 89 ·
+# ES 212), todos del seller A2R25VOCZPEH8K.
+DOMINIO_NUM = {'3': 'de', '4': 'fr', '8': 'it', '9': 'es'}
 
 # ---------------------------------------------------------------------------
 # Columnas TIPADAS: (encabezado EXACTO del CSV, columna Postgres, tipo).
@@ -288,8 +306,13 @@ def leer_nombre(fichero):
     except ValueError:
         raise Aborta(f"[Guarda 4] La fecha del nombre no es válida: {fecha_txt!r}.")
     if dom_num not in DOMINIO_NUM:
+        # La lista de conocidos se DERIVA del dict: un mensaje con los pares
+        # escritos a mano es el que se queda mintiendo cuando el dict cambia
+        # (fue justo lo que pasó hasta el 20-jul-2026).
+        conocidos = ", ".join(f"{n}={d.upper()}" for n, d in sorted(DOMINIO_NUM.items(),
+                                                                    key=lambda kv: int(kv[0])))
         raise Aborta(f"[Guarda 4] Dominio Keepa desconocido en el nombre: {dom_num!r} "
-                     f"(conocidos: 9=ES, 10=IT, 8=FR).")
+                     f"(conocidos: {conocidos}).")
     return {'fecha_foto': fecha_foto, 'dominio': DOMINIO_NUM[dom_num],
             'seller_id': seller}
 
@@ -525,6 +548,7 @@ def main():
     print("=== PROCESADOR KEEPA_ESCAPARATE ===", flush=True)
     print(f"MODO: {MODO}", flush=True)
     print(f"ENTORNO: {ENTORNO}", flush=True)
+    print(f"FICHERO: {FICHERO or '(vacío → el más reciente del buzón)'}", flush=True)
     print("=" * 40, flush=True)
 
     if MODO not in ('ensayo', 'aplicar'):
@@ -546,8 +570,23 @@ def main():
         sys.exit(f"No hay ningún .csv en {BUCKET}/{CARPETA}/. "
                  "Sube el export 'Resumen del vendedor' de Keepa (.csv) y relanza.")
     csvs.sort(key=lambda o: (o.get('updated_at') or o.get('created_at') or ''), reverse=True)
-    fichero = csvs[0]['name']
-    print(f"Export elegido (el más reciente): {fichero}", flush=True)
+
+    if FICHERO:
+        # Pedido a dedo: tiene que estar, EXACTO. Sin fallback al más reciente.
+        nombres = [o['name'] for o in csvs]
+        if FICHERO not in nombres:
+            print(f"\n❌ ABORTA (no se ha escrito nada):\n"
+                  f"[Guarda fichero] Se pidió procesar {FICHERO!r} y no está en "
+                  f"{BUCKET}/{CARPETA}/.\n"
+                  f"   Hay {len(nombres)} .csv en el buzón: {nombres}\n"
+                  f"   No se cae al más reciente: cargaría un país distinto del que "
+                  f"pediste sin avisar.", flush=True)
+            sys.exit(1)
+        fichero = FICHERO
+        print(f"Export elegido (pedido a dedo por FICHERO): {fichero}", flush=True)
+    else:
+        fichero = csvs[0]['name']
+        print(f"Export elegido (el más reciente de {len(csvs)}): {fichero}", flush=True)
 
     # --- El nombre es DATO (Guarda 4) ---
     try:

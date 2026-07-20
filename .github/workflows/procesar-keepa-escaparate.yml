@@ -17,6 +17,14 @@ on:
         type: choice
         options: [ensayo, aplicar]
         default: ensayo
+      fichero:
+        # Cada export de Keepa es de UN país. Con los cuatro (DE/FR/IT/ES) en el
+        # buzón, "el más reciente" procesaría siempre el mismo: esto deja elegir.
+        # Si el nombre no está en el buzón, ABORTA (no cae al más reciente).
+        description: 'Nombre EXACTO del .csv a procesar. Vacío = el más reciente (por defecto).'
+        type: string
+        required: false
+        default: ''
 
 concurrency:
   group: procesar-keepa-escaparate
@@ -41,5 +49,6 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           ENTORNO: ${{ inputs.entorno }}
           MODO: ${{ inputs.modo }}
+          FICHERO: ${{ inputs.fichero }}
           DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
         run: python -u procesador_keepa_escaparate.py
