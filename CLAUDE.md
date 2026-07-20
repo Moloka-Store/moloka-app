@@ -65,6 +65,27 @@ Fernando: *"los míos son los buenos"*. Las fórmulas de rentabilidad, IVA y ale
 al céntimo y **no se reinterpretan**. `estimated-cost-savings-*` de salud_fba es **marketing**
 (prometía 10.747 € con un almacenamiento real de 94,86 €/mes): jamás usarlo como "ahorro".
 
+### 1.6 Los TRES CAJONES: cada tabla se escribe de UNA manera
+Antes de escribir en una tabla, mira **en qué cajón está**. El cajón decide qué pasa con lo que ya
+había, y los cajones no se mezclan:
+
+| Cajón | Qué se hace con lo viejo | Quién vive aquí |
+|---|---|---|
+| **FOTO** | **Se tira la hoja vieja.** Lo que no viene en el fichero se **BORRA** | `salud_fba`, `listings_amazon`, `keepa_escaparate`, `paneu_aptos` + `paneu_oferta_pais`, custom analytics |
+| **PELÍCULA** | **Se apila. NUNCA se borra** | `movimientos`, el ledger |
+| **MAESTRO** | **Se MARCA. Ni se borra ni se sustituye** | `productos` |
+
+- Una **FOTO** contesta *"¿cómo está esto AHORA?"*. Una fila que sobrevive a su fichero es un
+  fantasma que descuadra el cruce. La memoria histórica **no vive aquí**: vive en la Película.
+- Una **PELÍCULA** es un libro de asientos: append, jamás update destructivo. Borrar una línea del
+  ledger es falsificar el extracto.
+- Un **MAESTRO** es la identidad. Un producto que deja de venderse no se borra: se **marca**
+  (`activo=false`). Borrarlo deja huérfanos los movimientos que lo citan.
+
+🔴 **El error caro es tratar un cajón como si fuera otro.** Un upsert-sin-DELETE convierte una Foto
+en un collage de dos días (fue el caso real de salud_fba, §2); un DELETE en una Película destruye
+el histórico y no hay de dónde recuperarlo.
+
 ---
 
 ## 2. LOS PROCESADORES: EL PATRÓN
@@ -91,13 +112,18 @@ al céntimo y **no se reinterpretan**. `estimated-cost-savings-*` de salud_fba e
   `sales-rank` llevaba semanas descargándose sin mirarse — y resultó ser el detector de ASIN muertos.
 
 ### Trampas medidas (no re-descubrir)
-- **Filas fantasma:** las tablas-foto se cargan con upsert **sin DELETE**. Si el informe encoge
-  (salud_fba: 195→188 SKU en dos días), quedan filas viejas conviviendo con las nuevas. La decisión
-  del invariante está **pendiente**.
-  🔴 **Es un ACUERDO, no una guarda: no se lanza salud_fba en `aplicar` hasta que se tome.** El
-  código NO lo impide — el workflow ofrece `produccion`+`aplicar` como cualquier otro. Si hace falta
-  lanzarlo, se le pregunta a Fernando.
-  El ledger no tiene este problema: es libro, no foto.
+- **Filas fantasma: RESUELTO (PR #33, 20-jul-2026).** Antes las tablas-foto se cargaban con upsert
+  **sin DELETE**: si el informe encogía (salud_fba: 195→188 SKU en dos días), quedaban filas viejas
+  conviviendo con las nuevas. **Ya no. La Foto tira la hoja vieja** (§1.6). Las cuatro cañerías
+  heredan el patrón de `foto_comun.py`: lo que no viene en el fichero se BORRA, con guarda
+  anti-encogimiento (<50% de las filas previas → ABORTA) **antes** del borrado, y borrado y carga en
+  la misma transacción.
+  ✅ **El ACUERDO de "no se lanza salud_fba en `aplicar`" queda LEVANTADO.** La decisión que
+  esperaba ya está tomada: se lanza como cualquier otro.
+  ⚠️ Lo que sí sigue mereciendo aviso: **la PRIMERA pasada `produccion`+`aplicar` de cada cañería
+  dará de baja los fantasmas acumulados**. Es lo que se busca, pero mira las bajas que anuncia el
+  ensayo antes de aplicar.
+  El ledger no tiene este problema: es Película, no Foto.
 - **Dos fórmulas de stock que NO se unifican.** Son asientos distintos y ninguna "corrige" a la otra:
   - **La columna de Amazon** (`Inventory Supply at FBA`, en salud_fba) `= available + fc-transfer +
     inbound-quantity`, **SIN `reserved`**. Verificado fila a fila; lo comprueba la Guarda 6. Es la
