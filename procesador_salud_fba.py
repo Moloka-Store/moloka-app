@@ -15,8 +15,14 @@
 #     v_salud_fba_cruce (§5). La conciliación es otro asiento, no este.
 #
 # LA CLAVE es (asin, marketplace), NO el SKU (ese fue el error de la v1).
-#   - PK (asin, marketplace). Cada pasada hace UPSERT: solo la última foto.
+#   - PK (asin, marketplace). Cada pasada deja SOLO la última foto.
 #   - Idempotente: correr dos veces el mismo fichero deja el mismo resultado.
+#   - 🔒 ES UNA FOTO, NO UN COLLAGE (patrón común en foto_comun.py): los
+#     (asin, marketplace) que ya no vienen en el informe se BORRAN. Es la
+#     decisión que faltaba sobre las filas fantasma (medido: 195→188 SKU en dos
+#     días dejaba 7 filas viejas conviviendo con las nuevas). El borrado va
+#     acotado a los marketplaces del informe y en la MISMA transacción que la
+#     carga: o todo o nada.
 #
 # Precedente a imitar: procesador_all_listings.py (ya en producción).
 # Mismo estilo, misma escalera (ENTORNO staging|produccion, MODO ensayo|aplicar),
@@ -33,6 +39,10 @@ from datetime import date
 import psycopg2
 from psycopg2.extras import Json
 from supabase import create_client
+
+# El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
+from foto_comun import (Aborta, guarda_anti_encogimiento, claves_previas,
+                        barrer_sobrantes, resumen_foto)
 
 # ---------------------------------------------------------------------------
 # 0) Configuración (secrets de GitHub; jamás credenciales en el código)
@@ -130,10 +140,8 @@ ALIAS = {
 }
 
 
-class Aborta(Exception):
-    """Cualquier guarda 1-10 lanza esto: se imprime, NO se escribe nada y el
-    workflow sale en rojo."""
-    pass
+# Aborta vive ahora en foto_comun (misma clase para las cuatro cañerías): una
+# guarda que aborta se imprime, NO escribe nada y el workflow sale en rojo.
 
 
 # ---------------------------------------------------------------------------
@@ -416,23 +424,22 @@ def main():
     con.autocommit = False
     cur = con.cursor()
 
-    # Recuento previo (para Guarda 9). Si la tabla no existe aún → 0.
-    cur.execute("SELECT to_regclass('public.salud_fba');")
-    existe_tabla = cur.fetchone()[0] is not None
-    if existe_tabla:
-        cur.execute("SELECT count(*) FROM salud_fba;")
-        previas = cur.fetchone()[0]
-        cur.execute("SELECT asin, marketplace FROM salud_fba;")
-        claves_previas = {(str(a).strip().upper(), str(m).strip().upper()) for a, m in cur.fetchall()}
-    else:
-        previas, claves_previas = 0, set()
+    # 🔒 ÁMBITO DE LA FOTO: los marketplaces que ESTE informe declara cubrir
+    # (hoy solo ES). La foto que sustituye es la de esos marketplaces, no la
+    # tabla entera: el día que llegue un informe de otro país, cargarlo no
+    # puede borrar el de ES.
+    AMBITO = ('marketplace', sorted({f['registro']['marketplace'] for f in filas}))
 
-    # Guarda 9: anti-encogimiento (< 50% de lo que ya hay → ABORTA)
-    if len(filas) < previas * 0.5:
-        print(f"\n❌ ABORTA [Guarda 9] anti-encogimiento: el fichero trae {len(filas)} "
-              f"filas y en salud_fba ya hay {previas} (menos del 50%). No se escribe nada.",
-              flush=True)
+    # Guarda 9: anti-encogimiento. Corre ANTES de borrar y ANTES de escribir.
+    try:
+        previas = guarda_anti_encogimiento(cur, 'salud_fba', len(filas),
+                                           ambito=AMBITO, etiqueta='9')
+    except Aborta as e:
+        print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
+
+    # Claves que ya estaban (solo para contar altas). Antes del barrido.
+    prev = claves_previas(cur, 'salud_fba', ['asin', 'marketplace'], ambito=AMBITO)
 
     # --- Cruce en memoria contra `productos` (para los avisos §4.2 y el premio §5) ---
     cur.execute("SELECT btrim(asin), btrim(sku) FROM productos WHERE activo AND asin IS NOT NULL;")
@@ -456,8 +463,7 @@ def main():
                                    f"vs informe {f['sku']}")
 
     altas = [f for f in filas
-             if (f['asin'].strip().upper(), f['marketplace'].strip().upper()) not in claves_previas]
-    actualizaciones = len(filas) - len(altas)
+             if (f['registro']['asin'], f['registro']['marketplace']) not in prev]
 
     # --- Crear tabla + vista y volcar (todo dentro de la transacción) ---
     cur.execute(sql_crear_tabla())
@@ -472,16 +478,25 @@ def main():
     sql_upsert = (f"INSERT INTO salud_fba ({', '.join(cols)}) VALUES ({ph}) "
                   f"ON CONFLICT (asin, marketplace) DO UPDATE SET {set_upd}, procesado_en=now();")
 
+    # 🔒 LA FOTO TIRA LA HOJA VIEJA: los (asin, marketplace) del ámbito que ya no
+    # vienen en el informe se BORRAN (los 7 SKU fantasma de 195→188 dejan de
+    # existir). Mismo commit que la carga: o todo o nada. Las claves son
+    # EXACTAMENTE los valores que el upsert va a escribir.
+    claves_nuevas = [(f['registro']['asin'], f['registro']['marketplace']) for f in filas]
+    try:
+        borradas = barrer_sobrantes(cur, 'salud_fba', ['asin', 'marketplace'],
+                                    claves_nuevas, ambito=AMBITO)
+    except Aborta as e:
+        print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
+        con.rollback(); cur.close(); con.close(); sys.exit(1)
+
     for f in filas:
         vals = [f['registro'][c] for c, _ in TIPADAS] + [snap, fichero, Json(f['crudo'])]
         cur.execute(sql_upsert, vals)
 
     # --- Resumen (se imprime siempre) ---
-    print(f"\n--- Lo que {'se ha escrito' if MODO == 'aplicar' else 'se escribiría'} en "
-          f"salud_fba ({ENTORNO}) ---")
-    print(f"   · altas (par nuevo):        {len(altas)}")
-    print(f"   · actualizaciones (upsert): {actualizaciones}")
-    print(f"   · total filas volcadas:     {len(filas)}")
+    print(resumen_foto('salud_fba', AMBITO, previas, len(filas),
+                       len(altas), borradas, MODO), flush=True)
 
     print(f"\n--- Avisos (§4.2 · NO abortan · viven en la vista v_salud_fba_cruce) ---")
     print(f"   · ASIN sin ficha activa en productos (red del reverso): {len(sin_ficha)}")
@@ -506,7 +521,7 @@ def main():
 
     cur.close(); con.close()
     print(f"\n=== FIN · entorno={ENTORNO} · modo={MODO} · filas={len(filas)} · "
-          f"altas={len(altas)} · sin_ficha={len(sin_ficha)} · "
+          f"altas={len(altas)} · bajas={borradas} · sin_ficha={len(sin_ficha)} · "
           f"sku_discrepante={len(sku_discrepante)} ===", flush=True)
 
 

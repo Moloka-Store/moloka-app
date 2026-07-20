@@ -15,6 +15,11 @@
 #      v1. Cero cruce contra `productos`.
 #   🔒 NINGUNA VISTA en este PR: la del eje país está bloqueada por una decisión
 #      de diseño abierta (el ranking de reconsideración). No se adelanta.
+#   🔒 SON DOS FOTOS, NO DOS COLLAGES (patrón común en foto_comun.py): los SKU
+#      (y los pares SKU×país) que ya no vienen en el informe se BORRAN. PanEU es
+#      película, no foto fija: un SKU que sale del programa tiene que
+#      DESAPARECER, no quedarse con el estado de la semana pasada. Guarda
+#      anti-encogimiento antes, y borrado+carga en la MISMA transacción.
 #
 # TRAMPA 1 — el fichero LLEVA BOM: se lee con utf-8-sig. (El del INTERNACIONAL
 #   del PR #2 NO lleva BOM: no copiar el encoding de uno al otro.)
@@ -33,11 +38,15 @@
 # ============================================================================
 
 import os, sys, io, csv, re
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 import psycopg2
 from psycopg2.extras import Json
 from supabase import create_client
+
+# El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
+from foto_comun import (Aborta, fecha_del_dato_por_subida, guarda_anti_encogimiento,
+                        claves_previas, barrer_sobrantes, resumen_foto)
 
 # ---------------------------------------------------------------------------
 # 0) Configuración (secrets de GitHub; jamás credenciales en el código)
@@ -100,10 +109,8 @@ RE_FECHA = re.compile(
     r'^[A-Za-z]{3}\s+([A-Za-z]{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+UTC\s+(\d{4})$')
 
 
-class Aborta(Exception):
-    """Cualquier guarda que aborta lanza esto: se imprime, NO se escribe nada y
-    el workflow sale en rojo."""
-    pass
+# Aborta vive ahora en foto_comun (misma clase para las cuatro cañerías): una
+# guarda que aborta se imprime, NO escribe nada y el workflow sale en rojo.
 
 
 # ---------------------------------------------------------------------------
@@ -417,14 +424,19 @@ def main():
     fichero = elegido['name']
     print(f"Informe elegido (el más reciente): {fichero}", flush=True)
 
-    # snapshot_date: el fichero no trae columna de snapshot ni fecha en el nombre;
-    # se toma la fecha de subida del objeto (cuándo se puso esta foto en el buzón).
-    sello = elegido.get('updated_at') or elegido.get('created_at') or ''
+    # snapshot_date = LA FECHA DEL DATO. Este fichero no trae columna de snapshot
+    # (a diferencia de salud_fba) ni fecha en el nombre (a diferencia de keepa):
+    # el único sello honrado es cuándo se subió esta foto al buzón.
+    # 🔴 Si no se puede leer, ABORTA. El date.today() de reserva que había aquí
+    # era el now() prohibido por la puerta de atrás: fechaba HOY una foto vieja,
+    # que no es información incompleta sino FALSA.
     try:
-        snapshot_date = datetime.fromisoformat(sello.replace('Z', '+00:00')).date()
-    except (ValueError, AttributeError):
-        snapshot_date = date.today()
-    print(f"   · snapshot_date={snapshot_date} (fecha de subida al buzón)", flush=True)
+        snapshot_date = fecha_del_dato_por_subida(elegido, 'paneu_aptos').date()
+    except Aborta as e:
+        print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
+        sys.exit(1)
+    print(f"   · snapshot_date={snapshot_date} (fecha de subida al buzón = fecha del dato)",
+          flush=True)
 
     crudo_bytes = sb.storage.from_(BUCKET).download(f"{CARPETA}/{fichero}")
     # 🔴 TRAMPA 1: este fichero LLEVA BOM → utf-8-sig. Fallback cp1252.
@@ -465,16 +477,25 @@ def main():
     con.autocommit = False
     cur = con.cursor()
 
-    # Claves previas (para contar altas vs actualizaciones)
-    def claves_previas(tabla, cols):
-        cur.execute(f"SELECT to_regclass('public.{tabla}');")
-        if cur.fetchone()[0] is None:
-            return set()
-        cur.execute(f"SELECT {', '.join(cols)} FROM {tabla};")
-        return {tuple(str(x).strip() for x in row) for row in cur.fetchall()}
+    # 🔒 ÁMBITO DE LA FOTO: ninguno. Este fichero trae los 10 países de una vez:
+    # ES la tabla entera, en las dos tablas. (En keepa sí hay ámbito, porque
+    # cada export es de un país.)
+    AMBITO = None
 
-    prev_aptos = claves_previas('paneu_aptos', ['seller_sku'])
-    prev_ofertas = claves_previas('paneu_oferta_pais', ['seller_sku', 'pais'])
+    # Guarda anti-encogimiento en LAS DOS tablas. Corre ANTES de borrar y ANTES
+    # de escribir. No la tenía ninguna de las dos: era el hueco de este PR.
+    try:
+        previas_aptos = guarda_anti_encogimiento(cur, 'paneu_aptos', len(aptos),
+                                                 ambito=AMBITO, etiqueta='anti-encogimiento aptos')
+        previas_ofertas = guarda_anti_encogimiento(cur, 'paneu_oferta_pais', len(ofertas),
+                                                   ambito=AMBITO, etiqueta='anti-encogimiento ofertas')
+    except Aborta as e:
+        print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
+        con.rollback(); cur.close(); con.close(); sys.exit(1)
+
+    # Claves que ya estaban (solo para contar altas). Antes del barrido.
+    prev_aptos = claves_previas(cur, 'paneu_aptos', ['seller_sku'], ambito=AMBITO)
+    prev_ofertas = claves_previas(cur, 'paneu_oferta_pais', ['seller_sku', 'pais'], ambito=AMBITO)
 
     # --- Crear tablas (nacen CERRADAS) e índices. SIN vista. ---
     cur.execute(SQL_TABLA_APTOS)
@@ -484,6 +505,21 @@ def main():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_paneu_oferta_pais_sku ON paneu_oferta_pais(seller_sku);")
     cur.execute("ALTER TABLE paneu_aptos ENABLE ROW LEVEL SECURITY;")
     cur.execute("ALTER TABLE paneu_oferta_pais ENABLE ROW LEVEL SECURITY;")
+
+    # 🔒 LA FOTO TIRA LA HOJA VIEJA: los SKU (y los pares SKU×país) que ya no
+    # vienen en el informe se BORRAN de las DOS tablas. PanEU es película, no
+    # foto fija: un SKU que sale del programa tiene que DESAPARECER, no quedarse
+    # con su estado de la semana pasada. Mismo commit que la carga: o todo o nada.
+    try:
+        borradas_aptos = barrer_sobrantes(
+            cur, 'paneu_aptos', ['seller_sku'],
+            [(r['seller_sku'],) for r in aptos], ambito=AMBITO)
+        borradas_ofertas = barrer_sobrantes(
+            cur, 'paneu_oferta_pais', ['seller_sku', 'pais'],
+            [(r['seller_sku'], r['pais']) for r in ofertas], ambito=AMBITO)
+    except Aborta as e:
+        print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
+        con.rollback(); cur.close(); con.close(); sys.exit(1)
 
     # --- Volcar paneu_aptos ---
     cols_a = COLS_APTOS + ['snapshot_date', 'fichero', 'crudo']
@@ -508,10 +544,10 @@ def main():
     altas_ofertas = sum(1 for r in ofertas if (r['seller_sku'], r['pais']) not in prev_ofertas)
 
     # --- Resumen: los números del §7, calculados y mostrados (verificar por SQL) ---
-    print(f"\n--- Lo que {'se ha escrito' if MODO == 'aplicar' else 'se escribiría'} "
-          f"({ENTORNO}) ---")
-    print(f"   · paneu_aptos:       {len(aptos)} filas  (altas {altas_aptos})")
-    print(f"   · paneu_oferta_pais: {len(ofertas)} filas  (altas {altas_ofertas})")
+    print(resumen_foto('paneu_aptos', AMBITO, previas_aptos, len(aptos),
+                       altas_aptos, borradas_aptos, MODO), flush=True)
+    print(resumen_foto('paneu_oferta_pais', AMBITO, previas_ofertas, len(ofertas),
+                       altas_ofertas, borradas_ofertas, MODO), flush=True)
 
     from collections import Counter
     est = Counter(r['estado_paneu'] for r in aptos)
@@ -551,7 +587,8 @@ def main():
 
     cur.close(); con.close()
     print(f"\n=== FIN · entorno={ENTORNO} · modo={MODO} · aptos={len(aptos)} · "
-          f"ofertas={len(ofertas)} · paises={len(paises)} · "
+          f"ofertas={len(ofertas)} · bajas={borradas_aptos}+{borradas_ofertas} · "
+          f"paises={len(paises)} · "
           f"estados_desconocidos={len(info['estados_desconocidos'])} · "
           f"paises_nuevos={len(info['paises_nuevos'])} ===", flush=True)
 
