@@ -1,0 +1,46 @@
+name: Moloka - Procesar LEDGER
+
+# 7ª pieza de la Fase 0 de la v2 (el LIBRO MAYOR de movimientos FBA). A DEMANDA,
+# sin reloj. Espejo de procesar-internacional.yml. STAGING + ENSAYO por defecto.
+# Carga POR RANGO de fechas (no foto): reemplaza [fecha_min, fecha_max] del
+# fichero y deja intacto lo anterior. Escalera: staging ensayo → staging aplicar
+#           → verificación SQL → producción ensayo → producción aplicar → SQL.
+on:
+  workflow_dispatch:
+    inputs:
+      entorno:
+        description: 'Base de datos destino'
+        type: choice
+        options: [staging, produccion]
+        default: staging
+      modo:
+        description: 'ensayo = solo comprueba y dice qué escribiría; aplicar = recierra el rango en ledger_movimientos'
+        type: choice
+        options: [ensayo, aplicar]
+        default: ensayo
+
+concurrency:
+  group: procesar-ledger
+  cancel-in-progress: false
+
+jobs:
+  procesar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install --quiet supabase psycopg2-binary
+
+      - name: Ejecutar procesador
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          ENTORNO: ${{ inputs.entorno }}
+          MODO: ${{ inputs.modo }}
+          DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
+        run: python -u procesador_ledger.py
