@@ -1269,8 +1269,14 @@ try:
 except Exception as ex:
     print("ATENCION: no se pudo subir el Excel a Storage:", ex)
 
+# El insert dice OK aunque la fila NO llegue a persistir (paso el 23-jul-2026: el log
+# imprimio "registrado" pero en la BD no habia fila). Por eso NO nos fiamos del insert:
+# releemos la fila por su id. Si no esta, la corrida termina en ROJO (ver cierre del script)
+# para que NUNCA vuelva a perderse un escaneo en silencio.
+_biblioteca_ok = False
+_biblioteca_id = None
 try:
-    sb.table('escaner_resultados').insert({
+    _resp_bib = sb.table('escaner_resultados').insert({
         'proveedor': PROVEEDOR, 'marca': MARCA, 'modo': MODO,
         'rank_maximo': RANK_MAXIMO,
         'n_productos': len(registros), 'n_comprar': n_mandar,
@@ -1279,9 +1285,19 @@ try:
         'fichero': ruta_storage if subido_ok else None,
         'tokens_restantes': int(api.tokens_left),
     }).execute()
-    print("Escaneo registrado en la biblioteca (escaner_resultados).")
+    _filas_bib = getattr(_resp_bib, 'data', None) or []
+    _biblioteca_id = _filas_bib[0].get('id') if _filas_bib else None
+    if _biblioteca_id is not None:
+        # Verificacion DURA contra la BD (no el objeto del insert, no el log).
+        _chk_bib = sb.table('escaner_resultados').select('id').eq('id', _biblioteca_id).limit(1).execute()
+        _biblioteca_ok = bool(getattr(_chk_bib, 'data', None))
+    if _biblioteca_ok:
+        print(f"Escaneo registrado y VERIFICADO en la biblioteca (escaner_resultados), id={_biblioteca_id}.")
+    else:
+        print("!!! CRITICO: el insert en escaner_resultados dijo OK pero la BD NO devuelve la fila "
+              f"(id={_biblioteca_id}). El escaneo NO quedo en la biblioteca. La corrida saldra en ROJO.")
 except Exception as ex:
-    print("AVISO: no se pudo registrar en escaner_resultados (el Excel SI esta en Storage):", ex)
+    print("!!! CRITICO: no se pudo registrar en escaner_resultados (el Excel puede estar en Storage):", ex)
 
 # ============================================================
 # Celda 10 - actualizar la memoria del proveedor (presentes / agotados)
@@ -1402,3 +1418,13 @@ try:
         print(">>> Telegram: sin claves en este paso -> no se envia (normal en TCG o app).")
 except Exception as _e_tg:
     print("AVISO Telegram (no se envio, la corrida ya termino igual):", _e_tg)
+
+# ============================================================
+# CIERRE: si el registro en la biblioteca NO persistio, la corrida NO termina en verde.
+# El "verde mentiroso" (run OK + escaneo perdido en silencio) fue el fallo del 23-jul-2026.
+# Todo el trabajo (memoria, buzon, Telegram) ya corrio arriba; aqui solo gritamos en el
+# ESTADO del run para que salte en GitHub Actions / cron-job.org y no pase desapercibido.
+# ============================================================
+if not _biblioteca_ok:
+    print("=== ESCANER: la biblioteca NO recibio el registro -> SALGO EN ROJO (exit 1) para que se vea ===")
+    sys.exit(1)
