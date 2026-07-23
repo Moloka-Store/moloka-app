@@ -483,9 +483,37 @@ def main():
     # existir). Mismo commit que la carga: o todo o nada. Las claves son
     # EXACTAMENTE los valores que el upsert va a escribir.
     claves_nuevas = [(f['registro']['asin'], f['registro']['marketplace']) for f in filas]
+
+    # ── SALVAGUARDA anti-omisión ────────────────────────────────────────────
+    # El informe FBA a veces OMITE productos SANOS (con stock). El patrón foto los
+    # borraría. Antes de barrer, PROTEGEMOS los (asin, ES) que ya están en salud_fba,
+    # NO vienen en el informe de hoy, y AÚN tienen stock real. Evidencia de stock:
+    #   (a) su propia foto de salud: available + fc_transfer > 0, o
+    #   (b) unidades en inventario_internacional (otra foto).
+    # Solo se borran los fantasmas de verdad (ausentes y sin stock por ningún lado).
+    en_fichero = {(a.upper(), mk.upper()) for (a, mk) in claves_nuevas}
+    cur.execute("SELECT DISTINCT btrim(asin) FROM inventario_internacional WHERE quantity > 0;")
+    intl_con_stock = {r[0].upper() for r in cur.fetchall() if r[0]}
+    cur.execute(
+        "SELECT asin, marketplace, COALESCE(available,0)+COALESCE(fc_transfer,0) "
+        "FROM salud_fba WHERE marketplace = ANY(%s);", (AMBITO[1],))
+    protegidas = []
+    for asin_p, mk_p, disp_p in cur.fetchall():
+        if (asin_p.upper(), mk_p.upper()) in en_fichero:
+            continue  # sí viene en el informe: no es candidato a baja
+        if (disp_p or 0) > 0 or asin_p.upper() in intl_con_stock:
+            protegidas.append((asin_p, mk_p))  # ausente pero CON stock → NO borrar
+    if protegidas:
+        print(f"   · 🛡️ Salvaguarda: {len(protegidas)} ausentes del informe PROTEGIDOS "
+              f"(tienen stock en salud o internacional): "
+              f"{', '.join(a for a, _ in protegidas[:10])}"
+              f"{' …' if len(protegidas) > 10 else ''}", flush=True)
+    claves_barrido = claves_nuevas + protegidas
+    # ────────────────────────────────────────────────────────────────────────
+
     try:
         borradas = barrer_sobrantes(cur, 'salud_fba', ['asin', 'marketplace'],
-                                    claves_nuevas, ambito=AMBITO)
+                                    claves_barrido, ambito=AMBITO)
     except Aborta as e:
         print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
