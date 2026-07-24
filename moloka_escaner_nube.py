@@ -441,8 +441,14 @@ def es_chase_ean(e):
 # normal, como caja 5+1 y como chase suelto, con precios muy distintos; al
 # descartar el suelto y separar normal/caja en claves de memoria distintas,
 # deja de haber 'cambio_precio' perpetuo.
-_RE_CAJA6     = re.compile(r'5\s*\+\s*1', re.I)
-_RE_CHASE_NOM = re.compile(r'\bchase\b', re.I)
+_RE_CAJA6 = re.compile(r'5\s*\+\s*1', re.I)
+# "chase" SOLO cuenta cuando es MARCADOR DE VARIANTE: al FINAL del nombre
+# ("... Dilophosaurus Chase") o entre PARENTESIS ("... Pink Batman (CHASE) 18 cm").
+# Si aparece en MEDIO es, casi siempre, un NOMBRE PROPIO: Chase es el perro de la
+# Patrulla Canina, y sin esta restriccion se tiraban paraguas, gorros, mochilas y
+# peluches perfectamente legitimos ("Peluche Chase Patrulla Canina Paw Patrol").
+# Medido en el ensayo del 24-jul-2026 contra el feed real de OcioStock.
+_RE_CHASE_NOM = re.compile(r'\bchase\b\s*$|\([^)]*\bchase\b[^)]*\)', re.I)
 
 def clasificar_chase(nombre, ean_in):
     """Devuelve (es_case, es_caja6, descartar)."""
