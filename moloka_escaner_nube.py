@@ -402,7 +402,7 @@ if PROVEEDOR != 'MOLOKA' and not catalogo_local:
 
 IVA_DEFAULT_ES, IVA_IT, IVA_FR = 0.21, 0.22, 0.20
 ALMACEN, COM_DIGITALES = 0.15, 1.03
-UNIDADES_CASE_TCG = 6          # TCG vende CHASE en case 5+1 -> coste unitario = PA / 6. Solo TCG.
+UNIDADES_CASE_TCG = 6          # CHASE en case de 6 (5+1) -> coste unitario = PA / 6. TCG y chase HEO.
 LOTE_FASE1 = 100
 TS = datetime.now().strftime('%Y%m%d_%H%M')
 ARCHIVO_SALIDA = f'/tmp/Escaneo_{PROVEEDOR}_{MARCA}_{TS}.xlsx'
@@ -1029,7 +1029,8 @@ for i,c in enumerate(lista,1):
     item = {'nombre':f['nombre'],'ean':c['ean_in'],'asin':c['asin'],'marca':f['marca'],
             'pa':f['pa'],'core':f['core'],'es_chase':f['es_chase'],'propio':c['propio'],
             'volumen':f.get('volumen'),'url':f.get('url',''),'titulo_amz':'',
-            'ambiguo':c['ean_in'] in amb_eans,'paises':{}}
+            'ambiguo':c['ean_in'] in amb_eans,'paises':{},
+            'case_de_6':(PROVEEDOR=='TCG' and f['es_chase'])}
     for dom in ('ES','IT','FR'):
         d = datos_pais(c['asin'], dom)
         if d:
@@ -1053,6 +1054,46 @@ try: sb.storage.from_(BUCKET).remove([CKPT_PATH, RANKCACHE_PATH])
 except Exception: pass
 
 # ============================================================
+# Celda 7.5 - CHASE FUNKO de HEO: puente escaner_chase_asin (ASIN a mano)
+# Los que ya tienen ASIN se ESCANEAN (valorados /6, como una caja de 6); los
+# pendientes van a la pestana Chase_manual. La puente esta CERRADA (RLS): se lee
+# con SERVICE_KEY, NUNCA con la anon (lleva el precio de coste).
+# ============================================================
+chase_pendientes = []
+if PROVEEDOR == 'HEO':
+    _svc = os.environ.get('SUPABASE_SERVICE_KEY')
+    if not _svc:
+        print("AVISO: sin SUPABASE_SERVICE_KEY -> no leo la puente de chase (ni ASIN ni pestana).")
+    else:
+        try:
+            sb_svc = create_client(os.environ['SUPABASE_URL'], _svc)
+            _rows = (sb_svc.table('escaner_chase_asin')
+                     .select('producto_heo,nombre,ean_caja,precio_caja,estado,imagen,link_amazon,asin')
+                     .execute().data) or []
+            _con_asin = [x for x in _rows if (x.get('asin') or '').strip() and x.get('estado') == 'disponible']
+            chase_pendientes = [x for x in _rows if not (x.get('asin') or '').strip()]
+            print(f">>> Puente chase: {len(_rows)} total | {len(_con_asin)} con ASIN disponibles | "
+                  f"{len(chase_pendientes)} pendientes de ASIN.")
+            for x in _con_asin:
+                _as = x['asin'].strip()
+                item = {'nombre': x.get('nombre', ''), 'ean': str(x.get('ean_caja') or ''), 'asin': _as,
+                        'marca': 'Funko', 'pa': _num(x.get('precio_caja')), 'core': str(x.get('ean_caja') or ''),
+                        'es_chase': True, 'propio': False, 'volumen': None, 'url': x.get('link_amazon', ''),
+                        'titulo_amz': '', 'ambiguo': False, 'paises': {}, 'case_de_6': True}
+                for dom in ('ES', 'IT', 'FR'):
+                    d = datos_pais(_as, dom)
+                    if d:
+                        item['paises'][dom] = d
+                        if dom == 'ES' and not item['titulo_amz']:
+                            item['titulo_amz'] = d.get('titulo', '')
+                item['coincide'] = _coincide_titulo(item['nombre'], item['titulo_amz'])
+                infos.append(item)
+            if _con_asin:
+                print(f">>> Chase con ASIN escaneados y anadidos a resultados: {len(_con_asin)} (valorados /6).")
+        except Exception as _e:
+            print("AVISO: no se pudo leer/escanear la puente de chase (sigo con el escaneo normal):", _e)
+
+# ============================================================
 # Celda 8 - calculo (decision + orden por margen ES)
 # ============================================================
 def decision_de(margen):
@@ -1065,7 +1106,7 @@ registros = []
 for item in infos:
     iva = {'ES':iva_es_de(item['core']),'IT':IVA_IT,'FR':IVA_FR}
     pa = item['pa']
-    if PROVEEDOR == 'TCG' and item['es_chase'] and pa:
+    if item.get('case_de_6') and pa:
         pa = pa / UNIDADES_CASE_TCG
     item['_pa_efectivo'] = pa
     margen_es = None; paises_out = {}
@@ -1254,6 +1295,43 @@ if filas_lote:
     wl.freeze_panes = 'A2'
 print(f"Pestana 'Precio por lote': {len(filas_lote)} filas con descuento por volumen")
 
+# ============================================================
+# Pestana "Chase_manual": Funko chase de HEO SIN ASIN todavia. Pega el ASIN en
+# Supabase (tabla escaner_chase_asin) usando el enlace de busqueda; la proxima
+# corrida ya lo cruza sola y desaparece de aqui.
+# ============================================================
+if PROVEEDOR == 'HEO':
+    wc = wb.create_sheet('Chase_manual')
+    COLS_CHASE = ['Nombre', 'Código HEO', 'EAN caja', 'Precio caja (€)', 'Precio /6 (€)',
+                  'Estado', 'Imagen', 'Buscar en Amazon', 'ASIN (pégalo en Supabase)']
+    wc.append(COLS_CHASE)
+    for c in range(1, len(COLS_CHASE) + 1):
+        wc.cell(row=1, column=c).font = Font(bold=True)
+    rc = 1
+    for x in chase_pendientes:
+        rc += 1
+        _pc = _num(x.get('precio_caja'))
+        wc.append([x.get('nombre', ''), x.get('producto_heo', ''), str(x.get('ean_caja') or ''),
+                   round(_pc, 2) if _pc else None,
+                   round(_pc / UNIDADES_CASE_TCG, 2) if _pc else None,
+                   x.get('estado', ''),
+                   'Ver imagen ↗' if x.get('imagen') else '',
+                   'Buscar ↗' if x.get('link_amazon') else '', ''])
+        if x.get('imagen'):
+            _ci = wc.cell(row=rc, column=7); _ci.hyperlink = x['imagen']; _ci.font = Font(color='0563C1', underline='single')
+        if x.get('link_amazon'):
+            _cl = wc.cell(row=rc, column=8); _cl.hyperlink = x['link_amazon']; _cl.font = Font(color='0563C1', underline='single')
+    for _cw, _w in ((1, 55), (2, 16), (3, 16), (7, 14), (8, 16), (9, 26)):
+        wc.column_dimensions[get_column_letter(_cw)].width = _w
+    for _col in (4, 5):
+        for _row in range(2, wc.max_row + 1):
+            wc.cell(row=_row, column=_col).number_format = '0.00'
+    wc.freeze_panes = 'A2'
+    print(f"Pestana 'Chase_manual': {len(chase_pendientes)} Funko chase pendientes de ASIN.")
+
+# NOTA: la pestana viaja dentro del Excel, y el Excel solo se guarda si hay
+# algun COMPRAR (ver mas abajo). Decidido asi a proposito: los pendientes
+# viven en la tabla escaner_chase_asin, que es donde se pegan los ASIN.
 # Si no hay ningun COMPRAR, NO se genera ni se sube el Excel (limpieza: un escaneo
 # sin chollos no aporta nada y cada Excel ocupa ~2 MB). El REGISTRO en la biblioteca
 # se guarda IGUAL (n_comprar=0, fichero=NULL) para no romper la alarma de persistencia.
