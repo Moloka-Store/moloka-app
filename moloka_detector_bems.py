@@ -56,7 +56,7 @@ MARCAS_DEFAULT = ['Funko', 'Bandai Model Kit', 'Pyramid Int.']
 IVA_DEFAULT_ES, IVA_IT, IVA_FR = 0.21, 0.22, 0.20
 ALMACEN, COM_DIGITALES = 0.15, 1.03
 LOTE_FASE1 = 100
-IDX_RANK, IDX_NEW = 3, 1
+IDX_RANK, IDX_NEW, IDX_BBOX_LAND = 3, 1, 18   # 18 = BUY_BOX_SHIPPING (buy box CON envio = aterrizada, como el v1)
 
 KEEPA_MAX_INTENTOS = 4
 KEEPA_ESPERAS = [5, 15, 40, 90]
@@ -353,9 +353,16 @@ def datos_pais(asin, dom):
     if not res: return None
     p = res[0]; st = p.get('stats') or {}
     cur, a90 = st.get('current') or [], st.get('avg90') or []
-    bb = st.get('buyBoxPrice')
-    if bb and bb>0:
-        precio = bb/100
+    # Buy box ATERRIZADA: current[18] (BUY_BOX_SHIPPING) es el precio CON envio,
+    # lo que paga el cliente. Fallback a buyBoxPrice (pelado) si el 18 no viene.
+    # Mismo mecanismo que el v1 en produccion (moloka_actualizar_nube.py, 1932-1943).
+    bb_land = cur[IDX_BBOX_LAND] if len(cur)>IDX_BBOX_LAND else None
+    bb_pel  = st.get('buyBoxPrice')
+    if bb_land and bb_land>0:
+        precio = bb_land/100
+        canal = 'BB-FBA' if st.get('buyBoxIsFBA') else 'BB-FBM'
+    elif bb_pel and bb_pel>0:
+        precio = bb_pel/100
         canal = 'BB-FBA' if st.get('buyBoxIsFBA') else 'BB-FBM'
     else:
         new = cur[IDX_NEW] if len(cur)>IDX_NEW else -1
