@@ -1285,8 +1285,16 @@ if not _sin_excel:
     except Exception as ex:
         print("ATENCION: no se pudo subir el Excel a Storage:", ex)
 
+# RED DE SEGURIDAD: un insert puede devolver OK sin que la fila llegue a persistir.
+# No nos fiamos del insert ni del print: releemos la fila por su id (la verdad es la
+# BD, no el log) y gritamos si no esta. Hoy NO se conoce ningun caso real: las filas
+# que parecian faltar resultaron ser limpieza MANUAL desde la app (comprobado con
+# pg_stat_user_tables: 451 insertadas / 435 borradas). Esto cubre el dia que falle
+# de verdad. NO tumba la corrida: solo avisa.
+_biblioteca_ok = False
+_biblioteca_id = None
 try:
-    sb.table('escaner_resultados').insert({
+    _resp_bib = sb.table('escaner_resultados').insert({
         'proveedor': PROVEEDOR, 'marca': MARCA, 'modo': MODO,
         'rank_maximo': RANK_MAXIMO,
         'n_productos': len(registros), 'n_comprar': n_mandar,
@@ -1295,9 +1303,27 @@ try:
         'fichero': ruta_storage if subido_ok else None,
         'tokens_restantes': int(api.tokens_left),
     }).execute()
-    print("Escaneo registrado en la biblioteca (escaner_resultados).")
+    _filas_bib = getattr(_resp_bib, 'data', None) or []
+    _biblioteca_id = _filas_bib[0].get('id') if _filas_bib else None
+    if _biblioteca_id is not None:
+        # Verificacion DURA contra la BD (no el objeto del insert, no el log).
+        # Va en su PROPIO try: si lo que falla es la RELECTURA, el insert ya fue bien
+        # y decir "no se pudo registrar" seria mentira en el log. En ese caso avisamos
+        # de que no se pudo verificar y NO damos falsa alarma.
+        try:
+            _chk_bib = sb.table('escaner_resultados').select('id').eq('id', _biblioteca_id).limit(1).execute()
+            _biblioteca_ok = bool(getattr(_chk_bib, 'data', None))
+        except Exception as _e_chk:
+            print(f"AVISO: el insert SI fue bien (id={_biblioteca_id}) pero no pude releer "
+                  f"la fila para verificarla: {_e_chk}")
+            _biblioteca_ok = True
+    if _biblioteca_ok:
+        print(f"Escaneo registrado y VERIFICADO en la biblioteca (escaner_resultados), id={_biblioteca_id}.")
+    else:
+        print("!!! CRITICO: el insert en escaner_resultados dijo OK pero la BD NO devuelve la fila "
+              f"(id={_biblioteca_id}). El escaneo NO quedo en la biblioteca: revisalo.")
 except Exception as ex:
-    print("AVISO: no se pudo registrar en escaner_resultados (el Excel SI esta en Storage):", ex)
+    print("!!! CRITICO: no se pudo registrar en escaner_resultados (el Excel puede estar en Storage):", ex)
 
 # ============================================================
 # Celda 10 - actualizar la memoria del proveedor (presentes / agotados)
