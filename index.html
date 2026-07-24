@@ -3333,10 +3333,16 @@ async function cargarBibliotecaEscaneos() {
   const cont = document.getElementById('esc-biblioteca');
   if (!cont) return;
   try {
-    const { data, error } = await db.from('escaner_resultados').select('*').order('fecha', { ascending: false }).limit(30);
+    // El autorrefresco necesita el id MAXIMO REAL, incluidos los escaneos sin COMPRAR
+    // (que ya no dejan Excel, pero sí dejan fila). Por eso se pide APARTE: si saliera
+    // de la lista ya filtrada, un escaneo sin chollos dejaría el poller girando 6 h.
+    const { data: ultimo } = await db.from('escaner_resultados').select('id').order('id', { ascending: false }).limit(1);
+    window._escMaxId = (ultimo && ultimo.length) ? (ultimo[0].id || 0) : 0;
+    // La biblioteca solo MUESTRA escaneos con al menos un COMPRAR: los de 0 no generan
+    // Excel y no aportan nada. Se filtra en la consulta para que salgan 30 útiles.
+    const { data, error } = await db.from('escaner_resultados').select('*').gt('n_comprar', 0).order('fecha', { ascending: false }).limit(30);
     if (error) { cont.innerHTML = 'Error: ' + error.message; return; }
-    window._escMaxId = (data || []).reduce((m, r) => Math.max(m, r.id || 0), 0);
-    if (!data || !data.length) { cont.innerHTML = '<span style="color:#888780">Aún no hay escaneos. Lanza uno arriba.</span>'; return; }
+    if (!data || !data.length) { cont.innerHTML = '<span style="color:#888780">Aún no hay escaneos con COMPRAR. Lanza uno arriba.</span>'; return; }
     let html = '<table style="width:100%;border-collapse:collapse;font-size:13px"><tr style="text-align:left;border-bottom:1px solid #ddd">' +
       '<th style="padding:4px">Fecha</th><th>Prov.</th><th>Marca</th><th>Modo</th><th>Prod.</th><th>COMPRAR</th><th>Nuev/Reap/Camb</th><th>Agot.</th><th></th><th></th></tr>';
     for (const r of data) {

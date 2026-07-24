@@ -1254,8 +1254,16 @@ if filas_lote:
     wl.freeze_panes = 'A2'
 print(f"Pestana 'Precio por lote': {len(filas_lote)} filas con descuento por volumen")
 
-wb.save(ARCHIVO_SALIDA)
-print("Guardado local:", ARCHIVO_SALIDA, "| filas:", last-1)
+# Si no hay ningun COMPRAR, NO se genera ni se sube el Excel (limpieza: un escaneo
+# sin chollos no aporta nada y cada Excel ocupa ~2 MB). El REGISTRO en la biblioteca
+# se guarda IGUAL (n_comprar=0, fichero=NULL) para no romper la alarma de persistencia.
+_sin_excel = (n_mandar == 0)
+if _sin_excel:
+    print(f"Sin COMPRAR en esta pasada ({n_mandar}): NO genero ni subo el Excel. "
+          "El registro en la biblioteca se guarda igual (fichero vacio).")
+else:
+    wb.save(ARCHIVO_SALIDA)
+    print("Guardado local:", ARCHIVO_SALIDA, "| filas:", last-1)
 
 # ============================================================
 # SUBIR EL EXCEL A STORAGE + REGISTRAR EN LA BIBLIOTECA (escaner_resultados)
@@ -1263,18 +1271,19 @@ print("Guardado local:", ARCHIVO_SALIDA, "| filas:", last-1)
 nombre_xlsx = os.path.basename(ARCHIVO_SALIDA)
 ruta_storage = f'{CARPETA_RESULTADOS}/{nombre_xlsx}'
 subido_ok = False
-try:
-    with open(ARCHIVO_SALIDA, 'rb') as fp:
-        sb.storage.from_(BUCKET).upload(
-            ruta_storage, fp.read(),
-            {'content-type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-             'upsert':'true'})
-    # verificar que esta en Storage
-    _res = sb.storage.from_(BUCKET).list(CARPETA_RESULTADOS) or []
-    subido_ok = any(o.get('name') == nombre_xlsx for o in _res)
-    print(f"Excel subido a Storage: {ruta_storage} | verificado: {subido_ok}")
-except Exception as ex:
-    print("ATENCION: no se pudo subir el Excel a Storage:", ex)
+if not _sin_excel:
+    try:
+        with open(ARCHIVO_SALIDA, 'rb') as fp:
+            sb.storage.from_(BUCKET).upload(
+                ruta_storage, fp.read(),
+                {'content-type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                 'upsert':'true'})
+        # verificar que esta en Storage
+        _res = sb.storage.from_(BUCKET).list(CARPETA_RESULTADOS) or []
+        subido_ok = any(o.get('name') == nombre_xlsx for o in _res)
+        print(f"Excel subido a Storage: {ruta_storage} | verificado: {subido_ok}")
+    except Exception as ex:
+        print("ATENCION: no se pudo subir el Excel a Storage:", ex)
 
 try:
     sb.table('escaner_resultados').insert({
@@ -1350,7 +1359,9 @@ def _buzon_escaner_pendiente():
         print('AVISO al listar el buzon del escaner:', _e)
         return None
 
-if subido_ok:
+# Se limpia el buzon si el Excel subio BIEN o si deliberadamente no se genero
+# (sin COMPRAR). Lo que NO se limpia es un fallo real de subida: eso se reintenta.
+if subido_ok or _sin_excel:
     pend = _buzon_escaner_pendiente()
     if pend:
         for intento in (1, 2, 3):
