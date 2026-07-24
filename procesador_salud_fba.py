@@ -42,7 +42,7 @@ from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
 from foto_comun import (Aborta, guarda_anti_encogimiento, guarda_no_retroceder, claves_previas,
-                        barrer_sobrantes, resumen_foto)
+                        barrer_sobrantes, resumen_foto, describir_ambito)
 
 # ---------------------------------------------------------------------------
 # 0) Configuración (secrets de GitHub; jamás credenciales en el código)
@@ -529,6 +529,25 @@ def main():
     print(resumen_foto('salud_fba', AMBITO, previas, len(filas),
                        len(altas), borradas, MODO), flush=True)
 
+    # --- Cuadre de la foto (el log no puede mentir) ---
+    # `len(filas)` es lo que trae el FICHERO; la tabla tiene además las filas que
+    # la salvaguarda protegió (ausentes del informe pero con stock). Se imprime el
+    # count REAL para que las dos cifras no se confundan nunca más.
+    cur.execute("SELECT count(*) FROM salud_fba WHERE marketplace = ANY(%s);",
+                (AMBITO[1],))
+    en_tabla = cur.fetchone()[0]
+    # De las protegidas, las que llevan >3 días sin aparecer en ningún informe:
+    # su snapshot_date se quedó atrás porque no se refrescan. Son las "rancias".
+    cur.execute("SELECT count(*) FROM salud_fba WHERE marketplace = ANY(%s) "
+                "AND snapshot_date < %s - INTERVAL '3 days';", (AMBITO[1], snap))
+    rancias = cur.fetchone()[0]
+
+    print(f"\n--- Cuadre de la foto ({describir_ambito(AMBITO)}) ---")
+    print(f"   · filas del fichero:                    {len(filas)}")
+    print(f"   · filas en la tabla (count real):       {en_tabla}")
+    print(f"   · protegidas (no venían en el informe): {len(protegidas)}")
+    print(f"        · de ellas, >3 días sin aparecer:  {rancias}", flush=True)
+
     print(f"\n--- Avisos (§4.2 · NO abortan · viven en la vista v_salud_fba_cruce) ---")
     print(f"   · ASIN sin ficha activa en productos (red del reverso): {len(sin_ficha)}")
     for s in sin_ficha[:50]:
@@ -542,7 +561,8 @@ def main():
     # --- Escritura (o no) ---
     if MODO == 'aplicar':
         con.commit()
-        print(f"\n✅ APLICADO en {ENTORNO}: {len(filas)} filas en salud_fba "
+        print(f"\n✅ APLICADO en {ENTORNO}: salud_fba queda con {en_tabla} filas "
+              f"({len(filas)} del informe + {len(protegidas)} protegidas) "
               f"(tabla y vista listas, RLS activo sin políticas).")
     else:
         con.rollback()   # 🔒 ensayo: no se escribe ni un byte
@@ -551,7 +571,9 @@ def main():
               f"revertida.)")
 
     cur.close(); con.close()
-    print(f"\n=== FIN · entorno={ENTORNO} · modo={MODO} · filas={len(filas)} · "
+    print(f"\n=== FIN · entorno={ENTORNO} · modo={MODO} · "
+          f"filas_fichero={len(filas)} · filas_tabla={en_tabla} · "
+          f"protegidas={len(protegidas)} · protegidas_rancias={rancias} · "
           f"altas={len(altas)} · bajas={borradas} · sin_ficha={len(sin_ficha)} · "
           f"sku_discrepante={len(sku_discrepante)} ===", flush=True)
 
