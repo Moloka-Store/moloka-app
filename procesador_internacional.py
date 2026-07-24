@@ -214,6 +214,26 @@ def sql_crear_tabla():
     """
 
 
+HIST_COLS = ['seller_sku', 'country', 'fecha_foto', 'asin', 'fulfillment_sku',
+             'condition_type', 'quantity', 'fichero']
+
+def sql_crear_tabla_historico():
+    return """
+    CREATE TABLE IF NOT EXISTS inventario_internacional_historico (
+        seller_sku      text    NOT NULL,
+        country         text    NOT NULL,
+        fecha_foto      date    NOT NULL,
+        asin            text,
+        fulfillment_sku text,
+        condition_type  text,
+        quantity        integer,
+        fichero         text,
+        capturado_en    timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (seller_sku, country, fecha_foto)
+    );
+    """
+
+
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
@@ -345,6 +365,33 @@ def main():
         r = f['registro']
         vals = [r[c] for _, c, _ in TIPADAS] + [fichero, info['fecha_foto'], Json(f['crudo'])]
         cur.execute(sql_upsert, vals)
+
+    # --- HISTÓRICO: crear (si no existe) + APILAR esta foto (cajón Película) ---
+    cur.execute(sql_crear_tabla_historico())
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_inv_intl_hist_fecha ON inventario_internacional_historico(fecha_foto);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_inv_intl_hist_asin  ON inventario_internacional_historico(asin);")
+    cur.execute("ALTER TABLE inventario_internacional_historico ENABLE ROW LEVEL SECURITY;")
+
+    ph_h  = ", ".join(['%s'] * len(HIST_COLS))
+    set_h = ", ".join(f"{c}=EXCLUDED.{c}" for c in HIST_COLS if c not in ('seller_sku','country','fecha_foto'))
+    sql_hist = (f"INSERT INTO inventario_internacional_historico ({', '.join(HIST_COLS)}) "
+                f"VALUES ({ph_h}) ON CONFLICT (seller_sku, country, fecha_foto) "
+                f"DO UPDATE SET {set_h}, capturado_en=now();")
+
+    def _val_hist(f, col):
+        if col == 'fecha_foto': return info['fecha_foto']
+        if col == 'fichero':    return fichero
+        return f['registro'][col]
+    for f in filas:
+        cur.execute(sql_hist, [_val_hist(f, c) for c in HIST_COLS])
+
+    cur.execute("SELECT count(*) FROM inventario_internacional_historico WHERE fecha_foto=%s;", (info['fecha_foto'],))
+    hist_hoy = cur.fetchone()[0]
+    cur.execute("SELECT count(DISTINCT fecha_foto) FROM inventario_internacional_historico;")
+    hist_fechas = cur.fetchone()[0]
+    print("\n--- HISTÓRICO inventario_internacional_historico (cajón Película) ---")
+    print(f"   · filas apiladas de esta foto ({info['fecha_foto']}): {hist_hoy}")
+    print(f"   · fechas distintas acumuladas: {hist_fechas}", flush=True)
 
     altas = sum(1 for f in filas
                 if (f['registro']['seller_sku'], f['registro']['country']) not in prev)
