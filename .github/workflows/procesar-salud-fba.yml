@@ -13,7 +13,7 @@ on:
         options: [staging, produccion]
         default: staging
       modo:
-        description: 'ensayo = solo comprueba y dice qué escribiría; aplicar = vuelca salud_fba'
+        description: 'ensayo = solo comprueba y dice qué escribiría; aplicar = vuelca salud_fba + apila salud_fba_historico'
         type: choice
         options: [ensayo, aplicar]
         default: ensayo
