@@ -10,7 +10,10 @@
 #
 #   - Guarda lo que Amazon declara, TAL CUAL llega.
 #   - NO escribe en `productos`. NO escribe en ninguna tabla de la v1.
-#     Cero UPDATE fuera de `salud_fba`.
+#     Cero UPDATE fuera de `salud_fba` y de su histórico.
+#
+#   Además APILA una copia fechada y LEAN en `salud_fba_historico` (PELÍCULA,
+#   §1.6): la foto viva no cambia ni un byte por ello. Ver el bloque HISTORICO.
 #   - El cruce con las fichas de Moloka vive en la VISTA de solo lectura
 #     v_salud_fba_cruce (§5). La conciliación es otro asiento, no este.
 #
@@ -138,6 +141,68 @@ ALIAS = {
     'exempted_from_low_inventory_fee':
         'Exempted from Low-Inventory cost coverage fee?',
 }
+
+# ---------------------------------------------------------------------------
+# EL HISTÓRICO — la PELÍCULA que la Foto no puede guardar (§1.6)
+# ---------------------------------------------------------------------------
+# `salud_fba` es una FOTO: cada pasada tira la hoja vieja, y con ella la única
+# copia que había del dato de ayer. Eso está bien (una foto contesta "¿cómo está
+# esto AHORA?"), pero deja sin contestar la otra pregunta: ¿el stock BAJA?, ¿la
+# cobertura se hunde?, ¿el rank se está muriendo? Para eso hay que apilar.
+#
+# `salud_fba_historico` es PELÍCULA, no Foto. Reglas, y no se reinterpretan:
+#   · Se APILA y NUNCA se borra. Aquí no entra `barrer_sobrantes` ni nada que
+#     se le parezca: borrar una línea de una Película es falsificar el extracto.
+#   · PK (asin, marketplace, snapshot_date) → un asiento por producto y día.
+#   · Solo se apilan las filas DEL FICHERO. Las que la salvaguarda anti-omisión
+#     protege en la foto viva (ausentes del informe pero con stock) NO se
+#     apilan: ese día Amazon no dijo nada de ellas, y un histórico que rellena
+#     el hueco con el dato de ayer fechado hoy MIENTE.
+#   · LEAN: solo las columnas que dibujan una curva. NADA de `crudo jsonb`
+#     (92 columnas × N días engordan la base sin añadir tendencia). La despensa
+#     completa del día de hoy sigue entera en `salud_fba.crudo`.
+#   · Idempotente: reprocesar el mismo fichero REESCRIBE la fila de ese día; ni
+#     la duplica ni inventa un día nuevo.
+#
+# 🔒 NO toca la foto viva. Se escribe DESPUÉS del upsert de `salud_fba` y en la
+# MISMA transacción: si algo revienta, no queda ni foto ni histórico.
+# El tipo de cada columna se HEREDA de TIPADAS: el histórico no puede guardar un
+# `numeric` donde la foto guarda un `integer`.
+# ---------------------------------------------------------------------------
+HISTORICO = [
+    # Identidad blanda del día. El SKU nace y muere (§1.1): verlo cambiar ES dato.
+    'sku',
+    # Stock
+    'available', 'fc_transfer', 'total_reserved_quantity', 'inbound_quantity',
+    'unfulfillable_quantity', 'pending_removal_quantity', 'inventory_supply_at_fba',
+    # Cobertura
+    'days_of_supply', 'total_days_of_supply_incl_open_shipments',
+    'weeks_of_cover_t30', 'weeks_of_cover_t90', 'sell_through',
+    'historical_days_of_supply',
+    # Salida (la curva de ventas)
+    'units_shipped_t7', 'units_shipped_t30', 'units_shipped_t60', 'units_shipped_t90',
+    # Exceso y alerta
+    'estimated_excess_quantity', 'recommended_removal_quantity', 'alert',
+    # LIL (nivel mínimo de inventario)
+    'fba_minimum_inventory_level', 'fba_inventory_level_health_status',
+    # Coste de almacenamiento REAL. El 'estimated cost savings' NO entra: es
+    # marketing (§1.5), y apilar marketing durante meses no lo vuelve un dato.
+    'estimated_storage_cost_next_month',
+    # Mercado / competencia
+    'featuredoffer_price', 'lowest_price_new_plus_shipping', 'your_price',
+    'sales_price', 'sales_rank',
+]
+
+_TIPO_DE = dict(TIPADAS)
+_SUELTAS = [c for c in HISTORICO if c not in _TIPO_DE]
+if _SUELTAS:
+    raise RuntimeError(
+        "[HISTORICO] Columnas que no existen en TIPADAS: " + ", ".join(_SUELTAS)
+        + ". El histórico HEREDA el tipo de la foto; una columna suelta guardaría "
+          "un tipo distinto al de salud_fba o un KeyError en runtime.")
+if 'asin' in HISTORICO or 'marketplace' in HISTORICO or 'snapshot_date' in HISTORICO:
+    raise RuntimeError("[HISTORICO] asin/marketplace/snapshot_date son la PK y se "
+                       "declaran aparte: no pueden repetirse en HISTORICO.")
 
 
 # Aborta vive ahora en foto_comun (misma clase para las cuatro cañerías): una
@@ -349,6 +414,21 @@ def sql_crear_tabla():
     );
     """
 
+def sql_crear_historico():
+    """La PELÍCULA. Nace CERRADA igual que la foto: RLS on y cero políticas."""
+    cols = ",\n        ".join(f"{c} {TIPO_SQL[_TIPO_DE[c]]}" for c in HISTORICO)
+    return f"""
+    CREATE TABLE IF NOT EXISTS salud_fba_historico (
+        asin           text NOT NULL,
+        marketplace    text NOT NULL,
+        snapshot_date  date NOT NULL,
+        {cols},
+        fichero        text,
+        procesado_en   timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (asin, marketplace, snapshot_date)
+    );
+    """
+
 SQL_VISTA = """
 CREATE OR REPLACE VIEW v_salud_fba_cruce
 WITH (security_invoker = true) AS
@@ -525,6 +605,46 @@ def main():
         vals = [f['registro'][c] for c, _ in TIPADAS] + [snap, fichero, Json(f['crudo'])]
         cur.execute(sql_upsert, vals)
 
+    # ── EL HISTÓRICO: apilar la copia fechada (PELÍCULA, §1.6) ──────────────
+    # Va DESPUÉS del upsert de la foto viva y DENTRO de la misma transacción.
+    # No borra nada: aquí no hay barrido ni ámbito que valga.
+    cur.execute(sql_crear_historico())
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_salud_fba_hist_snapshot "
+                "ON salud_fba_historico(snapshot_date);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_salud_fba_hist_asin "
+                "ON salud_fba_historico(asin, snapshot_date);")
+    cur.execute("ALTER TABLE salud_fba_historico ENABLE ROW LEVEL SECURITY;")  # nace CERRADA
+
+    # Qué había YA de este día (para distinguir apilar de reescribir en el log:
+    # si reprocesas el mismo fichero, todo tiene que salir como 'reescritas').
+    cur.execute("SELECT asin, marketplace FROM salud_fba_historico "
+                "WHERE snapshot_date = %s AND marketplace = ANY(%s);",
+                (snap, AMBITO[1]))
+    ya_del_dia = {tuple(r) for r in cur.fetchall()}
+
+    cols_h = ['asin', 'marketplace', 'snapshot_date'] + HISTORICO + ['fichero']
+    ph_h = ", ".join(['%s'] * len(cols_h))
+    set_h = ", ".join(f"{c}=EXCLUDED.{c}" for c in HISTORICO + ['fichero'])
+    sql_hist = (f"INSERT INTO salud_fba_historico ({', '.join(cols_h)}) VALUES ({ph_h}) "
+                f"ON CONFLICT (asin, marketplace, snapshot_date) DO UPDATE SET "
+                f"{set_h}, procesado_en=now();")
+
+    for f in filas:   # 🔒 SOLO las filas del fichero. Las protegidas NO se apilan.
+        vals_h = ([f['registro']['asin'], f['registro']['marketplace'], snap]
+                  + [f['registro'][c] for c in HISTORICO] + [fichero])
+        cur.execute(sql_hist, vals_h)
+
+    hist_reescritas = sum(
+        1 for f in filas
+        if (f['registro']['asin'], f['registro']['marketplace']) in ya_del_dia)
+    hist_apiladas = len(filas) - hist_reescritas
+
+    cur.execute("SELECT count(*), count(DISTINCT snapshot_date), "
+                "       min(snapshot_date), max(snapshot_date) "
+                "FROM salud_fba_historico;")
+    h_filas, h_dias, h_min, h_max = cur.fetchone()
+    # ────────────────────────────────────────────────────────────────────────
+
     # --- Resumen (se imprime siempre) ---
     print(resumen_foto('salud_fba', AMBITO, previas, len(filas),
                        len(altas), borradas, MODO), flush=True)
@@ -548,6 +668,13 @@ def main():
     print(f"   · protegidas (no venían en el informe): {len(protegidas)}")
     print(f"        · de ellas, >3 días sin aparecer:  {rancias}", flush=True)
 
+    print(f"\n--- Histórico salud_fba_historico (Película: apila, NUNCA borra) ---")
+    print(f"   · apiladas de esta pasada (nuevas):     {hist_apiladas}")
+    print(f"   · reescritas (mismo día ya cargado):    {hist_reescritas}")
+    print(f"   · días distintos en el histórico:       {h_dias}"
+          f"{f'  (de {h_min} a {h_max})' if h_dias else ''}")
+    print(f"   · filas totales en el histórico:        {h_filas}", flush=True)
+
     print(f"\n--- Avisos (§4.2 · NO abortan · viven en la vista v_salud_fba_cruce) ---")
     print(f"   · ASIN sin ficha activa en productos (red del reverso): {len(sin_ficha)}")
     for s in sin_ficha[:50]:
@@ -564,6 +691,8 @@ def main():
         print(f"\n✅ APLICADO en {ENTORNO}: salud_fba queda con {en_tabla} filas "
               f"({len(filas)} del informe + {len(protegidas)} protegidas) "
               f"(tabla y vista listas, RLS activo sin políticas).")
+        print(f"   · salud_fba_historico: {h_filas} filas en {h_dias} día(s) "
+              f"(RLS activo sin políticas).")
     else:
         con.rollback()   # 🔒 ensayo: no se escribe ni un byte
         print(f"\n🔎 ENSAYO: TODAS las guardas pasaron, NO se ha escrito nada. "
@@ -575,7 +704,9 @@ def main():
           f"filas_fichero={len(filas)} · filas_tabla={en_tabla} · "
           f"protegidas={len(protegidas)} · protegidas_rancias={rancias} · "
           f"altas={len(altas)} · bajas={borradas} · sin_ficha={len(sin_ficha)} · "
-          f"sku_discrepante={len(sku_discrepante)} ===", flush=True)
+          f"sku_discrepante={len(sku_discrepante)} · "
+          f"hist_apiladas={hist_apiladas} · hist_reescritas={hist_reescritas} · "
+          f"hist_dias={h_dias} · hist_filas={h_filas} ===", flush=True)
 
 
 if __name__ == '__main__':
