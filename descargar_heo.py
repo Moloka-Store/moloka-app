@@ -13,7 +13,8 @@
 # El director importa descargar_catalogo_heo() / a_csv_bytes().
 # Credenciales SOLO en Secrets: HEO_USER, HEO_PASS.
 # ============================================================================
-import os, io, csv, sys, time, requests
+import os, io, csv, sys, time, re, requests
+from urllib.parse import quote_plus
 from requests.auth import HTTPBasicAuth
 
 sys.stdout.reconfigure(line_buffering=True)
@@ -82,6 +83,29 @@ def _ean(prod):
     return ''
 
 
+def _ean_bruto(prod):
+    """El PRIMER barcode del producto, sea GTIN o no. Los cases (p.ej. AC/DC Angus)
+    traen el codigo de CAJA con type UNDEFINED, que _ean descarta; aqui lo conservamos."""
+    for b in (prod.get('barcodes') or []):
+        if b.get('barcode'):
+            return str(b['barcode']).strip()
+    return ''
+
+
+# Senal de chase Funko, MEDIDA contra el catalogo real (100 productos, 0 escapes):
+# CHASE / 5+1 / abreviatura CH (w/CH, w/ CH(BD), (CH), CH(GW)) / "Surtido 6" / "Surtido (6)".
+# En HEO, un Funko + surtido de 6 es un case con chase.
+_RE_CHASE = re.compile(r'chase|5\s*\+\s*1|w/\s*ch\b|\(\s*ch\s*\)|\bch\s*\(|surtido\s*\(\s*6\s*\)|surtido\s+6\b', re.I)
+
+
+def _es_funko_chase(prod):
+    """True si es Funko y el nombre lleva senal de chase. Los cases NO cruzan por EAN
+    (su codigo es de caja): van a la puente escaner_chase_asin para ASIN manual."""
+    if 'FUNKO' not in (_marca(prod) or '').upper():
+        return False
+    return bool(_RE_CHASE.search(_trad(prod.get('name')) or ''))
+
+
 def _marca(prod):
     ms = prod.get('manufacturers') or []
     return _trad(ms[0].get('translations')) if (ms and isinstance(ms[0], dict)) else ''
@@ -113,8 +137,10 @@ def _campana(pr):
     return str(c)
 
 
-def descargar_catalogo_heo(max_paginas=None):
-    """Baja y cruza los 3 endpoints. Devuelve lista de dicts (una fila por producto CON EAN)."""
+def descargar_catalogo_heo(max_paginas=None, con_chase=False):
+    """Baja y cruza los 3 endpoints. Devuelve lista de dicts (una fila por producto CON EAN).
+    Si con_chase=True devuelve (filas, chase): los Funko chase se DESVIAN a 'chase' (no
+    entran al cruce normal) para la puente escaner_chase_asin (ASIN manual)."""
     print(">>> Bajando PRODUCTS...", flush=True)
     productos = _paginar('catalog/products', max_paginas)
     print(">>> Bajando PRICES...", flush=True)
@@ -123,8 +149,28 @@ def descargar_catalogo_heo(max_paginas=None):
     dispo = {a.get('productNumber'): a for a in _paginar('catalog/availabilities', max_paginas)}
     print(f">>> Cruzando: {len(productos)} productos | {len(precios)} precios | {len(dispo)} disponibilidades")
 
-    filas, sin_ean = [], 0
+    filas, sin_ean, chase = [], 0, []
     for prod in productos:
+        if con_chase and _es_funko_chase(prod):
+            pnc = prod.get('productNumber')
+            prc = precios.get(pnc) or {}
+            avc = dispo.get(pnc) or {}
+            basec = _amt(prc.get('basePricePerUnit'))
+            discc = _amt(prc.get('discountedPricePerUnit'))
+            precioc = discc if discc is not None else basec
+            orderablec = bool(avc.get('availableToOrder')) and str(avc.get('availabilityState', '')).upper() == 'AVAILABLE'
+            nombrec = _trad(prod.get('name'))
+            chase.append({
+                'producto_heo': pnc,
+                'nombre':       nombrec,
+                'ean_caja':     _ean_bruto(prod),
+                'marca':        _marca(prod),
+                'precio_caja':  (None if precioc is None else round(precioc, 2)),
+                'estado':       ('disponible' if orderablec else 'agotado'),
+                'imagen':       ((prod.get('media') or {}).get('mainImage') or {}).get('url') or '',
+                'link_amazon':  'https://www.amazon.es/s?k=' + quote_plus(nombrec or ''),
+            })
+            continue                     # los chase NO cruzan por EAN (su codigo es de caja)
         ean = _ean(prod)
         if not ean:                      # sin GTIN no se puede cruzar con Amazon -> fuera
             sin_ean += 1
@@ -163,6 +209,9 @@ def descargar_catalogo_heo(max_paginas=None):
     print(f">>> Catalogo cruzado: {len(filas)} filas con EAN (descartadas {sin_ean} sin GTIN)")
     en_of = sum(1 for f in filas if f['en_oferta'])
     print(f">>> En oferta (campana/descuento/precio<base): {en_of}")
+    if con_chase:
+        print(f">>> Funko chase desviados a la puente: {len(chase)}")
+        return filas, chase
     return filas
 
 
