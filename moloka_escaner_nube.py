@@ -449,6 +449,11 @@ _RE_CAJA6 = re.compile(r'5\s*\+\s*1', re.I)
 # peluches perfectamente legitimos ("Peluche Chase Patrulla Canina Paw Patrol").
 # Medido en el ensayo del 24-jul-2026 contra el feed real de OcioStock.
 _RE_CHASE_NOM = re.compile(r'\bchase\b\s*$|\([^)]*\bchase\b[^)]*\)', re.I)
+# "w/Chase" y "with Chase" significan CON chase: la linea INCLUYE el chase, no
+# ES un chase suelto. Es la forma habitual de DBLine ("FUNKO GOLD ... w/Chase",
+# a precio de unidad) y tambien de HEO ("... w/CH 9 cm Surtido (6)"). Entra
+# como producto NORMAL. Medido en el ensayo del 24-jul-2026.
+_RE_CON_CHASE = re.compile(r'\b(?:w/|with)\s*ch(?:ase)?\b', re.I)
 
 def clasificar_chase(nombre, ean_in):
     """Devuelve (es_case, es_caja6, descartar)."""
@@ -457,6 +462,8 @@ def clasificar_chase(nombre, ean_in):
     n = str(nombre or '')
     if _RE_CAJA6.search(n):
         return True, True, False       # caja de 6 -> entra y se valora /6
+    if _RE_CON_CHASE.search(n):
+        return False, False, False     # "w/Chase" = CON chase -> producto NORMAL
     if _RE_CHASE_NOM.search(n):
         return False, False, True      # chase SUELTO -> descartar
     return False, False, False         # figura normal
