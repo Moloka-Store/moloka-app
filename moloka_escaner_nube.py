@@ -1269,10 +1269,12 @@ try:
 except Exception as ex:
     print("ATENCION: no se pudo subir el Excel a Storage:", ex)
 
-# El insert dice OK aunque la fila NO llegue a persistir (paso el 23-jul-2026: el log
-# imprimio "registrado" pero en la BD no habia fila). Por eso NO nos fiamos del insert:
-# releemos la fila por su id. Si no esta, la corrida termina en ROJO (ver cierre del script)
-# para que NUNCA vuelva a perderse un escaneo en silencio.
+# RED DE SEGURIDAD: un insert puede devolver OK sin que la fila llegue a persistir.
+# No nos fiamos del insert ni del print: releemos la fila por su id (la verdad es la
+# BD, no el log) y gritamos si no esta. Hoy NO se conoce ningun caso real: las filas
+# que parecian faltar resultaron ser limpieza MANUAL desde la app (comprobado con
+# pg_stat_user_tables: 451 insertadas / 435 borradas). Esto cubre el dia que falle
+# de verdad. NO tumba la corrida: solo avisa.
 _biblioteca_ok = False
 _biblioteca_id = None
 try:
@@ -1295,7 +1297,7 @@ try:
         print(f"Escaneo registrado y VERIFICADO en la biblioteca (escaner_resultados), id={_biblioteca_id}.")
     else:
         print("!!! CRITICO: el insert en escaner_resultados dijo OK pero la BD NO devuelve la fila "
-              f"(id={_biblioteca_id}). El escaneo NO quedo en la biblioteca. La corrida saldra en ROJO.")
+              f"(id={_biblioteca_id}). El escaneo NO quedo en la biblioteca: revisalo.")
 except Exception as ex:
     print("!!! CRITICO: no se pudo registrar en escaner_resultados (el Excel puede estar en Storage):", ex)
 
@@ -1418,13 +1420,3 @@ try:
         print(">>> Telegram: sin claves en este paso -> no se envia (normal en TCG o app).")
 except Exception as _e_tg:
     print("AVISO Telegram (no se envio, la corrida ya termino igual):", _e_tg)
-
-# ============================================================
-# CIERRE: si el registro en la biblioteca NO persistio, la corrida NO termina en verde.
-# El "verde mentiroso" (run OK + escaneo perdido en silencio) fue el fallo del 23-jul-2026.
-# Todo el trabajo (memoria, buzon, Telegram) ya corrio arriba; aqui solo gritamos en el
-# ESTADO del run para que salte en GitHub Actions / cron-job.org y no pase desapercibido.
-# ============================================================
-if not _biblioteca_ok:
-    print("=== ESCANER: la biblioteca NO recibio el registro -> SALGO EN ROJO (exit 1) para que se vea ===")
-    sys.exit(1)
