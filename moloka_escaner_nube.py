@@ -20,7 +20,7 @@
 # Variables de entorno (GitHub Secrets): KEEPA_API_KEY, SUPABASE_URL, SUPABASE_KEY
 # ============================================================
 
-import os, sys, time, json
+import os, sys, time, json, re
 import pandas as pd
 import keepa
 from supabase import create_client
@@ -430,6 +430,43 @@ def core_ean(e):
     return e[:-1] if e.endswith('C') else e
 def es_chase_ean(e):
     return str(e).strip().upper().endswith('C')
+
+# ---- REGLA DE NEGOCIO DEL CHASE (todos los proveedores) --------------------
+# El chase SOLO se compra en CAJA DE 6 (5+1): coste unitario = PA / 6.
+# El chase SUELTO es un atraco -> se DESCARTA (no se escanea, no gasta tokens).
+# OJO AL ORDEN: el sufijo del EAN manda sobre el nombre, porque en TCG la 'C'
+# pegada al EAN YA significa la caja 5+1; si mirasemos el nombre primero,
+# descartariamos por error los cases de TCG que se llaman "... Chase".
+# De paso corta el bucle de OcioStock: alli el mismo EAN llega como figura
+# normal, como caja 5+1 y como chase suelto, con precios muy distintos; al
+# descartar el suelto y separar normal/caja en claves de memoria distintas,
+# deja de haber 'cambio_precio' perpetuo.
+_RE_CAJA6 = re.compile(r'5\s*\+\s*1', re.I)
+# "chase" SOLO cuenta cuando es MARCADOR DE VARIANTE: al FINAL del nombre
+# ("... Dilophosaurus Chase") o entre PARENTESIS ("... Pink Batman (CHASE) 18 cm").
+# Si aparece en MEDIO es, casi siempre, un NOMBRE PROPIO: Chase es el perro de la
+# Patrulla Canina, y sin esta restriccion se tiraban paraguas, gorros, mochilas y
+# peluches perfectamente legitimos ("Peluche Chase Patrulla Canina Paw Patrol").
+# Medido en el ensayo del 24-jul-2026 contra el feed real de OcioStock.
+_RE_CHASE_NOM = re.compile(r'\bchase\b\s*$|\([^)]*\bchase\b[^)]*\)', re.I)
+# "w/Chase" y "with Chase" significan CON chase: la linea INCLUYE el chase, no
+# ES un chase suelto. Es la forma habitual de DBLine ("FUNKO GOLD ... w/Chase",
+# a precio de unidad) y tambien de HEO ("... w/CH 9 cm Surtido (6)"). Entra
+# como producto NORMAL. Medido en el ensayo del 24-jul-2026.
+_RE_CON_CHASE = re.compile(r'\b(?:w/|with)\s*ch(?:ase)?\b', re.I)
+
+def clasificar_chase(nombre, ean_in):
+    """Devuelve (es_case, es_caja6, descartar)."""
+    if es_chase_ean(ean_in):
+        return True, True, False       # convencion TCG: la 'C' del EAN ya es la caja
+    n = str(nombre or '')
+    if _RE_CAJA6.search(n):
+        return True, True, False       # caja de 6 -> entra y se valora /6
+    if _RE_CON_CHASE.search(n):
+        return False, False, False     # "w/Chase" = CON chase -> producto NORMAL
+    if _RE_CHASE_NOM.search(n):
+        return False, False, True      # chase SUELTO -> descartar
+    return False, False, False         # figura normal
 def variantes_ean(core):
     c, vs = core.strip(), set()
     if c.isdigit():
@@ -586,6 +623,7 @@ def _stock_osma(x):
 #   MOLOKA -> Supabase (inventario propio).  Resto -> fichero crudo del buzon.
 # ============================================================
 problematicos = []
+chase_sueltos = []   # chase suelto descartado por la regla de negocio (va a la hoja Descartados)
 filas = []
 fuera_disp = 0
 
@@ -709,6 +747,12 @@ else:
         if stock is None or stock <= 0:
             fuera_disp += 1; continue
         ean_in = str(row[cE]).strip()
+        # Regla del chase: el SUELTO se descarta (solo se compra en caja de 6).
+        _es_case, _es_caja6, _descartar = clasificar_chase(row.get(cN, ''), ean_in)
+        if _descartar:
+            chase_sueltos.append({'EAN': ean_in, 'Cabecera': row.get(cN, ''),
+                                  'Motivo': 'Chase SUELTO descartado (solo se compra en caja de 6)'})
+            continue
         core = core_ean(ean_in)
         if (not core.isdigit()) or len(core) not in (12, 13):
             problematicos.append({'EAN':ean_in, 'Cabecera':row.get(cN,''),
@@ -735,9 +779,44 @@ else:
         url = str(row.get(_cu,'')).strip() if _cu else ''
         filas.append({'ean_in':ean_in, 'core':core, 'variantes':variantes_ean(core),
                       'nombre':row.get(cN,''), 'marca':MARCA, 'pa':pa,
-                      'es_chase':es_chase_ean(ean_in), 'volumen':vol, 'url':url})
+                      'es_chase':_es_case, 'es_caja6':_es_caja6, 'volumen':vol, 'url':url})
     print(f"Disponibles a escanear: {len(filas)} | fuera por estado/stock: {fuera_disp} | "
           f"EAN problematicos: {len(problematicos)} | CHASE: {sum(f['es_chase'] for f in filas)}")
+    if chase_sueltos:
+        print(f"Chase SUELTO descartado (solo se compra en caja de 6): {len(chase_sueltos)} "
+              f"-> listados en la hoja 'Descartados'")
+
+# ============================================================
+# DEDUP del proveedor: UNA sola fila por clave de memoria
+# ------------------------------------------------------------
+# Tras la regla del chase todavia puede haber VARIAS filas con la misma clave
+# (mismo EAN + misma categoria) y precios distintos. Eso ya NO es chase: es
+# BASURA DE DATOS del proveedor. Caso real de OcioStock: el mismo producto,
+# con el MISMO nombre, mandado 3 veces a 37,99 / 8,50 / 6,99.
+# La memoria guarda un solo precio por clave, asi que sin deduplicar siempre
+# habria una fila que no cuadra -> 'cambio_precio' eterno y re-escaneo.
+# Nos quedamos con la MAS BARATA: es el mejor coste y, sobre todo, es
+# DETERMINISTA, que es lo que corta el bucle. Las descartadas se listan.
+# ============================================================
+_uni, _dups = {}, []
+for f in filas:
+    k = (norm(f['core']), bool(f['es_chase']))
+    prev = _uni.get(k)
+    if prev is None:
+        _uni[k] = f
+        continue
+    if f['pa'] is not None and (prev['pa'] is None or f['pa'] < prev['pa']):
+        barato, caro = f, prev
+    else:
+        barato, caro = prev, f
+    _uni[k] = barato
+    _dups.append({'EAN': caro['ean_in'], 'Cabecera': caro.get('nombre', ''),
+                  'Motivo': f"Duplicado del proveedor: me quedo con {barato['pa']} "
+                            f"(esta venia a {caro['pa']})"})
+if _dups:
+    filas = list(_uni.values())
+    print(f"Duplicados del proveedor: {len(_dups)} filas descartadas (misma clave, "
+          f"varios precios) -> me quedo con la MAS BARATA. Van a la hoja 'Descartados'.")
 
 # ============================================================
 # Celda 5 - cruce con Supabase (productos propios + stock para 'En mi BD')
@@ -1030,7 +1109,7 @@ for i,c in enumerate(lista,1):
             'pa':f['pa'],'core':f['core'],'es_chase':f['es_chase'],'propio':c['propio'],
             'volumen':f.get('volumen'),'url':f.get('url',''),'titulo_amz':'',
             'ambiguo':c['ean_in'] in amb_eans,'paises':{},
-            'case_de_6':(PROVEEDOR=='TCG' and f['es_chase'])}
+            'case_de_6':bool(f.get('es_caja6'))}
     for dom in ('ES','IT','FR'):
         d = datos_pais(c['asin'], dom)
         if d:
@@ -1229,7 +1308,7 @@ def hoja(nombre, regs):
         ks = list(regs[0].keys()); w.append(ks)
         for x in regs: w.append([x.get(k) for k in ks])
     else: w.append(['(vacio)'])
-hoja('Descartados', problematicos + no_encontrados)
+hoja('Descartados', problematicos + no_encontrados + chase_sueltos + _dups)
 hoja('Ambiguos', ambiguos)
 hoja('Sin_rank', [{'EAN':c['ean_in'],'ASIN':c['asin'],'Nombre':c['fila']['nombre'],
                    'rank_act':c['r_act'],'rank90':c['r_90']} for c in sin_rank])
