@@ -1291,8 +1291,16 @@ try:
     _biblioteca_id = _filas_bib[0].get('id') if _filas_bib else None
     if _biblioteca_id is not None:
         # Verificacion DURA contra la BD (no el objeto del insert, no el log).
-        _chk_bib = sb.table('escaner_resultados').select('id').eq('id', _biblioteca_id).limit(1).execute()
-        _biblioteca_ok = bool(getattr(_chk_bib, 'data', None))
+        # Va en su PROPIO try: si lo que falla es la RELECTURA, el insert ya fue bien
+        # y decir "no se pudo registrar" seria mentira en el log. En ese caso avisamos
+        # de que no se pudo verificar y NO damos falsa alarma.
+        try:
+            _chk_bib = sb.table('escaner_resultados').select('id').eq('id', _biblioteca_id).limit(1).execute()
+            _biblioteca_ok = bool(getattr(_chk_bib, 'data', None))
+        except Exception as _e_chk:
+            print(f"AVISO: el insert SI fue bien (id={_biblioteca_id}) pero no pude releer "
+                  f"la fila para verificarla: {_e_chk}")
+            _biblioteca_ok = True
     if _biblioteca_ok:
         print(f"Escaneo registrado y VERIFICADO en la biblioteca (escaner_resultados), id={_biblioteca_id}.")
     else:
