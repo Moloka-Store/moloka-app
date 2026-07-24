@@ -774,6 +774,38 @@ else:
               f"-> listados en la hoja 'Descartados'")
 
 # ============================================================
+# DEDUP del proveedor: UNA sola fila por clave de memoria
+# ------------------------------------------------------------
+# Tras la regla del chase todavia puede haber VARIAS filas con la misma clave
+# (mismo EAN + misma categoria) y precios distintos. Eso ya NO es chase: es
+# BASURA DE DATOS del proveedor. Caso real de OcioStock: el mismo producto,
+# con el MISMO nombre, mandado 3 veces a 37,99 / 8,50 / 6,99.
+# La memoria guarda un solo precio por clave, asi que sin deduplicar siempre
+# habria una fila que no cuadra -> 'cambio_precio' eterno y re-escaneo.
+# Nos quedamos con la MAS BARATA: es el mejor coste y, sobre todo, es
+# DETERMINISTA, que es lo que corta el bucle. Las descartadas se listan.
+# ============================================================
+_uni, _dups = {}, []
+for f in filas:
+    k = (norm(f['core']), bool(f['es_chase']))
+    prev = _uni.get(k)
+    if prev is None:
+        _uni[k] = f
+        continue
+    if f['pa'] is not None and (prev['pa'] is None or f['pa'] < prev['pa']):
+        barato, caro = f, prev
+    else:
+        barato, caro = prev, f
+    _uni[k] = barato
+    _dups.append({'EAN': caro['ean_in'], 'Cabecera': caro.get('nombre', ''),
+                  'Motivo': f"Duplicado del proveedor: me quedo con {barato['pa']} "
+                            f"(esta venia a {caro['pa']})"})
+if _dups:
+    filas = list(_uni.values())
+    print(f"Duplicados del proveedor: {len(_dups)} filas descartadas (misma clave, "
+          f"varios precios) -> me quedo con la MAS BARATA. Van a la hoja 'Descartados'.")
+
+# ============================================================
 # Celda 5 - cruce con Supabase (productos propios + stock para 'En mi BD')
 # ============================================================
 sup = {}
@@ -1263,7 +1295,7 @@ def hoja(nombre, regs):
         ks = list(regs[0].keys()); w.append(ks)
         for x in regs: w.append([x.get(k) for k in ks])
     else: w.append(['(vacio)'])
-hoja('Descartados', problematicos + no_encontrados + chase_sueltos)
+hoja('Descartados', problematicos + no_encontrados + chase_sueltos + _dups)
 hoja('Ambiguos', ambiguos)
 hoja('Sin_rank', [{'EAN':c['ean_in'],'ASIN':c['asin'],'Nombre':c['fila']['nombre'],
                    'rank_act':c['r_act'],'rank90':c['r_90']} for c in sin_rank])
