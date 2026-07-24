@@ -46,6 +46,7 @@ from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
 from foto_comun import (Aborta, fecha_del_dato_por_subida, guarda_anti_encogimiento,
+                        guarda_no_retroceder,
                         claves_previas, barrer_sobrantes, resumen_foto)
 
 # ---------------------------------------------------------------------------
@@ -489,6 +490,9 @@ def main():
                                                  ambito=AMBITO, etiqueta='anti-encogimiento aptos')
         previas_ofertas = guarda_anti_encogimiento(cur, 'paneu_oferta_pais', len(ofertas),
                                                    ambito=AMBITO, etiqueta='anti-encogimiento ofertas')
+        # No-retroceder: una foto más vieja que la ya cargada no entra (informe
+        # caducado = información FALSA). PERMITIR_RETROCESO=1 la salta.
+        guarda_no_retroceder(cur, 'paneu_aptos', 'snapshot_date', snapshot_date, ambito=AMBITO)
     except Aborta as e:
         print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)

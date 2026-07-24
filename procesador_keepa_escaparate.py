@@ -51,7 +51,7 @@ from psycopg2.extras import Json
 from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
-from foto_comun import (Aborta, guarda_anti_encogimiento, claves_previas,
+from foto_comun import (Aborta, guarda_anti_encogimiento, guarda_no_retroceder, claves_previas,
                         barrer_sobrantes, resumen_foto)
 
 # ---------------------------------------------------------------------------
@@ -680,6 +680,10 @@ def main():
     try:
         previas = guarda_anti_encogimiento(cur, 'keepa_escaparate', len(filas),
                                            ambito=AMBITO, etiqueta='10')
+        # Guarda 11: no-retroceder. Un export más viejo que el ya cargado no entra
+        # (foto caducada = información FALSA). PERMITIR_RETROCESO=1 la salta.
+        guarda_no_retroceder(cur, 'keepa_escaparate', 'fecha_foto',
+                             meta['fecha_foto'], ambito=AMBITO)
     except Aborta as e:
         print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
