@@ -48,7 +48,7 @@ import psycopg2
 from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
-from foto_comun import (Aborta, guarda_anti_encogimiento,
+from foto_comun import (Aborta, guarda_anti_encogimiento, guarda_no_retroceder,
                         claves_previas, barrer_sobrantes, resumen_foto)
 
 # ---------------------------------------------------------------------------
@@ -231,6 +231,9 @@ AMBITO = None
 try:
     previas = guarda_anti_encogimiento(cur, 'listings_amazon', len(skus_fichero),
                                        ambito=AMBITO, etiqueta='anti-encogimiento')
+    # No-retroceder: un informe más viejo que el que ya está cargado no entra
+    # (información caducada = información FALSA). PERMITIR_RETROCESO=1 la salta.
+    guarda_no_retroceder(cur, 'listings_amazon', 'fecha_informe', fecha_dato, ambito=AMBITO)
 except Aborta as e:
     print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
     con.rollback(); cur.close(); con.close(); sys.exit(1)

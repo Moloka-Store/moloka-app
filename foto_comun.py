@@ -146,6 +146,49 @@ def guarda_anti_encogimiento(cur, tabla, n_filas_nuevas, ambito=None, etiqueta='
 
 
 # ---------------------------------------------------------------------------
+# Guarda no-retroceder — corre DESPUÉS de la anti-encogimiento y ANTES de borrar
+# ---------------------------------------------------------------------------
+def guarda_no_retroceder(cur, tabla, col_fecha, fecha_nueva, ambito=None):
+    """Si la foto que entra es MÁS VIEJA que la máxima ya presente en el ámbito
+    → ABORTA sin tocar nada.
+
+    Compara la FECHA DEL DATO (la que escribe el upsert), no la de subida: subir
+    hoy un informe de la semana pasada es retroceder en el tiempo, y una foto
+    caducada no da información incompleta, da información FALSA.
+
+    Válvula de escape para recargas deliberadas: PERMITIR_RETROCESO=1.
+    """
+    import os
+    if os.environ.get('PERMITIR_RETROCESO') == '1':
+        return
+
+    tabla = _ident(tabla)
+    cur.execute("SELECT to_regclass(%s);", (f'public.{tabla}',))
+    if cur.fetchone()[0] is None:
+        return  # tabla aún no creada: no hay pasado contra el que retroceder
+
+    clausula, args = _clausula_ambito(ambito, 't')
+    cur.execute(
+        f"SELECT MAX(t.{_ident(col_fecha)}) FROM {tabla} AS t WHERE {clausula};", args)
+
+    # Comparación date-vs-date: `listings_amazon.fecha_informe` es timestamptz
+    # (MAX devuelve datetime) y el resto son date. Sin normalizar, comparar
+    # date con datetime revienta en runtime (TypeError).
+    def _a_fecha(v):
+        return v.date() if isinstance(v, datetime) else v
+
+    fecha_max = _a_fecha(cur.fetchone()[0])
+    fecha_nueva = _a_fecha(fecha_nueva)
+
+    if fecha_max is not None and fecha_nueva is not None and fecha_nueva < fecha_max:
+        raise Aborta(
+            f"[Guarda no-retroceder] La foto que entra es del {fecha_nueva} y en {tabla} "
+            f"({describir_ambito(ambito)}) ya hay dato del {fecha_max}: sería retroceder "
+            f"en el tiempo. No se escribe nada. "
+            f"(Si de verdad quieres recargar una foto vieja: PERMITIR_RETROCESO=1.)")
+
+
+# ---------------------------------------------------------------------------
 # Claves que ya estaban (solo para contar altas vs actualizaciones en el log)
 # ---------------------------------------------------------------------------
 def claves_previas(cur, tabla, pk_cols, ambito=None):
