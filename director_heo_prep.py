@@ -77,8 +77,9 @@ if _viejos:
     except Exception as e:
         print("AVISO limpiando huerfanos:", e)
 
-# 2) Descargar + cruzar el catalogo HEO por API (los 3 endpoints)
-filas = descargar_catalogo_heo()
+# 2) Descargar + cruzar el catalogo HEO por API (los 3 endpoints).
+#    con_chase=True -> los Funko chase se desvian a 'chase' (no cruzan por EAN).
+filas, chase = descargar_catalogo_heo(con_chase=True)
 
 # 3) Pre-filtrar: servible + (marca en la lista  O  oferta si se pidio)
 def _quiere(f):
@@ -94,6 +95,29 @@ def _quiere(f):
 sel = [f for f in filas if _quiere(f)]
 print(f">>> Seleccionados {len(sel)} de {len(filas)} " +
       f"(marcas {marcas_reales}" + (" + ofertas" if quiere_ofertas else "") + ")")
+
+# 3.5) Refrescar la puente de Funko chase (ASIN manual). Upsert SIN 'asin': los nuevos
+#      nacen con asin NULL (pendientes) y los que Fernando ya relleno conservan su ASIN.
+#      Va ANTES del corte por 'sel' para refrescar la puente aunque no haya nada servible.
+if chase:
+    ahora = datetime.now(timezone.utc).isoformat()
+    payload = []
+    for c in chase:
+        r = {k: c.get(k) for k in ('producto_heo', 'nombre', 'ean_caja', 'marca',
+                                   'precio_caja', 'estado', 'imagen', 'link_amazon')}
+        r['fecha'] = ahora
+        payload.append(r)
+    try:
+        n_ok = 0
+        for i in range(0, len(payload), 500):
+            sb.table('escaner_chase_asin').upsert(payload[i:i+500], on_conflict='producto_heo').execute()
+            n_ok += len(payload[i:i+500])
+        print(f">>> Puente chase Funko actualizada: {n_ok} (asin preservado; nuevos = pendientes).")
+    except Exception as e:
+        print("AVISO: no se pudo actualizar escaner_chase_asin (sigo con el catalogo):", e)
+else:
+    print(">>> Sin Funko chase detectados en esta pasada.")
+
 if not sel:
     print("HEO: nada que escanear tras el filtro. Fin."); sys.exit(0)
 
