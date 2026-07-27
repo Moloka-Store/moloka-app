@@ -34,14 +34,24 @@
 #   filas se quedan. Es indistinguible de "hoy no me han dado ese informe", y
 #   ese caso lo canta la fecha del dato, que es lo que se mira.
 #
+# EL HISTÓRICO — la PELÍCULA que la Foto no puede guardar (§1.6)
+#   `archivar_foto()` apila la foto viva ACTUAL en su histórico `<tabla>_hist`
+#   ANTES de que la carga la sobrescriba, en la MISMA transacción. Es el cajón
+#   PELÍCULA (§1.6): apila, NUNCA borra. La garantía es transaccional: ninguna
+#   foto se sobrescribe sin haberla archivado primero — si la carga se revierte,
+#   el archivado también. Es OPT-IN: una cañería lo usa solo si tiene histórico.
+#
 # CÓMO SE USA (el orden NO es negociable)
 #     previas = guarda_anti_encogimiento(cur, 'tabla', len(filas), ambito)
 #     prev    = claves_previas(cur, 'tabla', ['pk1','pk2'], ambito)   # solo contar altas
+#     ... crear tabla viva si no existe ...
+#     arch = archivar_foto(cur, 'tabla', ['pk1','pk2'], 'fecha_foto')  # ANTES de barrer
 #     borradas = barrer_sobrantes(cur, 'tabla', ['pk1','pk2'], claves_nuevas, ambito)
 #     ... upsert de las filas ...
 #     con.commit() si MODO == 'aplicar', si no con.rollback()
-#   En ENSAYO el borrado se ejecuta igual (para poder decir cuántas se irían)
-#   pero la transacción se revierte: no se escribe ni un byte.
+#   En ENSAYO el borrado y el archivado se ejecutan igual (para poder decir
+#   cuántas se irían / se archivarían) pero la transacción se revierte: no se
+#   escribe ni un byte.
 # ============================================================================
 
 import re
@@ -250,6 +260,121 @@ def barrer_sobrantes(cur, tabla, pk_cols, claves_nuevas, ambito=None):
     borradas = cur.rowcount
     cur.execute(f"DROP TABLE {tmp};")
     return borradas
+
+
+# ---------------------------------------------------------------------------
+# EL HISTÓRICO: apilar la foto viva ANTES de que la carga la sobrescriba
+# ---------------------------------------------------------------------------
+def archivar_foto(cur, tabla_viva, pk_cols, col_fecha, etiqueta='HISTORICO'):
+    """Apila la foto viva ACTUAL en su histórico `<tabla_viva>_hist` ANTES de que
+    el barrido/upsert la sobrescriban. Cajón PELÍCULA (§1.6): apila, NUNCA borra.
+
+    Va DENTRO de la misma transacción que la carga: si la carga se revierte, el
+    archivado también. La garantía es "ninguna foto se sobrescribe sin haberla
+    guardado primero".
+
+    - IDEMPOTENTE por (PK de la foto + `col_fecha`): correr dos veces la misma
+      foto no duplica. La clave lleva la PK ENTERA, no solo (asin, fecha): un
+      mismo ASIN en dos dominios el mismo día son DOS asientos, y una clave corta
+      archivaría solo uno (la trampa que trae el SQL del recado, medida contra el
+      escaparate multi-país).
+    - El histórico se CREA si no existe, clonado de la foto viva + `archivado_en`,
+      y nace CERRADO (RLS on, cero políticas). Si ya existe (lo creó otra mano),
+      NO se toca su seguridad ni su esquema: solo se le asegura el índice.
+    - ROBUSTO AL ESQUEMA (el «Aviso de diseño» del recado, hecho dato): las
+      columnas se derivan de la intersección real viva∩hist. Si la foto viva
+      tiene una columna que el histórico no → ABORTA en vez de desalinear un
+      `SELECT *` en silencio.
+
+    Devuelve el nº de filas archivadas (0 si la foto de hoy ya estaba).
+    """
+    tabla_viva = _ident(tabla_viva)
+    tabla_hist = _ident(f'{tabla_viva}_hist')
+    pk = [_ident(c) for c in pk_cols]
+    col_fecha = _ident(col_fecha)
+    idem = pk + [col_fecha]
+
+    # ¿Existe la foto viva? Si no, no hay pasado que archivar (primera corrida).
+    cur.execute("SELECT to_regclass(%s);", (f'public.{tabla_viva}',))
+    if cur.fetchone()[0] is None:
+        return 0
+
+    # Asegurar el histórico. Se CREA cerrado SOLO si no existía; si ya está, no se
+    # toca su RLS ni su esquema (puede ser de otra cañería/otra mano).
+    cur.execute("SELECT to_regclass(%s);", (f'public.{tabla_hist}',))
+    if cur.fetchone()[0] is None:
+        cur.execute(f"CREATE TABLE {tabla_hist} (LIKE {tabla_viva});")   # columnas + NOT NULL, sin PK
+        cur.execute(f"ALTER TABLE {tabla_hist} "
+                    f"ADD COLUMN archivado_en timestamptz NOT NULL DEFAULT now();")
+        cur.execute(f"ALTER TABLE {tabla_hist} ENABLE ROW LEVEL SECURITY;")   # nace CERRADA
+    # El índice de la clave idempotente sí se asegura siempre (es inocuo: ni toca
+    # datos ni seguridad, y es lo que hace barato el NOT EXISTS de cada pasada).
+    cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{tabla_hist}_idem "
+                f"ON {tabla_hist} ({', '.join(idem)});")
+
+    # Columnas reales de viva e histórico, leídas AHORA (dentro de la txn: la DDL
+    # de arriba ya es visible). Nada de SELECT *: se enumeran, se validan y se
+    # guarda el TIPO SQL exacto de cada una (format_type) para poder dar el remedio.
+    def _cols(tabla):
+        cur.execute(
+            "SELECT a.attname, format_type(a.atttypid, a.atttypmod), "
+            "       (NOT a.attnotnull) AS nullable, "
+            "       pg_get_expr(ad.adbin, ad.adrelid) AS defecto "
+            "FROM pg_attribute a "
+            "JOIN pg_class c ON c.oid = a.attrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "LEFT JOIN pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum "
+            "WHERE n.nspname = 'public' AND c.relname = %s "
+            "  AND a.attnum > 0 AND NOT a.attisdropped "
+            "ORDER BY a.attnum;", (tabla,))
+        return cur.fetchall()
+
+    viva_rows = _cols(tabla_viva)
+    cols_viva = [_ident(r[0]) for r in viva_rows]
+    tipo_viva = {r[0]: r[1] for r in viva_rows}     # columna → tipo SQL exacto ('text', 'text[]', 'jsonb'…)
+    hist_rows = _cols(tabla_hist)
+    hist_cols = {r[0] for r in hist_rows}
+
+    # La clave de idempotencia tiene que existir en la foto viva.
+    faltan_clave = [c for c in idem if c not in cols_viva]
+    if faltan_clave:
+        raise Aborta(f"[{etiqueta}] La clave de idempotencia {idem} referencia columnas que "
+                     f"{tabla_viva} no tiene: {faltan_clave}. Abortando.")
+
+    # Robustez al esquema, en los DOS sentidos, RUIDOSA:
+    #   · la foto trae una columna que el histórico no puede guardar → ABORTA, y
+    #     el mensaje trae el ALTER TABLE EXACTO para copiar y pegar. El riesgo
+    #     domesticado: parar la carga sí (mejor eso que archivar mal), pero sin
+    #     dejarte con un susto y una cañería parada sin remedio a mano.
+    faltan_en_hist = [c for c in cols_viva if c not in hist_cols]
+    if faltan_en_hist:
+        remedio = "\n".join(
+            f"    ALTER TABLE {tabla_hist} ADD COLUMN {c} {tipo_viva[c]};"
+            for c in faltan_en_hist)
+        raise Aborta(
+            f"[{etiqueta}] La foto {tabla_viva} tiene {len(faltan_en_hist)} columna(s) que "
+            f"{tabla_hist} NO tiene: {faltan_en_hist}. Se PARA la carga (mejor parar que "
+            f"archivar mal). Remedio para copiar y pegar en el entorno, y relanzar:\n"
+            f"{remedio}\n"
+            f"Se añaden NULLABLE a propósito: las filas históricas viejas no traen ese dato. "
+            f"No se ha archivado ni cargado nada.")
+    #   · el histórico exige una columna NOT NULL sin defecto que la foto no llena.
+    obligatorias_sin_cubrir = [
+        r[0] for r in hist_rows
+        if r[0] not in cols_viva and r[0] != 'archivado_en' and not r[2] and r[3] is None]
+    if obligatorias_sin_cubrir:
+        raise Aborta(
+            f"[{etiqueta}] {tabla_hist} exige columnas NOT NULL sin defecto que {tabla_viva} "
+            f"no rellena: {obligatorias_sin_cubrir}. El INSERT reventaría. No se archiva nada.")
+
+    # Apilar: la foto viva entera que aún NO esté archivada (por PK + fecha).
+    cond = " AND ".join(f"h.{c} IS NOT DISTINCT FROM v.{c}" for c in idem)
+    cur.execute(
+        f"INSERT INTO {tabla_hist} ({', '.join(cols_viva)}, archivado_en) "
+        f"SELECT {', '.join('v.' + c for c in cols_viva)}, now() "
+        f"FROM {tabla_viva} AS v "
+        f"WHERE NOT EXISTS (SELECT 1 FROM {tabla_hist} AS h WHERE {cond});")
+    return cur.rowcount
 
 
 def resumen_foto(tabla, ambito, previas, nuevas, altas, borradas, modo):
