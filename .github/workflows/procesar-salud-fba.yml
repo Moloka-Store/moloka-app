@@ -17,6 +17,16 @@ on:
         type: choice
         options: [ensayo, aplicar]
         default: ensayo
+      fichero:
+        # Igual que en procesar-keepa-escaparate.yml: deja procesar UN informe
+        # concreto del buzón en vez del más reciente. Nace por el caso de las dos
+        # guillotinas (recargar el informe original 50497020659.txt), pero vale
+        # para cualquier recarga dirigida. Vacío = el más reciente (comportamiento
+        # de siempre). Si el nombre no está en el buzón, ABORTA (no cae al más reciente).
+        description: 'Nombre EXACTO del .txt a procesar. Vacío = el más reciente (por defecto).'
+        type: string
+        required: false
+        default: ''
 
 concurrency:
   group: procesar-salud-fba
@@ -41,5 +51,6 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           ENTORNO: ${{ inputs.entorno }}
           MODO: ${{ inputs.modo }}
+          FICHERO: ${{ inputs.fichero }}
           DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
         run: python -u procesador_salud_fba.py

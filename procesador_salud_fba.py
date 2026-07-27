@@ -56,6 +56,15 @@ DB_URL       = os.environ.get('DB_URL', '')         # postgres del ENTORNO (stag
 MODO         = os.environ.get('MODO', 'ensayo').strip().lower()       # ensayo | aplicar
 ENTORNO      = os.environ.get('ENTORNO', 'staging').strip().lower()   # staging | produccion
 
+# FICHERO (opcional): nombre EXACTO del .txt del buzón que se quiere procesar.
+# Vacío = el más reciente (comportamiento de siempre). Igual que en keepa: existe
+# para poder recargar un informe concreto (p. ej. el original de las dos guillotinas
+# salud_fba/50497020659.txt) sin depender de cuál es el más reciente del buzón.
+# 🔒 Si se pide un nombre que no está en el buzón se ABORTA: JAMÁS se cae al más
+#    reciente de reserva. Cargar en silencio un informe distinto del que pediste es
+#    exactamente el error que este parámetro viene a evitar.
+FICHERO      = os.environ.get('FICHERO', '').strip()
+
 BUCKET, CARPETA = 'informes', 'salud_fba'
 
 # ---------------------------------------------------------------------------
@@ -477,8 +486,23 @@ def main():
         sys.exit(f"No hay ningún .txt en {BUCKET}/{CARPETA}/. "
                  "Sube el informe SALUD_FBA (MANAGE_INVENTORY_HEALTH) en .txt y relanza.")
     txts.sort(key=lambda o: (o.get('updated_at') or o.get('created_at') or ''), reverse=True)
-    fichero = txts[0]['name']
-    print(f"Informe elegido (el más reciente): {fichero}", flush=True)
+
+    if FICHERO:
+        # Pedido a dedo: tiene que estar, EXACTO. Sin fallback al más reciente.
+        nombres = [o['name'] for o in txts]
+        if FICHERO not in nombres:
+            print(f"\n❌ ABORTA (no se ha escrito nada):\n"
+                  f"[Guarda fichero] Se pidió procesar {FICHERO!r} y no está en "
+                  f"{BUCKET}/{CARPETA}/.\n"
+                  f"   Hay {len(nombres)} .txt en el buzón: {nombres}\n"
+                  f"   No se cae al más reciente: cargaría un informe distinto del que "
+                  f"pediste sin avisar.", flush=True)
+            sys.exit(1)
+        fichero = FICHERO
+        print(f"Informe elegido (pedido a dedo por FICHERO): {fichero}", flush=True)
+    else:
+        fichero = txts[0]['name']
+        print(f"Informe elegido (el más reciente de {len(txts)}): {fichero}", flush=True)
     crudo_bytes = sb.storage.from_(BUCKET).download(f"{CARPETA}/{fichero}")
 
     # Encoding: el real trae UTF-8 con BOM (utf-8-sig). Fallback cp1252.
