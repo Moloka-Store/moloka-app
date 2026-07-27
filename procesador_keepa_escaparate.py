@@ -52,7 +52,7 @@ from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
 from foto_comun import (Aborta, guarda_anti_encogimiento, guarda_no_retroceder, claves_previas,
-                        barrer_sobrantes, resumen_foto)
+                        barrer_sobrantes, resumen_foto, archivar_foto)
 
 # ---------------------------------------------------------------------------
 # 0) Configuración (secrets de GitHub; jamás credenciales en el código)
@@ -699,6 +699,16 @@ def main():
     cur.execute(SQL_FUNCION)   # moloka_ean_norm(): normaliza EAN para el cruce §5.1
     cur.execute(SQL_VISTA)
 
+    # 🎞️ EL HISTÓRICO: apila la foto viva ANTERIOR en keepa_escaparate_hist ANTES
+    # de que el barrido/upsert la sobrescriban (Película §1.6, misma txn). Clave
+    # idempotente (asin, dominio, fecha_foto): un ASIN en dos dominios el mismo
+    # día son DOS asientos. Corre antes de barrer: captura la foto que va a morir.
+    try:
+        arch = archivar_foto(cur, 'keepa_escaparate', ['asin', 'dominio'], 'fecha_foto')
+    except Aborta as e:
+        print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
+        con.rollback(); cur.close(); con.close(); sys.exit(1)
+
     cols = [c for _, c, _ in TIPADAS] + ['bb_seller_id', 'fichero', 'fecha_foto', 'seller_id', 'crudo']
     ph = ", ".join(['%s'] * len(cols))
     set_upd = ", ".join(f"{c}=EXCLUDED.{c}" for c in cols if c not in ('asin', 'dominio'))
@@ -767,6 +777,10 @@ def main():
     print(resumen_foto('keepa_escaparate', AMBITO, previas, len(filas),
                        len(altas), borradas, MODO), flush=True)
 
+    print(f"\n--- HISTÓRICO keepa_escaparate_hist (Película §1.6: apila, NUNCA borra) ---")
+    print(f"   · filas archivadas de la foto anterior: {arch}"
+          f"{'   (la foto anterior ya estaba archivada)' if arch == 0 else ''}", flush=True)
+
     print(f"\n--- El descuadre POR DOMINIO (vista v_keepa_cruce · NO aborta · vive en el dato) ---")
     print(f"    'n/a' = la bandera NO APLICA a ese país (no hay con qué comparar).")
     print(f"    NO es un cero: un cero dice 'lo he mirado y cuadra'.\n")
@@ -794,7 +808,8 @@ def main():
 
     cur.close(); con.close()
     print(f"\n=== FIN · entorno={ENTORNO} · modo={MODO} · filas={len(filas)} · "
-          f"altas={len(altas)} · bajas={borradas} · ean_no_confirmado={n_ean} · tarifa_discrepante={n_tarifa} · "
+          f"altas={len(altas)} · bajas={borradas} · hist_archivadas={arch} · "
+          f"ean_no_confirmado={n_ean} · tarifa_discrepante={n_tarifa} · "
           f"sin_foto_curable={n_foto} · buybox_ajena={n_bb} · activo_sin_export={n_sinexport} ===",
           flush=True)
 

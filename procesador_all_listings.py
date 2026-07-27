@@ -49,7 +49,7 @@ from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
 from foto_comun import (Aborta, guarda_anti_encogimiento, guarda_no_retroceder,
-                        claves_previas, barrer_sobrantes, resumen_foto)
+                        claves_previas, barrer_sobrantes, resumen_foto, archivar_foto)
 
 # ---------------------------------------------------------------------------
 # 0) Configuración
@@ -266,6 +266,16 @@ cur.execute("CREATE INDEX IF NOT EXISTS idx_listings_amazon_asin ON listings_ama
 # Nace cerrada: RLS activo y CERO políticas → anon no puede ni leerla.
 cur.execute("ALTER TABLE listings_amazon ENABLE ROW LEVEL SECURITY;")
 
+# 🎞️ EL HISTÓRICO: apila la foto viva ANTERIOR en listings_amazon_hist ANTES de
+# que el barrido/upsert la sobrescriban (Película §1.6, misma txn). Clave
+# idempotente (seller_sku, fecha_informe). Corre antes de barrer: captura la
+# foto que va a morir; si la carga se revierte, el archivado también.
+try:
+    arch = archivar_foto(cur, 'listings_amazon', ['seller_sku'], 'fecha_informe')
+except Aborta as e:
+    print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
+    con.rollback(); cur.close(); con.close(); sys.exit(1)
+
 # 🔒 LA FOTO TIRA LA HOJA VIEJA: los SKU que ya no vienen en el informe se
 # BORRAN. El SKU nace y muere (regla de identidad §1.1): un SKU muerto que se
 # queda en el diccionario es exactamente el fantasma que hace cuadrar mal el
@@ -294,6 +304,10 @@ for o in ofertas:
 altas = sum(1 for s in skus_fichero if (s,) not in prev)
 print(resumen_foto('listings_amazon', AMBITO, previas, len(skus_fichero),
                    altas, borradas, MODO), flush=True)
+
+print(f"\n--- HISTÓRICO listings_amazon_hist (Película §1.6: apila, NUNCA borra) ---")
+print(f"   · filas archivadas de la foto anterior: {arch}"
+      f"{'   (la foto anterior ya estaba archivada)' if arch == 0 else ''}", flush=True)
 
 # ---------------------------------------------------------------------------
 # 4) Cargar productos y clasificar
@@ -408,5 +422,5 @@ else:
 
 cur.close(); con.close()
 print(f"\n=== FIN · destino={DESTINO} · modo={MODO} · filas={len(skus_fichero)} · "
-      f"altas={altas} · bajas={borradas} · curables={len(curables)} · "
+      f"altas={altas} · bajas={borradas} · hist_archivadas={arch} · curables={len(curables)} · "
       f"no_casa={len(no_casa)} · sin_asin={len(sin_asin)} ===")
