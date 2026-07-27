@@ -179,8 +179,8 @@ ALIAS = {
 # `numeric` donde la foto guarda un `integer`.
 # ---------------------------------------------------------------------------
 HISTORICO = [
-    # Identidad blanda del día. El SKU nace y muere (§1.1): verlo cambiar ES dato.
-    'sku',
+    # (El SKU ya NO vive aquí: con el grano Dos Vidas entra en la PK del histórico,
+    #  declarado aparte como asin/marketplace/snapshot_date.)
     # Stock
     'available', 'fc_transfer', 'total_reserved_quantity', 'inbound_quantity',
     'unfulfillable_quantity', 'pending_removal_quantity', 'inventory_supply_at_fba',
@@ -209,8 +209,8 @@ if _SUELTAS:
         "[HISTORICO] Columnas que no existen en TIPADAS: " + ", ".join(_SUELTAS)
         + ". El histórico HEREDA el tipo de la foto; una columna suelta guardaría "
           "un tipo distinto al de salud_fba o un KeyError en runtime.")
-if 'asin' in HISTORICO or 'marketplace' in HISTORICO or 'snapshot_date' in HISTORICO:
-    raise RuntimeError("[HISTORICO] asin/marketplace/snapshot_date son la PK y se "
+if any(c in HISTORICO for c in ('asin', 'marketplace', 'sku', 'snapshot_date')):
+    raise RuntimeError("[HISTORICO] asin/marketplace/sku/snapshot_date son la PK y se "
                        "declaran aparte: no pueden repetirse en HISTORICO.")
 
 
@@ -339,10 +339,13 @@ def analizar(texto, fichero):
 
         snapshots.add(celda_norm(fila, 'snapshot-date'))
 
-        # Guarda 2: par (asin, marketplace) duplicado (se recopilan todos)
-        k = (asin_v.upper(), mk_v.upper())
+        # Guarda 2: trío (asin, marketplace, sku) duplicado (se recopilan todos).
+        # 🔴 El SKU entra en la clave: un mismo ASIN con dos SKU vivos en el mismo
+        # país (dos vidas) ya NO es un duplicado — es lo normal desde que Amazon
+        # obliga a etiquetar. Solo un trío repetido de verdad sería informe corrupto.
+        k = (asin_v.upper(), mk_v.upper(), sku_v.upper())
         if k in claves_vistas:
-            duplicadas.append(f"({asin_v}, {mk_v}) — filas {claves_vistas[k]} y {num_fila}")
+            duplicadas.append(f"({asin_v}, {mk_v}, {sku_v}) — filas {claves_vistas[k]} y {num_fila}")
         else:
             claves_vistas[k] = num_fila
 
@@ -388,8 +391,8 @@ def analizar(texto, fichero):
 
     # Guarda 2 (informe final si hubo duplicados)
     if duplicadas:
-        raise Aborta("[Guarda 2] Pares (asin, marketplace) duplicados (el procesador "
-                     "NO elige):\n   · " + "\n   · ".join(duplicadas))
+        raise Aborta("[Guarda 2] Tríos (asin, marketplace, sku) duplicados (el procesador "
+                     "NO elige; esto sí sería un informe corrupto):\n   · " + "\n   · ".join(duplicadas))
 
     # Guarda 7: más de una snapshot-date distinta
     snapshots = {s for s in snapshots if s}
@@ -419,7 +422,7 @@ def sql_crear_tabla():
         fichero        text,
         crudo          jsonb,
         procesado_en   timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (asin, marketplace)
+        PRIMARY KEY (asin, marketplace, sku)
     );
     """
 
@@ -430,11 +433,12 @@ def sql_crear_historico():
     CREATE TABLE IF NOT EXISTS salud_fba_historico (
         asin           text NOT NULL,
         marketplace    text NOT NULL,
+        sku            text NOT NULL,
         snapshot_date  date NOT NULL,
         {cols},
         fichero        text,
         procesado_en   timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (asin, marketplace, snapshot_date)
+        PRIMARY KEY (asin, marketplace, sku, snapshot_date)
     );
     """
 
@@ -455,7 +459,26 @@ SELECT
         WHERE p.activo AND btrim(p.asin) = btrim(s.asin))
      AND NOT EXISTS (SELECT 1 FROM productos p
         WHERE p.activo AND btrim(p.asin) = btrim(s.asin)
-          AND btrim(p.sku) = btrim(s.sku))) AS sku_discrepante
+          AND btrim(p.sku) = btrim(s.sku))) AS sku_discrepante,
+    -- ▼▼ Añadido para Dos Vidas (§4.3). ADITIVO: `sku_discrepante` queda EXACTO.
+    --    (Semántica derivada de los nombres que pidió el trackeador; a confirmar.)
+    -- Cuántas vidas (SKU vivos) tiene este (asin, marketplace) en la foto.
+    (SELECT count(*) FROM salud_fba s2
+       WHERE btrim(s2.asin) = btrim(s.asin) AND s2.marketplace = s.marketplace) AS n_skus_vivos,
+    -- Este SKU concreto del informe no está en NINGUNA ficha activa con ese ASIN.
+    NOT EXISTS (SELECT 1 FROM productos p
+       WHERE p.activo AND btrim(p.asin) = btrim(s.asin)
+         AND btrim(p.sku) = btrim(s.sku)) AS sku_sin_ficha,
+    -- Hay ficha activa para el ASIN pero NINGUNA de sus vidas del informe casa con
+    -- un SKU fichado (la lectura "revisada" de discrepante: no es este SKU, es que
+    -- no casa ninguno). Con esto, un ASIN de una sola vida fichada NO sale marcado.
+    (EXISTS (SELECT 1 FROM productos p
+        WHERE p.activo AND btrim(p.asin) = btrim(s.asin))
+     AND NOT EXISTS (SELECT 1 FROM salud_fba s2
+        JOIN productos p ON p.activo AND btrim(p.asin) = btrim(s2.asin)
+                        AND btrim(p.sku) = btrim(s2.sku)
+        WHERE btrim(s2.asin) = btrim(s.asin) AND s2.marketplace = s.marketplace))
+       AS asin_sin_ningun_sku_fichado
 FROM salud_fba s;
 """
 
@@ -546,7 +569,7 @@ def main():
         con.rollback(); cur.close(); con.close(); sys.exit(1)
 
     # Claves que ya estaban (solo para contar altas). Antes del barrido.
-    prev = claves_previas(cur, 'salud_fba', ['asin', 'marketplace'], ambito=AMBITO)
+    prev = claves_previas(cur, 'salud_fba', ['asin', 'marketplace', 'sku'], ambito=AMBITO)
 
     # --- Cruce en memoria contra `productos` (para los avisos §4.2 y el premio §5) ---
     cur.execute("SELECT btrim(asin), btrim(sku) FROM productos WHERE activo AND asin IS NOT NULL;")
@@ -569,8 +592,18 @@ def main():
             sku_discrepante.append(f"{f['asin']} · BD {sorted(skus_por_asin.get(au, set()))} "
                                    f"vs informe {f['sku']}")
 
+    # Aviso DOS VIDAS (§4.2, NO aborta): un (asin, marketplace) con más de un SKU
+    # vivo. La Guarda 2 ya no lo mata, pero NO puede volverse invisible: si esto
+    # desaparece del log, hemos cambiado un aborto ruidoso por un silencio.
+    por_asin_mk = {}
+    for f in filas:
+        por_asin_mk.setdefault((f['asin'], f['marketplace']), []).append(
+            (f['sku'], f['registro'].get('fnsku')))
+    dos_vidas = {k: v for k, v in por_asin_mk.items() if len(v) > 1}
+
     altas = [f for f in filas
-             if (f['registro']['asin'], f['registro']['marketplace']) not in prev]
+             if (f['registro']['asin'], f['registro']['marketplace'],
+                 f['registro']['sku']) not in prev]
 
     # --- Crear tabla + vista y volcar (todo dentro de la transacción) ---
     cur.execute(sql_crear_tabla())
@@ -581,15 +614,16 @@ def main():
 
     cols = [c for c, _ in TIPADAS] + ['snapshot_date', 'fichero', 'crudo']
     ph = ", ".join(['%s'] * len(cols))
-    set_upd = ", ".join(f"{c}=EXCLUDED.{c}" for c in cols if c not in ('asin', 'marketplace'))
+    set_upd = ", ".join(f"{c}=EXCLUDED.{c}" for c in cols if c not in ('asin', 'marketplace', 'sku'))
     sql_upsert = (f"INSERT INTO salud_fba ({', '.join(cols)}) VALUES ({ph}) "
-                  f"ON CONFLICT (asin, marketplace) DO UPDATE SET {set_upd}, procesado_en=now();")
+                  f"ON CONFLICT (asin, marketplace, sku) DO UPDATE SET {set_upd}, procesado_en=now();")
 
     # 🔒 LA FOTO TIRA LA HOJA VIEJA: los (asin, marketplace) del ámbito que ya no
     # vienen en el informe se BORRAN (los 7 SKU fantasma de 195→188 dejan de
     # existir). Mismo commit que la carga: o todo o nada. Las claves son
     # EXACTAMENTE los valores que el upsert va a escribir.
-    claves_nuevas = [(f['registro']['asin'], f['registro']['marketplace']) for f in filas]
+    claves_nuevas = [(f['registro']['asin'], f['registro']['marketplace'], f['registro']['sku'])
+                     for f in filas]
 
     # ── SALVAGUARDA anti-omisión ────────────────────────────────────────────
     # El informe FBA a veces OMITE productos SANOS (con stock). El patrón foto los
@@ -598,28 +632,30 @@ def main():
     #   (a) su propia foto de salud: available + fc_transfer > 0, o
     #   (b) unidades en inventario_internacional (otra foto).
     # Solo se borran los fantasmas de verdad (ausentes y sin stock por ningún lado).
-    en_fichero = {(a.upper(), mk.upper()) for (a, mk) in claves_nuevas}
+    en_fichero = {(a.upper(), mk.upper(), sku.upper()) for (a, mk, sku) in claves_nuevas}
     cur.execute("SELECT DISTINCT btrim(asin) FROM inventario_internacional WHERE quantity > 0;")
     intl_con_stock = {r[0].upper() for r in cur.fetchall() if r[0]}
     cur.execute(
-        "SELECT asin, marketplace, COALESCE(available,0)+COALESCE(fc_transfer,0) "
+        "SELECT asin, marketplace, sku, COALESCE(available,0)+COALESCE(fc_transfer,0) "
         "FROM salud_fba WHERE marketplace = ANY(%s);", (AMBITO[1],))
     protegidas = []
-    for asin_p, mk_p, disp_p in cur.fetchall():
-        if (asin_p.upper(), mk_p.upper()) in en_fichero:
-            continue  # sí viene en el informe: no es candidato a baja
+    for asin_p, mk_p, sku_p, disp_p in cur.fetchall():
+        # 🔴 Ahora se decide por SKU: si el informe trae UNA vida y la otra no, la
+        # ausente se protege si tiene stock PROPIO (su available+fc_transfer > 0).
+        if (asin_p.upper(), mk_p.upper(), sku_p.upper()) in en_fichero:
+            continue  # esta vida sí viene en el informe: no es candidata a baja
         if (disp_p or 0) > 0 or asin_p.upper() in intl_con_stock:
-            protegidas.append((asin_p, mk_p))  # ausente pero CON stock → NO borrar
+            protegidas.append((asin_p, mk_p, sku_p))  # vida ausente pero CON stock → NO borrar
     if protegidas:
-        print(f"   · 🛡️ Salvaguarda: {len(protegidas)} ausentes del informe PROTEGIDOS "
-              f"(tienen stock en salud o internacional): "
-              f"{', '.join(a for a, _ in protegidas[:10])}"
+        print(f"   · 🛡️ Salvaguarda: {len(protegidas)} vidas (asin, mk, sku) ausentes del "
+              f"informe PROTEGIDAS (tienen stock en salud o internacional): "
+              f"{', '.join(a for a, _, _ in protegidas[:10])}"
               f"{' …' if len(protegidas) > 10 else ''}", flush=True)
     claves_barrido = claves_nuevas + protegidas
     # ────────────────────────────────────────────────────────────────────────
 
     try:
-        borradas = barrer_sobrantes(cur, 'salud_fba', ['asin', 'marketplace'],
+        borradas = barrer_sobrantes(cur, 'salud_fba', ['asin', 'marketplace', 'sku'],
                                     claves_barrido, ambito=AMBITO)
     except Aborta as e:
         print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
@@ -641,26 +677,28 @@ def main():
 
     # Qué había YA de este día (para distinguir apilar de reescribir en el log:
     # si reprocesas el mismo fichero, todo tiene que salir como 'reescritas').
-    cur.execute("SELECT asin, marketplace FROM salud_fba_historico "
+    cur.execute("SELECT asin, marketplace, sku FROM salud_fba_historico "
                 "WHERE snapshot_date = %s AND marketplace = ANY(%s);",
                 (snap, AMBITO[1]))
     ya_del_dia = {tuple(r) for r in cur.fetchall()}
 
-    cols_h = ['asin', 'marketplace', 'snapshot_date'] + HISTORICO + ['fichero']
+    cols_h = ['asin', 'marketplace', 'sku', 'snapshot_date'] + HISTORICO + ['fichero']
     ph_h = ", ".join(['%s'] * len(cols_h))
     set_h = ", ".join(f"{c}=EXCLUDED.{c}" for c in HISTORICO + ['fichero'])
     sql_hist = (f"INSERT INTO salud_fba_historico ({', '.join(cols_h)}) VALUES ({ph_h}) "
-                f"ON CONFLICT (asin, marketplace, snapshot_date) DO UPDATE SET "
+                f"ON CONFLICT (asin, marketplace, sku, snapshot_date) DO UPDATE SET "
                 f"{set_h}, procesado_en=now();")
 
     for f in filas:   # 🔒 SOLO las filas del fichero. Las protegidas NO se apilan.
-        vals_h = ([f['registro']['asin'], f['registro']['marketplace'], snap]
+        vals_h = ([f['registro']['asin'], f['registro']['marketplace'],
+                   f['registro']['sku'], snap]
                   + [f['registro'][c] for c in HISTORICO] + [fichero])
         cur.execute(sql_hist, vals_h)
 
     hist_reescritas = sum(
         1 for f in filas
-        if (f['registro']['asin'], f['registro']['marketplace']) in ya_del_dia)
+        if (f['registro']['asin'], f['registro']['marketplace'],
+            f['registro']['sku']) in ya_del_dia)
     hist_apiladas = len(filas) - hist_reescritas
 
     cur.execute("SELECT count(*), count(DISTINCT snapshot_date), "
@@ -709,6 +747,12 @@ def main():
     for s in sku_discrepante[:50]:
         print(f"        · {s}")
 
+    print(f"\n--- 🎭 DOS VIDAS (§4.2 · NO aborta · un ASIN con >1 SKU vivo en el país) ---")
+    print(f"   · ASIN con más de un SKU vivo: {len(dos_vidas)}")
+    for (asin_dv, mk_dv), vidas_dv in list(dos_vidas.items())[:50]:
+        detalle = ", ".join(f"{sku_dv} (FNSKU {fn_dv or '—'})" for sku_dv, fn_dv in vidas_dv)
+        print(f"        · {asin_dv} [{mk_dv}]: {detalle}")
+
     # --- Escritura (o no) ---
     if MODO == 'aplicar':
         con.commit()
@@ -727,8 +771,8 @@ def main():
     print(f"\n=== FIN · entorno={ENTORNO} · modo={MODO} · "
           f"filas_fichero={len(filas)} · filas_tabla={en_tabla} · "
           f"protegidas={len(protegidas)} · protegidas_rancias={rancias} · "
-          f"altas={len(altas)} · bajas={borradas} · sin_ficha={len(sin_ficha)} · "
-          f"sku_discrepante={len(sku_discrepante)} · "
+          f"altas={len(altas)} · bajas={borradas} · dos_vidas={len(dos_vidas)} · "
+          f"sin_ficha={len(sin_ficha)} · sku_discrepante={len(sku_discrepante)} · "
           f"hist_apiladas={hist_apiladas} · hist_reescritas={hist_reescritas} · "
           f"hist_dias={h_dias} · hist_filas={h_filas} ===", flush=True)
 
