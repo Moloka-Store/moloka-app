@@ -305,8 +305,9 @@ altas = sum(1 for s in skus_fichero if (s,) not in prev)
 print(resumen_foto('listings_amazon', AMBITO, previas, len(skus_fichero),
                    altas, borradas, MODO), flush=True)
 
+verbo_h = 'archivadas' if MODO == 'aplicar' else 'que se archivarían'
 print(f"\n--- HISTÓRICO listings_amazon_hist (Película §1.6: apila, NUNCA borra) ---")
-print(f"   · filas archivadas de la foto anterior: {arch}"
+print(f"   · filas {verbo_h} de la foto anterior: {arch}"
       f"{'   (la foto anterior ya estaba archivada)' if arch == 0 else ''}", flush=True)
 
 # ---------------------------------------------------------------------------

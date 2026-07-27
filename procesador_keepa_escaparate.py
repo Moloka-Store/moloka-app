@@ -777,8 +777,9 @@ def main():
     print(resumen_foto('keepa_escaparate', AMBITO, previas, len(filas),
                        len(altas), borradas, MODO), flush=True)
 
+    verbo_h = 'archivadas' if MODO == 'aplicar' else 'que se archivarían'
     print(f"\n--- HISTÓRICO keepa_escaparate_hist (Película §1.6: apila, NUNCA borra) ---")
-    print(f"   · filas archivadas de la foto anterior: {arch}"
+    print(f"   · filas {verbo_h} de la foto anterior: {arch}"
           f"{'   (la foto anterior ya estaba archivada)' if arch == 0 else ''}", flush=True)
 
     print(f"\n--- El descuadre POR DOMINIO (vista v_keepa_cruce · NO aborta · vive en el dato) ---")

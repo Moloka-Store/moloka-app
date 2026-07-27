@@ -313,15 +313,25 @@ def archivar_foto(cur, tabla_viva, pk_cols, col_fecha, etiqueta='HISTORICO'):
                 f"ON {tabla_hist} ({', '.join(idem)});")
 
     # Columnas reales de viva e histórico, leídas AHORA (dentro de la txn: la DDL
-    # de arriba ya es visible). Nada de SELECT *: se enumeran y se validan.
+    # de arriba ya es visible). Nada de SELECT *: se enumeran, se validan y se
+    # guarda el TIPO SQL exacto de cada una (format_type) para poder dar el remedio.
     def _cols(tabla):
-        cur.execute("SELECT column_name, is_nullable, column_default "
-                    "FROM information_schema.columns "
-                    "WHERE table_schema='public' AND table_name=%s "
-                    "ORDER BY ordinal_position;", (tabla,))
+        cur.execute(
+            "SELECT a.attname, format_type(a.atttypid, a.atttypmod), "
+            "       (NOT a.attnotnull) AS nullable, "
+            "       pg_get_expr(ad.adbin, ad.adrelid) AS defecto "
+            "FROM pg_attribute a "
+            "JOIN pg_class c ON c.oid = a.attrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "LEFT JOIN pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum "
+            "WHERE n.nspname = 'public' AND c.relname = %s "
+            "  AND a.attnum > 0 AND NOT a.attisdropped "
+            "ORDER BY a.attnum;", (tabla,))
         return cur.fetchall()
 
-    cols_viva = [_ident(r[0]) for r in _cols(tabla_viva)]
+    viva_rows = _cols(tabla_viva)
+    cols_viva = [_ident(r[0]) for r in viva_rows]
+    tipo_viva = {r[0]: r[1] for r in viva_rows}     # columna → tipo SQL exacto ('text', 'text[]', 'jsonb'…)
     hist_rows = _cols(tabla_hist)
     hist_cols = {r[0] for r in hist_rows}
 
@@ -332,17 +342,26 @@ def archivar_foto(cur, tabla_viva, pk_cols, col_fecha, etiqueta='HISTORICO'):
                      f"{tabla_viva} no tiene: {faltan_clave}. Abortando.")
 
     # Robustez al esquema, en los DOS sentidos, RUIDOSA:
-    #   · la foto trae una columna que el histórico no puede guardar → ABORTA.
+    #   · la foto trae una columna que el histórico no puede guardar → ABORTA, y
+    #     el mensaje trae el ALTER TABLE EXACTO para copiar y pegar. El riesgo
+    #     domesticado: parar la carga sí (mejor eso que archivar mal), pero sin
+    #     dejarte con un susto y una cañería parada sin remedio a mano.
     faltan_en_hist = [c for c in cols_viva if c not in hist_cols]
     if faltan_en_hist:
+        remedio = "\n".join(
+            f"    ALTER TABLE {tabla_hist} ADD COLUMN {c} {tipo_viva[c]};"
+            for c in faltan_en_hist)
         raise Aborta(
-            f"[{etiqueta}] La foto {tabla_viva} tiene columnas que {tabla_hist} NO tiene: "
-            f"{faltan_en_hist}. El histórico no puede guardar lo que la foto trae (replica "
-            f"el esquema en el histórico). No se archiva ni se carga nada.")
+            f"[{etiqueta}] La foto {tabla_viva} tiene {len(faltan_en_hist)} columna(s) que "
+            f"{tabla_hist} NO tiene: {faltan_en_hist}. Se PARA la carga (mejor parar que "
+            f"archivar mal). Remedio para copiar y pegar en el entorno, y relanzar:\n"
+            f"{remedio}\n"
+            f"Se añaden NULLABLE a propósito: las filas históricas viejas no traen ese dato. "
+            f"No se ha archivado ni cargado nada.")
     #   · el histórico exige una columna NOT NULL sin defecto que la foto no llena.
     obligatorias_sin_cubrir = [
         r[0] for r in hist_rows
-        if r[0] not in cols_viva and r[0] != 'archivado_en' and r[1] == 'NO' and r[2] is None]
+        if r[0] not in cols_viva and r[0] != 'archivado_en' and not r[2] and r[3] is None]
     if obligatorias_sin_cubrir:
         raise Aborta(
             f"[{etiqueta}] {tabla_hist} exige columnas NOT NULL sin defecto que {tabla_viva} "
