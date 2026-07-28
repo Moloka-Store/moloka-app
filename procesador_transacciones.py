@@ -74,6 +74,7 @@ DB_URL       = os.environ.get('DB_URL', '')         # postgres del ENTORNO (stag
 MODO         = os.environ.get('MODO', 'ensayo').strip().lower()       # ensayo | aplicar
 ENTORNO      = os.environ.get('ENTORNO', 'staging').strip().lower()   # staging | produccion
 PAIS         = os.environ.get('PAIS', '').strip().upper()             # ES | IT | FR (selector)
+FICHERO      = os.environ.get('FICHERO', '').strip()                  # nombre EXACTO; vacío = más reciente
 
 BUCKET, CARPETA = 'informes', 'transacciones'
 PAISES_VALIDOS = ('ES', 'IT', 'FR')
@@ -438,8 +439,26 @@ def main():
                  f"Report del país {PAIS} y relanza. (Sin fichero, el ensayo aborta en el "
                  "primer paso: es el orden, no un fallo.)")
     csvs.sort(key=lambda o: (o.get('updated_at') or o.get('created_at') or ''), reverse=True)
-    fichero = csvs[0]['name']
-    print(f"Informe elegido (el más reciente de {len(csvs)}): {fichero}", flush=True)
+
+    # Con ES/IT/FR en la misma carpeta, "el más reciente" es una lotería (subes dos,
+    # lanzas PAIS=ES y te coge el italiano). Por eso el catálogo v2 pasa el nombre
+    # EXACTO por el input FICHERO. Igual que salud_fba/keepa: si se pide, tiene que
+    # estar; NO se cae al más reciente (cargaría otro fichero sin avisar).
+    if FICHERO:
+        nombres = [o['name'] for o in csvs]
+        if FICHERO not in nombres:
+            print(f"\n❌ ABORTA (no se ha escrito nada):\n"
+                  f"[Guarda fichero] Se pidió procesar {FICHERO!r} y no está en "
+                  f"{BUCKET}/{CARPETA}/.\n"
+                  f"   Hay {len(nombres)} .csv en el buzón: {nombres}\n"
+                  f"   No se cae al más reciente: cargaría un informe distinto del que "
+                  f"pediste sin avisar.", flush=True)
+            sys.exit(1)
+        fichero = FICHERO
+        print(f"Informe elegido (pedido a dedo por FICHERO): {fichero}", flush=True)
+    else:
+        fichero = csvs[0]['name']
+        print(f"Informe elegido (el más reciente de {len(csvs)}): {fichero}", flush=True)
 
     crudo_bytes = sb.storage.from_(BUCKET).download(f"{CARPETA}/{fichero}")
     try:

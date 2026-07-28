@@ -25,6 +25,17 @@ on:
         type: choice
         options: [ES, IT, FR]
         default: ES
+      fichero:
+        # Igual que procesar-salud-fba.yml y procesar-keepa-escaparate.yml: procesa
+        # UN informe concreto del buzón en vez del más reciente. Aquí es lo NORMAL,
+        # no la excepción: con ES/IT/FR en la misma carpeta, "el más reciente" es una
+        # lotería. El catálogo de la v2 pasa el nombre exacto (inputFichero: 'fichero')
+        # y puede encolar los tres seguidos. Vacío = el más reciente. Si el nombre no
+        # está en el buzón, ABORTA (no cae al más reciente).
+        description: 'Nombre EXACTO del .csv a procesar. Vacío = el más reciente.'
+        type: string
+        required: false
+        default: ''
 
 concurrency:
   group: procesar-transacciones
@@ -50,5 +61,6 @@ jobs:
           ENTORNO: ${{ inputs.entorno }}
           MODO: ${{ inputs.modo }}
           PAIS: ${{ inputs.pais }}
+          FICHERO: ${{ inputs.fichero }}
           DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
         run: python -u procesador_transacciones.py
