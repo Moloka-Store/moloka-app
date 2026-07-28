@@ -419,7 +419,9 @@ IVA_DEFAULT_ES, IVA_IT, IVA_FR = 0.21, 0.22, 0.20
 ALMACEN, COM_DIGITALES = 0.15, 1.03
 UNIDADES_CASE_TCG = 6          # CHASE en case de 6 (5+1) -> coste unitario = PA / 6. TCG y chase HEO.
 LOTE_FASE1 = int(os.environ.get('LOTE_FASE1', '50'))   # 100 -> 50: si se pierde un lote, el agujero es la mitad
-COTEJO_MODO = (os.environ.get('COTEJO_MODO') or 'observar').lower()   # observar | bloquear | off
+# activo (default) -> elige el que se parece y marca los dudosos (nada desaparece).
+# off              -> vuelta atras de emergencia: elige por rank, como antes del bloque 2.
+COTEJO_MODO = (os.environ.get('COTEJO_MODO') or 'activo').lower()     # activo | off
 TS = datetime.now().strftime('%Y%m%d_%H%M')
 ARCHIVO_SALIDA = f'/tmp/Escaneo_{PROVEEDOR}_{MARCA}_{TS}.xlsx'
 print(f"{PROVEEDOR} | Marca {MARCA} | Rank max {RANK_MAXIMO} | Modo {MODO}")
@@ -616,19 +618,32 @@ def cotejar(nombre_prov, titulo_amz):
     return (score >= UMBRAL_COTEJO), score, f'cobertura {score:.0%} (nombre sin palabras distintivas)'
 
 def elegir_candidato(nombre_prov, cands, keyrank):
-    """cands: [{'asin','title','r_90',...}]. Devuelve (elegido, veredicto).
-    1) se queda solo con los que COTEJAN; 2) entre esos, el de mejor rank.
-    Si NINGUNO coteja -> no elige: a revision manual (y no se gasta Fase 2)."""
+    """cands: [{'asin','title','r_90',...}] -> (elegido, veredicto, detalle).
+    🔒 REGLA DE FERNANDO (28-jul): NUNCA devuelve None. Si ninguno pasa el filtro
+    se entrega EL MAS PARECIDO y se marca DUDOSO. Sacar un producto del informe
+    porque el criterio no lo reconoce seria cambiar un error VISIBLE (un ASIN
+    equivocado, que se ve y se corrige) por una AUSENCIA INVISIBLE (un producto
+    que falta y del que nadie se entera). Es el mismo pecado que la fuga
+    silenciosa. El criterio ORDENA y AVISA; no decide qué desaparece.
+    Ademas el filtro fallara por idioma (Vengadores/Avengers) y eso no puede
+    costarte dejar de ver el producto."""
     if not cands:
-        return None, 'sin candidatos'
-    evaluados = [(c, cotejar(nombre_prov, c.get('title'))) for c in cands]
-    if all(v[0] is None for _, v in evaluados):                 # no cotejable
-        return min(cands, key=keyrank), 'n/d: elegido por rank (como hasta hoy)'
-    casan = [c for c, v in evaluados if v[0] is True]
+        return None, '—', 'sin candidatos'
+    ev = [(c, cotejar(nombre_prov, c.get('title'))) for c in cands]
+    if all(v[0] is None for _, v in ev):                    # no hay con que cotejar
+        return min(cands, key=keyrank), 'n/d', ev[0][1][2] + ' -> elegido por rank, como siempre'
+    casan = [(c, v) for c, v in ev if v[0] is True]
     if casan:
-        elegido = min(casan, key=keyrank)
-        return elegido, f'OK ({len(casan)} de {len(cands)} cotejan; entre esos, mejor rank)'
-    return None, f'NINGUNO de los {len(cands)} candidatos casa con el nombre del proveedor'
+        elegido = min((c for c, _ in casan), key=keyrank)
+        det = next(v[2] for c, v in casan if c is elegido)
+        return elegido, 'OK', f'{len(casan)}/{len(cands)} casan; entre esos, mejor rank ({det})'
+    # Ninguno pasa el filtro -> se entrega el MAS PARECIDO, nunca se descarta.
+    mejor_c, mejor_v = max(ev, key=lambda cv: (cv[1][1], -keyrank(cv[0])))
+    if mejor_v[1] <= 0:                                     # ni uno se parece en nada
+        return (min(cands, key=keyrank), '⚠ DUDOSO',
+                f'ninguno de los {len(cands)} se parece al nombre; te pongo el de mejor rank — REVISAR')
+    return (mejor_c, '⚠ DUDOSO',
+            f'ninguno pasa el filtro; te pongo el MAS PARECIDO ({mejor_v[1]:.0%} de {len(cands)}) — REVISAR')
 
 # ============================================================
 # GUARDARRAIL DE SISTEMA (mismo espiritu que el blindaje anti-vaciado del 35%)
@@ -1216,47 +1231,38 @@ if filas:
 
     # ============================================================
     # COTEJO: elegir el ASIN que SE PARECE, no el que mas vende.
-    #   observar (default) -> se elige como hasta hoy; solo se informa. NO cambia nada.
-    #   bloquear           -> se elige por cotejo; si ninguno casa, a revision manual.
-    #   off                -> como antes del bloque 2.
+    #   activo (default) -> se aplica SIEMPRE el elegido; los dudosos se marcan.
+    #   off              -> como antes del bloque 2 (se elige por rank).
+    # 🔒 NADA DESAPARECE. El cotejo ORDENA y AVISA; nunca saca un producto del
+    # informe. Un ASIN dudoso VISIBLE (se ve y se corrige) es mejor que una
+    # ausencia invisible. len(candidatos) es INVARIANTE en este bloque: solo se
+    # reasigna candidatos[ein], jamas se hace pop ni se anade a no_encontrados.
     # ============================================================
-    cotejo_info = {}          # ein -> {'veredicto','motivo','asin_cotejo','difiere'}
-    _n_eval = _n_rech = 0
+    cotejo_info = {}          # ein -> {'veredicto','detalle','asin_cotejo','difiere'}
+    _n_eval = _n_dud = 0
     if COTEJO_MODO != 'off' and COTEJO_ACTIVO:
         for ein, c in list(candidatos.items()):
             cands = cands_por_ean.get(ein) or [c]
             nom = fila_por_ean[ein]['nombre']
-            elegido, motivo = elegir_candidato(nom, cands, keyrank)
-            if motivo.startswith('n/d'):
-                cotejo_info[ein] = {'veredicto':'n/d','motivo':motivo,'asin_cotejo':None,'difiere':False}
-                continue
-            _n_eval += 1
+            elegido, veredicto, detalle = elegir_candidato(nom, cands, keyrank)
             if elegido is None:
-                _n_rech += 1
-                cotejo_info[ein] = {'veredicto':'NINGUNO CASA','motivo':motivo,'asin_cotejo':None,'difiere':True}
-            else:
-                difiere = elegido['asin'] != c['asin']
-                cotejo_info[ein] = {'veredicto':('OTRO MEJOR' if difiere else 'OK'),
-                                    'motivo':motivo,'asin_cotejo':elegido['asin'],'difiere':difiere}
-        _fiar, _msg_panico = cotejo_de_fiar(_n_eval, _n_rech)
+                continue                                    # cands nunca vacio; defensivo
+            difiere = elegido['asin'] != c['asin']
+            candidatos[ein] = elegido                        # <- SIEMPRE se aplica el elegido
+            cotejo_info[ein] = {'veredicto':veredicto, 'detalle':detalle,
+                                'asin_cotejo':elegido['asin'], 'difiere':difiere}
+            if veredicto != 'n/d':
+                _n_eval += 1
+                if str(veredicto).startswith('⚠'):
+                    _n_dud += 1
+        # Guardarrail de panico: ya no apaga nada (no hay nada destructivo). Si el
+        # ratio de dudosos supera el 50%, avisa: es la senal de afinar el criterio.
+        _fiar, _msg_panico = cotejo_de_fiar(_n_eval, _n_dud)
         if not _fiar:
             print("!!! " + _msg_panico)
         n_dif = sum(1 for v in cotejo_info.values() if v['difiere'])
-        print(f"COTEJO ({COTEJO_MODO}): {_n_eval} evaluados | {_n_rech} sin candidato que case | "
-              f"{n_dif} donde el cotejo discrepa del rank.")
-
-        # SOLO en modo bloquear (y solo si el criterio es de fiar) se toca la eleccion
-        if COTEJO_MODO == 'bloquear' and _fiar:
-            for ein, v in cotejo_info.items():
-                if v['veredicto'] == 'NINGUNO CASA':
-                    candidatos.pop(ein, None)                        # fuera: no se gasta Fase 2
-                    no_encontrados.append({'EAN': ein, 'Cabecera': fila_por_ean[ein]['nombre'],
-                                           'Motivo': 'COTEJO: ningun ASIN casa con el nombre -> revisar a mano'})
-                elif v['asin_cotejo'] and v['difiere']:
-                    for cc in cands_por_ean.get(ein, []):
-                        if cc['asin'] == v['asin_cotejo']:
-                            candidatos[ein] = cc                     # gana el que se parece
-                            break
+        print(f"COTEJO ({COTEJO_MODO}): {_n_eval} evaluados | {_n_dud} dudosos | "
+              f"{n_dif} donde el cotejo cambia la eleccion del rank.")
 
     for ein,c in candidatos.items():
         tiene = (c['r_act'] and c['r_act']>0) or (c['r_90'] and c['r_90']>0)
@@ -1355,6 +1361,7 @@ for i,c in enumerate(lista,1):
             'pa':f['pa'],'core':f['core'],'es_chase':f['es_chase'],'propio':c['propio'],
             'volumen':f.get('volumen'),'url':f.get('url',''),'titulo_amz':'',
             'ambiguo':c['ean_in'] in amb_eans,'paises':{},
+            'cotejo':(cotejo_info.get(c['ean_in']) or {}).get('veredicto','—'),   # para marcar dudosos en Telegram
             'case_de_6':bool(f.get('es_caja6'))}
     for dom in ('ES','IT','FR'):
         d = datos_pais(c['asin'], dom)
@@ -1499,7 +1506,7 @@ for item in registros:
             f"={L['Beneficio (€)']}{r}/{L['Precio venta (€)']}{r}" if (div and d['precio'] and pct is not None) else None,
             d['decision'], en_bd, amb,
             item.get('titulo_amz',''), item.get('coincide','?'),
-            _cot.get('veredicto','—'), _cot.get('motivo','—'),
+            _cot.get('veredicto','—'), _cot.get('detalle','—'),
             ('Ver ficha ↗' if item.get('url') else '')])
         cell = ws.cell(row=r, column=3)
         cell.hyperlink = f"https://www.{DOM_AMZ[dom]}/dp/{item['asin']}"
@@ -1548,12 +1555,10 @@ if last >= 2:
     coi = L['Coincide']; rng_coi = f'{coi}2:{coi}{last}'
     ws.conditional_formatting.add(rng_coi, FormulaRule(formula=[f'ISNUMBER(SEARCH("NO",{coi}2))'],
         fill=_cf_fill('FFC7CE'), font=Font(color='9C0006')))
-    # Semaforo del COTEJO (mismo espiritu que Coincide): rojo si el cotejo discrepa
-    # o rechaza, gris si no aplica, verde si el rank y el cotejo coinciden.
+    # Semaforo del COTEJO (mismo espiritu que Coincide): DUDOSO rojo (revisar el
+    # ASIN), n/d gris (no habia con que cotejar), OK verde (rank y cotejo coinciden).
     cot = L['Cotejo']; rng_cot = f'{cot}2:{cot}{last}'
-    ws.conditional_formatting.add(rng_cot, FormulaRule(formula=[f'ISNUMBER(SEARCH("OTRO MEJOR",{cot}2))'],
-        fill=_cf_fill('FFC7CE'), font=Font(color='9C0006'), stopIfTrue=True))
-    ws.conditional_formatting.add(rng_cot, FormulaRule(formula=[f'ISNUMBER(SEARCH("NINGUNO CASA",{cot}2))'],
+    ws.conditional_formatting.add(rng_cot, FormulaRule(formula=[f'ISNUMBER(SEARCH("DUDOSO",{cot}2))'],
         fill=_cf_fill('FFC7CE'), font=Font(color='9C0006'), stopIfTrue=True))
     ws.conditional_formatting.add(rng_cot, FormulaRule(formula=[f'ISNUMBER(SEARCH("n/d",{cot}2))'],
         fill=_cf_fill('E7E6E6'), font=Font(color='808080'), stopIfTrue=True))
@@ -1900,7 +1905,8 @@ try:
             for _it, (_dom, _mg, _pv) in _compras[:20]:
                 _nom = str(_it.get('nombre') or '')[:45]
                 _pvs = f"{_pv:.2f}€" if _pv else "s/precio"
-                _lineas.append(f"• {_nom} — {_mg*100:.0f}% — {_pvs} ({_dom}) — {_it.get('marca','')}")
+                _dud = ' ⚠ASIN DUDOSO' if str(_it.get('cotejo','')).startswith('⚠') else ''
+                _lineas.append(f"• {_nom} — {_mg*100:.0f}% — {_pvs} ({_dom}) — {_it.get('marca','')}{_dud}")
             if len(_compras) > 20:
                 _lineas.append(f"…y {len(_compras)-20} más (mira el Excel de la Biblioteca).")
             import requests as _rq_tg
