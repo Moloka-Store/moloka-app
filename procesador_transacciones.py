@@ -150,8 +150,35 @@ COLS_OBLIGATORIAS = ('fecha', 'tipo', 'sku', 'cantidad', 'ventas_producto',
                      'impuesto_producto', 'tarifa_venta', 'tarifa_fba',
                      'tarifa_otras', 'total')
 
+# Tipo de movimiento CANÓNICO (literal del idioma → canon). El `tipo` crudo queda intacto
+# para auditar; `tipo_norm` es lo que lee la vista, para no cablear literales por idioma
+# (el techo de la v1 con su `for pais in ('IT','FR')`: el día que entre DE, se caería solo).
+# 🔴 Los canon están MEDIDOS contra producción (descripciones reales), no traducidos a ojo:
+#   · reembolso_inventario (Ajuste ES / Modifica IT): NO son ajustes contables, son
+#     INDEMNIZACIONES de Amazon por inventario perdido/dañado/no devuelto (+374,54 €, con SKU
+#     al 100%, imputables a producto). Llamarlo 'ajuste' escondería ese dinero.
+#   · ajuste_tarifa (Ajuste de tarifa ES) SEPARADO de reembolso_inventario: medido, lleva SKU
+#     0/44 (no imputable a producto) frente a 122/122 del otro. Mezclarlos rompe el análisis
+#     por SKU. (Los 44 son 'cambio de peso y dimensión', 1-10 jun, todos a favor: +54,90 €.)
+# Un literal SIN canon → tipo_norm NULL y se GRITA en el resumen (así DE no entra en silencio).
+TIPO_CANON = {
+    'Pedido': 'pedido', 'Ordine': 'pedido', 'Commande': 'pedido',
+    'Reembolso': 'reembolso', 'Rimborso': 'reembolso', 'Remboursement': 'reembolso',
+    'Ajuste': 'reembolso_inventario', 'Modifica': 'reembolso_inventario',
+    'Ajuste de tarifa': 'ajuste_tarifa',
+    'Transferir': 'transferencia', 'Trasferimento': 'transferencia', 'Transfert': 'transferencia',
+    'Tarifas de inventario de Logística de Amazon': 'tarifa_inventario',
+    'Costo di stoccaggio Logistica di Amazon': 'tarifa_inventario',
+    'Frais de stock Expédié par Amazon': 'tarifa_inventario',
+    'Tarifas de transacción de Logística de Amazon': 'tarifa_transaccion_fba',
+    'Commissioni per le transazioni di Logistica di Amazon': 'tarifa_transaccion_fba',
+    'Frais de transaction Expédié par Amazon': 'tarifa_transaccion_fba',
+    'Tarifa de prestación de servicio': 'tarifa_servicio',
+    'Saldo descubierto': 'saldo', 'Saldo negativo': 'saldo', 'Solde négatif': 'saldo',
+}
+
 # Columnas tipadas de la tabla, en el orden del INSERT (id IDENTITY y procesado_at aparte).
-COLS_DB = ['pais', 'fecha', 'fecha_hora', 'tipo', 'numero_pedido', 'identificador_pago',
+COLS_DB = ['pais', 'fecha', 'fecha_hora', 'tipo', 'tipo_norm', 'numero_pedido', 'identificador_pago',
            'sku', 'descripcion', 'cantidad', 'marketplace',
            'ventas_producto', 'impuesto_producto', 'tarifa_venta', 'tarifa_fba',
            'tarifa_otras', 'otro', 'total', 'estado', 'fecha_liberacion', 'fichero', 'crudo']
@@ -312,6 +339,7 @@ def analizar(texto, pais, fichero):
     filas_datos = filas[cab_idx + 1:]
     movimientos = []
     tipos = Counter()
+    tipos_sin_canon = Counter()   # literal de tipo que no está en TIPO_CANON → tipo_norm NULL
     mkt_incoherente = Counter()   # marketplace no vacío que NO cuadra con PAIS
 
     for pos, fila in enumerate(filas_datos):
@@ -333,6 +361,9 @@ def analizar(texto, pais, fichero):
 
         tipo_raw = celda(fila, col['tipo'])
         tipos[tipo_raw] += 1
+        tipo_norm = TIPO_CANON.get(tipo_raw)
+        if tipo_raw and tipo_norm is None:
+            tipos_sin_canon[tipo_raw] += 1
 
         crudo = {}
         for i, h in enumerate(cabecera):
@@ -343,6 +374,7 @@ def analizar(texto, pais, fichero):
             'fecha': fecha,
             'fecha_hora': parse_fecha_hora(f_raw, pais),
             'tipo': txt(tipo_raw),
+            'tipo_norm': tipo_norm,   # canon (la vista lee de aquí); NULL si el literal no está en TIPO_CANON
             'numero_pedido': txt(celda(fila, col['numero_pedido'])) if col.get('numero_pedido') else None,
             'identificador_pago': txt(celda(fila, col['identificador_pago'])) if col.get('identificador_pago') else None,
             'sku': txt(celda(fila, col['sku'])),
@@ -383,7 +415,8 @@ def analizar(texto, pais, fichero):
     fecha_max = max(mv['fecha'] for mv in movimientos)
 
     return {'movimientos': movimientos, 'fichero': fichero, 'pais': pais,
-            'fecha_min': fecha_min, 'fecha_max': fecha_max, 'tipos': tipos}
+            'fecha_min': fecha_min, 'fecha_max': fecha_max, 'tipos': tipos,
+            'tipos_sin_canon': tipos_sin_canon}
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +430,7 @@ CREATE TABLE IF NOT EXISTS transacciones_movimientos (
     fecha              date NOT NULL,
     fecha_hora         timestamptz,
     tipo               text,
+    tipo_norm          text,   -- canon (pedido/reembolso/reembolso_inventario/…); tipo crudo intacto
     numero_pedido      text,
     identificador_pago text,
     sku                text,
@@ -499,6 +533,16 @@ def main():
     print(f"\nMovimientos leídos: {len(movs)}  ·  país {PAIS}  ·  rango {fmin} → {fmax}", flush=True)
     print("   Tipos:  " + " · ".join(f"{k or '(vacío)'} {v}" for k, v in info['tipos'].most_common()), flush=True)
 
+    # 🔴 GRITA: literal de tipo SIN canon → tipo_norm queda NULL y la vista NO lo cuenta.
+    # Es el seguro contra el techo de la v1: el día que entre un país nuevo (DE, PL…) o Amazon
+    # renombre un tipo, salta aquí y se añade a TIPO_CANON — nunca se cae en silencio.
+    if info['tipos_sin_canon']:
+        print("\n⚠️  [tipo sin canon] Estos literales NO están en TIPO_CANON → tipo_norm=NULL "
+              "(añádelos al mapa; la vista de rentabilidad no los cuenta hasta entonces):",
+              flush=True)
+        for val, n in info['tipos_sin_canon'].most_common():
+            print(f"        · {val!r} en {n} fila(s)", flush=True)
+
     # --- Conectar al ENTORNO ---
     con = psycopg2.connect(DB_URL)
     con.autocommit = False
@@ -538,7 +582,7 @@ def main():
 
     plantilla = "(" + ", ".join(['%s'] * len(COLS_DB)) + ")"
     valores = [
-        [mv['pais'], mv['fecha'], mv['fecha_hora'], mv['tipo'], mv['numero_pedido'],
+        [mv['pais'], mv['fecha'], mv['fecha_hora'], mv['tipo'], mv['tipo_norm'], mv['numero_pedido'],
          mv['identificador_pago'], mv['sku'], mv['descripcion'], mv['cantidad'],
          mv['marketplace'], mv['ventas_producto'], mv['impuesto_producto'],
          mv['tarifa_venta'], mv['tarifa_fba'], mv['tarifa_otras'], mv['otro'], mv['total'],
