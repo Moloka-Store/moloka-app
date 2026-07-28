@@ -523,6 +523,25 @@ def rescatar_gtin(e):
 def core_ean(e):     return partir_ean(e)[0]
 def es_chase_ean(e): return clasificar(partir_ean(e)[1])[0]
 
+# ============================================================
+# GUARDARRAIL RELATIVO caja-vs-suelta (regla de Fernando: NINGUN umbral absoluto
+# de precio; compra Funkos a 2,99 y llaveros a 1 €). Se compara la ficha CAJA
+# contra la ficha SUELTA del MISMO EAN. Una oferta agresiva baja las DOS -> pasa
+# limpia. Un fallo de parseo (÷6 mal aplicado) baja solo la caja -> salta.
+# Medido sobre el feed real de OcioStock (28-jul), 105 pares caja/suelta:
+#   ratio real min 0.48 | mediana 1.00 | max 1.50 ; con el ÷6 del bug: 0.079 a 0.25.
+# Umbral 0.40: cero falsos positivos, caza el bug 105 de 105.
+# ============================================================
+UMBRAL_CAJA_VS_SUELTA = 0.40
+def aviso_caja_incoherente(pa_caja_ud, pa_suelta):
+    if not (pa_caja_ud and pa_suelta and pa_suelta > 0):
+        return None
+    ratio = pa_caja_ud / pa_suelta
+    if ratio < UMBRAL_CAJA_VS_SUELTA:
+        return (f'INCOHERENTE: la caja sale a {pa_caja_ud:.2f} €/ud y la unidad suelta del '
+                f'MISMO EAN esta a {pa_suelta:.2f} € (ratio {ratio:.2f}). Parseo roto, no ganga.')
+    return None
+
 # ---- REGLA DE NEGOCIO DEL CHASE (todos los proveedores) --------------------
 # El chase SOLO se compra en CAJA DE 6 (5+1): coste unitario = PA / 6.
 # El chase SUELTO es un atraco -> se DESCARTA (no se escanea, no gasta tokens).
@@ -1058,6 +1077,34 @@ else:
     print(f"COTEJO: activo, modo '{COTEJO_MODO}' | IDF sobre {_NDOC} nombres.")
 
 # ============================================================
+# GUARDARRAIL caja-vs-suelta (ajuste bloque 3, medido 28-jul). Aqui, tras el
+# dedup, ya estan todas las filas. Para cada EAN base con ficha CAJA y ficha
+# SUELTA, se compara el precio POR UNIDAD de la caja (con el ÷6 que le tocaria a
+# su perfil) contra el de la suelta. Solo puede saltar si un perfil aplica el ÷6
+# donde NO debe: es la red de seguridad para un perfil mal declarado. MARCA, no
+# borra (regla del #56: nada desaparece).
+# ============================================================
+aviso_caja = {}    # ean_in de la caja -> texto de aviso
+_sueltas_pa = {}   # core normalizado -> PA de la ficha suelta (la mas barata si hay varias)
+for f in filas:
+    if not f.get('es_caja6') and f.get('pa'):
+        k = norm(f['core'])
+        if k not in _sueltas_pa or f['pa'] < _sueltas_pa[k]:
+            _sueltas_pa[k] = f['pa']
+for f in filas:
+    if f.get('es_caja6') and f.get('pa'):
+        _su = _sueltas_pa.get(norm(f['core']))
+        if _su:
+            _pa_ud = (f['pa'] / (f.get('uds_caja') or UNIDADES_CASE_TCG)
+                      if PERFIL.get('precio_caja6') == 'caja' else f['pa'])
+            _av = aviso_caja_incoherente(_pa_ud, _su)
+            if _av:
+                aviso_caja[f['ean_in']] = _av
+if aviso_caja:
+    print(f"GUARDARRAIL caja-vs-suelta: {len(aviso_caja)} cajas con precio/ud incoherente "
+          f"vs su ficha suelta (marcadas, NO borradas).")
+
+# ============================================================
 # Celda 5 - cruce con Supabase (productos propios + stock para 'En mi BD')
 # ============================================================
 sup = {}
@@ -1449,6 +1496,7 @@ for i,c in enumerate(lista,1):
             'volumen':f.get('volumen'),'url':f.get('url',''),'titulo_amz':'',
             'ambiguo':c['ean_in'] in amb_eans,'paises':{},
             'cotejo':(cotejo_info.get(c['ean_in']) or {}).get('veredicto','—'),   # para marcar dudosos en Telegram
+            'coherencia_caja':aviso_caja.get(c['ean_in'],''),   # caja/ud incoherente vs su suelta (guardarrail)
             'case_de_6':bool(f.get('es_caja6'))}
     for dom in ('ES','IT','FR'):
         d = datos_pais(c['asin'], dom)
@@ -1564,7 +1612,7 @@ COLS = ['Nombre','EAN','ASIN','Marca','PA (€)','País','Rank actual','Rank 90d
         'Precio venta (€)','Canal BB','Nº ofertas','% Comisión',
         'Com. Amazon (€)','Fee Logística (€)','Almacén (€)','Promo activa',
         'Beneficio (€)','ROI','Margen','Decisión','En mi BD','EAN ambiguo','Amazon (título)','Coincide',
-        'Cotejo','Cotejo (detalle)','OcioStock']
+        'Cotejo','Cotejo (detalle)','Coherencia caja','OcioStock']
 L = {name:get_column_letter(i+1) for i,name in enumerate(COLS)}
 DOM_AMZ = {'ES':'amazon.es','IT':'amazon.it','FR':'amazon.fr'}
 
@@ -1598,6 +1646,7 @@ for item in registros:
             d['decision'], en_bd, amb,
             item.get('titulo_amz',''), item.get('coincide','?'),
             _cot.get('veredicto','—'), _cot.get('detalle','—'),
+            item.get('coherencia_caja','') or '—',
             ('Ver ficha ↗' if item.get('url') else '')])
         cell = ws.cell(row=r, column=3)
         cell.hyperlink = f"https://www.{DOM_AMZ[dom]}/dp/{item['asin']}"
@@ -1619,7 +1668,8 @@ fmt('% Comisión','0.00%'); fmt('ROI','0.0%'); fmt('Margen','0.0%')
 for c in range(1,len(COLS)+1):
     ws.cell(row=1,column=c).font = Font(bold=True)
 anchos = {'Nombre':50,'EAN':14,'ASIN':12,'Marca':12,'En mi BD':20,'Decisión':15,
-          'Amazon (título)':50,'Coincide':11,'Cotejo':16,'Cotejo (detalle)':46,'OcioStock':13}
+          'Amazon (título)':50,'Coincide':11,'Cotejo':16,'Cotejo (detalle)':46,
+          'Coherencia caja':46,'OcioStock':13}
 for nm,w in anchos.items(): ws.column_dimensions[L[nm]].width = w
 
 ws.freeze_panes = 'A2'
@@ -1655,6 +1705,10 @@ if last >= 2:
         fill=_cf_fill('E7E6E6'), font=Font(color='808080'), stopIfTrue=True))
     ws.conditional_formatting.add(rng_cot, FormulaRule(formula=[f'ISNUMBER(SEARCH("OK",{cot}2))'],
         fill=_cf_fill('C6EFCE'), font=Font(color='006100'), stopIfTrue=True))
+    # Coherencia caja: rojo si el precio/ud de la caja no cuadra con el de la suelta.
+    ccj = L['Coherencia caja']; rng_ccj = f'{ccj}2:{ccj}{last}'
+    ws.conditional_formatting.add(rng_ccj, FormulaRule(formula=[f'ISNUMBER(SEARCH("INCOHERENTE",{ccj}2))'],
+        fill=_cf_fill('FFC7CE'), font=Font(color='9C0006')))
     ws.conditional_formatting.add(f'A2:{get_column_letter(len(COLS))}{last}',
         FormulaRule(formula=['ISODD(INT((ROW()-2)/3))'], fill=_cf_fill('D9D9D9')))
 
@@ -2006,7 +2060,8 @@ try:
                 _nom = str(_it.get('nombre') or '')[:45]
                 _pvs = f"{_pv:.2f}€" if _pv else "s/precio"
                 _dud = ' ⚠ASIN DUDOSO' if str(_it.get('cotejo','')).startswith('⚠') else ''
-                _lineas.append(f"• {_nom} — {_mg*100:.0f}% — {_pvs} ({_dom}) — {_it.get('marca','')}{_dud}")
+                _inc = ' ⚠CAJA INCOHERENTE' if _it.get('coherencia_caja') else ''
+                _lineas.append(f"• {_nom} — {_mg*100:.0f}% — {_pvs} ({_dom}) — {_it.get('marca','')}{_dud}{_inc}")
             if len(_compras) > 20:
                 _lineas.append(f"…y {len(_compras)-20} más (mira el Excel de la Biblioteca).")
             import requests as _rq_tg
