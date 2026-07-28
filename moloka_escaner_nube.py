@@ -200,6 +200,7 @@ PERFILES = {
         'col_marca':'Marca', 'col_ean':'EAN', 'col_nombre':'Cabecera',
         'col_pa':'Precio', 'col_stock':'Stock', 'col_estado':'Estado producto',
         'estados_ok':['Disponible','Oferta','Saldo'],   # PreOrder / Backorder quedan FUERA
+        'precio_caja6':'caja',   # la 'C' pegada al EAN ya significa la caja 5+1 -> PA es de la CAJA
     },
     'DBLINE': {
         'tipo':'excel', 'sheet':0, 'header':2,
@@ -255,6 +256,7 @@ PERFILES = {
         'col_estado':None, 'estados_ok':None,
         'col_volumen':'txt_precios_volumen',   # descuentos por volumen -> pestana "Precio por lote"
         'col_url':'product_url',   # enlace a la ficha de OcioStock (verificar volumen/precio en su web)
+        'precio_caja6':'unidad',   # VERIFICADO en su feed: 11,99 €/ud, 71,94 € la caja -> NO dividir
     },
     'STOCKLIST': {
         # Mayorista nordico GENERALISTA (Toys, Games and consoles, Beauty, Movies, Pet...).
@@ -294,6 +296,7 @@ PERFILES = {
         'col_pa':'precio', 'col_stock':None,
         'col_estado':'estado', 'estados_ok':['disponible'],
         'sin_columna_stock':True,   # HEO no da stock numerico -> estado 'disponible' ya filtra
+        'precio_caja6':'caja',   # la pestana Chase_manual trae 'Precio caja' y 'Precio /6' explicitos
     },
     'MOLOKA': {'tipo':'supabase'},   # inventario propio: se lee de la tabla productos
 }
@@ -443,11 +446,101 @@ print(">>> FORMULA OK <<<" if abs(_r['beneficio']+1.04)<0.01 and abs(_r['com_ama
 # ============================================================
 # Funciones de EAN
 # ============================================================
-def core_ean(e):
-    e = str(e).strip().upper()
-    return e[:-1] if e.endswith('C') else e
-def es_chase_ean(e):
-    return str(e).strip().upper().endswith('C')
+# ============================================================
+# EL SUFIJO DEL EAN NO SE TIRA, SE LEE (bloque 3). Es el dato que falta.
+# OcioStock manda el MISMO EAN 3 veces: '...' (suelta), '... Chase' (suelto,
+# se descarta) y '... C6' (la caja de 6, que es la que Fernando compra). Antes
+# el 'C6' acababa en '6' -> "EAN forma rara" -> 66 cajas de 6 a la basura.
+# ============================================================
+_RE_SUFIJO = re.compile(r'^(.*?)\s+(C(\d+)|CHASE|L)\s*$', re.I)
+
+def partir_ean(e):
+    """'889698679282 C6' -> ('889698679282', 'C6', 6)
+       '889698679282 Chase' -> ('889698679282', 'CHASE', None)
+       '196214117020L'      -> ('196214117020', 'L', None)   (Latino, va PEGADA)
+       '889698679282C'      -> ('889698679282', 'C', 6)      (convencion TCG, pegada)
+       '8435507873345'      -> ('8435507873345', None, None)
+    Devuelve (ean_limpio, sufijo, unidades_caja)."""
+    e = str(e or '').strip().upper()
+    if not e:
+        return '', None, None
+    m = _RE_SUFIJO.match(e)               # sufijo separado por espacio
+    if m:
+        base, suf = m.group(1).strip(), m.group(2)
+        if suf.startswith('C') and m.group(3):
+            return base, f'C{m.group(3)}', int(m.group(3))
+        if suf == 'CHASE':
+            return base, 'CHASE', None
+        return base, 'L', None
+    if e.endswith('L') and e[:-1].isdigit():      # 'L' pegada = version Latino
+        return e[:-1], 'L', None
+    if e.endswith('C') and e[:-1].isdigit():      # convencion TCG: la C pegada YA es la caja
+        return e[:-1], 'C', 6
+    return e, None, None
+
+def clasificar(sufijo):
+    """(es_caja, descartar). El chase SUELTO se sigue descartando (regla de negocio)."""
+    if sufijo is None:  return False, False       # figura normal
+    if sufijo == 'L':   return False, False       # version Latino: producto normal
+    if sufijo == 'CHASE': return False, True      # chase suelto -> descartar (ya funcionaba)
+    return True, False                            # C / C6 / C12... -> caja
+
+# ============================================================
+# GTIN-14: el proveedor manda a veces el codigo de CAJA (14 digitos) en vez del
+# EAN-13 de la unidad, y a veces lo manda TRUNCADO a 13. Se reconstruye el
+# EAN-13 y se deja que Keepa confirme: si no existe, se descarta como siempre.
+# Coste de equivocarse: 1 token. Coste de no intentarlo: el producto no se ve.
+# (_chk13 y _ean_ok los usa variantes_ean; _gtin14_ok y rescatar_gtin quedan como
+#  utilidades del modulo -hoy sin llamador- que documentan la reconstruccion.)
+# ============================================================
+def _chk13(cuerpo12):
+    d = [int(x) for x in cuerpo12][::-1]
+    return str((10 - sum(v * (3 if i % 2 == 0 else 1) for i, v in enumerate(d)) % 10) % 10)
+
+def _ean_ok(s):
+    return s.isdigit() and len(s) == 13 and _chk13(s[:12]) == s[12]
+
+def _gtin14_ok(s):
+    if not (s.isdigit() and len(s) == 14):
+        return False
+    d = [int(x) for x in s[:13]][::-1]
+    return str((10 - sum(v * (3 if i % 2 == 0 else 1) for i, v in enumerate(d)) % 10) % 10) == s[13]
+
+def rescatar_gtin(e):
+    """Devuelve el EAN-13 de la unidad, o None si no aplica. NO se usa si el
+    codigo ya es un EAN-13/UPC-12 valido: solo para los que hoy se tiran."""
+    e = str(e or '').strip()
+    if not e.isdigit():
+        return None
+    if len(e) == 12 or _ean_ok(e):
+        return None                              # ya vale tal cual
+    if len(e) == 14 and _gtin14_ok(e):           # GTIN-14 completo
+        return e[1:13] + _chk13(e[1:13])
+    if len(e) == 13 and not _ean_ok(e) and e[0] in '123456789':
+        return e[1:13] + _chk13(e[1:13])         # GTIN-14 truncado a 13 por el proveedor
+    return None
+
+def core_ean(e):     return partir_ean(e)[0]
+def es_chase_ean(e): return clasificar(partir_ean(e)[1])[0]
+
+# ============================================================
+# GUARDARRAIL RELATIVO caja-vs-suelta (regla de Fernando: NINGUN umbral absoluto
+# de precio; compra Funkos a 2,99 y llaveros a 1 €). Se compara la ficha CAJA
+# contra la ficha SUELTA del MISMO EAN. Una oferta agresiva baja las DOS -> pasa
+# limpia. Un fallo de parseo (÷6 mal aplicado) baja solo la caja -> salta.
+# Medido sobre el feed real de OcioStock (28-jul), 105 pares caja/suelta:
+#   ratio real min 0.48 | mediana 1.00 | max 1.50 ; con el ÷6 del bug: 0.079 a 0.25.
+# Umbral 0.40: cero falsos positivos, caza el bug 105 de 105.
+# ============================================================
+UMBRAL_CAJA_VS_SUELTA = 0.40
+def aviso_caja_incoherente(pa_caja_ud, pa_suelta):
+    if not (pa_caja_ud and pa_suelta and pa_suelta > 0):
+        return None
+    ratio = pa_caja_ud / pa_suelta
+    if ratio < UMBRAL_CAJA_VS_SUELTA:
+        return (f'INCOHERENTE: la caja sale a {pa_caja_ud:.2f} €/ud y la unidad suelta del '
+                f'MISMO EAN esta a {pa_suelta:.2f} € (ratio {ratio:.2f}). Parseo roto, no ganga.')
+    return None
 
 # ---- REGLA DE NEGOCIO DEL CHASE (todos los proveedores) --------------------
 # El chase SOLO se compra en CAJA DE 6 (5+1): coste unitario = PA / 6.
@@ -474,23 +567,34 @@ _RE_CHASE_NOM = re.compile(r'\bchase\b\s*$|\([^)]*\bchase\b[^)]*\)', re.I)
 _RE_CON_CHASE = re.compile(r'\b(?:w/|with)\s*ch(?:ase)?\b', re.I)
 
 def clasificar_chase(nombre, ean_in):
-    """Devuelve (es_case, es_caja6, descartar)."""
-    if es_chase_ean(ean_in):
-        return True, True, False       # convencion TCG: la 'C' del EAN ya es la caja
+    """(es_case, es_caja6, descartar). El SUFIJO del EAN manda sobre el nombre."""
+    _base, suf, _uds = partir_ean(ean_in)
+    if suf is not None:
+        es_caja, descartar = clasificar(suf)
+        if descartar:   return False, False, True      # chase SUELTO -> fuera
+        if es_caja:     return True, True, False        # C / C6 / C12 -> caja
+        return False, False, False                      # 'L' (Latino) -> producto normal
     n = str(nombre or '')
-    if _RE_CAJA6.search(n):
-        return True, True, False       # caja de 6 -> entra y se valora /6
-    if _RE_CON_CHASE.search(n):
-        return False, False, False     # "w/Chase" = CON chase -> producto NORMAL
-    if _RE_CHASE_NOM.search(n):
-        return False, False, True      # chase SUELTO -> descartar
-    return False, False, False         # figura normal
+    # 🔒 El nombre YA NO decide si es caja: eso lo dice el sufijo del EAN. "5 + 1"
+    # en el nombre solo sirve para NO descartarlo como chase suelto.
+    if _RE_CAJA6.search(n):     return True, True, False
+    if _RE_CON_CHASE.search(n): return False, False, False
+    if _RE_CHASE_NOM.search(n): return False, False, True
+    return False, False, False
 def variantes_ean(core):
-    c, vs = core.strip(), set()
+    c, vs = str(core).strip(), set()
     if c.isdigit():
         vs.add(c); vs.add(c.lstrip('0'))
         if len(c)==12: vs.add('0'+c)
         if len(c)==13 and c.startswith('0'): vs.add(c[1:])
+        # 🆕 GTIN-14: codigo de CAJA (14 digitos) o truncado a 13 por el proveedor.
+        # Solo si NO es un EAN-13 valido, o si empieza por 1/2 (prefijos GS1 que no
+        # son de pais). Medido sobre el catalogo real: genera variante en 5 de 1.557
+        # codigos (0,32%), y son EXACTAMENTE los 5 raros. Cero falsos positivos.
+        # (ningun EAN-13 legitimo empieza por 1 o 2; los buenos van por 8, 0 y 3.)
+        if len(c) == 14 or (len(c) == 13 and (not _ean_ok(c) or c[0] in '12')):
+            cuerpo = c[1:13]
+            if len(cuerpo) == 12: vs.add(cuerpo + _chk13(cuerpo))
     return [v for v in vs if v]
 def norm(code): return str(code).strip().lstrip('0')
 def _num(x):
@@ -913,7 +1017,9 @@ else:
         url = str(row.get(_cu,'')).strip() if _cu else ''
         filas.append({'ean_in':ean_in, 'core':core, 'variantes':variantes_ean(core),
                       'nombre':row.get(cN,''), 'marca':MARCA, 'pa':pa,
-                      'es_chase':_es_case, 'es_caja6':_es_caja6, 'volumen':vol, 'url':url})
+                      'es_chase':_es_case, 'es_caja6':_es_caja6,
+                      'uds_caja': (partir_ean(ean_in)[2] or UNIDADES_CASE_TCG),   # C12 son 12, no 6
+                      'volumen':vol, 'url':url})
     print(f"Disponibles a escanear: {len(filas)} | fuera por estado/stock: {fuera_disp} | "
           f"EAN problematicos: {len(problematicos)} | CHASE: {sum(f['es_chase'] for f in filas)}")
     if chase_sueltos:
@@ -969,6 +1075,34 @@ if not COTEJO_ACTIVO:
     print(f"COTEJO: apagado para {PROVEEDOR} (el fichero no trae columna de nombre).")
 else:
     print(f"COTEJO: activo, modo '{COTEJO_MODO}' | IDF sobre {_NDOC} nombres.")
+
+# ============================================================
+# GUARDARRAIL caja-vs-suelta (ajuste bloque 3, medido 28-jul). Aqui, tras el
+# dedup, ya estan todas las filas. Para cada EAN base con ficha CAJA y ficha
+# SUELTA, se compara el precio POR UNIDAD de la caja (con el ÷6 que le tocaria a
+# su perfil) contra el de la suelta. Solo puede saltar si un perfil aplica el ÷6
+# donde NO debe: es la red de seguridad para un perfil mal declarado. MARCA, no
+# borra (regla del #56: nada desaparece).
+# ============================================================
+aviso_caja = {}    # ean_in de la caja -> texto de aviso
+_sueltas_pa = {}   # core normalizado -> PA de la ficha suelta (la mas barata si hay varias)
+for f in filas:
+    if not f.get('es_caja6') and f.get('pa'):
+        k = norm(f['core'])
+        if k not in _sueltas_pa or f['pa'] < _sueltas_pa[k]:
+            _sueltas_pa[k] = f['pa']
+for f in filas:
+    if f.get('es_caja6') and f.get('pa'):
+        _su = _sueltas_pa.get(norm(f['core']))
+        if _su:
+            _pa_ud = (f['pa'] / (f.get('uds_caja') or UNIDADES_CASE_TCG)
+                      if PERFIL.get('precio_caja6') == 'caja' else f['pa'])
+            _av = aviso_caja_incoherente(_pa_ud, _su)
+            if _av:
+                aviso_caja[f['ean_in']] = _av
+if aviso_caja:
+    print(f"GUARDARRAIL caja-vs-suelta: {len(aviso_caja)} cajas con precio/ud incoherente "
+          f"vs su ficha suelta (marcadas, NO borradas).")
 
 # ============================================================
 # Celda 5 - cruce con Supabase (productos propios + stock para 'En mi BD')
@@ -1362,6 +1496,7 @@ for i,c in enumerate(lista,1):
             'volumen':f.get('volumen'),'url':f.get('url',''),'titulo_amz':'',
             'ambiguo':c['ean_in'] in amb_eans,'paises':{},
             'cotejo':(cotejo_info.get(c['ean_in']) or {}).get('veredicto','—'),   # para marcar dudosos en Telegram
+            'coherencia_caja':aviso_caja.get(c['ean_in'],''),   # caja/ud incoherente vs su suelta (guardarrail)
             'case_de_6':bool(f.get('es_caja6'))}
     for dom in ('ES','IT','FR'):
         d = datos_pais(c['asin'], dom)
@@ -1438,8 +1573,12 @@ registros = []
 for item in infos:
     iva = {'ES':iva_es_de(item['core']),'IT':IVA_IT,'FR':IVA_FR}
     pa = item['pa']
-    if item.get('case_de_6') and pa:
-        pa = pa / UNIDADES_CASE_TCG
+    # 🔒 Solo se divide donde el proveedor da el precio de la CAJA COMPLETA.
+    # OcioStock lo da POR UNIDAD (11,99 €/ud, 71,94 € la caja): dividir alli
+    # convertia un Funko de 9,99 € en uno de 1,66 € y sacaba 18 COMPRAR falsos.
+    # Default: NO dividir (perfil sin 'precio_caja6'). Adivinarlo es lo que rompio esto.
+    if item.get('case_de_6') and pa and PERFIL.get('precio_caja6') == 'caja':
+        pa = pa / (item.get('uds_caja') or UNIDADES_CASE_TCG)
     item['_pa_efectivo'] = pa
     margen_es = None; paises_out = {}
     for dom in ('ES','IT','FR'):
@@ -1473,7 +1612,7 @@ COLS = ['Nombre','EAN','ASIN','Marca','PA (€)','País','Rank actual','Rank 90d
         'Precio venta (€)','Canal BB','Nº ofertas','% Comisión',
         'Com. Amazon (€)','Fee Logística (€)','Almacén (€)','Promo activa',
         'Beneficio (€)','ROI','Margen','Decisión','En mi BD','EAN ambiguo','Amazon (título)','Coincide',
-        'Cotejo','Cotejo (detalle)','OcioStock']
+        'Cotejo','Cotejo (detalle)','Coherencia caja','OcioStock']
 L = {name:get_column_letter(i+1) for i,name in enumerate(COLS)}
 DOM_AMZ = {'ES':'amazon.es','IT':'amazon.it','FR':'amazon.fr'}
 
@@ -1507,6 +1646,7 @@ for item in registros:
             d['decision'], en_bd, amb,
             item.get('titulo_amz',''), item.get('coincide','?'),
             _cot.get('veredicto','—'), _cot.get('detalle','—'),
+            item.get('coherencia_caja','') or '—',
             ('Ver ficha ↗' if item.get('url') else '')])
         cell = ws.cell(row=r, column=3)
         cell.hyperlink = f"https://www.{DOM_AMZ[dom]}/dp/{item['asin']}"
@@ -1528,7 +1668,8 @@ fmt('% Comisión','0.00%'); fmt('ROI','0.0%'); fmt('Margen','0.0%')
 for c in range(1,len(COLS)+1):
     ws.cell(row=1,column=c).font = Font(bold=True)
 anchos = {'Nombre':50,'EAN':14,'ASIN':12,'Marca':12,'En mi BD':20,'Decisión':15,
-          'Amazon (título)':50,'Coincide':11,'Cotejo':16,'Cotejo (detalle)':46,'OcioStock':13}
+          'Amazon (título)':50,'Coincide':11,'Cotejo':16,'Cotejo (detalle)':46,
+          'Coherencia caja':46,'OcioStock':13}
 for nm,w in anchos.items(): ws.column_dimensions[L[nm]].width = w
 
 ws.freeze_panes = 'A2'
@@ -1564,6 +1705,10 @@ if last >= 2:
         fill=_cf_fill('E7E6E6'), font=Font(color='808080'), stopIfTrue=True))
     ws.conditional_formatting.add(rng_cot, FormulaRule(formula=[f'ISNUMBER(SEARCH("OK",{cot}2))'],
         fill=_cf_fill('C6EFCE'), font=Font(color='006100'), stopIfTrue=True))
+    # Coherencia caja: rojo si el precio/ud de la caja no cuadra con el de la suelta.
+    ccj = L['Coherencia caja']; rng_ccj = f'{ccj}2:{ccj}{last}'
+    ws.conditional_formatting.add(rng_ccj, FormulaRule(formula=[f'ISNUMBER(SEARCH("INCOHERENTE",{ccj}2))'],
+        fill=_cf_fill('FFC7CE'), font=Font(color='9C0006')))
     ws.conditional_formatting.add(f'A2:{get_column_letter(len(COLS))}{last}',
         FormulaRule(formula=['ISODD(INT((ROW()-2)/3))'], fill=_cf_fill('D9D9D9')))
 
@@ -1586,7 +1731,7 @@ hoja('Sin_rank', [{'EAN':c['ean_in'],'ASIN':c['asin'],'Nombre':c['fila']['nombre
 # ============================================================
 COLS_LOTE = ['Nombre','EAN','ASIN','Marca','País','Precio venta (€)','PA suelto (€)',
              'PA lote (€)','Ahorro/ud (€)','Beneficio lote (€)','Margen lote','Decisión lote',
-             'Uds. para ese precio']
+             'Uds. para ese precio','Coherencia']
 filas_lote = []
 for item in registros:
     vol = item.get('volumen')
@@ -1594,6 +1739,13 @@ for item in registros:
         continue
     pa_lote = vol['pa']; uds = vol['uds']
     pa_suelto = item.get('_pa_efectivo')
+    # 🔒 Guardarrail RELATIVO (nunca un umbral absoluto de precio: Fernando compra
+    # Funkos a 2,99 y llaveros a 1 €). Un descuento por volumen NEGATIVO es imposible
+    # por definicion: el lote no puede salir MAS CARO que el suelto -> firma de un
+    # parseo roto. Se MARCA, no se borra (regla del #56: nada desaparece).
+    _coh = ''
+    if pa_suelto and pa_lote and pa_lote > pa_suelto * 1.05:
+        _coh = f'INCOHERENTE: lote ({pa_lote}) mas caro que suelto ({pa_suelto})'
     for dom in ('ES','IT','FR'):
         d = item['_paises_calc'].get(dom)
         if not d or not d.get('precio') or d.get('ref_pct') is None or d.get('fee') is None:
@@ -1610,6 +1762,7 @@ for item in registros:
             round(rr['margen'], 4),
             decision_de(rr['margen']),
             uds,
+            _coh,
         ])
 filas_lote.sort(key=lambda x: (x[10] if x[10] is not None else -9), reverse=True)
 
@@ -1636,6 +1789,7 @@ if filas_lote:
         fill=_cf_fill('C6EFCE'), font=Font(color='006100'), stopIfTrue=True))
     wl.column_dimensions[LL['Nombre']].width = 50
     wl.column_dimensions[LL['Uds. para ese precio']].width = 18
+    wl.column_dimensions[LL['Coherencia']].width = 46
     wl.freeze_panes = 'A2'
 print(f"Pestana 'Precio por lote': {len(filas_lote)} filas con descuento por volumen")
 
@@ -1906,7 +2060,8 @@ try:
                 _nom = str(_it.get('nombre') or '')[:45]
                 _pvs = f"{_pv:.2f}€" if _pv else "s/precio"
                 _dud = ' ⚠ASIN DUDOSO' if str(_it.get('cotejo','')).startswith('⚠') else ''
-                _lineas.append(f"• {_nom} — {_mg*100:.0f}% — {_pvs} ({_dom}) — {_it.get('marca','')}{_dud}")
+                _inc = ' ⚠CAJA INCOHERENTE' if _it.get('coherencia_caja') else ''
+                _lineas.append(f"• {_nom} — {_mg*100:.0f}% — {_pvs} ({_dom}) — {_it.get('marca','')}{_dud}{_inc}")
             if len(_compras) > 20:
                 _lineas.append(f"…y {len(_compras)-20} más (mira el Excel de la Biblioteca).")
             import requests as _rq_tg
