@@ -1,5 +1,13 @@
-supabase
-keepa
-requests
-python-dateutil
+# Moloka - dependencias FIJADAS a las versiones con las que corrio en verde
+# el 27-jul-2026 (run 82044424936). Sin '==' el runner instala lo ultimo cada
+# manana: el 27-jul metio pandas 3.0.0 y numpy 2.4.6 sin que nadie lo decidiera.
+# Para subir una version: se cambia AQUI, se prueba, y se despliega.
+keepa==1.5.0
+supabase==2.31.0
+openpyxl==3.1.5
+pandas==3.0.0
+xlrd==2.0.2
+curl_cffi==0.15.0
+requests==2.34.2
+python-dateutil==2.9.0.post0
 tzdata

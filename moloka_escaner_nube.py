@@ -40,7 +40,12 @@ except Exception:
 # CREDENCIALES (entorno, no Colab)
 # ============================================================
 print(">>> ARRANCANDO escaner. Creando cliente Keepa...", flush=True)
-api = keepa.Keepa(os.environ['KEEPA_API_KEY'])
+# 🔒 timeout EXPLICITO: la libreria keepa trae 10.0s por defecto (keepa_sync.py,
+# __init__), insuficiente para un lote de 100 ASIN con stats=90. Ese default es
+# el origen de los "Read timed out" que hacian saltar lotes enteros (run 27-jul:
+# 86 de 186 productos nunca preguntados). Ajustable por entorno sin desplegar.
+api = keepa.Keepa(os.environ['KEEPA_API_KEY'],
+                  timeout=float(os.environ.get('KEEPA_TIMEOUT', '120')))
 print(">>> Cliente Keepa creado. Conectando a Supabase...", flush=True)
 sb  = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
 print(">>> Supabase conectado. Consultando saldo real de tokens...", flush=True)
@@ -61,6 +66,16 @@ print(f">>> Tokens Keepa disponibles AHORA: {api.tokens_left}", flush=True)
 # ============================================================
 KEEPA_MAX_INTENTOS = 4
 KEEPA_ESPERAS = [5, 15, 40, 90]   # segundos entre intentos (backoff)
+
+# 🔒 CONTABILIDAD DE LO QUE NO SE PUDO PREGUNTAR.
+# El blindaje de arriba evita que un hipo mate la corrida, pero hasta hoy el
+# lote perdido no dejaba rastro en el DATO: se etiquetaba "Keepa sin ASIN"
+# (mentira: nunca se pregunto) y la memoria lo grababa como visto, asi que el
+# pase diario 'nuevos' ya no volvia a mirarlo. Eso es la acumulacion.
+# Regla de oro: NO SE MARCA COMO VISTO LO QUE NO SE HA PODIDO PREGUNTAR.
+LOTES_PERDIDOS = []          # [{'fase','etiqueta','lote','n_codigos'}]
+EANS_NO_PREGUNTADOS = set()  # ean_in cuyo lote de Fase 1 se perdio
+PAISES_PERDIDOS = []         # [(asin, dominio)] de Fase 2
 
 def keepa_query(items, **kwargs):
     """Llama a api.query con reintentos. Devuelve la lista de productos, o None
@@ -403,7 +418,7 @@ if PROVEEDOR != 'MOLOKA' and not catalogo_local:
 IVA_DEFAULT_ES, IVA_IT, IVA_FR = 0.21, 0.22, 0.20
 ALMACEN, COM_DIGITALES = 0.15, 1.03
 UNIDADES_CASE_TCG = 6          # CHASE en case de 6 (5+1) -> coste unitario = PA / 6. TCG y chase HEO.
-LOTE_FASE1 = 100
+LOTE_FASE1 = int(os.environ.get('LOTE_FASE1', '50'))   # 100 -> 50: si se pierde un lote, el agujero es la mitad
 TS = datetime.now().strftime('%Y%m%d_%H%M')
 ARCHIVO_SALIDA = f'/tmp/Escaneo_{PROVEEDOR}_{MARCA}_{TS}.xlsx'
 print(f"{PROVEEDOR} | Marca {MARCA} | Rank max {RANK_MAXIMO} | Modo {MODO}")
@@ -990,16 +1005,25 @@ if filas:
             else: candidatos[ein]=cand
             vistos.add(ein)
 
-    def pasada(cod_por_ean, etiqueta):
+    def pasada(cod_por_ean, etiqueta, lote_size=None):
         pool = list(cod_por_ean.keys())
         codigos = sorted({cod_por_ean[e] for e in pool})
-        lotes = [codigos[i:i+LOTE_FASE1] for i in range(0,len(codigos),LOTE_FASE1)]
+        _ls = lote_size or LOTE_FASE1
+        lotes = [codigos[i:i+_ls] for i in range(0,len(codigos),_ls)]
         vistos = set()
         print(f"{etiqueta}: {len(pool)} productos, {len(codigos)} codigos, {len(lotes)} lotes")
         for n,lote in enumerate(lotes,1):
             prods = keepa_rank(lote, domain='ES')
             if prods is None:
-                print(f"  lote {n}/{len(lotes)} NO resuelto tras reintentos -> se salta este lote")
+                # 🔒 Se apunta QUE EAN se ha quedado sin preguntar. No es lo mismo
+                # que "Keepa no lo tiene": es que no llegamos a preguntarlo.
+                _cods = set(lote)
+                _perdidos = {e for e, c in cod_por_ean.items() if c in _cods}
+                LOTES_PERDIDOS.append({'fase': 'F1', 'etiqueta': etiqueta,
+                                       'lote': n, 'n_codigos': len(lote)})
+                EANS_NO_PREGUNTADOS.update(_perdidos)
+                print(f"  lote {n}/{len(lotes)} NO resuelto tras reintentos -> se salta este lote "
+                      f"({len(_perdidos)} EAN quedan SIN PREGUNTAR)")
                 continue
             for prod in prods: registra(prod, pool, vistos)
             if n % 5 == 0: _guardar_rankcache()
@@ -1022,6 +1046,43 @@ if filas:
         if rint:
             vistos |= pasada(rint, f"Fase 1 reintento {ronda+1} (variante alternativa)")
 
+    # ============================================================
+    # 🔒 RONDA DE RESCATE (pedida por Fernando, 28-jul)
+    # ------------------------------------------------------------
+    # Un lote perdido casi siempre lo tira un hipo TRANSITORIO de Keepa. Antes
+    # de darlo por no preguntado y dejarlo para manana, se reintenta AQUI, al
+    # final de la Fase 1: se espera a que Keepa respire y se vuelve a preguntar
+    # en lotes mas pequenos todavia. Va en Fase 1 y no al final del script a
+    # proposito: lo que se rescata entra en el flujo COMPLETO (Fase 2, 3 paises,
+    # Excel, memoria). Si se rescatara despues, tendriamos rank pero no informe.
+    # Lo que ni asi se resuelve queda marcado y manana se reintenta solo.
+    # ============================================================
+    RESCATE_INTENTOS = int(os.environ.get('RESCATE_INTENTOS', '2'))
+    RESCATE_ESPERA   = int(os.environ.get('RESCATE_ESPERA', '60'))   # s antes de cada rescate
+    LOTE_RESCATE     = max(10, LOTE_FASE1 // 2)
+    for _nr in range(1, RESCATE_INTENTOS + 1):
+        _pend = EANS_NO_PREGUNTADOS - vistos
+        if not _pend:
+            break
+        if _cerca_del_corte():
+            print(f">>> RESCATE {_nr}: cerca del corte de GitHub, no lo intento (quedan {len(_pend)} EAN).")
+            break
+        if not api.tokens_left or api.tokens_left <= 0:
+            print(f">>> RESCATE {_nr}: sin tokens Keepa, no lo intento (quedan {len(_pend)} EAN).")
+            break
+        print(f">>> RESCATE {_nr}/{RESCATE_INTENTOS}: {len(_pend)} EAN se quedaron sin preguntar. "
+              f"Espero {RESCATE_ESPERA}s y reintento en lotes de {LOTE_RESCATE}.")
+        time.sleep(RESCATE_ESPERA)
+        vistos |= pasada({e: cod_pref(fila_por_ean[e]) for e in _pend},
+                         f"RESCATE {_nr}", lote_size=LOTE_RESCATE)
+        _rescatados = len(_pend) - len(EANS_NO_PREGUNTADOS - vistos)
+        print(f">>> RESCATE {_nr}: recuperados {_rescatados} de {len(_pend)}.")
+
+    # 🔒 Un EAN que fallo en la 1a pasada puede haberse resuelto en un reintento
+    # con variante alternativa o en el rescate: solo sigue "sin preguntar" si NO
+    # acabo visto. Esta resta es la que manda; LOTES_PERDIDOS es solo historial.
+    EANS_NO_PREGUNTADOS.difference_update(vistos)
+
     for ein,c in candidatos.items():
         tiene = (c['r_act'] and c['r_act']>0) or (c['r_90'] and c['r_90']>0)
         if c['propio'] or pasa_filtro(c['r_act'],c['r_90']): pasan[ein]=c
@@ -1029,7 +1090,11 @@ if filas:
         elif not tiene: sin_rank.append(c)
     for f in filas:
         if f['ean_in'] not in vistos:
-            no_encontrados.append({'EAN':f['ean_in'],'Cabecera':f['nombre'],'Motivo':'Keepa sin ASIN'})
+            # 🔒 No mentir en el motivo: "Keepa sin ASIN" solo si de verdad se
+            # pregunto y no lo tenia. Si el lote se perdio, se dice.
+            _motivo = ('NO PREGUNTADO (lote perdido por fallo de Keepa)'
+                       if f['ean_in'] in EANS_NO_PREGUNTADOS else 'Keepa sin ASIN')
+            no_encontrados.append({'EAN':f['ean_in'],'Cabecera':f['nombre'],'Motivo':_motivo})
 amb_eans = {a['EAN'] for a in ambiguos}
 print(f"\nCon ASIN: {len(candidatos)} | PASAN: {len(pasan)} | sin rank: {len(sin_rank)} | "
       f"no encontrados: {len(no_encontrados)} | ambiguos: {len(ambiguos)}")
@@ -1039,6 +1104,12 @@ print(f"\nCon ASIN: {len(candidatos)} | PASAN: {len(pasan)} | sin rank: {len(sin
 # ============================================================
 def datos_pais(asin, dom):
     res = keepa_query([asin], product_code_is_asin=True, domain=dom, stats=90, history=0, buybox=True)
+    # 🔒 None (fallo de red tras reintentos) NO es lo mismo que [] (Keepa no
+    # tiene ese ASIN en ese pais). Antes se mezclaban y el pais perdido por red
+    # desaparecia en silencio del informe.
+    if res is None:
+        PAISES_PERDIDOS.append((asin, dom))
+        return None
     if not res: return None
     p = res[0]; st = p.get('stats') or {}
     cur, a90 = st.get('current') or [], st.get('avg90') or []
@@ -1451,7 +1522,7 @@ if not _sin_excel:
 _biblioteca_ok = False
 _biblioteca_id = None
 try:
-    _resp_bib = sb.table('escaner_resultados').insert({
+    _fila_bib = {
         'proveedor': PROVEEDOR, 'marca': MARCA, 'modo': MODO,
         'rank_maximo': RANK_MAXIMO,
         'n_productos': len(registros), 'n_comprar': n_mandar,
@@ -1459,7 +1530,19 @@ try:
         'n_cambios': cnt.get('cambio_precio',0), 'n_agotados': len(ausentes),
         'fichero': ruta_storage if subido_ok else None,
         'tokens_restantes': int(api.tokens_left),
-    }).execute()
+    }
+    # 🔒 EL AVISO VIVE EN EL DATO, no en el log (el log de Actions caduca).
+    # Requiere la migracion: alter table escaner_resultados add column
+    #   lotes_perdidos int default 0, eans_no_preguntados int default 0;
+    # Si las columnas aun no existen, se reintenta SIN ellas: nunca se pierde el registro.
+    _extra_bib = {'lotes_perdidos': len(LOTES_PERDIDOS),
+                  'eans_no_preguntados': len(EANS_NO_PREGUNTADOS)}
+    try:
+        _resp_bib = sb.table('escaner_resultados').insert({**_fila_bib, **_extra_bib}).execute()
+    except Exception as _e_cols:
+        print(f"AVISO: no pude guardar lotes_perdidos/eans_no_preguntados ({_e_cols}). "
+              f"Falta la migracion. Registro el escaneo sin esas columnas.")
+        _resp_bib = sb.table('escaner_resultados').insert(_fila_bib).execute()
     _filas_bib = getattr(_resp_bib, 'data', None) or []
     _biblioteca_id = _filas_bib[0].get('id') if _filas_bib else None
     if _biblioteca_id is not None:
@@ -1490,7 +1573,16 @@ regs = []; vistos_up = set()
 if PERFIL.get('efimero'):
     print(f"Perfil EFIMERO ({PROVEEDOR}): NO se escribe en escaner_memoria; ningun proveedor real se ve afectado.")
 else:
+    # 🔒🔒 LA LINEA QUE CORTA LA ACUMULACION.
+    # Un EAN cuyo lote se perdio NO entra en la memoria: si lo grabaramos con el
+    # PA de hoy, manana saldria 'sin_cambios' y el pase diario 'nuevos' lo
+    # filtraria fuera para siempre. Dejandolo fuera, manana vuelve a salir
+    # 'nuevo' y se reintenta. Un hipo de red no puede condenar a un producto.
+    _saltados_mem = 0
     for f in filas_hoy:
+        if f['ean_in'] in EANS_NO_PREGUNTADOS:
+            _saltados_mem += 1
+            continue
         k = (PROVEEDOR, norm(f['core']), bool(f['es_chase']))
         if k in vistos_up: continue
         vistos_up.add(k)
@@ -1501,8 +1593,18 @@ else:
     #  - catalogo vacio (0 filas) -> no marcar (fichero equivocado / marca inexistente)
     #  - catalogo PARCIAL (crudo < UMBRAL_PARCIAL de lo que hay en memoria) -> no marcar
     #    (descarga incompleta). Una REBAJA no reduce el nº de filas crudas -> NO salta aqui.
+    if _saltados_mem:
+        print(f"MEMORIA: {_saltados_mem} productos NO se graban (su lote se perdio y nunca se "
+              f"pregunto a Keepa). Manana volveran a salir 'nuevo' y se reintentaran.")
     if not filas_hoy:
         print("Catalogo vacio (0 productos): NO se marcan agotados (evita falso vaciado de la memoria).")
+    elif EANS_NO_PREGUNTADOS:
+        # 🔒 Si tras el RESCATE siguen quedando EAN sin preguntar, el escaneo es
+        # PARCIAL: marcar agotados aqui seria dar por desaparecido lo que ni
+        # siquiera se ha llegado a mirar. (Si el rescate los recupero todos,
+        # este bloque no salta y los agotados se marcan con normalidad.)
+        print(f"BLINDAJE: {len(EANS_NO_PREGUNTADOS)} EAN sin preguntar tras el rescate -> escaneo "
+              f"PARCIAL: NO se marcan agotados. La memoria queda intacta en esa parte.")
     elif N_CRUDO is not None and len(mem) > 0 and N_CRUDO < UMBRAL_PARCIAL * len(mem):
         print(f"BLINDAJE: catalogo PARCIAL ({N_CRUDO} filas crudas vs {len(mem)} en memoria, "
               f"<{int(UMBRAL_PARCIAL*100)}%): NO se marcan agotados. Huele a descarga incompleta o "
@@ -1603,3 +1705,35 @@ try:
         print(">>> Telegram: sin claves en este paso -> no se envia (normal en TCG o app).")
 except Exception as _e_tg:
     print("AVISO Telegram (no se envio, la corrida ya termino igual):", _e_tg)
+
+# ============================================================
+# Celda 12 - VEREDICTO DE INTEGRIDAD (lo ultimo que corre)
+# ------------------------------------------------------------
+# 🔒 Un escaneo al que le falta parte del catalogo NO es un escaneo bueno con
+# un aviso: es un escaneo INCOMPLETO. Hasta hoy terminaba en VERDE y nadie se
+# enteraba (run 27-jul: 86 de 186 productos sin preguntar, job en success).
+# Va AL FINAL a proposito: el Excel ya esta subido, la biblioteca registrada y
+# la memoria actualizada. Lo unico que cambia es que el run sale ROJO.
+# ============================================================
+# 🔒 El veredicto mira EANS_NO_PREGUNTADOS (lo que quedo sin preguntar DESPUES
+# del rescate), no LOTES_PERDIDOS: si un lote se cayo pero el rescate lo
+# recupero, el escaneo esta COMPLETO y no hay motivo para salir en rojo.
+if LOTES_PERDIDOS and not EANS_NO_PREGUNTADOS:
+    print(f"NOTA: {len(LOTES_PERDIDOS)} lotes se cayeron durante la corrida, pero la RONDA DE "
+          f"RESCATE los recupero todos. Escaneo COMPLETO.")
+if EANS_NO_PREGUNTADOS or PAISES_PERDIDOS:
+    print("")
+    print("=" * 64)
+    print("!!! ESCANEO PARCIAL - NO TE FIES DE ESTE RESULTADO COMO COMPLETO")
+    if EANS_NO_PREGUNTADOS:
+        print(f"  Fase 1: {len(EANS_NO_PREGUNTADOS)} EAN NUNCA preguntados a Keepa "
+              f"(ni en la pasada normal ni en el rescate).")
+        for _lp in LOTES_PERDIDOS:
+            print(f"    - intento fallido: {_lp['etiqueta']} lote {_lp['lote']} ({_lp['n_codigos']} codigos)")
+    if PAISES_PERDIDOS:
+        print(f"  Fase 2: {len(PAISES_PERDIDOS)} pares ASIN/pais perdidos.")
+    print("  La memoria NO los ha marcado como vistos: el proximo pase los reintenta.")
+    print("  Relanza el escaneo cuando Keepa vaya fino.")
+    print("=" * 64)
+    sys.exit(1)
+print("=== INTEGRIDAD OK: todo el catalogo se pregunto a Keepa. ===")
