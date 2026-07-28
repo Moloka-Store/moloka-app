@@ -1673,6 +1673,21 @@ print("=== ESCANER FIN ===")
 # que quieran aviso: DBLine, OcioStock). TCG no las pasa aqui -> no duplica su aviso.
 # Envuelto en try/except: si Telegram falla, la corrida ya termino igual.
 # ============================================================
+# 🔒 El aviso de parcial tiene que ir DENTRO del Telegram, que es por donde se
+# entera Fernando de verdad. Hasta ahora el veredicto de integridad corria
+# DESPUES de enviarlo, asi que un escaneo al que le faltaba medio catalogo
+# mandaba el 🟢 de siempre. Y peor: con 0 COMPRAR no se enviaba NADA, o sea que
+# el caso mas roto era el mas silencioso.
+_PARCIAL = bool(EANS_NO_PREGUNTADOS or PAISES_PERDIDOS)
+_aviso_parcial = None
+if _PARCIAL:
+    _trozos = []
+    if EANS_NO_PREGUNTADOS: _trozos.append(f"{len(EANS_NO_PREGUNTADOS)} EAN sin preguntar a Keepa")
+    if PAISES_PERDIDOS:     _trozos.append(f"{len(PAISES_PERDIDOS)} pares ASIN/pais perdidos")
+    _aviso_parcial = ("⚠️ <b>ESCANEO PARCIAL</b>: " + " y ".join(_trozos) +
+                      ". Los COMPRAR de abajo salen de un catalogo INCOMPLETO. "
+                      "Relanza cuando Keepa vaya fina.")
+
 try:
     _tg_token = os.environ.get('TELEGRAM_TOKEN')
     _tg_chat  = os.environ.get('TELEGRAM_CHAT_ID')
@@ -1686,8 +1701,13 @@ try:
                         _mejor = (_dom, _d['margen'], _d.get('precio'))
             if _mejor:
                 _compras.append((_it, _mejor))
-        if _compras:
-            _lineas = [f"🟢 <b>Director {PROVEEDOR}</b> ({MODO}): {len(_compras)} para COMPRAR"]
+        # 🔒 Se envia si hay compras O si el escaneo fue parcial: un escaneo roto
+        # que no encuentra nada NO puede quedarse en silencio.
+        if _compras or _PARCIAL:
+            _lineas = [f"{'🔴' if _PARCIAL else '🟢'} <b>Director {PROVEEDOR}</b> ({MODO}): "
+                       f"{len(_compras)} para COMPRAR"]
+            if _aviso_parcial:
+                _lineas.append(_aviso_parcial)
             for _it, (_dom, _mg, _pv) in _compras[:20]:
                 _nom = str(_it.get('nombre') or '')[:45]
                 _pvs = f"{_pv:.2f}€" if _pv else "s/precio"
@@ -1698,9 +1718,10 @@ try:
             _rq_tg.post(f"https://api.telegram.org/bot{_tg_token}/sendMessage",
                         data={'chat_id': _tg_chat, 'text': "\n".join(_lineas),
                               'parse_mode': 'HTML', 'disable_web_page_preview': 'true'}, timeout=20)
-            print(f">>> Telegram enviado: {len(_compras)} COMPRAR.")
+            print(f">>> Telegram enviado: {len(_compras)} COMPRAR"
+                  f"{' + AVISO DE ESCANEO PARCIAL' if _PARCIAL else ''}.")
         else:
-            print(">>> Telegram: 0 COMPRAR en esta pasada -> no se envia aviso.")
+            print(">>> Telegram: 0 COMPRAR y escaneo COMPLETO -> no se envia aviso.")
     else:
         print(">>> Telegram: sin claves en este paso -> no se envia (normal en TCG o app).")
 except Exception as _e_tg:
