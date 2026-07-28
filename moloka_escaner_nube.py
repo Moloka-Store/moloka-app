@@ -419,6 +419,9 @@ IVA_DEFAULT_ES, IVA_IT, IVA_FR = 0.21, 0.22, 0.20
 ALMACEN, COM_DIGITALES = 0.15, 1.03
 UNIDADES_CASE_TCG = 6          # CHASE en case de 6 (5+1) -> coste unitario = PA / 6. TCG y chase HEO.
 LOTE_FASE1 = int(os.environ.get('LOTE_FASE1', '50'))   # 100 -> 50: si se pierde un lote, el agujero es la mitad
+# activo (default) -> elige el que se parece y marca los dudosos (nada desaparece).
+# off              -> vuelta atras de emergencia: elige por rank, como antes del bloque 2.
+COTEJO_MODO = (os.environ.get('COTEJO_MODO') or 'activo').lower()     # activo | off
 TS = datetime.now().strftime('%Y%m%d_%H%M')
 ARCHIVO_SALIDA = f'/tmp/Escaneo_{PROVEEDOR}_{MARCA}_{TS}.xlsx'
 print(f"{PROVEEDOR} | Marca {MARCA} | Rank max {RANK_MAXIMO} | Modo {MODO}")
@@ -547,6 +550,118 @@ def _coincide_titulo(nombre_prov, titulo_amz):
     if not a or not b: return '?'
     return 'SÍ' if (a & b) else '⚠ NO'
 
+# ============================================================
+# COTEJO proveedor<->Amazon (bloque 2). Elige el ASIN que SE PARECE al nombre del
+# proveedor, no el que mas vende. El desempate por rank tenia 50% de acierto en el
+# escaneo del 26-jul (4 de 8 con varios ASIN mal elegidos), y el sesgo es dirigido:
+# mejor rank ~ mas vendido ~ precio mas alto -> siempre empuja a "mas rentable de lo
+# que es". El criterio calcula que palabras distinguen A PARTIR DEL PROPIO CATALOGO
+# (IDF), sin lista de stopwords que mantener.
+# ============================================================
+import math, unicodedata   # re y Counter ya estan importados arriba; unicodedata aqui va pelado (arriba es 'as _ud')
+
+UMBRAL_COTEJO = 0.40        # solo se usa cuando el nombre NO tiene ninguna palabra distintiva
+_DF, _NDOC = Counter(), 1
+COTEJO_ACTIVO = True        # se apaga si el proveedor no trae columna de nombre real
+
+def _tok_cot(t):
+    t = unicodedata.normalize('NFKD', str(t or '')).encode('ascii', 'ignore').decode().lower()
+    out = []
+    for w in re.sub(r'[^a-z0-9]+', ' ', t).split():
+        if len(w) < 3 and not w.isdigit():
+            continue
+        if len(w) > 4 and w.endswith('s'):
+            w = w[:-1]                     # plural simple
+        out.append(w)
+    return out
+
+def construir_idf(nombres):
+    """Una palabra que sale en MUCHOS productos del catalogo (funko, pop, figura,
+    disney, dragon...) no distingue nada. El propio catalogo dice cuales son:
+    no hace falta mantener a mano ninguna lista de palabras a ignorar."""
+    global _DF, _NDOC
+    _DF, vistos = Counter(), set()
+    for n in nombres:
+        n = str(n or '').strip()
+        if not n or n in vistos:
+            continue
+        vistos.add(n)
+        _DF.update(set(_tok_cot(n)))
+    _NDOC = max(1, len(vistos))
+
+def _idf(w):          return math.log(_NDOC / (1 + _DF.get(w, 0)))
+def _distintivo(w):   return _DF.get(w, 0) <= max(2, _NDOC * 0.01)
+
+def cotejar(nombre_prov, titulo_amz):
+    """(casa, score, motivo). casa=None -> NO SE PUEDE cotejar: el llamador debe
+    comportarse como hasta hoy (desempate por rank), nunca rechazar por esto."""
+    if not COTEJO_ACTIVO:
+        return None, 0.0, 'n/d: proveedor sin columna de nombre'
+    tp = _tok_cot(nombre_prov)
+    ta = set(_tok_cot(titulo_amz))
+    if not tp or not ta:
+        return None, 0.0, 'n/d: sin texto que comparar'
+    # 🔒 RED DE SEGURIDAD (defensa en profundidad). Con deteccion tolerante, si el
+    # motor no encuentra columna de nombre usa la del EAN como nombre
+    # (`det['nombre'] or det['ean']`). Un "nombre" que son solo digitos NO es un
+    # nombre: sin esto, ZENTRADA/DINOTOYS rechazarian el catalogo entero.
+    if not [w for w in tp if not w.isdigit()]:
+        return None, 0.0, 'n/d: el nombre no tiene palabras (parece un codigo)'
+    pesos = {w: _idf(w) for w in set(tp)}
+    score = sum(p for w, p in pesos.items() if w in ta) / (sum(pesos.values()) or 1)
+    fuertes = {w for w in pesos if _distintivo(w)}
+    if fuertes:                                     # via 1 (95,5% del catalogo)
+        casan = fuertes & ta
+        if casan:
+            return True, score, 'casa: ' + ', '.join(sorted(casan)[:3])
+        return False, score, 'ningun distintivo casa (faltan: ' + ', '.join(sorted(fuertes)[:3]) + ')'
+    return (score >= UMBRAL_COTEJO), score, f'cobertura {score:.0%} (nombre sin palabras distintivas)'
+
+def elegir_candidato(nombre_prov, cands, keyrank):
+    """cands: [{'asin','title','r_90',...}] -> (elegido, veredicto, detalle).
+    🔒 REGLA DE FERNANDO (28-jul): NUNCA devuelve None. Si ninguno pasa el filtro
+    se entrega EL MAS PARECIDO y se marca DUDOSO. Sacar un producto del informe
+    porque el criterio no lo reconoce seria cambiar un error VISIBLE (un ASIN
+    equivocado, que se ve y se corrige) por una AUSENCIA INVISIBLE (un producto
+    que falta y del que nadie se entera). Es el mismo pecado que la fuga
+    silenciosa. El criterio ORDENA y AVISA; no decide qué desaparece.
+    Ademas el filtro fallara por idioma (Vengadores/Avengers) y eso no puede
+    costarte dejar de ver el producto."""
+    if not cands:
+        return None, '—', 'sin candidatos'
+    ev = [(c, cotejar(nombre_prov, c.get('title'))) for c in cands]
+    if all(v[0] is None for _, v in ev):                    # no hay con que cotejar
+        return min(cands, key=keyrank), 'n/d', ev[0][1][2] + ' -> elegido por rank, como siempre'
+    casan = [(c, v) for c, v in ev if v[0] is True]
+    if casan:
+        elegido = min((c for c, _ in casan), key=keyrank)
+        det = next(v[2] for c, v in casan if c is elegido)
+        return elegido, 'OK', f'{len(casan)}/{len(cands)} casan; entre esos, mejor rank ({det})'
+    # Ninguno pasa el filtro -> se entrega el MAS PARECIDO, nunca se descarta.
+    mejor_c, mejor_v = max(ev, key=lambda cv: (cv[1][1], -keyrank(cv[0])))
+    if mejor_v[1] <= 0:                                     # ni uno se parece en nada
+        return (min(cands, key=keyrank), '⚠ DUDOSO',
+                f'ninguno de los {len(cands)} se parece al nombre; te pongo el de mejor rank — REVISAR')
+    return (mejor_c, '⚠ DUDOSO',
+            f'ninguno pasa el filtro; te pongo el MAS PARECIDO ({mejor_v[1]:.0%} de {len(cands)}) — REVISAR')
+
+# ============================================================
+# GUARDARRAIL DE SISTEMA (mismo espiritu que el blindaje anti-vaciado del 35%)
+# Si el cotejo rechaza a MEDIO CATALOGO, el roto es el criterio, no el catalogo.
+# En ese caso NO se bloquea nada: se avisa y se elige como hasta hoy.
+# ============================================================
+UMBRAL_PANICO = 0.50
+
+def cotejo_de_fiar(n_evaluados, n_rechazados):
+    if n_evaluados < 20:
+        return True, ''                       # muestra muy chica para juzgar
+    ratio = n_rechazados / n_evaluados
+    if ratio > UMBRAL_PANICO:
+        return False, (f"PANICO DE COTEJO: rechaza {n_rechazados}/{n_evaluados} ({ratio:.0%}). "
+                       f"El roto es el criterio, no el catalogo -> NO se bloquea nada "
+                       f"esta corrida; se elige por rank como siempre.")
+    return True, ''
+
 def _es_ean_valido(s):
     """True si s es un EAN/UPC utilizable: 12 o 13 digitos."""
     s = str(s).strip()
@@ -641,6 +756,10 @@ problematicos = []
 chase_sueltos = []   # chase suelto descartado por la regla de negocio (va a la hoja Descartados)
 filas = []
 fuera_disp = 0
+# Defaults para que el cotejo (mas abajo, punto comun) no reviente en la rama MOLOKA:
+# la rama de ficheros los reasigna; MOLOKA los deja asi (tiene nombre real -> cotejo activo).
+det = {}
+_tolerante = False
 
 if PROVEEDOR == 'MOLOKA':
     print("=== MOLOKA: leyendo inventario propio de Supabase ===")
@@ -834,6 +953,24 @@ if _dups:
           f"varios precios) -> me quedo con la MAS BARATA. Van a la hoja 'Descartados'.")
 
 # ============================================================
+# COTEJO (bloque 2): construir el IDF y decidir si aplica. Va AQUI, en el punto
+# comun tras el dedup, para que valga tanto para MOLOKA como para los proveedores
+# de fichero (el sitio original ~"Disponibles a escanear" solo cubria ficheros).
+# ============================================================
+# 🔒 El IDF se calcula sobre el catalogo de HOY: son sus propias palabras las que
+# dicen cuales distinguen y cuales no. Nada de listas de stopwords a mano.
+construir_idf([f['nombre'] for f in filas])
+# Con deteccion tolerante, si no hay columna de nombre el motor usa la del EAN
+# (`det['nombre'] or det['ean']`). Comparar un EAN con un titulo de Amazon no
+# casaria NUNCA -> el cotejo se APAGA para ese proveedor. (COTEJO_ACTIVO es el
+# global del modulo de cotejo; aqui, a nivel de script, se reasigna directo.)
+COTEJO_ACTIVO = not (_tolerante and not det.get('nombre'))
+if not COTEJO_ACTIVO:
+    print(f"COTEJO: apagado para {PROVEEDOR} (el fichero no trae columna de nombre).")
+else:
+    print(f"COTEJO: activo, modo '{COTEJO_MODO}' | IDF sobre {_NDOC} nombres.")
+
+# ============================================================
 # Celda 5 - cruce con Supabase (productos propios + stock para 'En mi BD')
 # ============================================================
 sup = {}
@@ -941,13 +1078,18 @@ try:
 except Exception:
     _rankcache = {}
 
+# 🔒 Subir REDUCE_VER cada vez que cambien los campos de _reduce_prod: invalida
+# la cache vieja, que no traeria los campos nuevos (p.ej. 'title', anadido en el
+# bloque 2 del cotejo). Sin esto, la primera corrida cotejaria contra titulos vacios.
+REDUCE_VER = 'v2'
 def _clave_lote(codigos, domain):
-    return hashlib.md5((domain + '|' + '|'.join(map(str, codigos))).encode()).hexdigest()[:16]
+    return hashlib.md5((REDUCE_VER + '|' + domain + '|' + '|'.join(map(str, codigos))).encode()).hexdigest()[:16]
 
 def _reduce_prod(prod):
-    # Solo lo que necesita registra(): asin, stats(current/avg90), eanList, upcList.
+    # asin, stats, eanList, upcList + TITLE: viene en la MISMA respuesta ya pagada
+    # de Fase 1 y hasta ahora se tiraba. Sin el, registra() no puede cotejar.
     st = prod.get('stats') or {}
-    return {'asin': prod.get('asin'),
+    return {'asin': prod.get('asin'), 'title': prod.get('title') or '',
             'stats': {'current': st.get('current'), 'avg90': st.get('avg90')},
             'eanList': prod.get('eanList'), 'upcList': prod.get('upcList')}
 
@@ -973,6 +1115,8 @@ def _guardar_rankcache():
 # ============================================================
 IDX_RANK, IDX_NEW, IDX_BBOX_LAND = 3, 1, 18   # 18 = BUY_BOX_SHIPPING (buy box CON envio = aterrizada, como el v1)
 candidatos, ambiguos = {}, []
+cands_por_ean = {}        # ein -> [todos los candidatos] (para el cotejo). candidatos guarda solo el ganador por rank.
+cotejo_info = {}          # ein -> veredicto del cotejo (se rellena mas abajo; declarado aqui para que exista aunque filas este vacio)
 pasan, sin_rank, no_encontrados = {}, [], []
 
 if filas:
@@ -998,6 +1142,8 @@ if filas:
             if not (var_norm[ein] & eans): continue
             f = fila_por_ean[ein]
             cand = {'ean_in':ein,'asin':asin,'r_act':r_act,'r_90':r_90,'fila':f,'propio':es_propio(f['core'])}
+            cand['title'] = prod.get('title') or ''
+            cands_por_ean.setdefault(ein, []).append(cand)      # <- se guardan TODOS (para el cotejo)
             if ein in candidatos:
                 prev = candidatos[ein]
                 ambiguos.append({'EAN':ein,'asin_elegido':cand['asin'] if keyrank(cand)<keyrank(prev) else prev['asin']})
@@ -1082,6 +1228,41 @@ if filas:
     # con variante alternativa o en el rescate: solo sigue "sin preguntar" si NO
     # acabo visto. Esta resta es la que manda; LOTES_PERDIDOS es solo historial.
     EANS_NO_PREGUNTADOS.difference_update(vistos)
+
+    # ============================================================
+    # COTEJO: elegir el ASIN que SE PARECE, no el que mas vende.
+    #   activo (default) -> se aplica SIEMPRE el elegido; los dudosos se marcan.
+    #   off              -> como antes del bloque 2 (se elige por rank).
+    # 🔒 NADA DESAPARECE. El cotejo ORDENA y AVISA; nunca saca un producto del
+    # informe. Un ASIN dudoso VISIBLE (se ve y se corrige) es mejor que una
+    # ausencia invisible. len(candidatos) es INVARIANTE en este bloque: solo se
+    # reasigna candidatos[ein], jamas se hace pop ni se anade a no_encontrados.
+    # ============================================================
+    cotejo_info = {}          # ein -> {'veredicto','detalle','asin_cotejo','difiere'}
+    _n_eval = _n_dud = 0
+    if COTEJO_MODO != 'off' and COTEJO_ACTIVO:
+        for ein, c in list(candidatos.items()):
+            cands = cands_por_ean.get(ein) or [c]
+            nom = fila_por_ean[ein]['nombre']
+            elegido, veredicto, detalle = elegir_candidato(nom, cands, keyrank)
+            if elegido is None:
+                continue                                    # cands nunca vacio; defensivo
+            difiere = elegido['asin'] != c['asin']
+            candidatos[ein] = elegido                        # <- SIEMPRE se aplica el elegido
+            cotejo_info[ein] = {'veredicto':veredicto, 'detalle':detalle,
+                                'asin_cotejo':elegido['asin'], 'difiere':difiere}
+            if veredicto != 'n/d':
+                _n_eval += 1
+                if str(veredicto).startswith('⚠'):
+                    _n_dud += 1
+        # Guardarrail de panico: ya no apaga nada (no hay nada destructivo). Si el
+        # ratio de dudosos supera el 50%, avisa: es la senal de afinar el criterio.
+        _fiar, _msg_panico = cotejo_de_fiar(_n_eval, _n_dud)
+        if not _fiar:
+            print("!!! " + _msg_panico)
+        n_dif = sum(1 for v in cotejo_info.values() if v['difiere'])
+        print(f"COTEJO ({COTEJO_MODO}): {_n_eval} evaluados | {_n_dud} dudosos | "
+              f"{n_dif} donde el cotejo cambia la eleccion del rank.")
 
     for ein,c in candidatos.items():
         tiene = (c['r_act'] and c['r_act']>0) or (c['r_90'] and c['r_90']>0)
@@ -1180,6 +1361,7 @@ for i,c in enumerate(lista,1):
             'pa':f['pa'],'core':f['core'],'es_chase':f['es_chase'],'propio':c['propio'],
             'volumen':f.get('volumen'),'url':f.get('url',''),'titulo_amz':'',
             'ambiguo':c['ean_in'] in amb_eans,'paises':{},
+            'cotejo':(cotejo_info.get(c['ean_in']) or {}).get('veredicto','—'),   # para marcar dudosos en Telegram
             'case_de_6':bool(f.get('es_caja6'))}
     for dom in ('ES','IT','FR'):
         d = datos_pais(c['asin'], dom)
@@ -1290,7 +1472,8 @@ from openpyxl.formatting.rule import FormulaRule, CellIsRule
 COLS = ['Nombre','EAN','ASIN','Marca','PA (€)','País','Rank actual','Rank 90d','Vendidos/mes',
         'Precio venta (€)','Canal BB','Nº ofertas','% Comisión',
         'Com. Amazon (€)','Fee Logística (€)','Almacén (€)','Promo activa',
-        'Beneficio (€)','ROI','Margen','Decisión','En mi BD','EAN ambiguo','Amazon (título)','Coincide','OcioStock']
+        'Beneficio (€)','ROI','Margen','Decisión','En mi BD','EAN ambiguo','Amazon (título)','Coincide',
+        'Cotejo','Cotejo (detalle)','OcioStock']
 L = {name:get_column_letter(i+1) for i,name in enumerate(COLS)}
 DOM_AMZ = {'ES':'amazon.es','IT':'amazon.it','FR':'amazon.fr'}
 
@@ -1301,6 +1484,7 @@ r = 1
 for item in registros:
     en_bd = en_bd_txt(item['core'])
     amb = 'AMBIGUO' if item['ambiguo'] else ''
+    _cot = cotejo_info.get(item['ean']) or {}   # veredicto del cotejo para este producto ('—' si no hay)
     for dom in ('ES','IT','FR'):
         d = item['_paises_calc'].get(dom)
         if not d:
@@ -1322,6 +1506,7 @@ for item in registros:
             f"={L['Beneficio (€)']}{r}/{L['Precio venta (€)']}{r}" if (div and d['precio'] and pct is not None) else None,
             d['decision'], en_bd, amb,
             item.get('titulo_amz',''), item.get('coincide','?'),
+            _cot.get('veredicto','—'), _cot.get('detalle','—'),
             ('Ver ficha ↗' if item.get('url') else '')])
         cell = ws.cell(row=r, column=3)
         cell.hyperlink = f"https://www.{DOM_AMZ[dom]}/dp/{item['asin']}"
@@ -1343,7 +1528,7 @@ fmt('% Comisión','0.00%'); fmt('ROI','0.0%'); fmt('Margen','0.0%')
 for c in range(1,len(COLS)+1):
     ws.cell(row=1,column=c).font = Font(bold=True)
 anchos = {'Nombre':50,'EAN':14,'ASIN':12,'Marca':12,'En mi BD':20,'Decisión':15,
-          'Amazon (título)':50,'Coincide':11,'OcioStock':13}
+          'Amazon (título)':50,'Coincide':11,'Cotejo':16,'Cotejo (detalle)':46,'OcioStock':13}
 for nm,w in anchos.items(): ws.column_dimensions[L[nm]].width = w
 
 ws.freeze_panes = 'A2'
@@ -1370,6 +1555,15 @@ if last >= 2:
     coi = L['Coincide']; rng_coi = f'{coi}2:{coi}{last}'
     ws.conditional_formatting.add(rng_coi, FormulaRule(formula=[f'ISNUMBER(SEARCH("NO",{coi}2))'],
         fill=_cf_fill('FFC7CE'), font=Font(color='9C0006')))
+    # Semaforo del COTEJO (mismo espiritu que Coincide): DUDOSO rojo (revisar el
+    # ASIN), n/d gris (no habia con que cotejar), OK verde (rank y cotejo coinciden).
+    cot = L['Cotejo']; rng_cot = f'{cot}2:{cot}{last}'
+    ws.conditional_formatting.add(rng_cot, FormulaRule(formula=[f'ISNUMBER(SEARCH("DUDOSO",{cot}2))'],
+        fill=_cf_fill('FFC7CE'), font=Font(color='9C0006'), stopIfTrue=True))
+    ws.conditional_formatting.add(rng_cot, FormulaRule(formula=[f'ISNUMBER(SEARCH("n/d",{cot}2))'],
+        fill=_cf_fill('E7E6E6'), font=Font(color='808080'), stopIfTrue=True))
+    ws.conditional_formatting.add(rng_cot, FormulaRule(formula=[f'ISNUMBER(SEARCH("OK",{cot}2))'],
+        fill=_cf_fill('C6EFCE'), font=Font(color='006100'), stopIfTrue=True))
     ws.conditional_formatting.add(f'A2:{get_column_letter(len(COLS))}{last}',
         FormulaRule(formula=['ISODD(INT((ROW()-2)/3))'], fill=_cf_fill('D9D9D9')))
 
@@ -1711,7 +1905,8 @@ try:
             for _it, (_dom, _mg, _pv) in _compras[:20]:
                 _nom = str(_it.get('nombre') or '')[:45]
                 _pvs = f"{_pv:.2f}€" if _pv else "s/precio"
-                _lineas.append(f"• {_nom} — {_mg*100:.0f}% — {_pvs} ({_dom}) — {_it.get('marca','')}")
+                _dud = ' ⚠ASIN DUDOSO' if str(_it.get('cotejo','')).startswith('⚠') else ''
+                _lineas.append(f"• {_nom} — {_mg*100:.0f}% — {_pvs} ({_dom}) — {_it.get('marca','')}{_dud}")
             if len(_compras) > 20:
                 _lineas.append(f"…y {len(_compras)-20} más (mira el Excel de la Biblioteca).")
             import requests as _rq_tg
