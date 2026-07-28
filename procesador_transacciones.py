@@ -99,6 +99,7 @@ COLS_ALIAS = {
         'tarifa_venta':     ['tarifas de venta'],
         'tarifa_fba':       ['tarifas de logistica de amazon'],
         'tarifa_otras':     ['tarifas de otras transacciones'],
+        'otro':             ['otro'],
         'total':            ['total'],
         'estado':           ['estado de la transaccion'],
         'fecha_liberacion': ['fecha de liberacion de la transaccion'],
@@ -117,6 +118,7 @@ COLS_ALIAS = {
         'tarifa_venta':     ['commissioni di vendita'],
         'tarifa_fba':       ['costi del servizio logistica di amazon'],
         'tarifa_otras':     ['altri costi relativi alle transazioni'],
+        'otro':             ['altro'],
         'total':            ['totale'],
         'estado':           ['stato della transazione'],
         'fecha_liberacion': ['data di rilascio della transazione'],
@@ -135,6 +137,7 @@ COLS_ALIAS = {
         'tarifa_venta':     ['frais de vente'],
         'tarifa_fba':       ['frais expedie par amazon'],
         'tarifa_otras':     ['autres frais de transaction'],
+        'otro':             ['autre'],
         'total':            ['total'],
         'estado':           ['statut de la transaction'],
         'fecha_liberacion': ['date de sortie de la transaction'],
@@ -151,7 +154,7 @@ COLS_OBLIGATORIAS = ('fecha', 'tipo', 'sku', 'cantidad', 'ventas_producto',
 COLS_DB = ['pais', 'fecha', 'fecha_hora', 'tipo', 'numero_pedido', 'identificador_pago',
            'sku', 'descripcion', 'cantidad', 'marketplace',
            'ventas_producto', 'impuesto_producto', 'tarifa_venta', 'tarifa_fba',
-           'tarifa_otras', 'total', 'estado', 'fecha_liberacion', 'fichero', 'crudo']
+           'tarifa_otras', 'otro', 'total', 'estado', 'fecha_liberacion', 'fichero', 'crudo']
 
 # marketplace → país, para la GUARDA de coherencia (no para detectar).
 MKT_A_PAIS = {'amazon.es': 'ES', 'amazon.fr': 'FR', 'amazon.it': 'IT'}
@@ -243,9 +246,19 @@ def parse_fecha_hora(s, pais):
 # 1) Parseo + guardas estructurales. Sin tocar la base todavía.
 # ---------------------------------------------------------------------------
 def _resolver_columna(cabecera, cab_norm, alias_list):
+    # EXACTO primero, y solo si ninguno casa exacto se prueba por PREFIJO. Es
+    # deliberado: el alias 'autre' (col 'otro' en FR) es prefijo de 'autres frais
+    # de transaction' (que es tarifa_otras). Con prefijo-primero, 'autre' capturaría
+    # la columna equivocada porque aparece antes. Con exacto-primero, cada una casa
+    # con la suya. Ningún alias actual depende del prefijo (todos casan exacto tras
+    # _norm), así que esto NO cambia ninguna resolución previa; solo blinda 'otro'.
     for alias in alias_list:
         for real, norm in zip(cabecera, cab_norm):
-            if norm == alias or norm.startswith(alias):
+            if norm == alias:
+                return real
+    for alias in alias_list:
+        for real, norm in zip(cabecera, cab_norm):
+            if norm.startswith(alias):
                 return real
     return None
 
@@ -341,6 +354,12 @@ def analizar(texto, pais, fichero):
             'tarifa_venta': num_o_null(celda(fila, col['tarifa_venta'])),
             'tarifa_fba': num_o_null(celda(fila, col['tarifa_fba'])),
             'tarifa_otras': num_o_null(celda(fila, col['tarifa_otras'])),
+            # 'otro' TAL CUAL, en euros, con signo. Aquí Amazon MEZCLA en una sola
+            # columna costes reales (tarifas de inventario, prestación de servicio,
+            # ajustes a favor) con las TRANSFERENCIAS al banco (que NO son coste).
+            # Por eso se tipa al lado de 'tipo': separarlas es cosa de la vista (PR-C),
+            # el cargador solo guarda el dato sin interpretarlo.
+            'otro': num_o_null(celda(fila, col['otro'])) if col.get('otro') else None,
             'total': num_o_null(celda(fila, col['total'])),
             'estado': txt(celda(fila, col['estado'])) if col.get('estado') else None,
             'fecha_liberacion': parse_fecha_pais(celda(fila, col['fecha_liberacion']), pais) if col.get('fecha_liberacion') else None,
@@ -389,6 +408,7 @@ CREATE TABLE IF NOT EXISTS transacciones_movimientos (
     tarifa_venta       numeric,
     tarifa_fba         numeric,
     tarifa_otras       numeric,
+    otro               numeric,   -- 'otro'/'altro'/'autre': MEZCLA costes y transferencias
     total              numeric,
     estado             text,
     fecha_liberacion   date,
@@ -521,7 +541,7 @@ def main():
         [mv['pais'], mv['fecha'], mv['fecha_hora'], mv['tipo'], mv['numero_pedido'],
          mv['identificador_pago'], mv['sku'], mv['descripcion'], mv['cantidad'],
          mv['marketplace'], mv['ventas_producto'], mv['impuesto_producto'],
-         mv['tarifa_venta'], mv['tarifa_fba'], mv['tarifa_otras'], mv['total'],
+         mv['tarifa_venta'], mv['tarifa_fba'], mv['tarifa_otras'], mv['otro'], mv['total'],
          mv['estado'], mv['fecha_liberacion'], fichero, Json(mv['crudo'])]
         for mv in movs
     ]
