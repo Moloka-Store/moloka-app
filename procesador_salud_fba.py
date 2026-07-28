@@ -44,7 +44,7 @@ from psycopg2.extras import Json
 from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
-from foto_comun import (Aborta, guarda_anti_encogimiento, guarda_no_retroceder, claves_previas,
+from foto_comun import (Aborta, listar_buzon, descargar_buzon, guarda_anti_encogimiento, guarda_no_retroceder, claves_previas,
                         barrer_sobrantes, resumen_foto, describir_ambito)
 
 # ---------------------------------------------------------------------------
@@ -503,7 +503,7 @@ def main():
 
     # --- Bajar el informe más reciente del buzón (Storage de PRODUCCIÓN) ---
     sb = create_client(SUPABASE_URL, SUPABASE_KEY)
-    objs = sb.storage.from_(BUCKET).list(CARPETA) or []
+    objs = listar_buzon(sb, BUCKET, CARPETA)
     txts = [o for o in objs if (o.get('name') or '').lower().endswith('.txt')]
     if not txts:
         sys.exit(f"No hay ningún .txt en {BUCKET}/{CARPETA}/. "
@@ -526,7 +526,7 @@ def main():
     else:
         fichero = txts[0]['name']
         print(f"Informe elegido (el más reciente de {len(txts)}): {fichero}", flush=True)
-    crudo_bytes = sb.storage.from_(BUCKET).download(f"{CARPETA}/{fichero}")
+    crudo_bytes = descargar_buzon(sb, BUCKET, f"{CARPETA}/{fichero}")
 
     # Encoding: el real trae UTF-8 con BOM (utf-8-sig). Fallback cp1252.
     try:

@@ -48,7 +48,7 @@ import psycopg2
 from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
-from foto_comun import (Aborta, guarda_anti_encogimiento, guarda_no_retroceder,
+from foto_comun import (Aborta, listar_buzon, descargar_buzon, guarda_anti_encogimiento, guarda_no_retroceder,
                         claves_previas, barrer_sobrantes, resumen_foto, archivar_foto)
 
 # ---------------------------------------------------------------------------
@@ -110,7 +110,7 @@ if DESTINO not in ('staging', 'produccion'):
 # 1) Bajar el informe más reciente del buzón (Storage de PRODUCCIÓN)
 # ---------------------------------------------------------------------------
 sb = create_client(SUPABASE_URL, SUPABASE_KEY)
-objs = sb.storage.from_(BUCKET).list(CARPETA) or []
+objs = listar_buzon(sb, BUCKET, CARPETA)
 txts = [o for o in objs if (o.get('name') or '').lower().endswith('.txt')]
 if not txts:
     sys.exit(f"No hay ningún .txt en {BUCKET}/{CARPETA}/. "
@@ -128,7 +128,7 @@ except Aborta as e:
     sys.exit(f"\n❌ ABORTA (no se ha escrito nada):\n{e}")
 print(f"   · fecha_informe={fecha_dato.isoformat()} (leída del NOMBRE del fichero)")
 
-crudo = sb.storage.from_(BUCKET).download(f"{CARPETA}/{nombre}")
+crudo = descargar_buzon(sb, BUCKET, f"{CARPETA}/{nombre}")
 
 # Encoding tolerante: Amazon suele dar UTF-8, a veces cp1252
 try:

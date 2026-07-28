@@ -45,7 +45,7 @@ from psycopg2.extras import Json
 from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
-from foto_comun import (Aborta, fecha_del_dato_por_subida, guarda_anti_encogimiento,
+from foto_comun import (Aborta, listar_buzon, descargar_buzon, fecha_del_dato_por_subida, guarda_anti_encogimiento,
                         guarda_no_retroceder,
                         claves_previas, barrer_sobrantes, resumen_foto)
 
@@ -410,10 +410,7 @@ def main():
 
     # --- Bajar el informe más reciente del buzón (Storage de PRODUCCIÓN) ---
     sb = create_client(SUPABASE_URL, SUPABASE_KEY)
-    try:
-        objs = sb.storage.from_(BUCKET).list(CARPETA) or []
-    except Exception as e:
-        sys.exit(f"No se pudo listar {BUCKET}/{CARPETA}/ ({e}). ¿Existe la carpeta?")
+    objs = listar_buzon(sb, BUCKET, CARPETA)  # reintenta cortes de red; aborta si no lo es
     tsvs = [o for o in objs if (o.get('name') or '').lower().endswith(('.tsv', '.txt'))]
     if not tsvs:
         # §9: sin fichero en el buzón, el ensayo aborta en el primer paso. Es el orden.
@@ -439,7 +436,7 @@ def main():
     print(f"   · snapshot_date={snapshot_date} (fecha de subida al buzón = fecha del dato)",
           flush=True)
 
-    crudo_bytes = sb.storage.from_(BUCKET).download(f"{CARPETA}/{fichero}")
+    crudo_bytes = descargar_buzon(sb, BUCKET, f"{CARPETA}/{fichero}")
     # 🔴 TRAMPA 1: este fichero LLEVA BOM → utf-8-sig. Fallback cp1252.
     try:
         texto = crudo_bytes.decode('utf-8-sig')

@@ -66,6 +66,122 @@ class Aborta(Exception):
     pass
 
 
+# ---------------------------------------------------------------------------
+# LECTURAS de Storage con reintento — SOLO lecturas (listar la carpeta, descargar
+# el fichero). Añadido tras el 28-jul: un "[Errno 104] Connection reset by peer"
+# tumbó el procesador de PanEU. No fue el fichero: fue la RED. Y con la Fase 2
+# disparando varios workflows casi a la vez, esto va a pasar MÁS, no menos.
+#
+# 🔒 El reintento va AQUÍ y solo aquí: en la conversación con Storage. JAMÁS en la
+#    escritura a la BD — esos procesadores escriben en TRANSACCIÓN y un reintento a
+#    ciegas podría DUPLICAR. Las escrituras no pasan por estos helpers.
+#
+# Se distinguen DOS fallos que hoy acaban igual (exit 1):
+#    · "no pude hablar con Storage" (red) → se REINTENTA; si persiste, aborta diciéndolo.
+#    · "el fichero está mal" (ausente, permiso, ruta) → NO se reintenta: aborta ya.
+# ---------------------------------------------------------------------------
+import re as _re
+import time
+
+# Espera entre intentos: CRECIENTE (1s, 3s, 6s), no tres golpes seguidos. Un hipo de red se
+# cura en el primer segundo; un corte no se arregla reintentando a los 100 ms. La suma (10s)
+# es el TOPE de espera total: el workflow no se queda colgado. → 4 intentos como mucho.
+_ESPERAS_REINTENTO = (1, 3, 6)
+
+
+def _es_transitorio(exc):
+    """True SOLO si el error es TRANSITORIO (reintentarlo puede ayudar): corte de red, timeout,
+    o un 5xx de Storage. Un 404 (el fichero no está) o un 403 (permisos) NO es transitorio:
+    reintentarlo es perder el tiempo del runner y tapar un problema real → False. Ante la duda,
+    False (conservador: no se reintenta lo que no se reconoce como transitorio)."""
+    # Excepciones de TRANSPORTE: la conversación con Storage se cortó.
+    if isinstance(exc, (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, TimeoutError)):
+        return True
+    try:
+        # supabase-py habla por httpx; TransportError = connect/read/write/pool/network/timeout.
+        import httpx
+        if isinstance(exc, httpx.TransportError):
+            return True
+    except ImportError:
+        pass
+    # HTTP: el código lo trae el error de la API de Storage (status/code/…) o el texto.
+    codigo = None
+    for attr in ('status', 'status_code', 'code', 'statusCode'):
+        v = getattr(exc, attr, None)
+        if v is not None:
+            try:
+                codigo = int(v)
+                break
+            except (ValueError, TypeError):
+                pass
+    txt = str(exc).lower()
+    if codigo is None:
+        m = _re.search(r'\b([45]\d\d)\b', txt)  # rescatar "… 503 …" del texto
+        if m:
+            codigo = int(m.group(1))
+    if codigo is not None:
+        return 500 <= codigo <= 599  # 5xx transitorio; 4xx (404/403/400) NO
+    # Sin código: solo firmas CLARAS de red en el texto. Lo demás → False.
+    return any(s in txt for s in ('connection reset', 'reset by peer', 'errno 104', 'broken pipe',
+                                  'timed out', 'read timeout', 'server disconnected',
+                                  'remotedisconnected', 'connection aborted', 'incompleteread'))
+
+
+def _leer_con_reintentos(descripcion, fn, esperas=_ESPERAS_REINTENTO):
+    """Ejecuta una LECTURA de Storage con reintentos ante errores TRANSITORIOS (red/5xx), con
+    espera creciente y tope total. Un fichero mal (404/403) aborta al primer intento.
+
+    🔒 Cuando un reintento SALE BIEN, lo GRITA en el log. Es la regla de la casa —o grita, o no
+       pinta veredicto— aplicada AL ÉXITO, no solo al fallo: un reintento silencioso convierte
+       una degradación creciente en invisible (Storage puede empezar a fallar el 30% de las
+       veces y nadie enterarse hasta que revienta del todo).
+    """
+    intentos = len(esperas) + 1
+    ultimo = None
+    for intento in range(1, intentos + 1):
+        try:
+            r = fn()
+            if intento > 1:
+                print(f"⚠️  [Storage] {descripcion}: falló {intento - 1} vez/veces "
+                      f"({ultimo}); intento {intento} OK.", flush=True)
+            return r
+        except Aborta:
+            raise  # una guarda de dentro: no es cosa de la red, sube tal cual
+        except Exception as e:
+            ultimo = e
+            if not _es_transitorio(e):
+                raise Aborta(
+                    f"[Storage] {descripcion}: falló y NO es transitorio → {e}. Reintentar no lo "
+                    f"arregla (fichero ausente [404], permiso [403] o ruta mala). Míralo y relanza. "
+                    f"No se ha escrito nada.")
+            if intento <= len(esperas):
+                espera = esperas[intento - 1]
+                print(f"⚠️  [Storage] {descripcion}: fallo transitorio ({e}). "
+                      f"Reintento {intento}/{len(esperas)} en {espera}s…", flush=True)
+                time.sleep(espera)
+    raise Aborta(
+        f"[Storage] {descripcion}: NO pude hablar con Storage tras {intentos} intentos → {ultimo}. "
+        f"Es transitorio (corte/timeout/5xx) pero no cesó en {sum(esperas)}s. No se ha escrito "
+        f"nada; relanza cuando la conexión vaya.")
+
+
+def listar_buzon(sb, bucket, carpeta):
+    """Lista una carpeta del buzón con reintento ante errores transitorios. [] si vacía."""
+    return _leer_con_reintentos(
+        f"listar {bucket}/{carpeta}/",
+        lambda: sb.storage.from_(bucket).list(carpeta) or [])
+
+
+def descargar_buzon(sb, bucket, ruta):
+    """Descarga un objeto del buzón (bytes) con reintento ante errores transitorios.
+    🔒 Cada reintento EMPIEZA DE CERO: storage3 `.download()` hace un GET nuevo y devuelve el
+       contenido entero (`response.content`); NO continúa sobre un buffer anterior (verificado
+       en el código del SDK). Un corte a media descarga se rehace limpio, no se concatena."""
+    return _leer_con_reintentos(
+        f"descargar {bucket}/{ruta}",
+        lambda: sb.storage.from_(bucket).download(ruta))
+
+
 # Los nombres de tabla/columna de este repo son literales del código, nunca
 # entrada del usuario. Aun así se validan: un f-string con un identificador es
 # la puerta por la que entra una inyección el día que alguien lo parametrice.
