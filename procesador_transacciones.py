@@ -580,6 +580,13 @@ def main():
         print(f"\n✅ APLICADO en {ENTORNO}: {insertadas} movimientos de {PAIS} en "
               f"transacciones_movimientos (rango recerrado; RLS activo sin políticas; "
               f"sello escrito en informes_subidos).")
+        # amazon_es (canales_producto) se calcula DESDE esta tabla y NO se refresca
+        # solo: tras esta carga puede haber quedado desfasado. Aviso, no acción.
+        # (Encadenarlo con workflow_run para que salga solo: otro encargo.)
+        if PAIS == 'ES':
+            print(f"\n⚠️  amazon_es en canales_producto se calcula desde estos datos y NO se "
+                  f"actualiza solo: acaba de quedar DESFASADO. Lanza 'procesar-canal-amazon-es' "
+                  f"({ENTORNO}) para refrescarlo.", flush=True)
     else:
         con.rollback()
         print(f"\n🔎 ENSAYO: TODAS las guardas pasaron, NO se ha escrito nada. "
