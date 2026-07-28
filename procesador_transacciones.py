@@ -63,7 +63,7 @@ from psycopg2.extras import Json, execute_values
 
 # Del patrón común solo se reutiliza Aborta: la carga por rango es lógica propia
 # (barrer_sobrantes es para FOTOS y aquí borraría el histórico) — igual que el ledger.
-from foto_comun import Aborta
+from foto_comun import Aborta, listar_buzon, descargar_buzon
 
 # ---------------------------------------------------------------------------
 # 0) Configuración (secrets de GitHub; jamás credenciales en el código)
@@ -482,11 +482,7 @@ def main():
     # --- Bajar el informe más reciente del buzón (Storage de PRODUCCIÓN) ---
     from supabase import create_client
     sb = create_client(SUPABASE_URL, SUPABASE_KEY)
-    try:
-        objs = sb.storage.from_(BUCKET).list(CARPETA) or []
-    except Exception as e:
-        sys.exit(f"No se pudo listar {BUCKET}/{CARPETA}/ ({e}). ¿Existe la carpeta? "
-                 "Créala y sube el Custom Transaction Report (.csv) del país que vas a procesar.")
+    objs = listar_buzon(sb, BUCKET, CARPETA)  # reintenta cortes de red; aborta si no lo es
     csvs = [o for o in objs if (o.get('name') or '').lower().endswith('.csv')]
     if not csvs:
         sys.exit(f"No hay ningún .csv en {BUCKET}/{CARPETA}/. Sube el Custom Transaction "
@@ -514,7 +510,7 @@ def main():
         fichero = csvs[0]['name']
         print(f"Informe elegido (el más reciente de {len(csvs)}): {fichero}", flush=True)
 
-    crudo_bytes = sb.storage.from_(BUCKET).download(f"{CARPETA}/{fichero}")
+    crudo_bytes = descargar_buzon(sb, BUCKET, f"{CARPETA}/{fichero}")
     try:
         texto = crudo_bytes.decode('utf-8-sig')
     except UnicodeDecodeError:

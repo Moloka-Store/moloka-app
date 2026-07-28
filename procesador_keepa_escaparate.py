@@ -51,7 +51,7 @@ from psycopg2.extras import Json
 from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
-from foto_comun import (Aborta, guarda_anti_encogimiento, guarda_no_retroceder, claves_previas,
+from foto_comun import (Aborta, listar_buzon, descargar_buzon, guarda_anti_encogimiento, guarda_no_retroceder, claves_previas,
                         barrer_sobrantes, resumen_foto, archivar_foto)
 
 # ---------------------------------------------------------------------------
@@ -611,11 +611,7 @@ def main():
 
     # --- Bajar el export más reciente del buzón (Storage de PRODUCCIÓN) ---
     sb = create_client(SUPABASE_URL, SUPABASE_KEY)
-    try:
-        objs = sb.storage.from_(BUCKET).list(CARPETA) or []
-    except Exception as e:
-        sys.exit(f"No se pudo listar {BUCKET}/{CARPETA}/ ({e}). "
-                 "¿Existe la carpeta? Créala y sube el export de Keepa en .csv.")
+    objs = listar_buzon(sb, BUCKET, CARPETA)  # reintenta cortes de red; aborta si no lo es
     csvs = [o for o in objs if (o.get('name') or '').lower().endswith('.csv')]
     if not csvs:
         sys.exit(f"No hay ningún .csv en {BUCKET}/{CARPETA}/. "
@@ -648,7 +644,7 @@ def main():
     print(f"   · fecha_foto={meta['fecha_foto']} · dominio={meta['dominio']} · "
           f"seller_id={meta['seller_id']}", flush=True)
 
-    crudo_bytes = sb.storage.from_(BUCKET).download(f"{CARPETA}/{fichero}")
+    crudo_bytes = descargar_buzon(sb, BUCKET, f"{CARPETA}/{fichero}")
     # El real trae UTF-8 con BOM (utf-8-sig). Fallback cp1252.
     try:
         texto = crudo_bytes.decode('utf-8-sig')
