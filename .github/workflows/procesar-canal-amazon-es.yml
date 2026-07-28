@@ -1,0 +1,45 @@
+name: Moloka - Procesar CANAL amazon_es
+
+# PR-C: mete España en canales_producto con la comisión y la logística REALES por
+# producto (mediana de las últimas 10 ventas de transacciones_movimientos), igual
+# que la v1 hace para amazon_it/amazon_fr. Lee de la BD (no de Storage), así que
+# NO necesita SUPABASE_KEY. A DEMANDA. Se lanza DESPUÉS de cada carga de
+# transacciones (el cargador avisa en su resumen de que amazon_es quedó desfasado).
+# Escalera: staging ensayo → staging aplicar → SQL → producción ensayo → aplicar → SQL.
+on:
+  workflow_dispatch:
+    inputs:
+      entorno:
+        description: 'Base de datos destino'
+        type: choice
+        options: [staging, produccion]
+        default: staging
+      modo:
+        description: 'ensayo = solo dice qué escribiría; aplicar = UPSERT de amazon_es en canales_producto'
+        type: choice
+        options: [ensayo, aplicar]
+        default: ensayo
+
+concurrency:
+  group: procesar-canal-amazon-es
+  cancel-in-progress: false
+
+jobs:
+  procesar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install --quiet psycopg2-binary
+
+      - name: Ejecutar procesador
+        env:
+          ENTORNO: ${{ inputs.entorno }}
+          MODO: ${{ inputs.modo }}
+          DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
+        run: python -u procesador_canal_amazon_es.py
