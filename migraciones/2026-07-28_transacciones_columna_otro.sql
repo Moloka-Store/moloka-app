@@ -1,0 +1,26 @@
+-- ============================================================================
+-- Migración TRANSACCIONES — tipar la columna `otro` (otro / altro / autre)
+-- ----------------------------------------------------------------------------
+-- Hasta ahora `otro` vivía SOLO en el crudo. Y ahí Amazon MEZCLA en una única
+-- columna cosas de naturaleza distinta:
+--   · COSTES reales     → tarifas de inventario (1.885,83 € en ES), tarifa de
+--                          prestación de servicio (330,33 €), ajustes a favor
+--                          (+361,77 €)...
+--   · NO costes          → transferencias al banco (78.451,76 € en ES).
+-- Sumarlas juntas no significa nada. Para poder separarlas por `tipo` en la vista
+-- (PR-C), el dato tiene que estar TIPADO al lado de `tipo`, no enterrado en jsonb.
+--
+-- Este ALTER es ADITIVO y NULLABLE: no toca ninguna fila existente ni ninguna otra
+-- columna. Tras aplicarlo se RECARGAN los 3 países (ES/IT/FR) para rellenar `otro`.
+-- Esa recarga es, además, la PRUEBA DE IDEMPOTENCIA en producción: filas, ventas,
+-- comisión, logística y total tienen que quedar EXACTAMENTE igual que antes
+-- (14.289 · 144.384,66 · −29.275,86 · −53.675,65 · 8.940,18). Si algo se mueve un
+-- céntimo, la carga por rango no sería idempotente — y eso importa más que la
+-- columna nueva. Objetivos de `otro` tras recargar: ES −80.308,66 · IT −1.825,66
+-- · FR −1.189,72 (medidos contra el CSV el 28-jul).
+--
+-- IDEMPOTENTE: IF NOT EXISTS. La columna nace sin valor; la rellena el procesador.
+-- Escalera: staging → SQL → producción → SQL.
+-- ============================================================================
+
+ALTER TABLE transacciones_movimientos ADD COLUMN IF NOT EXISTS otro numeric;
