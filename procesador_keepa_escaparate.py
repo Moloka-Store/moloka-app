@@ -598,9 +598,16 @@ def main():
 
     # --- Crear tabla + vista y volcar (todo dentro de la transacción) ---
     cur.execute(sql_crear_tabla())
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_keepa_escaparate_asin ON keepa_escaparate(asin);")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_keepa_escaparate_dominio ON keepa_escaparate(dominio);")
-    cur.execute("ALTER TABLE keepa_escaparate ENABLE ROW LEVEL SECURITY;")   # nace CERRADA
+    # 🔒 RLS + índices fuera del arranque (migración): el ENABLE RLS pedía
+    # AccessExclusiveLock sobre keepa_escaparate EN CADA carga (el lock que dejaba
+    # fuera al sondeo de la cola). Viven en
+    # migraciones/2026-07-29_rls_indices_fuera_del_arranque.sql. Solo se comprueba
+    # que la tabla está CERRADA (RLS activa); si no, ABORTA pidiéndola.
+    cur.execute("SELECT relrowsecurity FROM pg_class WHERE oid = 'public.keepa_escaparate'::regclass;")
+    if not cur.fetchone()[0]:
+        raise Aborta(
+            "RLS no está activa en keepa_escaparate. Ya NO la activa el procesador (era un lock "
+            "exclusivo en cada carga). Aplica migraciones/2026-07-29_rls_indices_fuera_del_arranque.sql y relanza.")
     cur.execute(SQL_FUNCION)   # moloka_ean_norm(): normaliza EAN para el cruce §5.1
     # La vista v_keepa_cruce YA NO se recrea aquí (recrearla en cada carga pedía lock
     # exclusivo sobre media base y tumbó la app el 28-jul 15:47). Su definición vive en

@@ -331,13 +331,18 @@ def main():
     prev = claves_previas(cur, 'inventario_internacional', ['seller_sku', 'country'],
                           ambito=AMBITO)
 
-    # --- Crear tabla (nace CERRADA) e índices ---
+    # --- Crear tabla; RLS e índices ya NO aquí (son migración, no arranque) ---
     cur.execute(sql_crear_tabla())
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_inventario_internacional_asin "
-                "ON inventario_internacional(asin);")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_inventario_internacional_country "
-                "ON inventario_internacional(country);")
-    cur.execute("ALTER TABLE inventario_internacional ENABLE ROW LEVEL SECURITY;")
+    # 🔒 El ENABLE RLS pedía AccessExclusiveLock sobre inventario_internacional EN
+    # CADA carga (el lock que dejaba fuera al sondeo de la cola). RLS e índices viven
+    # en migraciones/2026-07-29_rls_indices_fuera_del_arranque.sql. Aquí solo se
+    # comprueba que la tabla está CERRADA (RLS activa); si no, ABORTA pidiéndola.
+    cur.execute("SELECT relrowsecurity FROM pg_class WHERE oid = 'public.inventario_internacional'::regclass;")
+    if not cur.fetchone()[0]:
+        raise Aborta(
+            "RLS no está activa en inventario_internacional. Ya NO la activa el procesador "
+            "(era un lock exclusivo en cada carga). Aplica "
+            "migraciones/2026-07-29_rls_indices_fuera_del_arranque.sql y relanza.")
 
     # 🔒 LA FOTO TIRA LA HOJA VIEJA: los (seller_sku, country) que ya no vienen en
     # el informe se BORRAN. Mismo commit que la carga: o todo o nada. Las claves
@@ -364,9 +369,12 @@ def main():
 
     # --- HISTÓRICO: crear (si no existe) + APILAR esta foto (cajón Película) ---
     cur.execute(sql_crear_tabla_historico())
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_inv_intl_hist_fecha ON inventario_internacional_historico(fecha_foto);")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_inv_intl_hist_asin  ON inventario_internacional_historico(asin);")
-    cur.execute("ALTER TABLE inventario_internacional_historico ENABLE ROW LEVEL SECURITY;")
+    # 🔒 RLS + índices del histórico también fuera del arranque (misma migración).
+    cur.execute("SELECT relrowsecurity FROM pg_class WHERE oid = 'public.inventario_internacional_historico'::regclass;")
+    if not cur.fetchone()[0]:
+        raise Aborta(
+            "RLS no está activa en inventario_internacional_historico. Ya NO la activa el procesador. "
+            "Aplica migraciones/2026-07-29_rls_indices_fuera_del_arranque.sql y relanza.")
 
     ph_h  = ", ".join(['%s'] * len(HIST_COLS))
     set_h = ", ".join(f"{c}=EXCLUDED.{c}" for c in HIST_COLS if c not in ('seller_sku','country','fecha_foto'))
