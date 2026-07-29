@@ -50,7 +50,7 @@ import os, sys, io, csv
 from collections import Counter
 
 import psycopg2
-from psycopg2.extras import Json
+from psycopg2.extras import Json, execute_values
 from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cañerías de la Fase 0.
@@ -355,17 +355,32 @@ def main():
         print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
 
-    # --- Volcar ---
+    # 🔒 Deduplicar por la clave del ON CONFLICT ANTES de mandar los lotes. Con
+    # execute_values las filas van en UN comando: dos con la misma clave abortan con
+    # "ON CONFLICT DO UPDATE command cannot affect row a second time". Nos quedamos
+    # con la última (mismo comportamiento que hoy con cur.execute fila a fila) y, si
+    # se descarta algo, lo SACAMOS al log. La clave (seller_sku, country) sirve para
+    # las DOS tablas: en el histórico la clave añade fecha_foto, que es constante en
+    # esta pasada, así que colapsa a la misma pareja.
+    dedup = {}
+    for f in filas:
+        dedup[(f['registro']['seller_sku'], f['registro']['country'])] = f
+    filas_v = list(dedup.values())
+    if len(filas_v) != len(filas):
+        print(f"⚠️ {len(filas) - len(filas_v)} filas duplicadas por (seller_sku, country), "
+              f"me quedo con la última.", flush=True)
+
+    # --- Volcar (por LOTES: execute_values, no fila a fila) ---
     cols = [c for _, c, _ in TIPADAS] + ['fichero', 'fecha_foto', 'crudo']
     ph = ", ".join(['%s'] * len(cols))
     upd = ", ".join(f"{c}=EXCLUDED.{c}" for c in cols
                     if c not in ('seller_sku', 'country'))
-    sql_upsert = (f"INSERT INTO inventario_internacional ({', '.join(cols)}) VALUES ({ph}) "
+    sql_upsert = (f"INSERT INTO inventario_internacional ({', '.join(cols)}) VALUES %s "
                   f"ON CONFLICT (seller_sku, country) DO UPDATE SET {upd}, procesado_at=now();")
-    for f in filas:
-        r = f['registro']
-        vals = [r[c] for _, c, _ in TIPADAS] + [fichero, info['fecha_foto'], Json(f['crudo'])]
-        cur.execute(sql_upsert, vals)
+    vals_inv = [tuple([f['registro'][c] for _, c, _ in TIPADAS]
+                      + [fichero, info['fecha_foto'], Json(f['crudo'])])
+                for f in filas_v]
+    execute_values(cur, sql_upsert, vals_inv, template=f"({ph})", page_size=500)
 
     # --- HISTÓRICO: crear (si no existe) + APILAR esta foto (cajón Película) ---
     cur.execute(sql_crear_tabla_historico())
@@ -379,15 +394,15 @@ def main():
     ph_h  = ", ".join(['%s'] * len(HIST_COLS))
     set_h = ", ".join(f"{c}=EXCLUDED.{c}" for c in HIST_COLS if c not in ('seller_sku','country','fecha_foto'))
     sql_hist = (f"INSERT INTO inventario_internacional_historico ({', '.join(HIST_COLS)}) "
-                f"VALUES ({ph_h}) ON CONFLICT (seller_sku, country, fecha_foto) "
+                f"VALUES %s ON CONFLICT (seller_sku, country, fecha_foto) "
                 f"DO UPDATE SET {set_h}, capturado_en=now();")
 
     def _val_hist(f, col):
         if col == 'fecha_foto': return info['fecha_foto']
         if col == 'fichero':    return fichero
         return f['registro'][col]
-    for f in filas:
-        cur.execute(sql_hist, [_val_hist(f, c) for c in HIST_COLS])
+    vals_hist = [tuple(_val_hist(f, c) for c in HIST_COLS) for f in filas_v]
+    execute_values(cur, sql_hist, vals_hist, template=f"({ph_h})", page_size=500)
 
     cur.execute("SELECT count(*) FROM inventario_internacional_historico WHERE fecha_foto=%s;", (info['fecha_foto'],))
     hist_hoy = cur.fetchone()[0]
