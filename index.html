@@ -6718,7 +6718,7 @@ function renderRepartoModal() {
     const filas = Object.keys(it.huecos).map(est =>
       '<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px">' +
         '<span style="font-size:12px;width:130px">' + est + ' <span style="color:var(--gray-400)">(' + it.huecos[est] + ' disp)</span></span>' +
-        '<input class="input" type="number" min="0" max="' + it.huecos[est] + '" value="' + (it.reparto[est] || 0) + '" oninput="actualizarReparto(' + idx + ',\'' + est + '\',this)" style="width:84px;font-size:12px;padding:4px 6px">' +
+        '<input class="input" type="number" min="0" max="' + it.huecos[est] + '" value="' + (it.reparto[est] || 0) + '" oninput="actualizarRepartoEstanteria(' + idx + ',\'' + est + '\',this)" style="width:84px;font-size:12px;padding:4px 6px">' +
       '</div>'
     ).join('');
     const suma = Object.values(it.reparto).reduce((s, x) => s + (x || 0), 0);
@@ -6732,7 +6732,7 @@ function renderRepartoModal() {
   }).join('');
   recalcRepartoUI();
 }
-function actualizarReparto(idx, est, el) {
+function actualizarRepartoEstanteria(idx, est, el) {
   const it = _repartoItems[idx];
   let n = parseInt(el.value) || 0;
   if (n < 0) n = 0;
