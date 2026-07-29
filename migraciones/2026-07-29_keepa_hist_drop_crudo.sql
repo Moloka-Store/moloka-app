@@ -1,0 +1,43 @@
+-- ============================================================================
+-- MIGRACIÓN 2026-07-29 · keepa_escaparate_hist deja de guardar `crudo`
+-- ----------------------------------------------------------------------------
+-- SEGUNDA mitad de "mover, no borrar" el crudo del histórico de Keepa (PR B2).
+-- La PRIMERA (PR B1, ya en producción) enseñó a `archivar_foto` a NO copiar
+-- `crudo` al `_hist` (parámetro `excluir=('crudo',)` en la llamada de keepa). Con
+-- B1 puesto, `keepa_escaparate_hist` ya NO recibe `crudo` en las filas nuevas
+-- (verificado en prod: las 384 filas del 29-jul entraron con crudo NULL). Esta
+-- migración quita la columna ya inútil.
+--
+-- 🔒 ORDEN OBLIGATORIO — CÓDIGO ANTES QUE MIGRACIÓN. Si este DROP se aplicara
+--    ANTES de B1, la siguiente carga de keepa ABORTARÍA: `archivar_foto` copia
+--    todas las columnas de la foto viva y su guarda `faltan_en_hist` grita si al
+--    `_hist` le falta una (`crudo` está en la viva keepa_escaparate, que NO se
+--    toca). Por eso B1 y B2 van en PR separados: en dos, aplicar en mal orden es
+--    imposible; en uno, era un error que alguien podía cometer.
+--
+-- 🔒 LA CONDICIÓN DE ESTE DROP — los CSV de Keepa se CONSERVAN. `crudo` era una
+--    copia byte a byte del CSV que Keepa exporta, y ese CSV ya vive permanente en
+--    Storage (informes/keepa_escaparate/). No se pierde NADA: las 512 claves que
+--    solo vivían en `crudo` se rescatan por `keepa_escaparate_hist.fichero` →
+--    informes/keepa_escaparate/<fichero>. Esta migración SOLO es segura porque esa
+--    contrapartida se mantiene. La regla que lo garantiza queda escrita en
+--    CLAUDE.md (§2), en el MISMO PR que esta migración, a propósito: separadas,
+--    alguien aplica el DROP sin leer nunca que los CSV no se borran, y dentro de
+--    unos meses los borra para hacer sitio.
+--
+-- 🔒 La columna VIVA `keepa_escaparate.crudo` NO se toca: la leen v_escaparate y
+--    v_suficiencia_decision (medido). Aquí solo se toca el HISTÓRICO.
+--
+-- QUÉ HACE. Quita la columna `crudo` de `keepa_escaparate_hist`. Idempotente
+-- (`IF EXISTS`): aplicar dos veces no cambia nada.
+--
+-- 🔒 Aplicar por la escalera (staging → prod) con lock_timeout corto: DROP COLUMN
+--    pide AccessExclusiveLock. Es metadata-only (marca la columna como borrada,
+--    NO reescribe la tabla), así que el lock es de milisegundos; aun así falla
+--    rápido en vez de encolar. El espacio de los ~13 MB de crudo viejo NO se
+--    libera con el DROP (las filas viejas conservan el hueco): eso lo reclama un
+--    `VACUUM FULL keepa_escaparate_hist` como paso SUELTO (no en transacción,
+--    fuera de esta migración).
+-- ============================================================================
+
+ALTER TABLE IF EXISTS keepa_escaparate_hist DROP COLUMN IF EXISTS crudo;
