@@ -496,99 +496,8 @@ $$;
 #     el listado de ES. Antes cruzaba contra el escaparate SIN filtrar dominio,
 #     así que un ASIN que faltaba del export de ES pero salía en el de otro país
 #     se escapaba de la alerta (medido: 1 caso real hoy, y crece con cada país).
-SQL_VISTA = f"""
-DROP VIEW IF EXISTS v_keepa_cruce;
-CREATE VIEW v_keepa_cruce
-WITH (security_invoker = true) AS
-SELECT
-    'escaparate'::text AS origen,
-    k.asin,
-    k.dominio,
-    k.titulo,
-    k.tarifa_fba,
-    k.bb_vendedor,
-    k.bb_seller_id,
-    -- §5.1 el EAN de la ficha NO aparece entre los que Keepa da para ese ASIN.
-    -- Ambos lados por moloka_ean_norm(): solo dígitos, sin ceros a la izquierda.
-    ( EXISTS (SELECT 1 FROM productos p
-        WHERE p.activo AND btrim(p.asin) = btrim(k.asin)
-          AND moloka_ean_norm(p.ean) IS NOT NULL)
-      AND NOT EXISTS (SELECT 1 FROM productos p
-        WHERE p.activo AND btrim(p.asin) = btrim(k.asin)
-          AND moloka_ean_norm(p.ean) IN (
-              SELECT moloka_ean_norm(e)
-              FROM unnest(string_to_array(coalesce(k.ean_keepa_crudo, ''), ',')) AS e
-              WHERE moloka_ean_norm(e) IS NOT NULL)) )
-      AS ean_no_confirmado,
-    -- §5.2 keepa_fba_fee del dominio != tarifa_fba del CSV (tolerancia 0,01 €).
-    -- NULL fuera de es/fr/it: productos NO tiene keepa_fba_fee_de, así que en DE
-    -- no hay nada que comparar y un `false` ahí sería un "cuadra" inventado.
-    CASE WHEN k.dominio IN ('es', 'fr', 'it') THEN
-      EXISTS (SELECT 1 FROM productos p
-        WHERE p.activo AND btrim(p.asin) = btrim(k.asin)
-          AND k.tarifa_fba IS NOT NULL
-          AND (CASE k.dominio WHEN 'es' THEN p.keepa_fba_fee_es
-                              WHEN 'it' THEN p.keepa_fba_fee_it
-                              WHEN 'fr' THEN p.keepa_fba_fee_fr END) IS NOT NULL
-          AND abs((CASE k.dominio WHEN 'es' THEN p.keepa_fba_fee_es
-                                  WHEN 'it' THEN p.keepa_fba_fee_it
-                                  WHEN 'fr' THEN p.keepa_fba_fee_fr END) - k.tarifa_fba) > 0.01)
-    END AS tarifa_discrepante,
-    -- §5.3 ficha activa sin keepa_image y el CSV trae imágenes
-    ( EXISTS (SELECT 1 FROM productos p
-        WHERE p.activo AND btrim(p.asin) = btrim(k.asin)
-          AND coalesce(btrim(p.keepa_image), '') = '')
-      AND coalesce(array_length(k.imagenes, 1), 0) > 0 )
-      AS sin_foto_curable,
-    -- §5.4 stock FBA propio en ese país y la buy box NO es nuestra (por SELLER ID).
-    -- NULL donde salud_fba no cubra ese país: sin saber si tenemos stock allí, la
-    -- pregunta "¿me están quitando la buy box teniendo yo stock?" no se puede
-    -- contestar, y un `false` sería decir que no pasa nada sin haber mirado.
-    -- La condición se deriva de salud_fba: el día que traiga IT, se enciende sola.
-    CASE WHEN EXISTS (SELECT 1 FROM salud_fba s
-                      WHERE upper(s.marketplace) = upper(k.dominio)) THEN
-      ( EXISTS (SELECT 1 FROM salud_fba s
-          WHERE btrim(s.asin) = btrim(k.asin)
-            AND upper(s.marketplace) = upper(k.dominio)
-            AND coalesce(s.available, 0) > 0)
-        AND k.bb_seller_id IS NOT NULL
-        AND k.bb_seller_id <> '{NUESTRO_SELLER_ID}' )
-    END AS buybox_ajena_con_stock,
-    -- §5.5 no aplica a filas del escaparate: NULL, no false (§tres estados)
-    NULL::boolean AS activo_sin_export
-FROM keepa_escaparate k
-
-UNION ALL
-
--- §5.5 ASIN 'Active' en listings_amazon que NO aparece en el export (la red del reverso).
--- El dominio es 'es' EXPLÍCITO, no NULL: listings_amazon no tiene columna de país
--- porque ES el listado de ES. Decirlo permite desglosar el log por dominio sin un
--- cajón "sin país" que en realidad sí tiene país.
-SELECT
-    'listing_sin_export'::text AS origen,
-    l.asin,
-    'es'::text    AS dominio,
-    l.item_name   AS titulo,
-    NULL::numeric AS tarifa_fba,
-    NULL::text    AS bb_vendedor,
-    NULL::text    AS bb_seller_id,
-    NULL::boolean AS ean_no_confirmado,
-    NULL::boolean AS tarifa_discrepante,
-    NULL::boolean AS sin_foto_curable,
-    NULL::boolean AS buybox_ajena_con_stock,
-    true          AS activo_sin_export
-FROM (
-    SELECT btrim(asin) AS asin, max(item_name) AS item_name
-    FROM listings_amazon
-    WHERE status = 'Active' AND asin IS NOT NULL AND btrim(asin) <> ''
-    GROUP BY btrim(asin)
-) l
--- 🔒 ACOTADO A dominio='es'. Sin esto, un ASIN que falta del export de ES pero
--- aparece en el de IT/FR/DE se escapaba de la alerta: la pregunta es "¿falta del
--- export DE SU PAÍS?", no "¿existe en algún sitio?".
-WHERE NOT EXISTS (SELECT 1 FROM keepa_escaparate k
-                  WHERE btrim(k.asin) = l.asin AND k.dominio = 'es');
-"""
+# La definición de v_keepa_cruce se movió a migraciones/2026-07-29_vistas_cruce_fuera_del_arranque.sql (es una migración, no arranque).
+# El procesador ya no la ejecuta; solo la consulta.
 
 
 # ---------------------------------------------------------------------------
@@ -693,7 +602,14 @@ def main():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_keepa_escaparate_dominio ON keepa_escaparate(dominio);")
     cur.execute("ALTER TABLE keepa_escaparate ENABLE ROW LEVEL SECURITY;")   # nace CERRADA
     cur.execute(SQL_FUNCION)   # moloka_ean_norm(): normaliza EAN para el cruce §5.1
-    cur.execute(SQL_VISTA)
+    # La vista v_keepa_cruce YA NO se recrea aquí (recrearla en cada carga pedía lock
+    # exclusivo sobre media base y tumbó la app el 28-jul 15:47). Su definición vive en
+    # migraciones/2026-07-29_vistas_cruce_fuera_del_arranque.sql. Solo se comprueba que existe.
+    cur.execute("SELECT to_regclass('public.v_keepa_cruce');")
+    if cur.fetchone()[0] is None:
+        raise Aborta(
+            "La vista v_keepa_cruce no existe en este entorno. Ya NO la crea el procesador "
+            "(era un lock que tumbaba la base). Aplica migraciones/2026-07-29_vistas_cruce_fuera_del_arranque.sql y relanza.")
 
     # 🎞️ EL HISTÓRICO: apila la foto viva ANTERIOR en keepa_escaparate_hist ANTES
     # de que el barrido/upsert la sobrescriban (Película §1.6, misma txn). Clave

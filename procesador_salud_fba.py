@@ -442,45 +442,8 @@ def sql_crear_historico():
     );
     """
 
-SQL_VISTA = """
-CREATE OR REPLACE VIEW v_salud_fba_cruce
-WITH (security_invoker = true) AS
-SELECT
-    s.asin,
-    s.marketplace,
-    s.sku,
-    s.product_name,
-    s.available,
-    (SELECT count(*) FROM productos p
-       WHERE p.activo AND btrim(p.asin) = btrim(s.asin)) AS fichas_activas,
-    NOT EXISTS (SELECT 1 FROM productos p
-       WHERE p.activo AND btrim(p.asin) = btrim(s.asin)) AS sin_ficha,
-    (EXISTS (SELECT 1 FROM productos p
-        WHERE p.activo AND btrim(p.asin) = btrim(s.asin))
-     AND NOT EXISTS (SELECT 1 FROM productos p
-        WHERE p.activo AND btrim(p.asin) = btrim(s.asin)
-          AND btrim(p.sku) = btrim(s.sku))) AS sku_discrepante,
-    -- ▼▼ Añadido para Dos Vidas (§4.3). ADITIVO: `sku_discrepante` queda EXACTO.
-    --    (Semántica derivada de los nombres que pidió el trackeador; a confirmar.)
-    -- Cuántas vidas (SKU vivos) tiene este (asin, marketplace) en la foto.
-    (SELECT count(*) FROM salud_fba s2
-       WHERE btrim(s2.asin) = btrim(s.asin) AND s2.marketplace = s.marketplace) AS n_skus_vivos,
-    -- Este SKU concreto del informe no está en NINGUNA ficha activa con ese ASIN.
-    NOT EXISTS (SELECT 1 FROM productos p
-       WHERE p.activo AND btrim(p.asin) = btrim(s.asin)
-         AND btrim(p.sku) = btrim(s.sku)) AS sku_sin_ficha,
-    -- Hay ficha activa para el ASIN pero NINGUNA de sus vidas del informe casa con
-    -- un SKU fichado (la lectura "revisada" de discrepante: no es este SKU, es que
-    -- no casa ninguno). Con esto, un ASIN de una sola vida fichada NO sale marcado.
-    (EXISTS (SELECT 1 FROM productos p
-        WHERE p.activo AND btrim(p.asin) = btrim(s.asin))
-     AND NOT EXISTS (SELECT 1 FROM salud_fba s2
-        JOIN productos p ON p.activo AND btrim(p.asin) = btrim(s2.asin)
-                        AND btrim(p.sku) = btrim(s2.sku)
-        WHERE btrim(s2.asin) = btrim(s.asin) AND s2.marketplace = s.marketplace))
-       AS asin_sin_ningun_sku_fichado
-FROM salud_fba s;
-"""
+# La definición de v_salud_fba_cruce se movió a migraciones/2026-07-29_vistas_cruce_fuera_del_arranque.sql (es una migración, no arranque).
+# El procesador ya no la ejecuta; solo la consulta.
 
 
 # ---------------------------------------------------------------------------
@@ -610,7 +573,14 @@ def main():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_salud_fba_asin ON salud_fba(asin);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_salud_fba_sku  ON salud_fba(sku);")
     cur.execute("ALTER TABLE salud_fba ENABLE ROW LEVEL SECURITY;")   # nace CERRADA
-    cur.execute(SQL_VISTA)
+    # La vista v_salud_fba_cruce YA NO se recrea aquí (recrearla en cada carga pedía lock
+    # exclusivo sobre media base y tumbó la app el 28-jul 15:47). Su definición vive en
+    # migraciones/2026-07-29_vistas_cruce_fuera_del_arranque.sql. Solo se comprueba que existe.
+    cur.execute("SELECT to_regclass('public.v_salud_fba_cruce');")
+    if cur.fetchone()[0] is None:
+        raise Aborta(
+            "La vista v_salud_fba_cruce no existe en este entorno. Ya NO la crea el procesador "
+            "(era un lock que tumbaba la base). Aplica migraciones/2026-07-29_vistas_cruce_fuera_del_arranque.sql y relanza.")
 
     cols = [c for c, _ in TIPADAS] + ['snapshot_date', 'fichero', 'crudo']
     ph = ", ".join(['%s'] * len(cols))

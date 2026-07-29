@@ -55,60 +55,8 @@ PEDIDO_ES = 'Pedido'
 # La vista que calcula las filas de amazon_es (self-sufficient: se crea aquí).
 # security_invoker: respeta el RLS del que consulta.
 # ---------------------------------------------------------------------------
-SQL_VISTA = """
-CREATE OR REPLACE VIEW v_canal_amazon_es
-WITH (security_invoker = true) AS
-WITH prod AS (
-    SELECT DISTINCT ON (sku) sku, id AS producto_id, ean
-    FROM productos WHERE sku IS NOT NULL
-    ORDER BY sku, (activo IS TRUE) DESC, id DESC
-),
-ventas AS (
-    SELECT t.sku, t.fecha, t.fecha_hora, t.id,
-        (t.ventas_producto + t.impuesto_producto) / t.cantidad AS precio_ud,
-        CASE WHEN t.tarifa_fba <> 0
-             THEN (-t.tarifa_fba / 1.21 / t.cantidad) END AS fba_ud,
-        CASE WHEN (t.ventas_producto + t.impuesto_producto) > 0 AND t.tarifa_venta <> 0
-             THEN (-t.tarifa_venta / 1.21) / (t.ventas_producto + t.impuesto_producto) * 100 END AS com_pct
-    FROM transacciones_movimientos t
-    WHERE t.pais = 'ES' AND t.cantidad > 0 AND t.ventas_producto > 0
-      AND t.sku IS NOT NULL AND t.sku <> ''
-),
-precio AS (
-    SELECT DISTINCT ON (sku) sku, round(precio_ud, 2) AS precio_venta
-    FROM ventas ORDER BY sku, fecha DESC, fecha_hora DESC NULLS LAST, id DESC
-),
-com10 AS (
-    SELECT sku, round(percentile_cont(0.5) WITHIN GROUP (ORDER BY com_pct)::numeric, 2) AS comision_pct
-    FROM (SELECT sku, com_pct,
-                 row_number() OVER (PARTITION BY sku ORDER BY fecha DESC, fecha_hora DESC NULLS LAST, id DESC) rn
-          FROM ventas WHERE com_pct IS NOT NULL) x
-    WHERE rn <= 10 GROUP BY sku
-),
-fba10 AS (
-    SELECT sku, round(percentile_cont(0.5) WITHIN GROUP (ORDER BY fba_ud)::numeric, 2) AS envio
-    FROM (SELECT sku, fba_ud,
-                 row_number() OVER (PARTITION BY sku ORDER BY fecha DESC, fecha_hora DESC NULLS LAST, id DESC) rn
-          FROM ventas WHERE fba_ud IS NOT NULL) x
-    WHERE rn <= 10 GROUP BY sku
-),
-skus AS (SELECT DISTINCT sku FROM ventas)
-SELECT
-    'amazon_es'::text AS canal,
-    s.sku             AS item_id_canal,
-    pr.producto_id,
-    pr.ean,
-    pe.precio_venta,
-    c.comision_pct,
-    21::numeric       AS iva_pct,
-    f.envio,
-    true              AS activo
-FROM skus s
-JOIN prod pr ON pr.sku = s.sku          -- solo SKUs CON ficha (huérfanos fuera)
-LEFT JOIN precio pe ON pe.sku = s.sku
-LEFT JOIN com10 c  ON c.sku  = s.sku
-LEFT JOIN fba10 f  ON f.sku  = s.sku;
-"""
+# La definición de v_canal_amazon_es se movió a migraciones/2026-07-29_vistas_cruce_fuera_del_arranque.sql (es una migración, no arranque).
+# El procesador ya no la ejecuta; solo la consulta.
 
 # Columnas que se escriben (las mismas que la v1 pone para IT/FR).
 COLS = ['canal', 'item_id_canal', 'producto_id', 'ean',
@@ -140,7 +88,13 @@ def main():
         con.rollback(); cur.close(); con.close(); sys.exit(0)
 
     # Crear/actualizar la vista.
-    cur.execute(SQL_VISTA)
+    # La vista v_canal_amazon_es YA NO se recrea aquí (recrearla en cada carga pedía lock
+    # exclusivo sobre media base y tumbó la app el 28-jul 15:47). Su definición vive en
+    # migraciones/2026-07-29_vistas_cruce_fuera_del_arranque.sql. Solo se comprueba que existe.
+    cur.execute("SELECT to_regclass('public.v_canal_amazon_es');")
+    if cur.fetchone()[0] is None:
+        sys.exit("La vista v_canal_amazon_es no existe. Ya NO la crea el procesador (era un lock "
+                 "que tumbaba la base). Aplica migraciones/2026-07-29_vistas_cruce_fuera_del_arranque.sql y relanza.")
 
     # --- Guarda A: 2+ fichas ACTIVAS con el mismo sku ---
     cur.execute("""
