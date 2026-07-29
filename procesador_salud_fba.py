@@ -40,7 +40,7 @@ import os, sys, io, csv, json
 from datetime import date
 
 import psycopg2
-from psycopg2.extras import Json
+from psycopg2.extras import Json, execute_values
 from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
@@ -591,7 +591,7 @@ def main():
     cols = [c for c, _ in TIPADAS] + ['snapshot_date', 'fichero', 'crudo']
     ph = ", ".join(['%s'] * len(cols))
     set_upd = ", ".join(f"{c}=EXCLUDED.{c}" for c in cols if c not in ('asin', 'marketplace', 'sku'))
-    sql_upsert = (f"INSERT INTO salud_fba ({', '.join(cols)}) VALUES ({ph}) "
+    sql_upsert = (f"INSERT INTO salud_fba ({', '.join(cols)}) VALUES %s "
                   f"ON CONFLICT (asin, marketplace, sku) DO UPDATE SET {set_upd}, procesado_en=now();")
 
     # 🔒 LA FOTO TIRA LA HOJA VIEJA: los (asin, marketplace) del ámbito que ya no
@@ -637,9 +637,17 @@ def main():
         print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
 
-    for f in filas:
-        vals = [f['registro'][c] for c, _ in TIPADAS] + [snap, fichero, Json(f['crudo'])]
-        cur.execute(sql_upsert, vals)
+    # 🔒 Volcado por LOTES (execute_values), no fila a fila. SIN dedup a propósito:
+    # a diferencia de paneu/internacional (donde un duplicado se define como "la
+    # última gana"), aquí un trío (asin, marketplace, sku) repetido es un INFORME
+    # CORRUPTO y la Guarda 2 ya ABORTA por él en analizar(), antes de llegar aquí
+    # (y la Guarda 7 garantiza un solo snapshot_date). Entre las dos, la clave del
+    # ON CONFLICT de las dos tablas es única antes del volcado: execute_values no
+    # puede recibir clave repetida. Deduplicar ("elegir la última") enmascararía
+    # justo lo que Guarda 2 manda gritar.
+    vals_foto = [tuple([f['registro'][c] for c, _ in TIPADAS] + [snap, fichero, Json(f['crudo'])])
+                 for f in filas]
+    execute_values(cur, sql_upsert, vals_foto, template=f"({ph})", page_size=500)
 
     # ── EL HISTÓRICO: apilar la copia fechada (PELÍCULA, §1.6) ──────────────
     # Va DESPUÉS del upsert de la foto viva y DENTRO de la misma transacción.
@@ -662,15 +670,17 @@ def main():
     cols_h = ['asin', 'marketplace', 'sku', 'snapshot_date'] + HISTORICO + ['fichero']
     ph_h = ", ".join(['%s'] * len(cols_h))
     set_h = ", ".join(f"{c}=EXCLUDED.{c}" for c in HISTORICO + ['fichero'])
-    sql_hist = (f"INSERT INTO salud_fba_historico ({', '.join(cols_h)}) VALUES ({ph_h}) "
+    sql_hist = (f"INSERT INTO salud_fba_historico ({', '.join(cols_h)}) VALUES %s "
                 f"ON CONFLICT (asin, marketplace, sku, snapshot_date) DO UPDATE SET "
                 f"{set_h}, procesado_en=now();")
 
-    for f in filas:   # 🔒 SOLO las filas del fichero. Las protegidas NO se apilan.
-        vals_h = ([f['registro']['asin'], f['registro']['marketplace'],
-                   f['registro']['sku'], snap]
-                  + [f['registro'][c] for c in HISTORICO] + [fichero])
-        cur.execute(sql_hist, vals_h)
+    # 🔒 SOLO las filas del fichero. Las protegidas NO se apilan. Por LOTES; sin
+    # dedup por lo mismo que la Foto (Guarda 2 + Guarda 7 garantizan la clave única).
+    vals_hist = [tuple([f['registro']['asin'], f['registro']['marketplace'],
+                        f['registro']['sku'], snap]
+                       + [f['registro'][c] for c in HISTORICO] + [fichero])
+                 for f in filas]
+    execute_values(cur, sql_hist, vals_hist, template=f"({ph_h})", page_size=500)
 
     hist_reescritas = sum(
         1 for f in filas
