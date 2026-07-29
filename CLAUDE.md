@@ -110,6 +110,15 @@ el histórico y no hay de dónde recuperarlo.
   MSKU/ASIN/FNSKU. Lo avisa el propio Seller.
 - **La DESPENSA COMÚN:** `crudo` guarda todas las columnas aunque hoy no se usen. Caso real: el
   `sales-rank` llevaba semanas descargándose sin mirarse — y resultó ser el detector de ASIN muertos.
+- 🔴 **Los CSV de Keepa en Storage (`informes/keepa_escaparate/`) NO SE BORRAN NUNCA.** Dejaron de
+  ser fichero temporal el día que `keepa_escaparate_hist` dejó de guardar `crudo` (29-jul-2026):
+  pasaron a ser **el archivo histórico permanente**. Ese `crudo` era copia byte a byte del CSV y se
+  sacó de la base porque estaba duplicado con 25× menos margen (BD 500 MB vs Storage 1 GB), pero las
+  512 claves que solo viven ahí siguen siendo munición del trackeador. **El rescate de cualquiera se
+  hace por `keepa_escaparate_hist.fichero` → `informes/keepa_escaparate/<fichero>`.** Borrar esos CSV
+  para "hacer sitio" es borrar el histórico sin vuelta atrás. Es la CONTRAPARTIDA del `DROP COLUMN
+  crudo` (migración `2026-07-29_keepa_hist_drop_crudo.sql`): el DROP solo fue seguro porque el CSV se
+  conserva. La misma regla aplica a cualquier `crudo` que en el futuro se mueva de la BD al Storage.
 
 ### Trampas medidas (no re-descubrir)
 - **Filas fantasma: RESUELTO (PR #33, 20-jul-2026).** Antes las tablas-foto se cargaban con upsert
