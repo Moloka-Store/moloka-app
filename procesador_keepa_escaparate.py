@@ -447,19 +447,13 @@ def sql_crear_tabla():
     );
     """
 
-# Normalización de EAN/GTIN/UPC para CONTRASTE (§5.1). Vive en una FUNCIÓN, no
-# copiada inline en el SQL: la misma regla que la v1 ya tiene validada (UPC-12
-# sin cero inicial, Diseño §11.8). Keepa da el EAN con cero a la izquierda
-# (0889698946933) y productos.ean va sin él (889698946933); comparados en crudo
-# encienden ean_no_confirmado en 183/203 en falso. Se comparan sin ceros a la
-# izquierda y solo dígitos.
-SQL_FUNCION = """
-CREATE OR REPLACE FUNCTION moloka_ean_norm(cod text)
-RETURNS text
-LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
-    SELECT NULLIF(ltrim(regexp_replace(coalesce(cod, ''), '[^0-9]', '', 'g'), '0'), '')
-$$;
-"""
+# Normalización de EAN/GTIN/UPC para CONTRASTE (§5.1): la función moloka_ean_norm()
+# (misma regla validada por la v1, Diseño §11.8; Keepa da el EAN con cero a la
+# izquierda y productos.ean sin él, y en crudo encienden ean_no_confirmado en falso).
+# 🔒 keepa YA NO la recrea: su definición vive en
+# migraciones/2026-07-29_moloka_ean_norm_fuera_del_arranque.sql y se COMPRUEBA que
+# existe (abajo). Recrearla en cada carga revertía en silencio cualquier migración
+# que la cambiara: la fuente de verdad tiene que ser UNA.
 
 # 🔒 Sin security_invoker una vista sobre tabla cerrada es una puerta trasera de
 # lectura. El descuadre vive en el DATO: una fila por ASIN del escaparate con las
@@ -608,7 +602,14 @@ def main():
         raise Aborta(
             "RLS no está activa en keepa_escaparate. Ya NO la activa el procesador (era un lock "
             "exclusivo en cada carga). Aplica migraciones/2026-07-29_rls_indices_fuera_del_arranque.sql y relanza.")
-    cur.execute(SQL_FUNCION)   # moloka_ean_norm(): normaliza EAN para el cruce §5.1
+    # moloka_ean_norm(): normaliza EAN para el cruce §5.1. Ya NO se recrea aquí
+    # (fuente de verdad única = la migración); solo se comprueba que existe.
+    cur.execute("SELECT to_regprocedure('public.moloka_ean_norm(text)');")
+    if cur.fetchone()[0] is None:
+        raise Aborta(
+            "La función moloka_ean_norm(text) no existe. Ya NO la crea el procesador "
+            "(recrearla en cada carga revertía en silencio cualquier migración que la "
+            "cambiara). Aplica migraciones/2026-07-29_moloka_ean_norm_fuera_del_arranque.sql y relanza.")
     # La vista v_keepa_cruce YA NO se recrea aquí (recrearla en cada carga pedía lock
     # exclusivo sobre media base y tumbó la app el 28-jul 15:47). Su definición vive en
     # migraciones/2026-07-29_vistas_cruce_fuera_del_arranque.sql. Solo se comprueba que existe.
