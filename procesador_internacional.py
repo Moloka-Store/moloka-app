@@ -355,20 +355,23 @@ def main():
         print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
 
-    # 🔒 Deduplicar por la clave del ON CONFLICT ANTES de mandar los lotes. Con
-    # execute_values las filas van en UN comando: dos con la misma clave abortan con
-    # "ON CONFLICT DO UPDATE command cannot affect row a second time". Nos quedamos
-    # con la última (mismo comportamiento que hoy con cur.execute fila a fila) y, si
-    # se descarta algo, lo SACAMOS al log. La clave (seller_sku, country) sirve para
-    # las DOS tablas: en el histórico la clave añade fecha_foto, que es constante en
-    # esta pasada, así que colapsa a la misma pareja.
-    dedup = {}
+    # 🔒 Deduplicar ANTES de mandar los lotes: con execute_values las filas van en UN
+    # comando y dos con la misma clave abortan con "ON CONFLICT DO UPDATE command
+    # cannot affect row a second time". Nos quedamos con la última (mismo
+    # comportamiento que hoy fila a fila) y, si se descarta algo, lo SACAMOS al log.
+    # 🔴 Cada tabla se deduplica por SU PROPIA clave de ON CONFLICT, no por una clave
+    # "colapsada": inventario por (seller_sku, country); el histórico por
+    # (seller_sku, country, fecha_foto). Hoy fecha_foto es constante en la carga y las
+    # dos claves darían lo mismo, pero NO se apoya en ese supuesto: si algún día
+    # entrase un informe con dos fechas, colapsar se comería una foto legítima del
+    # histórico (Película: no se recupera).
+    dedup_inv = {}
     for f in filas:
-        dedup[(f['registro']['seller_sku'], f['registro']['country'])] = f
-    filas_v = list(dedup.values())
-    if len(filas_v) != len(filas):
-        print(f"⚠️ {len(filas) - len(filas_v)} filas duplicadas por (seller_sku, country), "
-              f"me quedo con la última.", flush=True)
+        dedup_inv[(f['registro']['seller_sku'], f['registro']['country'])] = f
+    filas_inv = list(dedup_inv.values())
+    if len(filas_inv) != len(filas):
+        print(f"⚠️ {len(filas) - len(filas_inv)} filas duplicadas por (seller_sku, country) "
+              f"en inventario_internacional, me quedo con la última.", flush=True)
 
     # --- Volcar (por LOTES: execute_values, no fila a fila) ---
     cols = [c for _, c, _ in TIPADAS] + ['fichero', 'fecha_foto', 'crudo']
@@ -379,7 +382,7 @@ def main():
                   f"ON CONFLICT (seller_sku, country) DO UPDATE SET {upd}, procesado_at=now();")
     vals_inv = [tuple([f['registro'][c] for _, c, _ in TIPADAS]
                       + [fichero, info['fecha_foto'], Json(f['crudo'])])
-                for f in filas_v]
+                for f in filas_inv]
     execute_values(cur, sql_upsert, vals_inv, template=f"({ph})", page_size=500)
 
     # --- HISTÓRICO: crear (si no existe) + APILAR esta foto (cajón Película) ---
@@ -401,7 +404,22 @@ def main():
         if col == 'fecha_foto': return info['fecha_foto']
         if col == 'fichero':    return fichero
         return f['registro'][col]
-    vals_hist = [tuple(_val_hist(f, c) for c in HIST_COLS) for f in filas_v]
+
+    # Dedup por la clave REAL del histórico (seller_sku, country, fecha_foto),
+    # derivada con el MISMO _val_hist que escribe los valores: así la clave del
+    # dedup nunca se separa de la que va al ON CONFLICT (si mañana fecha_foto deja
+    # de ser constante, el dedup lo sigue solo).
+    HIST_PK = ('seller_sku', 'country', 'fecha_foto')
+    dedup_hist = {}
+    for f in filas:
+        dedup_hist[tuple(_val_hist(f, c) for c in HIST_PK)] = f
+    filas_hist = list(dedup_hist.values())
+    if len(filas_hist) != len(filas):
+        print(f"⚠️ {len(filas) - len(filas_hist)} filas duplicadas por "
+              f"(seller_sku, country, fecha_foto) en inventario_internacional_historico, "
+              f"me quedo con la última.", flush=True)
+
+    vals_hist = [tuple(_val_hist(f, c) for c in HIST_COLS) for f in filas_hist]
     execute_values(cur, sql_hist, vals_hist, template=f"({ph_h})", page_size=500)
 
     cur.execute("SELECT count(*) FROM inventario_internacional_historico WHERE fecha_foto=%s;", (info['fecha_foto'],))
