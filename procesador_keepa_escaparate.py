@@ -47,7 +47,7 @@ import os, sys, io, csv, re
 from datetime import date, datetime
 
 import psycopg2
-from psycopg2.extras import Json
+from psycopg2.extras import Json, execute_values
 from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
@@ -631,7 +631,7 @@ def main():
     cols = [c for _, c, _ in TIPADAS] + ['bb_seller_id', 'fichero', 'fecha_foto', 'seller_id', 'crudo']
     ph = ", ".join(['%s'] * len(cols))
     set_upd = ", ".join(f"{c}=EXCLUDED.{c}" for c in cols if c not in ('asin', 'dominio'))
-    sql_upsert = (f"INSERT INTO keepa_escaparate ({', '.join(cols)}) VALUES ({ph}) "
+    sql_upsert = (f"INSERT INTO keepa_escaparate ({', '.join(cols)}) VALUES %s "
                   f"ON CONFLICT (asin, dominio) DO UPDATE SET {set_upd}, procesado_at=now();")
 
     # 🔒 LA FOTO TIRA LA HOJA VIEJA: los (asin, dominio) de ESTE dominio que ya
@@ -645,11 +645,18 @@ def main():
         print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
 
+    # 🔒 Volcado por LOTES (execute_values), no fila a fila. SIN dedup a propósito,
+    # como salud_fba (y a diferencia de paneu/all_listings): un par (asin, dominio)
+    # repetido NO es "la última gana", es un informe corrupto, y la Guarda 2 ya
+    # ABORTA por él en analizar() ("el procesador NO elige"); la Guarda 5 obliga a un
+    # solo dominio por fichero. Entre las dos, la clave del ON CONFLICT es única
+    # antes del volcado: execute_values no puede recibir clave repetida.
+    vals_foto = []
     for f in filas:
         r = f['registro']
-        vals = [r[c] for _, c, _ in TIPADAS] + [
-            r['bb_seller_id'], fichero, meta['fecha_foto'], meta['seller_id'], Json(f['crudo'])]
-        cur.execute(sql_upsert, vals)
+        vals_foto.append(tuple([r[c] for _, c, _ in TIPADAS] + [
+            r['bb_seller_id'], fichero, meta['fecha_foto'], meta['seller_id'], Json(f['crudo'])]))
+    execute_values(cur, sql_upsert, vals_foto, template=f"({ph})", page_size=500)
 
     altas = [f for f in filas
              if (f['registro']['asin'], f['registro']['dominio']) not in prev]
