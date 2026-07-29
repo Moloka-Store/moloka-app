@@ -623,7 +623,13 @@ def main():
     # idempotente (asin, dominio, fecha_foto): un ASIN en dos dominios el mismo
     # día son DOS asientos. Corre antes de barrer: captura la foto que va a morir.
     try:
-        arch = archivar_foto(cur, 'keepa_escaparate', ['asin', 'dominio'], 'fecha_foto')
+        # 🔒 `crudo` NO se archiva: es copia del CSV de Keepa, que ya vive en Storage
+        # (informes/keepa_escaparate/, archivo histórico permanente). El rescate de
+        # cualquiera de las 512 claves que solo viven en `crudo` se hace por `fichero`
+        # contra ese CSV. Las 63 columnas propias del histórico (bb_*, p3_*, ofertas_*,
+        # rank_*, monthly_sold, rating…) SÍ se archivan: son la munición del trackeador.
+        arch = archivar_foto(cur, 'keepa_escaparate', ['asin', 'dominio'], 'fecha_foto',
+                             excluir=('crudo',))
     except Aborta as e:
         print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
