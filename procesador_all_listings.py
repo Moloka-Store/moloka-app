@@ -45,6 +45,7 @@ import os, sys, io, csv, re
 from datetime import date
 
 import psycopg2
+from psycopg2.extras import execute_values
 from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
@@ -295,19 +296,29 @@ except Aborta as e:
     print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
     con.rollback(); cur.close(); con.close(); sys.exit(1)
 
+# Volcado por LOTES (execute_values), no fila a fila. Dedup por seller_sku (la PK
+# / clave del ON CONFLICT), la última gana — el MISMO comportamiento que hoy fila
+# a fila (el ⚠️ de arriba, len(ofertas) vs SKU distintos, ya avisa del descarte).
+# Con execute_values las filas van en UN comando y dos con el mismo seller_sku
+# abortarían con "ON CONFLICT DO UPDATE command cannot affect row a second time".
+dedup = {}
 for o in ofertas:
-    cur.execute("""
-        INSERT INTO listings_amazon
-            (seller_sku, asin, product_id, item_name, status, open_date, price, listing_id, fecha_informe)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        ON CONFLICT (seller_sku) DO UPDATE SET
-            asin=EXCLUDED.asin, product_id=EXCLUDED.product_id,
-            item_name=EXCLUDED.item_name, status=EXCLUDED.status,
-            open_date=EXCLUDED.open_date, price=EXCLUDED.price,
-            listing_id=EXCLUDED.listing_id, fecha_informe=EXCLUDED.fecha_informe,
-            procesado_en=now();
-    """, (o['sku'], o['asin'], o['product_id'], o['nombre'],
-          o['status'], o['open_date'], o['price'], o['listing_id'], fecha_dato))
+    dedup[o['sku']] = o          # la última gana, como hoy
+ofertas_v = list(dedup.values())
+
+execute_values(cur, """
+    INSERT INTO listings_amazon
+        (seller_sku, asin, product_id, item_name, status, open_date, price, listing_id, fecha_informe)
+    VALUES %s
+    ON CONFLICT (seller_sku) DO UPDATE SET
+        asin=EXCLUDED.asin, product_id=EXCLUDED.product_id,
+        item_name=EXCLUDED.item_name, status=EXCLUDED.status,
+        open_date=EXCLUDED.open_date, price=EXCLUDED.price,
+        listing_id=EXCLUDED.listing_id, fecha_informe=EXCLUDED.fecha_informe,
+        procesado_en=now();
+""", [(o['sku'], o['asin'], o['product_id'], o['nombre'],
+       o['status'], o['open_date'], o['price'], o['listing_id'], fecha_dato)
+      for o in ofertas_v], template="(%s,%s,%s,%s,%s,%s,%s,%s,%s)", page_size=500)
 
 altas = sum(1 for s in skus_fichero if (s,) not in prev)
 print(resumen_foto('listings_amazon', AMBITO, previas, len(skus_fichero),
