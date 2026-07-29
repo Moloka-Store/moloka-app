@@ -381,9 +381,17 @@ def barrer_sobrantes(cur, tabla, pk_cols, claves_nuevas, ambito=None):
 # ---------------------------------------------------------------------------
 # EL HISTÓRICO: apilar la foto viva ANTES de que la carga la sobrescriba
 # ---------------------------------------------------------------------------
-def archivar_foto(cur, tabla_viva, pk_cols, col_fecha, etiqueta='HISTORICO'):
+def archivar_foto(cur, tabla_viva, pk_cols, col_fecha, etiqueta='HISTORICO', excluir=()):
     """Apila la foto viva ACTUAL en su histórico `<tabla_viva>_hist` ANTES de que
     el barrido/upsert la sobrescriban. Cajón PELÍCULA (§1.6): apila, NUNCA borra.
+
+    `excluir` = columnas de la foto viva que NO se archivan (por defecto (): nada
+    se excluye, comportamiento idéntico al de siempre para todas las cañerías).
+    Sirve para sacar del histórico datos que ya viven en otro sitio con más margen
+    —el caso de keepa: `crudo` es una copia del CSV que ya está en Storage—. Las
+    columnas excluidas se quitan de `cols_viva` ANTES de la guarda `faltan_en_hist`,
+    así que el histórico puede NO tener esas columnas sin que esto aborte. Una
+    columna de la clave de idempotencia NUNCA puede excluirse (se comprueba).
 
     Va DENTRO de la misma transacción que la carga: si la carga se revierte, el
     archivado también. La garantía es "ninguna foto se sobrescribe sin haberla
@@ -409,6 +417,15 @@ def archivar_foto(cur, tabla_viva, pk_cols, col_fecha, etiqueta='HISTORICO'):
     pk = [_ident(c) for c in pk_cols]
     col_fecha = _ident(col_fecha)
     idem = pk + [col_fecha]
+
+    # Columnas a excluir del archivado (identificadores validados). Una columna de
+    # la clave de idempotencia JAMÁS se excluye: sin ella el NOT EXISTS archivaría
+    # duplicados o mal. Si se pide, se ABORTA (no se elige en silencio).
+    excluir_id = {_ident(c) for c in excluir}
+    conflicto = excluir_id & set(idem)
+    if conflicto:
+        raise Aborta(f"[{etiqueta}] No se puede excluir del archivado una columna de la "
+                     f"clave de idempotencia {idem}: {sorted(conflicto)}. Abortando.")
 
     # ¿Existe la foto viva? Si no, no hay pasado que archivar (primera corrida).
     cur.execute("SELECT to_regclass(%s);", (f'public.{tabla_viva}',))
@@ -446,7 +463,10 @@ def archivar_foto(cur, tabla_viva, pk_cols, col_fecha, etiqueta='HISTORICO'):
         return cur.fetchall()
 
     viva_rows = _cols(tabla_viva)
-    cols_viva = [_ident(r[0]) for r in viva_rows]
+    # Se quitan las excluidas AQUÍ, antes de todo lo demás: así ni se copian (INSERT)
+    # ni se exigen en el histórico (guarda faltan_en_hist). El resto de la función
+    # no las ve.
+    cols_viva = [_ident(r[0]) for r in viva_rows if _ident(r[0]) not in excluir_id]
     tipo_viva = {r[0]: r[1] for r in viva_rows}     # columna → tipo SQL exacto ('text', 'text[]', 'jsonb'…)
     hist_rows = _cols(tabla_hist)
     hist_cols = {r[0] for r in hist_rows}
