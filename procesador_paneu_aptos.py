@@ -498,14 +498,20 @@ def main():
     prev_aptos = claves_previas(cur, 'paneu_aptos', ['seller_sku'], ambito=AMBITO)
     prev_ofertas = claves_previas(cur, 'paneu_oferta_pais', ['seller_sku', 'pais'], ambito=AMBITO)
 
-    # --- Crear tablas (nacen CERRADAS) e índices. SIN vista. ---
+    # --- Crear tablas. SIN vista. RLS e índices ya NO aquí (son migración). ---
     cur.execute(SQL_TABLA_APTOS)
     cur.execute(SQL_TABLA_OFERTA)
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_paneu_aptos_asin ON paneu_aptos(asin);")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_paneu_oferta_pais_pais ON paneu_oferta_pais(pais);")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_paneu_oferta_pais_sku ON paneu_oferta_pais(seller_sku);")
-    cur.execute("ALTER TABLE paneu_aptos ENABLE ROW LEVEL SECURITY;")
-    cur.execute("ALTER TABLE paneu_oferta_pais ENABLE ROW LEVEL SECURITY;")
+    # 🔒 El ENABLE RLS pedía AccessExclusiveLock sobre paneu_aptos (relation 22200 en
+    # el log del 29-jul: el lock que dejaba fuera al sondeo de la cola) y sobre
+    # paneu_oferta_pais EN CADA carga. RLS e índices viven en
+    # migraciones/2026-07-29_rls_indices_fuera_del_arranque.sql. Solo se comprueba que
+    # las DOS tablas están CERRADAS (RLS activa); si no, ABORTA pidiéndola.
+    for _t in ('paneu_aptos', 'paneu_oferta_pais'):
+        cur.execute("SELECT relrowsecurity FROM pg_class WHERE oid = ('public.' || %s)::regclass;", (_t,))
+        if not cur.fetchone()[0]:
+            raise Aborta(
+                f"RLS no está activa en {_t}. Ya NO la activa el procesador (era un lock exclusivo "
+                "en cada carga). Aplica migraciones/2026-07-29_rls_indices_fuera_del_arranque.sql y relanza.")
 
     # 🔒 LA FOTO TIRA LA HOJA VIEJA: los SKU (y los pares SKU×país) que ya no
     # vienen en el informe se BORRAN de las DOS tablas. PanEU es película, no

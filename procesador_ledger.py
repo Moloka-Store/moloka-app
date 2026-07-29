@@ -262,13 +262,9 @@ CREATE TABLE IF NOT EXISTS ledger_movimientos (
 );
 """
 
-SQL_INDICES = [
-    "CREATE INDEX IF NOT EXISTS idx_ledger_fecha ON ledger_movimientos(fecha);",
-    "CREATE INDEX IF NOT EXISTS idx_ledger_event_type ON ledger_movimientos(event_type);",
-    "CREATE INDEX IF NOT EXISTS idx_ledger_reference_id ON ledger_movimientos(reference_id);",
-    "CREATE INDEX IF NOT EXISTS idx_ledger_asin ON ledger_movimientos(asin);",
-    "CREATE INDEX IF NOT EXISTS idx_ledger_country ON ledger_movimientos(country);",
-]
+# Los índices de ledger_movimientos se movieron a
+# migraciones/2026-07-29_rls_indices_fuera_del_arranque.sql (son migración, no
+# arranque: CREATE INDEX en cada carga pedía lock sobre la tabla).
 
 
 # ---------------------------------------------------------------------------
@@ -335,11 +331,17 @@ def main():
     con.autocommit = False
     cur = con.cursor()
 
-    # Crear tabla (nace CERRADA) e índices — dentro de la transacción.
+    # Crear tabla — dentro de la transacción. RLS e índices ya NO aquí (migración).
     cur.execute(SQL_TABLA)
-    for ddl in SQL_INDICES:
-        cur.execute(ddl)
-    cur.execute("ALTER TABLE ledger_movimientos ENABLE ROW LEVEL SECURITY;")
+    # 🔒 El ENABLE RLS pedía AccessExclusiveLock sobre ledger_movimientos EN CADA
+    # carga (el lock que dejaba fuera al sondeo de la cola). RLS e índices viven en
+    # migraciones/2026-07-29_rls_indices_fuera_del_arranque.sql. Solo se comprueba
+    # que la tabla está CERRADA (RLS activa); si no, ABORTA pidiéndola.
+    cur.execute("SELECT relrowsecurity FROM pg_class WHERE oid = 'public.ledger_movimientos'::regclass;")
+    if not cur.fetchone()[0]:
+        raise Aborta(
+            "RLS no está activa en ledger_movimientos. Ya NO la activa el procesador (era un lock "
+            "exclusivo en cada carga). Aplica migraciones/2026-07-29_rls_indices_fuera_del_arranque.sql y relanza.")
 
     # --- Guarda 5: anti-encogimiento POR RANGO ---
     # Cuenta lo que ya había en [fmin, fmax]. Si el fichero trae < 50% → ABORTA

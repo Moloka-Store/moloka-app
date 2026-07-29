@@ -258,13 +258,21 @@ CREATE TABLE IF NOT EXISTS listings_amazon (
 # dos cosas distintas y a partir de aquí no se confunden.
 # 🔒 El TIPO de fecha_informe NO cambia: sigue siendo timestamptz, como está hoy
 # en producción. Se le pasa un `date` y Postgres lo sube a timestamptz (00:00);
-# no hay ALTER COLUMN ... TYPE por ningún lado. Y el CREATE TABLE IF NOT EXISTS
-# no toca una tabla que ya existe: por eso el ADD COLUMN va aparte.
-cur.execute("ALTER TABLE listings_amazon "
-            "ADD COLUMN IF NOT EXISTS procesado_en timestamptz NOT NULL DEFAULT now();")
-cur.execute("CREATE INDEX IF NOT EXISTS idx_listings_amazon_asin ON listings_amazon(asin);")
-# Nace cerrada: RLS activo y CERO políticas → anon no puede ni leerla.
-cur.execute("ALTER TABLE listings_amazon ENABLE ROW LEVEL SECURITY;")
+# no hay ALTER COLUMN ... TYPE por ningún lado.
+#
+# 🔒 RLS + índice + la columna procesado_en YA NO se crean aquí. Cada ALTER /
+# ADD COLUMN pedía AccessExclusiveLock sobre listings_amazon EN CADA carga
+# (relation 20290 en el log del 29-jul: el lock que dejaba fuera al sondeo de la
+# cola y, con 5 informes en serie, apilaba conexiones). Viven en
+# migraciones/2026-07-29_rls_indices_fuera_del_arranque.sql. Aquí solo se comprueba
+# que la tabla está CERRADA (RLS activa); si no, se ABORTA pidiendo la migración —
+# nunca se carga en una tabla abierta a anon.
+cur.execute("SELECT relrowsecurity FROM pg_class WHERE oid = 'public.listings_amazon'::regclass;")
+if not cur.fetchone()[0]:
+    con.rollback(); cur.close(); con.close()
+    sys.exit("\n❌ ABORTA (no se ha escrito nada):\nRLS no está activa en listings_amazon. Ya NO "
+             "la activa el procesador (era un lock exclusivo en cada carga). Aplica "
+             "migraciones/2026-07-29_rls_indices_fuera_del_arranque.sql y relanza.")
 
 # 🎞️ EL HISTÓRICO: apila la foto viva ANTERIOR en listings_amazon_hist ANTES de
 # que el barrido/upsert la sobrescriban (Película §1.6, misma txn). Clave

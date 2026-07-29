@@ -452,13 +452,9 @@ CREATE TABLE IF NOT EXISTS transacciones_movimientos (
 );
 """
 
-SQL_INDICES = [
-    "CREATE INDEX IF NOT EXISTS idx_trans_pais_fecha ON transacciones_movimientos(pais, fecha);",
-    "CREATE INDEX IF NOT EXISTS idx_trans_fecha ON transacciones_movimientos(fecha);",
-    "CREATE INDEX IF NOT EXISTS idx_trans_tipo ON transacciones_movimientos(tipo);",
-    "CREATE INDEX IF NOT EXISTS idx_trans_sku ON transacciones_movimientos(sku);",
-    "CREATE INDEX IF NOT EXISTS idx_trans_pedido ON transacciones_movimientos(numero_pedido);",
-]
+# Los índices de transacciones_movimientos se movieron a
+# migraciones/2026-07-29_rls_indices_fuera_del_arranque.sql (son migración, no
+# arranque: CREATE INDEX en cada carga pedía lock sobre la tabla).
 
 
 # ---------------------------------------------------------------------------
@@ -545,9 +541,15 @@ def main():
     cur = con.cursor()
 
     cur.execute(SQL_TABLA)
-    for ddl in SQL_INDICES:
-        cur.execute(ddl)
-    cur.execute("ALTER TABLE transacciones_movimientos ENABLE ROW LEVEL SECURITY;")
+    # 🔒 El ENABLE RLS pedía AccessExclusiveLock sobre transacciones_movimientos EN
+    # CADA carga (el lock que dejaba fuera al sondeo de la cola). RLS e índices viven
+    # en migraciones/2026-07-29_rls_indices_fuera_del_arranque.sql. Solo se comprueba
+    # que la tabla está CERRADA (RLS activa); si no, ABORTA pidiéndola.
+    cur.execute("SELECT relrowsecurity FROM pg_class WHERE oid = 'public.transacciones_movimientos'::regclass;")
+    if not cur.fetchone()[0]:
+        raise Aborta(
+            "RLS no está activa en transacciones_movimientos. Ya NO la activa el procesador (era un "
+            "lock exclusivo en cada carga). Aplica migraciones/2026-07-29_rls_indices_fuera_del_arranque.sql y relanza.")
 
     # --- Guarda 5: anti-encogimiento POR RANGO Y PAÍS ---
     cur.execute("SELECT count(*) FROM transacciones_movimientos "

@@ -568,11 +568,17 @@ def main():
              if (f['registro']['asin'], f['registro']['marketplace'],
                  f['registro']['sku']) not in prev]
 
-    # --- Crear tabla + vista y volcar (todo dentro de la transacción) ---
+    # --- Crear tabla + volcar (todo dentro de la transacción) ---
     cur.execute(sql_crear_tabla())
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_salud_fba_asin ON salud_fba(asin);")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_salud_fba_sku  ON salud_fba(sku);")
-    cur.execute("ALTER TABLE salud_fba ENABLE ROW LEVEL SECURITY;")   # nace CERRADA
+    # 🔒 RLS + índices fuera del arranque (migración): el ENABLE RLS pedía
+    # AccessExclusiveLock sobre salud_fba (relation 20505 en el log del 29-jul) EN
+    # CADA carga. Viven en migraciones/2026-07-29_rls_indices_fuera_del_arranque.sql.
+    # Solo se comprueba que la tabla está CERRADA (RLS activa); si no, ABORTA.
+    cur.execute("SELECT relrowsecurity FROM pg_class WHERE oid = 'public.salud_fba'::regclass;")
+    if not cur.fetchone()[0]:
+        raise Aborta(
+            "RLS no está activa en salud_fba. Ya NO la activa el procesador (era un lock exclusivo "
+            "en cada carga). Aplica migraciones/2026-07-29_rls_indices_fuera_del_arranque.sql y relanza.")
     # La vista v_salud_fba_cruce YA NO se recrea aquí (recrearla en cada carga pedía lock
     # exclusivo sobre media base y tumbó la app el 28-jul 15:47). Su definición vive en
     # migraciones/2026-07-29_vistas_cruce_fuera_del_arranque.sql. Solo se comprueba que existe.
@@ -639,11 +645,12 @@ def main():
     # Va DESPUÉS del upsert de la foto viva y DENTRO de la misma transacción.
     # No borra nada: aquí no hay barrido ni ámbito que valga.
     cur.execute(sql_crear_historico())
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_salud_fba_hist_snapshot "
-                "ON salud_fba_historico(snapshot_date);")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_salud_fba_hist_asin "
-                "ON salud_fba_historico(asin, snapshot_date);")
-    cur.execute("ALTER TABLE salud_fba_historico ENABLE ROW LEVEL SECURITY;")  # nace CERRADA
+    # 🔒 RLS + índices del histórico también fuera del arranque (misma migración).
+    cur.execute("SELECT relrowsecurity FROM pg_class WHERE oid = 'public.salud_fba_historico'::regclass;")
+    if not cur.fetchone()[0]:
+        raise Aborta(
+            "RLS no está activa en salud_fba_historico. Ya NO la activa el procesador. "
+            "Aplica migraciones/2026-07-29_rls_indices_fuera_del_arranque.sql y relanza.")
 
     # Qué había YA de este día (para distinguir apilar de reescribir en el log:
     # si reprocesas el mismo fichero, todo tiene que salir como 'reescritas').
