@@ -41,7 +41,7 @@ import os, sys, io, csv, re
 from datetime import datetime, timezone
 
 import psycopg2
-from psycopg2.extras import Json
+from psycopg2.extras import Json, execute_values
 from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
@@ -528,24 +528,48 @@ def main():
         print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
 
-    # --- Volcar paneu_aptos ---
+    # 🔒 Deduplicar por la clave del ON CONFLICT ANTES de mandar el lote. Con
+    # cur.execute fila a fila, dos filas con la misma clave se pisaban en silencio
+    # (ganaba la última). Con execute_values las dos van en el MISMO comando y
+    # Postgres aborta: "ON CONFLICT DO UPDATE command cannot affect row a second
+    # time". Nos quedamos con la última (mismo comportamiento que hoy) y, si algo
+    # se descarta, lo SACAMOS al log: podría estar tapando un problema del informe.
+    dedup_a = {}
+    for r in aptos:
+        dedup_a[r['seller_sku']] = r
+    aptos_v = list(dedup_a.values())
+    if len(aptos_v) != len(aptos):
+        print(f"⚠️ {len(aptos) - len(aptos_v)} filas duplicadas por seller_sku en "
+              f"paneu_aptos, me quedo con la última.", flush=True)
+
+    dedup_o = {}
+    for r in ofertas:
+        dedup_o[(r['seller_sku'], r['pais'])] = r
+    ofertas_v = list(dedup_o.values())
+    if len(ofertas_v) != len(ofertas):
+        print(f"⚠️ {len(ofertas) - len(ofertas_v)} filas duplicadas por (seller_sku, pais) "
+              f"en paneu_oferta_pais, me quedo con la última.", flush=True)
+
+    # --- Volcar paneu_aptos (por LOTES: execute_values, no fila a fila) ---
     cols_a = COLS_APTOS + ['snapshot_date', 'fichero', 'crudo']
     ph_a = ", ".join(['%s'] * len(cols_a))
     upd_a = ", ".join(f"{c}=EXCLUDED.{c}" for c in cols_a if c != 'seller_sku')
-    sql_a = (f"INSERT INTO paneu_aptos ({', '.join(cols_a)}) VALUES ({ph_a}) "
+    sql_a = (f"INSERT INTO paneu_aptos ({', '.join(cols_a)}) VALUES %s "
              f"ON CONFLICT (seller_sku) DO UPDATE SET {upd_a}, procesado_en=now();")
-    for r in aptos:
-        cur.execute(sql_a, [r[c] for c in COLS_APTOS]
+    vals_a = [tuple([r[c] for c in COLS_APTOS]
                     + [info['snapshot_date'], fichero, Json(r['crudo'])])
+              for r in aptos_v]
+    execute_values(cur, sql_a, vals_a, template=f"({ph_a})", page_size=500)
 
-    # --- Volcar paneu_oferta_pais ---
+    # --- Volcar paneu_oferta_pais (por LOTES: execute_values) ---
     cols_o = COLS_OFERTA + ['snapshot_date', 'fichero']
     ph_o = ", ".join(['%s'] * len(cols_o))
     upd_o = ", ".join(f"{c}=EXCLUDED.{c}" for c in cols_o if c not in ('seller_sku', 'pais'))
-    sql_o = (f"INSERT INTO paneu_oferta_pais ({', '.join(cols_o)}) VALUES ({ph_o}) "
+    sql_o = (f"INSERT INTO paneu_oferta_pais ({', '.join(cols_o)}) VALUES %s "
              f"ON CONFLICT (seller_sku, pais) DO UPDATE SET {upd_o}, procesado_en=now();")
-    for r in ofertas:
-        cur.execute(sql_o, [r[c] for c in COLS_OFERTA] + [info['snapshot_date'], fichero])
+    vals_o = [tuple([r[c] for c in COLS_OFERTA] + [info['snapshot_date'], fichero])
+              for r in ofertas_v]
+    execute_values(cur, sql_o, vals_o, template=f"({ph_o})", page_size=500)
 
     altas_aptos = sum(1 for r in aptos if (r['seller_sku'],) not in prev_aptos)
     altas_ofertas = sum(1 for r in ofertas if (r['seller_sku'], r['pais']) not in prev_ofertas)
