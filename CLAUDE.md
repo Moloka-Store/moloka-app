@@ -124,6 +124,30 @@ el histórico y no hay de dónde recuperarlo.
   dará de baja los fantasmas acumulados**. Es lo que se busca, pero mira las bajas que anuncia el
   ensayo antes de aplicar.
   El ledger no tiene este problema: es Película, no Foto.
+- **Escritura masiva: SIEMPRE por lotes (`execute_values`), JAMÁS un `cur.execute()` por fila
+  (PRs #65-#68 y #70, 29-jul-2026).** El runner de Actions está en EEUU y Supabase en `eu-west-1`
+  (Irlanda): cada `cur.execute()` es un viaje transatlántico de **~90 ms**. Un
+  `for fila in filas: cur.execute(...)` de 3.806 filas = **5 m 48 s esperando a la red** (PanEU,
+  medido en el run #14); el mismo volcado con `psycopg2.extras.execute_values` baja a **<10 s** y la
+  ventana de locks sobre la tabla de Elena de ~6 min a segundos. Los cinco que iban fila a fila
+  (paneu, internacional, salud_fba, all_listings, keepa) ya están por lotes; el patrón está calcado
+  de `procesador_ledger.py`, que nació así. **Si mañana nace un procesador nuevo, nace por lotes.**
+  🔴 **La trampa del lote:** con `execute_values` todas las filas van en UN comando, así que dos con
+  la misma clave del `ON CONFLICT` abortan con `ON CONFLICT DO UPDATE command cannot affect row a
+  second time` (fila a fila no saltaba: la segunda pisaba a la primera en silencio). Qué significa un
+  duplicado se decide POR PROCESADOR y NO se copia entre ellos:
+  - **Duplicado = "la última gana"** (paneu, all_listings: el informe puede repetir clave y es
+    legítimo) → **deduplicar en Python** por la clave del `ON CONFLICT` antes del lote, quedándote con
+    la última; y si descartas algo, GRÍTALO al log (fila a fila era invisible).
+  - **Duplicado = informe CORRUPTO** con una guarda que ya ABORTA por él (salud_fba y keepa: Guarda 2,
+    *"el procesador NO elige"*) → **NO deduplicar**: dedup enmascararía justo lo que la guarda manda
+    gritar. Y dedup por la clave REAL de cada tabla, nunca una "colapsada" que dependa de un supuesto
+    (internacional: el histórico se deduplica por `(sku, country, fecha_foto)`, no por `(sku, country)`).
+  🔒 **Prueba de que el cambio no movió ni un dato:** mismo fichero, viejo(`main`) vs nuevo, `md5` del
+  CONTENIDO de la tabla —`md5(string_agg((to_jsonb(t) - '<col now()>')::text, '|' order by pk))`,
+  excluyendo la columna `now()` (`procesado_en`/`procesado_at`/`capturado_en`, cada tabla la suya)—
+  idéntico. El diff de logs solo prueba los recuentos, NO que cada columna caiga en su sitio (el
+  riesgo real al pasar a tuplas en `execute_values`).
 - **Dos fórmulas de stock que NO se unifican.** Son asientos distintos y ninguna "corrige" a la otra:
   - **La columna de Amazon** (`Inventory Supply at FBA`, en salud_fba) `= available + fc-transfer +
     inbound-quantity`, **SIN `reserved`**. Verificado fila a fila; lo comprueba la Guarda 6. Es la
