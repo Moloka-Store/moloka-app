@@ -44,11 +44,24 @@
 #   total sigue muy por encima del 50%, la 5 pasa… y entonces el DELETE se lleva los
 #   doce meses mientras el INSERT devuelve once. Ese mes desaparecía del extracto sin
 #   que chillara nadie. La Guarda 8 compara lo que de verdad se BORRA con lo que de
-#   verdad ENTRA: si el rango encoge aunque sea en un movimiento, ABORTA.
-#   Y el DETECTOR DE HUECOS POR DÍA dice QUÉ días se iban a perder. Avisa siempre pero
-#   NO aborta por sí solo, porque un mes puede desaparecer y el total subir igual (si
-#   el mismo fichero trae además meses nuevos al final): ahí no hay merma que medir,
-#   solo un hueco que enseñar.
+#   verdad ENTRA: si el TOTAL del rango encoge, ABORTA.
+#
+#   🔴 LO QUE LA GUARDA 8 NO PUEDE VER, Y POR QUÉ EL DETECTOR VA POR RECUENTO
+#   La Guarda 8 compara TOTALES del rango, así que una merma en un día queda
+#   COMPENSADA por crecimiento en otro tramo del mismo rango. Medido el 30-jul contra
+#   DOS exportaciones reales del mismo libro mayor (50465020654.txt, cargado en
+#   staging, y 50505020662.txt, cargado en producción): de los 89 días que solapan,
+#   88 traen EXACTAMENTE las mismas filas y uno no — el 2026-07-20, con 281 filas en
+#   una y 176 en la otra. El día de CORTE de una exportación viene siempre a medias.
+#   Cargar el fichero ancho sobre el estrecho destruiría 105 asientos con la Guarda 8
+#   en verde, porque el fichero ancho trae 7 meses de más que compensan de sobra.
+#   Por eso el DETECTOR DE HUECOS no mira solo qué días FALTAN: compara el RECUENTO
+#   POR DÍA y avisa también de los días que ADELGAZAN (vienen, pero con menos
+#   movimientos de los que la BD ya tenía). Al mismo coste: el SELECT ya recorría
+#   esas filas, solo cambia DISTINCT por GROUP BY.
+#   ⚠️ El detector AVISA, no aborta (así se pidió). Un día que adelgaza o desaparece
+#   mientras el total sube se borra igualmente y el proceso termina en verde: lee el
+#   aviso ANTES de aplicar.
 #   🔒 Los días se comparan BD-contra-FICHERO, JAMÁS contra el calendario: hay días
 #   sin ningún movimiento que son perfectamente legítimos (medido el 30-jul: en
 #   transacciones IT solo 64 de 201 días de calendario tienen movimiento). Un detector
@@ -410,19 +423,47 @@ def main():
                   f"(Pan-EU); posible NUEVA OBLIGACIÓN DE IVA en ese país — revisar.",
                   flush=True)
 
-    # --- Guarda 8 (1ª parte): foto de los DÍAS que había, ANTES de borrar ---
+    # --- Guarda 8 (1ª parte): RECUENTO POR DÍA de lo que había, ANTES de borrar ---
     # Se lee aquí y no después porque después del DELETE ya no hay con qué comparar.
+    # 🔒 Por RECUENTO, no por presencia: un día que viene "a medias" (el día de corte
+    # de una exportación) no falta, pero pierde movimientos igual. Medido: 2026-07-20
+    # trae 281 filas en una exportación y 176 en otra.
     # 🔒 BD contra FICHERO, nunca contra el calendario: un día sin movimientos es
     # legítimo y no se inventa un hueco donde no lo hay.
-    cur.execute("SELECT DISTINCT fecha FROM ledger_movimientos WHERE fecha BETWEEN %s AND %s;",
-                (fmin, fmax))
-    dias_bd = {r[0] for r in cur.fetchall()}
-    dias_fichero = {mv['fecha'] for mv in movs}
-    dias_perdidos = sorted(dias_bd - dias_fichero)
+    cur.execute("SELECT fecha, count(*) FROM ledger_movimientos "
+                "WHERE fecha BETWEEN %s AND %s GROUP BY fecha;", (fmin, fmax))
+    filas_bd_dia = {f: n for f, n in cur.fetchall()}
+    filas_fich_dia = Counter(mv['fecha'] for mv in movs)
 
-    if dias_perdidos:
-        print(f"\n⚠️  [Guarda 8 · huecos] {len(dias_perdidos)} día(s) que SÍ estaban en la BD "
-              f"NO vienen en este fichero:\n        {texto_dias(dias_perdidos)}", flush=True)
+    dias_perdidos = sorted(d for d in filas_bd_dia if d not in filas_fich_dia)
+    dias_adelgazan = sorted((d, filas_bd_dia[d], filas_fich_dia[d]) for d in filas_bd_dia
+                            if d in filas_fich_dia and filas_fich_dia[d] < filas_bd_dia[d])
+    movs_sin_contrapartida = (sum(filas_bd_dia[d] for d in dias_perdidos)
+                              + sum(antes - ahora for _, antes, ahora in dias_adelgazan))
+
+    def _pinta_huecos(sangria="        "):
+        """El detalle del hueco. Se usa en el aviso, en el aborto y en el resumen: el
+        mismo texto en los tres sitios para que no haya dos versiones de la verdad."""
+        lineas = []
+        if dias_perdidos:
+            lineas.append(f"{sangria}· DESAPARECEN {len(dias_perdidos)} día(s) enteros: "
+                          f"{texto_dias(dias_perdidos)}")
+        if dias_adelgazan:
+            peor = sorted(dias_adelgazan, key=lambda t: t[1] - t[2], reverse=True)[:5]
+            lineas.append(f"{sangria}· ADELGAZAN {len(dias_adelgazan)} día(s) (vienen, pero "
+                          f"con menos movimientos de los que ya había):")
+            for d, antes, ahora in peor:
+                lineas.append(f"{sangria}    {d}: {antes} → {ahora}  ({antes - ahora} de menos)")
+            if len(dias_adelgazan) > len(peor):
+                lineas.append(f"{sangria}    … y {len(dias_adelgazan) - len(peor)} día(s) más")
+        if lineas:
+            lineas.append(f"{sangria}En total {movs_sin_contrapartida} movimiento(s) del rango "
+                          f"se quedan sin contrapartida en el fichero.")
+        return "\n".join(lineas)
+
+    if dias_perdidos or dias_adelgazan:
+        print(f"\n⚠️  [Guarda 8 · huecos por día] el fichero NO cubre todo lo que la BD ya "
+              f"tenía en {fmin}→{fmax}:\n" + _pinta_huecos(), flush=True)
 
     # --- Carga por rango: DELETE del rango + INSERT de todo (misma transacción) ---
     cur.execute("DELETE FROM ledger_movimientos WHERE fecha BETWEEN %s AND %s;", (fmin, fmax))
@@ -454,10 +495,10 @@ def main():
               f"PERDIDO {borradas - insertadas}.\n"
               f"   Un libro mayor no encoge solo. Causa probable: el fichero exportado está "
               f"INCOMPLETO — vuelve a exportarlo del Seller comprobando el rango de fechas.\n"
-              f"   Días que estaban en la BD y NO vienen en el fichero: "
-              + (texto_dias(dias_perdidos) if dias_perdidos else
-                 "ninguno (la merma está DENTRO de días que sí vienen: el fichero trae "
-                 "esos días a medias)"), flush=True)
+              f"   Dónde está el hueco:\n"
+              + (_pinta_huecos("      ") or
+                 "      en ningún día concreto: el fichero trae menos filas repartidas."),
+              flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
 
     # --- Resumen ---
@@ -468,15 +509,15 @@ def main():
     print(f"   · BORRADOS del rango ({verbo}):    {borradas}")
     print(f"   · INSERTADOS ({verbo}):            {insertadas}")
     print(f"   · anteriores a {fmin} (intactos):  no se tocan")
-    if dias_perdidos:
-        print(f"   · ⚠️  DÍAS PERDIDOS ({len(dias_perdidos)}): estaban en la BD y este fichero "
-              f"YA NO los trae")
-        print(f"        {texto_dias(dias_perdidos)}")
-        print(f"        El rango NO encoge en total (por eso no aborta), pero esos días "
-              f"desaparecen del extracto.")
-        print(f"        Comprueba el rango que exportaste del Seller antes de aplicar.")
+    if dias_perdidos or dias_adelgazan:
+        print(f"   · ⚠️  HUECOS POR DÍA — {movs_sin_contrapartida} movimiento(s) del rango se "
+              f"quedan sin contrapartida:")
+        print(_pinta_huecos("        "))
+        print(f"        El TOTAL del rango no encoge (por eso no aborta), pero esos "
+              f"movimientos se borran igual.")
+        print(f"        MÍRALO antes de aplicar: el ledger es PELÍCULA y no se recupera.")
     else:
-        print(f"   · días de la BD que ya no vienen: 0")
+        print(f"   · huecos por día (desaparecidos o adelgazados): 0")
 
     if MODO == 'aplicar':
         con.commit()
@@ -491,7 +532,8 @@ def main():
     cur.close(); con.close()
     print(f"\n=== FIN · entorno={ENTORNO} · modo={MODO} · movimientos={len(movs)} · "
           f"rango={fmin}→{fmax} · borrados_rango={borradas} · insertados={insertadas} · "
-          f"dias_perdidos={len(dias_perdidos)} · "
+          f"dias_perdidos={len(dias_perdidos)} · dias_adelgazan={len(dias_adelgazan)} · "
+          f"movs_sin_contrapartida={movs_sin_contrapartida} · "
           f"event_desconocidos={len(info['event_desconocidos'])} ===", flush=True)
 
 
