@@ -45,6 +45,25 @@
 #   trae transacciones DIFERIDAS (columna Estado) que cambian entre dos descargas;
 #   recerrar el rango hace ganar a la última descarga.
 #
+# 🔴 GUARDA 8 (el extracto no encoge) — POR QUÉ LA GUARDA 5 NO BASTABA
+#   La Guarda 5 mira SOLO el total del rango y tolera hasta un 50% de merma. Un año
+#   exportado con UN MES EN BLANCO en medio conserva fmin=enero y fmax=diciembre, el
+#   total sigue muy por encima del 50%, la 5 pasa… y entonces el DELETE se lleva los
+#   doce meses mientras el INSERT devuelve once. Ese mes desaparecía del extracto sin
+#   que chillara nadie. La Guarda 8 compara lo que de verdad se BORRA con lo que de
+#   verdad ENTRA: si el rango encoge aunque sea en un movimiento, ABORTA.
+#   Y el DETECTOR DE HUECOS POR DÍA dice QUÉ días se iban a perder. Avisa siempre pero
+#   NO aborta por sí solo, porque un mes puede desaparecer y el total subir igual (si
+#   el mismo fichero trae además meses nuevos al final): ahí no hay merma que medir,
+#   solo un hueco que enseñar.
+#   🔒 Aquí TODO va por rango Y PAÍS, también la Guarda 8: se compara contra lo que
+#   había de ESE país. Mezclar países haría que cargar FR (243 filas) pareciera un
+#   derrumbe frente a ES (13.658) y abortaría siempre.
+#   🔒 Los días se comparan BD-contra-FICHERO, JAMÁS contra el calendario: hay días
+#   sin ninguna transacción que son perfectamente legítimos (medido el 30-jul: IT solo
+#   tiene movimiento en 64 de sus 201 días de calendario, FR en 59 de 112). Un detector
+#   por calendario daría 137 falsos positivos solo en IT.
+#
 # 🔒 El SELLO DE FRESCURA: al aplicar, escribe una fila en `informes_subidos`
 #   (tipo='transacciones', fecha_dato_hasta, procesado_at). Es lo que lee la RPC
 #   frescura_informes() para esta tarjeta. Con el fichero en informes/transacciones/
@@ -55,7 +74,7 @@
 # ============================================================================
 
 import os, sys, io, csv, re, unicodedata
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from collections import Counter
 
 import psycopg2
@@ -267,6 +286,27 @@ def parse_fecha_hora(s, pais):
     from datetime import timezone
     return datetime(d.year, d.month, d.day, int(m.group(4)), int(m.group(5)),
                     int(m.group(6)), tzinfo=timezone.utc)
+
+
+def _tramos_de_dias(dias):
+    """Agrupa fechas sueltas en tramos consecutivos: del 1 al 30 de junio → un tramo."""
+    tramos = []
+    for d in sorted(dias):
+        if tramos and d == tramos[-1][1] + timedelta(days=1):
+            tramos[-1][1] = d
+        else:
+            tramos.append([d, d])
+    return tramos
+
+def texto_dias(dias):
+    """Los días, en cristiano y en una línea. Es lo que convierte el aviso en útil:
+    'falta 2026-06-01→2026-06-30 (30 días)' se lee de un vistazo; treinta fechas
+    seguidas, no. (Se duplica en procesador_ledger.py a propósito: foto_comun es el
+    patrón de las FOTOS y estos dos son PELÍCULAS — no se toca.)"""
+    partes = []
+    for a, b in _tramos_de_dias(dias):
+        partes.append(str(a) if a == b else f"{a}→{b} ({(b - a).days + 1} días)")
+    return " · ".join(partes)
 
 
 # ---------------------------------------------------------------------------
@@ -573,6 +613,22 @@ def main():
               f"marketplace nuevo; posible NUEVA OBLIGACIÓN DE IVA — revisar. (Entra igual.)",
               flush=True)
 
+    # --- Guarda 8 (1ª parte): foto de los DÍAS que había de ESTE país, ANTES de borrar ---
+    # Se lee aquí y no después porque después del DELETE ya no hay con qué comparar.
+    # 🔒 Con el filtro de PAIS: los días de los otros países no son asunto de esta carga.
+    # 🔒 BD contra FICHERO, nunca contra el calendario: un día sin transacciones es
+    # legítimo (IT tiene movimiento en 64 de 201 días) y no se inventa un hueco.
+    cur.execute("SELECT DISTINCT fecha FROM transacciones_movimientos "
+                "WHERE fecha BETWEEN %s AND %s AND pais = %s;", (fmin, fmax, PAIS))
+    dias_bd = {r[0] for r in cur.fetchall()}
+    dias_fichero = {mv['fecha'] for mv in movs}
+    dias_perdidos = sorted(dias_bd - dias_fichero)
+
+    if dias_perdidos:
+        print(f"\n⚠️  [Guarda 8 · huecos] {len(dias_perdidos)} día(s) que SÍ estaban en la BD "
+              f"para {PAIS} NO vienen en este fichero:\n        {texto_dias(dias_perdidos)}",
+              flush=True)
+
     # --- Carga por rango y país: DELETE + INSERT (misma transacción) ---
     cur.execute("DELETE FROM transacciones_movimientos "
                 "WHERE fecha BETWEEN %s AND %s AND pais = %s;", (fmin, fmax, PAIS))
@@ -592,6 +648,25 @@ def main():
         f"INSERT INTO transacciones_movimientos ({', '.join(COLS_DB)}) VALUES %s",
         valores, template=plantilla, page_size=1000)
     insertadas = len(valores)
+
+    # --- Guarda 8: EL EXTRACTO NO ENCOGE ---
+    # La 5 mira el total ANTES de borrar y tolera hasta un 50% de merma; ésta compara
+    # lo que de verdad se DESTRUYE con lo que de verdad ENTRA. Si el rango de ESTE país
+    # encoge aunque sea en un movimiento, el fichero está incompleto y NO se escribe nada.
+    # Va ANTES del sello de frescura a propósito: un extracto que no se carga no se sella.
+    if insertadas < borradas:
+        print(f"\n❌ ABORTA (no se ha escrito nada):\n"
+              f"[Guarda 8] EL EXTRACTO ENCOGE. En {PAIS} [{fmin}→{fmax}] se iban a BORRAR "
+              f"{borradas} movimientos y el fichero solo trae {insertadas}: se habrían "
+              f"PERDIDO {borradas - insertadas}.\n"
+              f"   Un extracto de euros no encoge solo. Causa probable: el fichero exportado "
+              f"está INCOMPLETO — vuelve a exportarlo del Seller comprobando el rango de "
+              f"fechas (y que sea el del país {PAIS}).\n"
+              f"   Días que estaban en la BD y NO vienen en el fichero: "
+              + (texto_dias(dias_perdidos) if dias_perdidos else
+                 "ninguno (la merma está DENTRO de días que sí vienen: el fichero trae "
+                 "esos días a medias)"), flush=True)
+        con.rollback(); cur.close(); con.close(); sys.exit(1)
 
     # --- SELLO DE FRESCURA: una fila en informes_subidos (lo que lee frescura_informes) ---
     resumen = {
@@ -616,6 +691,15 @@ def main():
     print(f"   · BORRADOS del rango ({verbo}):    {borradas}")
     print(f"   · INSERTADOS ({verbo}):            {insertadas}")
     print(f"   · otros países y lo anterior a {fmin}: intactos")
+    if dias_perdidos:
+        print(f"   · ⚠️  DÍAS PERDIDOS ({len(dias_perdidos)}): estaban en la BD para {PAIS} y "
+              f"este fichero YA NO los trae")
+        print(f"        {texto_dias(dias_perdidos)}")
+        print(f"        El rango NO encoge en total (por eso no aborta), pero esos días "
+              f"desaparecen del extracto.")
+        print(f"        Comprueba el rango que exportaste del Seller antes de aplicar.")
+    else:
+        print(f"   · días de la BD que ya no vienen: 0")
 
     if MODO == 'aplicar':
         con.commit()
@@ -638,7 +722,7 @@ def main():
     cur.close(); con.close()
     print(f"\n=== FIN · entorno={ENTORNO} · modo={MODO} · pais={PAIS} · "
           f"movimientos={len(movs)} · rango={fmin}→{fmax} · borrados={borradas} · "
-          f"insertados={insertadas} ===", flush=True)
+          f"insertados={insertadas} · dias_perdidos={len(dias_perdidos)} ===", flush=True)
 
 
 if __name__ == '__main__':

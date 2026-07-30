@@ -38,6 +38,22 @@
 #   ≥ lo que ya había en ese rango → en uso normal NO aborta (solo protege ante
 #   un fichero truncado de verdad).
 #
+# 🔴 GUARDA 8 (el extracto no encoge) — POR QUÉ LA GUARDA 5 NO BASTABA
+#   La Guarda 5 mira SOLO el total del rango y tolera hasta un 50% de merma. Un año
+#   exportado con UN MES EN BLANCO en medio conserva fmin=enero y fmax=diciembre, el
+#   total sigue muy por encima del 50%, la 5 pasa… y entonces el DELETE se lleva los
+#   doce meses mientras el INSERT devuelve once. Ese mes desaparecía del extracto sin
+#   que chillara nadie. La Guarda 8 compara lo que de verdad se BORRA con lo que de
+#   verdad ENTRA: si el rango encoge aunque sea en un movimiento, ABORTA.
+#   Y el DETECTOR DE HUECOS POR DÍA dice QUÉ días se iban a perder. Avisa siempre pero
+#   NO aborta por sí solo, porque un mes puede desaparecer y el total subir igual (si
+#   el mismo fichero trae además meses nuevos al final): ahí no hay merma que medir,
+#   solo un hueco que enseñar.
+#   🔒 Los días se comparan BD-contra-FICHERO, JAMÁS contra el calendario: hay días
+#   sin ningún movimiento que son perfectamente legítimos (medido el 30-jul: en
+#   transacciones IT solo 64 de 201 días de calendario tienen movimiento). Un detector
+#   por calendario daría 137 falsos positivos en ese solo país.
+#
 # 🔒 NO escribe identidad (ni productos ni nada de v1). Solo carga movimientos.
 #    Las conciliaciones (envíos perdidos, cruce con salud_fba y con envios_fba)
 #    son VISTAS/pasos posteriores, NO en este PR.
@@ -47,7 +63,7 @@
 # ============================================================================
 
 import os, sys, io, csv, re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from collections import Counter
 
 import psycopg2
@@ -138,6 +154,27 @@ def marca_tiempo(v):
             return datetime.fromisoformat(s2)
         except ValueError:
             return None
+
+
+def _tramos_de_dias(dias):
+    """Agrupa fechas sueltas en tramos consecutivos: del 1 al 30 de junio → un tramo."""
+    tramos = []
+    for d in sorted(dias):
+        if tramos and d == tramos[-1][1] + timedelta(days=1):
+            tramos[-1][1] = d
+        else:
+            tramos.append([d, d])
+    return tramos
+
+def texto_dias(dias):
+    """Los días, en cristiano y en una línea. Es lo que convierte el aviso en útil:
+    'falta 2026-06-01→2026-06-30 (30 días)' se lee de un vistazo; treinta fechas
+    seguidas, no. (Se duplica en procesador_transacciones.py a propósito: foto_comun
+    es el patrón de las FOTOS y estos dos son PELÍCULAS — no se toca.)"""
+    partes = []
+    for a, b in _tramos_de_dias(dias):
+        partes.append(str(a) if a == b else f"{a}→{b} ({(b - a).days + 1} días)")
+    return " · ".join(partes)
 
 
 # ---------------------------------------------------------------------------
@@ -373,6 +410,20 @@ def main():
                   f"(Pan-EU); posible NUEVA OBLIGACIÓN DE IVA en ese país — revisar.",
                   flush=True)
 
+    # --- Guarda 8 (1ª parte): foto de los DÍAS que había, ANTES de borrar ---
+    # Se lee aquí y no después porque después del DELETE ya no hay con qué comparar.
+    # 🔒 BD contra FICHERO, nunca contra el calendario: un día sin movimientos es
+    # legítimo y no se inventa un hueco donde no lo hay.
+    cur.execute("SELECT DISTINCT fecha FROM ledger_movimientos WHERE fecha BETWEEN %s AND %s;",
+                (fmin, fmax))
+    dias_bd = {r[0] for r in cur.fetchall()}
+    dias_fichero = {mv['fecha'] for mv in movs}
+    dias_perdidos = sorted(dias_bd - dias_fichero)
+
+    if dias_perdidos:
+        print(f"\n⚠️  [Guarda 8 · huecos] {len(dias_perdidos)} día(s) que SÍ estaban en la BD "
+              f"NO vienen en este fichero:\n        {texto_dias(dias_perdidos)}", flush=True)
+
     # --- Carga por rango: DELETE del rango + INSERT de todo (misma transacción) ---
     cur.execute("DELETE FROM ledger_movimientos WHERE fecha BETWEEN %s AND %s;", (fmin, fmax))
     borradas = cur.rowcount
@@ -391,6 +442,24 @@ def main():
         valores, template=plantilla, page_size=1000)
     insertadas = len(valores)
 
+    # --- Guarda 8: EL EXTRACTO NO ENCOGE ---
+    # La 5 mira el total ANTES de borrar y tolera hasta un 50% de merma; ésta compara
+    # lo que de verdad se DESTRUYE con lo que de verdad ENTRA. Si el rango encoge
+    # aunque sea en un movimiento, el fichero está incompleto y NO se escribe nada.
+    # Una PELÍCULA no encoge: recargar un rango deja lo mismo o más, nunca menos.
+    if insertadas < borradas:
+        print(f"\n❌ ABORTA (no se ha escrito nada):\n"
+              f"[Guarda 8] EL EXTRACTO ENCOGE. En el rango {fmin}→{fmax} se iban a BORRAR "
+              f"{borradas} movimientos y el fichero solo trae {insertadas}: se habrían "
+              f"PERDIDO {borradas - insertadas}.\n"
+              f"   Un libro mayor no encoge solo. Causa probable: el fichero exportado está "
+              f"INCOMPLETO — vuelve a exportarlo del Seller comprobando el rango de fechas.\n"
+              f"   Días que estaban en la BD y NO vienen en el fichero: "
+              + (texto_dias(dias_perdidos) if dias_perdidos else
+                 "ninguno (la merma está DENTRO de días que sí vienen: el fichero trae "
+                 "esos días a medias)"), flush=True)
+        con.rollback(); cur.close(); con.close(); sys.exit(1)
+
     # --- Resumen ---
     verbo = 'se han' if MODO == 'aplicar' else 'se habrían'
     print(f"\n--- LEDGER (carga por rango {fmin} → {fmax}) ---")
@@ -399,6 +468,15 @@ def main():
     print(f"   · BORRADOS del rango ({verbo}):    {borradas}")
     print(f"   · INSERTADOS ({verbo}):            {insertadas}")
     print(f"   · anteriores a {fmin} (intactos):  no se tocan")
+    if dias_perdidos:
+        print(f"   · ⚠️  DÍAS PERDIDOS ({len(dias_perdidos)}): estaban en la BD y este fichero "
+              f"YA NO los trae")
+        print(f"        {texto_dias(dias_perdidos)}")
+        print(f"        El rango NO encoge en total (por eso no aborta), pero esos días "
+              f"desaparecen del extracto.")
+        print(f"        Comprueba el rango que exportaste del Seller antes de aplicar.")
+    else:
+        print(f"   · días de la BD que ya no vienen: 0")
 
     if MODO == 'aplicar':
         con.commit()
@@ -413,6 +491,7 @@ def main():
     cur.close(); con.close()
     print(f"\n=== FIN · entorno={ENTORNO} · modo={MODO} · movimientos={len(movs)} · "
           f"rango={fmin}→{fmax} · borrados_rango={borradas} · insertados={insertadas} · "
+          f"dias_perdidos={len(dias_perdidos)} · "
           f"event_desconocidos={len(info['event_desconocidos'])} ===", flush=True)
 
 
