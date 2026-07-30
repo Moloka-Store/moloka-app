@@ -178,9 +178,11 @@ el histórico y no hay de dónde recuperarlo.
   (`X0…`) ⇒ etiquetado. Explica stock que aparece en países donde no enviaste nada.
 - **El "país" del INTERNACIONAL puede ser de PROGRAMA, no físico** (stock en Praga contado como DE).
   Y CZ/SK no existen para ese informe, pero el ledger demuestra stock físico allí.
-- **Bug latente en `procesador_keepa_escaparate.py`:** `DOMINIO_NUM` tiene dos pares mal. Los
-  dominios reales de Keepa son **3=DE · 4=FR · 8=IT · 9=ES** (10 es India). Hoy no rompe porque
-  solo se carga ES=9. Abortará en falso el día que se cargue IT o FR.
+- **Dominios de Keepa: 3=DE · 4=FR · 8=IT · 9=ES** (10 es India). Ojo con el 8: es IT, no FR.
+  *(Aquí vivió un aviso de "bug latente en `DOMINIO_NUM`" que se quedó mintiendo **10 días**
+  después de estar arreglado — el mapa se corrigió el 20-jul-2026 en `007632c` y la nota siguió
+  diciendo que estaba mal. Es el ejemplo de andar por casa de §3: **el estado vive en el repo, no
+  en las notas**. Si dudas del mapa, míralo en el fichero; si lo cambias, borra la nota.)*
 
 ---
 
