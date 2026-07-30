@@ -166,6 +166,14 @@ el histórico y no hay de dónde recuperarlo.
     propósito la columna de Amazon: "inflaba el stock".
   🔴 **`fc-transfer` cambia de bando entre las dos.** Llevar el "SIN `reserved`" de la primera al v1
   borra el FC Transfer del stock — el error exacto contra el que el v1 avisa por escrito.
+- ⚠️ **`productos.unidades_compradas` cuenta unidades FÍSICAS, no facturadas: el nombre engaña.**
+  "Compradas" suena a lo que dice el papel y no lo es. Con los packs se ve a la vista: una línea de
+  400 paquetes facturados que son 100 unidades físicas deja `unidades_compradas = 100`.
+  **Está BIEN así y no se cambia.** Su único uso real es elegir la ficha principal al consolidar
+  duplicados (*"Principal: la que tiene mas unidades_compradas historicas"*, `index.html:10171-10172`)
+  y ahí las físicas son lo correcto: contando facturadas, la ficha de packs ganaría artificialmente.
+  **No entra en costes ni en rentabilidad**, así que no hay riesgo contable — solo un nombre que
+  miente. Medido el 30-jul-2026.
 - **`FNSKU = ASIN` ⇒ listing commingled** (pozo común por EAN entre vendedores). FNSKU propio
   (`X0…`) ⇒ etiquetado. Explica stock que aparece en países donde no enviaste nada.
 - **El "país" del INTERNACIONAL puede ser de PROGRAMA, no físico** (stock en Praga contado como DE).
@@ -208,6 +216,16 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   rama → PR → Fernando aprueba → ensayo en staging → producción.
 - **Todo lo NUEVO nace CERRADO:** RLS activo y 0 políticas. Vistas `security_invoker`. Funciones
   `IMMUTABLE`, sin `SECURITY DEFINER`.
+- 🔴 **Pero "nace cerrado" NO es el estado por defecto: hay que REVOCAR antes de conceder.**
+  Medido el 30-jul-2026 en `pg_default_acl` de las DOS bases: en `public`, toda **tabla o vista**
+  nueva nace con **`arwdDxtm` concedido a `anon` Y a `authenticated`**, y toda **función** nueva con
+  `EXECUTE` para `anon`. Son DEFAULT PRIVILEGES de Supabase y **un `revoke … from public` NO los
+  quita** (son grants explícitos a un rol, no a `public`). Si escribes `grant select, insert to
+  authenticated` y te quedas ahí, **el grant no añade nada porque ya lo tenía todo**: el `relacl`
+  sigue diciendo `authenticated=arwdDxtm`. Hay que revocar a **cada rol por su nombre** antes de
+  conceder — `revoke all on <objeto> from public, anon, authenticated;` y luego el `grant` mínimo —
+  y **MEDIR** el resultado (`pg_class.relacl` / `pg_proc.proacl`), no suponerlo.
+  Afecta a **todo objeto nuevo**, también a las tablas que crean los procesadores.
 - **La v1 tiene escritura anónima abierta** (deuda estructural). **No se toca a mitad de vuelo**:
   se cierra en la v2 con Auth + RPC. El problema no es la llave `publishable` (es pública por
   diseño): son las políticas.
