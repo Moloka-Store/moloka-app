@@ -226,6 +226,16 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   conceder — `revoke all on <objeto> from public, anon, authenticated;` y luego el `grant` mínimo —
   y **MEDIR** el resultado (`pg_class.relacl` / `pg_proc.proacl`), no suponerlo.
   Afecta a **todo objeto nuevo**, también a las tablas que crean los procesadores.
+- 🔴 **Y no basta con revocar AL CREAR: hay que revocar CADA VEZ QUE SE RECREA.**
+  `CREATE OR REPLACE` **conserva** el ACL; **`DROP` + `CREATE` lo PIERDE**, y el objeto vuelve a nacer
+  con el default puesto, o sea con `anon` dentro. Caso real medido el 30-jul-2026:
+  `entrada_factura_pvd` tenía `anon=X` en **staging** y no en producción, **aunque su migración lleva
+  el `revoke`** — alguien la había recreado con DROP+CREATE y aquel revoke ya no aplicaba a la función
+  nueva. No era explotable (aritmética pura, `IMMUTABLE`, no lee tablas), pero **las dos bases dejaron
+  de ser iguales, y entonces un ensayo en staging ya no demuestra nada sobre producción**. Corregido
+  con un `revoke … from anon` en staging.
+  Regla práctica: **si la migración lleva un `drop`, el `revoke` va DESPUÉS del `create`, en la misma
+  migración, y se mide el ACL al terminar.**
 - **La v1 tiene escritura anónima abierta** (deuda estructural). **No se toca a mitad de vuelo**:
   se cierra en la v2 con Auth + RPC. El problema no es la llave `publishable` (es pública por
   diseño): son las políticas.
