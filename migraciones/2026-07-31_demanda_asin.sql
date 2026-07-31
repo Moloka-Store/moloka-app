@@ -52,14 +52,15 @@
 --
 -- 🔒 IDEMPOTENTE. CREATE TABLE/INDEX IF NOT EXISTS, CREATE OR REPLACE VIEW, REVOKE
 --   (repetirlo no cambia nada), COMMENT (idem). Aplicarla dos veces = no-op.
--- 🔒 lock_timeout corto (criterio DDL de la casa). Aquí es precaución pura: la tabla
---   es NUEVA, nadie la referencia, ni ENABLE RLS ni CREATE VIEW encuentran con quién
---   competir por el lock. Aun así se aplica el criterio.
+-- 🔒 lock_timeout corto (criterio DDL de la casa). Se pone AL APLICAR, no en el
+--   fichero, como las migraciones anteriores: un `SET LOCAL` fuera de un BEGIN/COMMIT
+--   no aplica al resto del script y sería una falsa red. Aquí el riesgo de lock es
+--   NULO de todas formas (la tabla es NUEVA, nadie la referencia), pero el criterio
+--   se respeta en el momento de aplicar:
+--       SET lock_timeout = '5s';  -- (o BEGIN; SET LOCAL …; … ; COMMIT;) antes de correr esto
 -- 🔒 Escalera: staging (apply) → verificación SQL → producción (apply) → SQL.
 --   Advisors después. Elena parada al aplicar en prod (aunque el riesgo real es nulo).
 -- ============================================================================
-
-SET LOCAL lock_timeout = '5s';
 
 -- ── LA TABLA ────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS demanda_asin (
