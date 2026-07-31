@@ -51,7 +51,7 @@ from psycopg2.extras import Json, execute_values
 from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
-from foto_comun import (Aborta, listar_buzon, descargar_buzon, guarda_anti_encogimiento, guarda_no_retroceder, claves_previas,
+from foto_comun import (Aborta, conectar_bd, listar_buzon, descargar_buzon, guarda_anti_encogimiento, guarda_no_retroceder, claves_previas,
                         barrer_sobrantes, resumen_foto, archivar_foto)
 
 # ---------------------------------------------------------------------------
@@ -566,7 +566,7 @@ def main():
           f"fecha_foto {meta['fecha_foto']}", flush=True)
 
     # --- Conectar al ENTORNO ---
-    con = psycopg2.connect(DB_URL)
+    con = conectar_bd(DB_URL)
     con.autocommit = False
     cur = con.cursor()
 

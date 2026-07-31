@@ -49,7 +49,7 @@ from psycopg2.extras import execute_values
 from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
-from foto_comun import (Aborta, listar_buzon, descargar_buzon, guarda_anti_encogimiento, guarda_no_retroceder,
+from foto_comun import (Aborta, conectar_bd, listar_buzon, descargar_buzon, guarda_anti_encogimiento, guarda_no_retroceder,
                         claves_previas, barrer_sobrantes, resumen_foto, archivar_foto)
 
 # ---------------------------------------------------------------------------
@@ -218,7 +218,7 @@ for asin, lst in por_asin.items():
 # ---------------------------------------------------------------------------
 # 3) Conectar al DESTINO y asegurar la tabla del diccionario (nace CERRADA)
 # ---------------------------------------------------------------------------
-con = psycopg2.connect(DB_URL)
+con = conectar_bd(DB_URL)
 con.autocommit = False
 cur = con.cursor()
 

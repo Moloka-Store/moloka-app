@@ -88,7 +88,7 @@ from psycopg2.extras import Json, execute_values
 
 # Del patrón común solo se reutiliza Aborta: la carga por rango es lógica propia
 # (barrer_sobrantes es para FOTOS y aquí borraría el histórico).
-from foto_comun import Aborta, listar_buzon, descargar_buzon
+from foto_comun import Aborta, conectar_bd, listar_buzon, descargar_buzon
 
 # ---------------------------------------------------------------------------
 # 0) Configuración (secrets de GitHub; jamás credenciales en el código)
@@ -381,7 +381,7 @@ def main():
     print("   Country:     " + " · ".join(f"{k} {v}" for k, v in co.most_common()), flush=True)
 
     # --- Conectar al ENTORNO ---
-    con = psycopg2.connect(DB_URL)
+    con = conectar_bd(DB_URL)
     con.autocommit = False
     cur = con.cursor()
 

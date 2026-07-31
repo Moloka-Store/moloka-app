@@ -63,7 +63,7 @@ import openpyxl
 # Del patrón común solo se reutiliza lo de FOTO que aplica: Aborta y las lecturas de
 # Storage con reintento. NO barrer_sobrantes/archivar_foto (esto es FOTO POR VENTANA,
 # no FOTO: el borrado es por ventana exacta, no "lo que no viene en el fichero").
-from foto_comun import Aborta, listar_buzon, descargar_buzon
+from foto_comun import Aborta, conectar_bd, listar_buzon, descargar_buzon
 
 # ---------------------------------------------------------------------------
 # 0) Configuración (secrets de GitHub; jamás credenciales en el código)
@@ -581,7 +581,7 @@ def main():
         sys.exit(1)
 
     # --- Conectar al ENTORNO ---
-    con = psycopg2.connect(DB_URL)
+    con = conectar_bd(DB_URL)
     con.autocommit = False
     cur = con.cursor()
 
