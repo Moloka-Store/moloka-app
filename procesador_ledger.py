@@ -477,6 +477,13 @@ def main():
     #   así que "pocas filas" no es señal de corte — la señal es "menos que la BD".
     #   Un día de EN MEDIO no se corta solo. Si encoge o desaparece, el fichero está
     #   incompleto y se ABORTA.
+    #   🔒 ASUNCIÓN EXPLÍCITA del recorte: una exportación más corta de un día del borde
+    #   es un SUBCONJUNTO de la que ya está en la BD. Se sostiene porque el ledger es
+    #   ACUMULATIVO: los movimientos de un día no se corrigen a posteriori, solo se AÑADEN
+    #   según avanza el día. Por eso al recortar nos quedamos con lo de la BD (que tiene
+    #   más) y descartamos lo del fichero. Si esa asunción se rompiera algún día (un
+    #   movimiento del borde desapareciera de verdad), lo conservaríamos DE MÁS, nunca de
+    #   menos — que es justo el lado seguro y coherente con "el extracto no encoge".
     BORDE = {fmin, fmax}
     adelgazan_medio = [t for t in dias_adelgazan if t[0] not in BORDE]
     adelgazan_borde = [t for t in dias_adelgazan if t[0] in BORDE]

@@ -662,6 +662,13 @@ def main():
     #   fmin/fmax salen del fichero, así que el borde solo puede ADELGAZAR, no faltar. Y
     #   puede venir cortado de forma legítima cuando el rango acaba en el día en curso.
     #   Un día de EN MEDIO no se corta solo → si encoge o desaparece, ABORTA.
+    #   🔒 ASUNCIÓN EXPLÍCITA del recorte: al estrechar el borde nos quedamos con lo de la
+    #   BD (que tiene más) y descartamos lo del fichero. En el ledger eso es un subconjunto
+    #   limpio (es acumulativo); AQUÍ es menos limpio por las diferidas (una del último día
+    #   podría haberse cancelado, no solo "aún no exportada"). Da igual para el lado que se
+    #   elige: quedarse con la versión de la BD conserva DE MÁS, nunca de menos — el lado
+    #   seguro, coherente con la tolerancia cero. Si el experimento de las diferidas (abajo)
+    #   demostrara que hay que soltar por el borde, se decide entonces y con el número.
     #   ⚠️ EXPOSICIÓN CONOCIDA, tolerancia CERO por ahora (decisión de Fernando, 31-jul):
     #   este informe trae transacciones DIFERIDAS que cambian entre dos descargas; una
     #   que se cancele en un día INTERMEDIO haría abortar la 8a. Medido hoy: IT 43,6% de
