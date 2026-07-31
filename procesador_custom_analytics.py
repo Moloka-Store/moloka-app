@@ -364,11 +364,21 @@ def analizar(bytes_xlsx, pais, periodo_desde, periodo_hasta, fichero):
 
 
 # ---------------------------------------------------------------------------
-# 2) GUARDA 6.6 — EL PAÍS: cruzar unidades por ASIN con transacciones_movimientos.
+# 2) GUARDA 6.6 — EL PAÍS: cruzar la DEMANDA por ASIN con transacciones_movimientos.
 #    El fichero no dice de qué marketplace es; el riesgo real es subir el de IT y
-#    marcar ES. Se identifica por CUÁL de ES/IT/FR tiene menor error mediano, no por
-#    cuadre exacto (uds pedidas ≠ uds de pedido liquidadas; §6.6). NO caza una MEZCLA
-#    (esa la para el procedimiento: un marketplace por fichero).
+#    marcar ES. Se identifica por CUÁL de ES/IT/FR tiene menor error mediano.
+#
+#    🔴 SE COMPARAN CUOTAS, NO UNIDADES ABSOLUTAS (corrección de Fernando, 31-jul).
+#    transacciones NO cubre la ventana declarada (acaba unos días antes; IT/FR
+#    empiezan tarde), así que exigir cobertura total saltaba la guarda SIEMPRE en el
+#    caso real. En su lugar se cruza sobre la INTERSECCIÓN de la ventana con lo que
+#    cubre transacciones del país declarado, y se compara la CUOTA de cada ASIN
+#    (uds_asin / total del conjunto): robusta al desfase de ventana. Medido con un
+#    desfase del 15% — por cuotas el país correcto queda en 0,4-3,4% y el incorrecto
+#    nunca baja del 74%; por absolutos el correcto subía a 14-15% y se confundía.
+#    Se SALTA la guarda (y se dice) si: el fichero no trae 'Unidades pedidas', o la
+#    intersección es < 40% de la ventana. NO caza una MEZCLA (esa la para el
+#    procedimiento: un marketplace por fichero).
 # ---------------------------------------------------------------------------
 def _puente_sku_asin(cur):
     """SKU→ASIN: listings_amazon ∪ productos(es_chase=false). El chase nace SIN ASIN,
@@ -391,63 +401,86 @@ def _puente_sku_asin(cur):
 
 def guarda_pais(cur, pais_declarado, desde, hasta, uds_fichero):
     """Devuelve (veredicto, detalle). veredicto ∈ {'ok','grita','salta'}; si el país
-    declarado NO gana, lanza Aborta. `uds_fichero` = {asin: unidades_pedidas} del fichero."""
-    # ¿Cubre transacciones la ventana declarada para el país declarado? (§6.6 paso 6)
+    declarado NO gana, lanza Aborta. `uds_fichero` = {asin: unidades_pedidas} del fichero.
+    Compara CUOTAS (no unidades) sobre la INTERSECCIÓN de la ventana con lo que cubre
+    transacciones del país declarado — robusto al desfase de ventana."""
+    # 0) Sin 'Unidades pedidas' en el fichero (el panel puede no traerla: el export del
+    #    28-jul tenía 8 columnas) → uds_fichero todo a cero: no hay con qué cruzar.
+    total_fichero = sum(uds_fichero.values())
+    if total_fichero <= 0:
+        return ('salta', "el fichero no trae 'Unidades pedidas' (columna ausente o suman 0): "
+                         "no hay con qué cruzar el país. Guarda SALTADA.")
+
+    # 1) Intersección de la ventana declarada con lo que cubre transacciones del declarado.
     cur.execute("SELECT min(fecha), max(fecha) FROM transacciones_movimientos WHERE pais=%s;",
                 (pais_declarado,))
     fmin, fmax = cur.fetchone()
-    if fmin is None or fmin > desde or fmax < hasta:
-        return ('salta',
-                f"transacciones de {pais_declarado} cubre {fmin}→{fmax}, no llega a "
-                f"{desde}→{hasta}: no hay contra qué cruzar. Guarda de país SALTADA (no se "
-                f"inventa un veredicto).")
+    if fmin is None:
+        return ('salta', f"transacciones no tiene datos de {pais_declarado}: no hay con qué "
+                         f"cruzar. Guarda SALTADA.")
+    ini, fin = max(desde, fmin), min(hasta, fmax)
+    dias_ventana = (hasta - desde).days + 1
+    dias_inter = (fin - ini).days + 1 if fin >= ini else 0
+    if dias_inter < 0.40 * dias_ventana:
+        return ('salta', f"transacciones de {pais_declarado} solo cruza {dias_inter} de los "
+                         f"{dias_ventana} días de la ventana ({fmin}→{fmax} ∩ {desde}→{hasta}): "
+                         f"menos del 40%, demasiado corta para fiarse. Guarda SALTADA.")
 
     sku2asin = _puente_sku_asin(cur)
 
-    # Unidades pedidas por (país, asin) en la ventana, desde transacciones.
+    # 2) Unidades pedidas por (país, asin) sobre la INTERSECCIÓN, para TODOS los candidatos.
     cur.execute(
         "SELECT pais, sku, sum(cantidad)::numeric FROM transacciones_movimientos "
         " WHERE tipo_norm='pedido' AND fecha BETWEEN %s AND %s "
         "   AND cantidad IS NOT NULL AND sku IS NOT NULL "
-        " GROUP BY pais, sku;", (desde, hasta))
+        " GROUP BY pais, sku;", (ini, fin))
     trans = defaultdict(lambda: defaultdict(float))   # pais → asin → uds
     for p, sku, uds in cur.fetchall():
         asin = sku2asin.get(_bt(sku))
         if asin:
             trans[p][asin] += float(uds)
 
-    # Error mediano de cada candidato sobre SUS 12 ASIN de más unidades (§6.6 paso 3).
+    # 3) CUOTAS: cuota de cada ASIN en el fichero (sobre la ventana) y en cada candidato
+    #    (sobre la intersección). Comparar cuotas neutraliza que las ventanas no coincidan.
+    cuota_fichero = {a: u / total_fichero for a, u in uds_fichero.items()}
     errores = {}
     for cand in PAISES_VALIDOS:
-        top = sorted(trans[cand].items(), key=lambda kv: kv[1], reverse=True)[:12]
-        if not top:
+        total_cand = sum(trans[cand].values())
+        if total_cand <= 0:
             errores[cand] = None
             continue
-        errs = [abs(uds_fichero.get(asin, 0) - tu) / tu for asin, tu in top]   # tu>0 (top)
-        errores[cand] = median(errs)
+        # Los 12 ASIN de más unidades del candidato; error relativo de su CUOTA vs el fichero.
+        top = sorted(trans[cand].items(), key=lambda kv: kv[1], reverse=True)[:12]
+        errs = []
+        for asin, tu in top:
+            if tu <= 0:                       # no dividir por cero (medido: qty mín = 1)
+                continue
+            ts = tu / total_cand
+            errs.append(abs(cuota_fichero.get(asin, 0.0) - ts) / ts)
+        errores[cand] = median(errs) if errs else None
 
     tabla = " · ".join(
         f"{c}={'s/d' if errores[c] is None else format(100*errores[c], '.1f')+'%'}"
         for c in PAISES_VALIDOS)
 
-    validos = {c: e for c, e in errores.items() if e is not None}
-    if not validos or errores.get(pais_declarado) is None:
-        return ('salta', f"no hay unidades cruzables para {pais_declarado} en la ventana "
-                         f"(error mediano por país: {tabla}). Guarda SALTADA.")
+    if errores.get(pais_declarado) is None:
+        return ('salta', f"no hay unidades cruzables para {pais_declarado} en la intersección "
+                         f"(cuota por país: {tabla}). Guarda SALTADA.")
 
-    ganador = min(validos, key=validos.get)
+    ganador = min((c for c in PAISES_VALIDOS if errores[c] is not None), key=lambda c: errores[c])
     if ganador != pais_declarado:
         raise Aborta(
             f"[Guarda 6.6 · PAÍS] Se declaró {pais_declarado} pero el fichero cuadra con "
-            f"{ganador}. Error mediano vs transacciones [{desde}→{hasta}]: {tabla}. "
+            f"{ganador}. Error mediano de CUOTA vs transacciones [{ini}→{fin}]: {tabla}. "
             f"O el selector de país va equivocado o subiste el fichero de otro marketplace. "
             f"NO se carga.")
 
-    if validos[pais_declarado] > 0.25:
+    if errores[pais_declarado] > 0.25:
         return ('grita',
-                f"{pais_declarado} GANA (error mediano por país: {tabla}) pero su error pasa "
-                f"del 25%: puede ser la VENTANA mal declarada. Revísala. (Entra igual.)")
-    return ('ok', f"{pais_declarado} identificado (error mediano por país: {tabla}).")
+                f"{pais_declarado} GANA (cuota por país: {tabla}) pero su error pasa del 25%: "
+                f"puede ser la VENTANA mal declarada. Revísala. (Entra igual.)")
+    return ('ok', f"{pais_declarado} identificado por CUOTA (error mediano: {tabla}; "
+                  f"intersección {ini}→{fin} = {dias_inter}/{dias_ventana} días).")
 
 
 # ---------------------------------------------------------------------------
