@@ -82,12 +82,32 @@ jobs:
       # decide aparte. Para meterlo bastaría con anadirlo a BUCKETS.
       - name: 5) Bajar el Storage a disco (facturas e informes)
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_URL:    ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:    ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           BUCKETS: 'facturas-pdfs,informes'
           DESTINO: storage_backup
         run: |
           pip install --quiet supabase
+          # 🔴 NÚMERO DE CONTROL EXTERNO. Preguntamos a Postgres cuántos FICHEROS tiene
+          # cada bucket (excluyendo los .emptyFolderPlaceholder, que el script no copia) y
+          # se lo pasamos al script. Si su listado recursivo no cuadra con esta cifra, la
+          # copia ABORTA en vez de salir en verde con media copia. Usamos el psql que ya
+          # se instaló en el paso 1 y el mismo secret que el pg_dump; no se mete psycopg2
+          # en el runner por esto. storage.objects vive en el schema `storage`.
+          ESPERADOS=""
+          for B in facturas-pdfs informes; do
+            N=$(psql "$SUPABASE_DB_URL" -At -c \
+              "select count(*) from storage.objects
+                 where bucket_id='$B' and name not like '%.emptyFolderPlaceholder';")
+            if ! [ "$N" -ge 0 ] 2>/dev/null; then
+              echo "::error::No pude leer el recuento de '$B' en storage.objects (psql: '$N')."
+              exit 1
+            fi
+            ESPERADOS="${ESPERADOS:+$ESPERADOS,}$B=$N"
+          done
+          echo "Recuento externo (Postgres): $ESPERADOS"
+          export ESPERADOS
           python -u backup_storage.py
 
       - name: 6) Sincronizar el Storage con R2

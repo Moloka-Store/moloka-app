@@ -242,6 +242,15 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
 - **SP-API: jamás con credenciales de Moloka SL.** Decidido y cerrado. Las cuentas de Moloka
   (Elena) y Fernando (autónomo) están separadas a nivel de credenciales.
 - **Confirmar una factura SIEMPRE inyecta stock.** Nunca subir facturas antiguas retroactivamente.
+- ⚠️ **PENDIENTE — la copia de FICHEROS a R2 no tiene simulacro de restauración.** Desde el
+  30-jul-2026 el backup diario (`backup-bd.yml` + `backup_storage.py`) copia a R2 los buckets
+  `facturas-pdfs` e `informes` (las facturas de proveedor y el archivo histórico de Keepa). Pero
+  `restaurar-staging.yml` solo ensaya el incendio de la **BD**: **esos ficheros no los recupera ni
+  los abre nadie nunca.** Es el MISMO agujero que motivó todo esto (una copia en la que se confía y
+  que nadie ha probado), en el otro activo. Falta un `restaurar-ficheros` que baje de R2 una muestra
+  y compruebe que abre. Hasta que exista, la copia de ficheros está **hecha pero no verificada de
+  extremo a extremo**. *(El backup sí tiene número de control externo contra `storage.objects`, así
+  que una copia CORTA no pasa por buena — pero eso valida la subida, no la restauración.)*
 
 ---
 
