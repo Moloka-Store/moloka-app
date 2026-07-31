@@ -53,22 +53,21 @@
 #   que chillara nadie. La Guarda 8 compara lo que de verdad se BORRA con lo que de
 #   verdad ENTRA: si el TOTAL del rango encoge, ABORTA.
 #
-#   🔴 LO QUE LA GUARDA 8 NO PUEDE VER, Y POR QUÉ EL DETECTOR VA POR RECUENTO
-#   La Guarda 8 compara TOTALES del rango, así que una merma en un día queda
-#   COMPENSADA por crecimiento en otro tramo del mismo rango. Medido el 30-jul en el
-#   ledger contra dos exportaciones reales del mismo informe: de 89 días solapados, 88
-#   traían las mismas filas y el 2026-07-20 traía 281 en una y 176 en otra — el día de
-#   CORTE de una exportación viene siempre a medias. Aquí pasa lo mismo.
-#   Por eso el DETECTOR DE HUECOS no mira solo qué días FALTAN: compara el RECUENTO
-#   POR DÍA y avisa también de los días que ADELGAZAN. Al mismo coste: el SELECT ya
-#   recorría esas filas, solo cambia DISTINCT por GROUP BY.
-#   ⚠️ El detector AVISA, no aborta (así se pidió). Un día que adelgaza o desaparece
-#   mientras el total sube se borra igualmente y el proceso termina en verde: lee el
-#   aviso ANTES de aplicar. Queda además escrito en el resumen_json del sello, para
-#   que no viva solo en el log de Actions.
-#   🔒 Aquí TODO va por rango Y PAÍS, también la Guarda 8: se compara contra lo que
-#   había de ESE país. Mezclar países haría que cargar FR (243 filas) pareciera un
-#   derrumbe frente a ES (13.658) y abortaría siempre.
+#   🔴 POR QUÉ NO BASTA EL TOTAL, Y CÓMO DECIDE POR DÍA (8a) + LA RED (8b)
+#   Mirando solo TOTALES no se ve una merma en un día si otro tramo del mismo rango la
+#   compensa. Medido el 30-jul en el ledger contra dos exportaciones del mismo informe:
+#   de 89 días solapados, 88 traían las mismas filas y el 2026-07-20 traía 281 en una y
+#   176 en otra. Aquí pasa lo mismo. Por eso la Guarda 8 decide POR DÍA:
+#     · 8a — recuento BD vs FICHERO día a día (por rango Y PAÍS). Día de EN MEDIO que
+#       encoge o desaparece → ABORTA antes del DELETE. Día del BORDE que encoge → se
+#       ESTRECHA el rango (puede ser un corte legítimo si acaba en el día en curso),
+#       condicional: solo si de verdad encoge.
+#     · 8b — red de última hora sobre el total del rango efectivo; con la 8a activa es
+#       inalcanzable, existe por si la 8a falla o hay escritura concurrente.
+#   ⚠️ Tolerancia CERO por ahora, con una exposición conocida y MEDIDA a las diferidas;
+#   el detalle y el experimento pendiente están junto a la Guarda 8a, en el cuerpo.
+#   🔒 TODO va por rango Y PAÍS: comparar contra otros países haría que cargar FR (243
+#   filas) pareciera un derrumbe frente a ES (13.658) y abortaría siempre.
 #   🔒 Los días se comparan BD-contra-FICHERO, JAMÁS contra el calendario: hay días
 #   sin ninguna transacción que son perfectamente legítimos (medido el 30-jul: IT solo
 #   tiene movimiento en 64 de sus 201 días de calendario, FR en 59 de 112). Un detector
@@ -636,36 +635,90 @@ def main():
     dias_perdidos = sorted(d for d in filas_bd_dia if d not in filas_fich_dia)
     dias_adelgazan = sorted((d, filas_bd_dia[d], filas_fich_dia[d]) for d in filas_bd_dia
                             if d in filas_fich_dia and filas_fich_dia[d] < filas_bd_dia[d])
-    movs_sin_contrapartida = (sum(filas_bd_dia[d] for d in dias_perdidos)
-                              + sum(antes - ahora for _, antes, ahora in dias_adelgazan))
 
-    def _pinta_huecos(sangria="        "):
+    def _pinta(perdidos, adelgazan, sangria="        "):
         """El detalle del hueco. Se usa en el aviso, en el aborto, en el resumen y en el
         sello: el mismo texto en todos para que no haya dos versiones de la verdad."""
         lineas = []
-        if dias_perdidos:
-            lineas.append(f"{sangria}· DESAPARECEN {len(dias_perdidos)} día(s) enteros: "
-                          f"{texto_dias(dias_perdidos)}")
-        if dias_adelgazan:
-            peor = sorted(dias_adelgazan, key=lambda t: t[1] - t[2], reverse=True)[:5]
-            lineas.append(f"{sangria}· ADELGAZAN {len(dias_adelgazan)} día(s) (vienen, pero "
+        if perdidos:
+            lineas.append(f"{sangria}· DESAPARECEN {len(perdidos)} día(s) enteros: "
+                          f"{texto_dias(perdidos)}")
+        if adelgazan:
+            peor = sorted(adelgazan, key=lambda t: t[1] - t[2], reverse=True)[:5]
+            lineas.append(f"{sangria}· ADELGAZAN {len(adelgazan)} día(s) (vienen, pero "
                           f"con menos movimientos de los que ya había):")
             for d, antes, ahora in peor:
                 lineas.append(f"{sangria}    {d}: {antes} → {ahora}  ({antes - ahora} de menos)")
-            if len(dias_adelgazan) > len(peor):
-                lineas.append(f"{sangria}    … y {len(dias_adelgazan) - len(peor)} día(s) más")
+            if len(adelgazan) > len(peor):
+                lineas.append(f"{sangria}    … y {len(adelgazan) - len(peor)} día(s) más")
         if lineas:
-            lineas.append(f"{sangria}En total {movs_sin_contrapartida} movimiento(s) del rango "
-                          f"se quedan sin contrapartida en el fichero.")
+            n = (sum(filas_bd_dia[d] for d in perdidos)
+                 + sum(antes - ahora for _, antes, ahora in adelgazan))
+            lineas.append(f"{sangria}En total {n} movimiento(s) del rango se quedan sin "
+                          f"contrapartida en el fichero.")
         return "\n".join(lineas)
 
-    if dias_perdidos or dias_adelgazan:
-        print(f"\n⚠️  [Guarda 8 · huecos por día] el fichero de {PAIS} NO cubre todo lo que la "
-              f"BD ya tenía en {fmin}→{fmax}:\n" + _pinta_huecos(), flush=True)
+    # 🔴 EL BORDE ES DISTINTO DEL MEDIO (idéntico al ledger, misma razón)
+    #   fmin/fmax salen del fichero, así que el borde solo puede ADELGAZAR, no faltar. Y
+    #   puede venir cortado de forma legítima cuando el rango acaba en el día en curso.
+    #   Un día de EN MEDIO no se corta solo → si encoge o desaparece, ABORTA.
+    #   ⚠️ EXPOSICIÓN CONOCIDA, tolerancia CERO por ahora (decisión de Fernando, 31-jul):
+    #   este informe trae transacciones DIFERIDAS que cambian entre dos descargas; una
+    #   que se cancele en un día INTERMEDIO haría abortar la 8a. Medido hoy: IT 43,6% de
+    #   sus filas diferidas, FR 34,6%, ES 4,2% — pero es artefacto de que IT/FR son series
+    #   cortas y recientes, no una propiedad del país (ES tiene 13.658 filas de historia).
+    #   Antes de aflojar NADA hay que MEDIR (bajar IT dos veces el mismo rango y ver si una
+    #   diferida cancelada BORRA la fila o si Amazon añade una línea de reembolso). Ese
+    #   experimento es de Elena (el Seller es suyo). Si algún día se afloja, será SOLO aquí
+    #   y con el número delante — el ledger es de movimientos físicos y no se toca.
+    BORDE = {fmin, fmax}
+    adelgazan_medio = [t for t in dias_adelgazan if t[0] not in BORDE]
+    adelgazan_borde = [t for t in dias_adelgazan if t[0] in BORDE]
 
-    # --- Carga por rango y país: DELETE + INSERT (misma transacción) ---
+    # --- Guarda 8a: UN DÍA DE EN MEDIO NO SE CORTA SOLO → ABORTA (antes del DELETE) ---
+    if dias_perdidos or adelgazan_medio:
+        print(f"\n❌ ABORTA (no se ha escrito nada; no se ha llegado ni a borrar):\n"
+              f"[Guarda 8a] EL EXTRACTO ENCOGE POR DENTRO. En {PAIS} [{fmin}→{fmax}] hay días "
+              f"INTERMEDIOS que la BD tiene y este fichero no cubre:\n"
+              + _pinta(dias_perdidos, adelgazan_medio, "      ") + "\n"
+              f"   El día de corte de una exportación es el PRIMERO o el ÚLTIMO, nunca uno de "
+              f"en medio: un hueco aquí significa que el fichero está INCOMPLETO.\n"
+              f"   Vuelve a exportarlo del Seller comprobando el rango y que sea el de {PAIS}.\n"
+              f"   (El extracto es PELÍCULA: lo que se borra no se recupera.)", flush=True)
+        con.rollback(); cur.close(); con.close(); sys.exit(1)
+
+    # --- Regla del BORDE: no se aborta, se ESTRECHA el rango (DELETE e INSERT) ---
+    # 🔴 Estrechar el DELETE no basta: hay que sacar ese día TAMBIÉN del INSERT, o queda
+    # duplicado. Sacarlo por los dos lados = "ese día se queda como está en la BD".
+    fmin_ef, fmax_ef = fmin, fmax
+    if any(d == fmin for d, _, _ in adelgazan_borde):
+        fmin_ef = fmin + timedelta(days=1)
+    if any(d == fmax for d, _, _ in adelgazan_borde):
+        fmax_ef = fmax - timedelta(days=1)
+
+    if adelgazan_borde:
+        print(f"\n✂️  [Guarda 8 · regla del borde] el borde del fichero de {PAIS} viene "
+              f"cortado (el rango acaba en el día en curso), así que NO se aborta: se "
+              f"ESTRECHA el rango y esos días se dejan tal como están en la BD.")
+        for d, antes, ahora in adelgazan_borde:
+            cual = 'PRIMER' if d == fmin else 'ÚLTIMO'
+            print(f"        · {d} ({cual} día): trae {ahora} y la BD ya tiene {antes} → "
+                  f"se respeta el de la BD")
+        print(f"        Rango efectivo: {fmin_ef} → {fmax_ef}", flush=True)
+
+    if fmin_ef > fmax_ef:
+        print(f"\n❌ ABORTA (no se ha escrito nada):\n"
+              f"[Guarda 8] Tras la regla del borde no queda NADA que cargar en {PAIS}: el "
+              f"fichero cubre {fmin}→{fmax} y sus extremos vienen más flacos que la BD. "
+              f"Vuelve a exportarlo con un rango más ancho.", flush=True)
+        con.rollback(); cur.close(); con.close(); sys.exit(1)
+
+    movs_ef = [mv for mv in movs if fmin_ef <= mv['fecha'] <= fmax_ef]
+    descartados_borde = len(movs) - len(movs_ef)
+
+    # --- Carga por rango EFECTIVO y país: DELETE + INSERT (misma transacción) ---
     cur.execute("DELETE FROM transacciones_movimientos "
-                "WHERE fecha BETWEEN %s AND %s AND pais = %s;", (fmin, fmax, PAIS))
+                "WHERE fecha BETWEEN %s AND %s AND pais = %s;", (fmin_ef, fmax_ef, PAIS))
     borradas = cur.rowcount
 
     plantilla = "(" + ", ".join(['%s'] * len(COLS_DB)) + ")"
@@ -675,7 +728,7 @@ def main():
          mv['marketplace'], mv['ventas_producto'], mv['impuesto_producto'],
          mv['tarifa_venta'], mv['tarifa_fba'], mv['tarifa_otras'], mv['otro'], mv['total'],
          mv['estado'], mv['fecha_liberacion'], fichero, Json(mv['crudo'])]
-        for mv in movs
+        for mv in movs_ef
     ]
     execute_values(
         cur,
@@ -683,46 +736,42 @@ def main():
         valores, template=plantilla, page_size=1000)
     insertadas = len(valores)
 
-    # --- Guarda 8: EL EXTRACTO NO ENCOGE ---
-    # La 5 mira el total ANTES de borrar y tolera hasta un 50% de merma; ésta compara
-    # lo que de verdad se DESTRUYE con lo que de verdad ENTRA. Si el rango de ESTE país
-    # encoge aunque sea en un movimiento, el fichero está incompleto y NO se escribe nada.
-    # Va ANTES del sello de frescura a propósito: un extracto que no se carga no se sella.
+    # --- Guarda 8b: RED DE ÚLTIMA HORA (el total del rango efectivo) ---
+    # 🔒 Con la 8a activa es matemáticamente inalcanzable: todo día intermedio cumple
+    # fichero ≥ BD y el borde ha quedado fuera del rango efectivo. Existe SOLO por si la
+    # 8a tiene un fallo o alguien escribe en la tabla entre el recuento y el DELETE. NO es
+    # ella quien caza el fichero incompleto — ésa es la 8a. Va antes del sello: un
+    # extracto que no se carga no se sella.
     if insertadas < borradas:
         print(f"\n❌ ABORTA (no se ha escrito nada):\n"
-              f"[Guarda 8] EL EXTRACTO ENCOGE. En {PAIS} [{fmin}→{fmax}] se iban a BORRAR "
-              f"{borradas} movimientos y el fichero solo trae {insertadas}: se habrían "
-              f"PERDIDO {borradas - insertadas}.\n"
-              f"   Un extracto de euros no encoge solo. Causa probable: el fichero exportado "
-              f"está INCOMPLETO — vuelve a exportarlo del Seller comprobando el rango de "
-              f"fechas (y que sea el del país {PAIS}).\n"
-              f"   Dónde está el hueco:\n"
-              + (_pinta_huecos("      ") or
-                 "      en ningún día concreto: el fichero trae menos filas repartidas."),
-              flush=True)
+              f"[Guarda 8b] EL EXTRACTO ENCOGE EN TOTAL y la comprobación por día no lo vio: "
+              f"en {PAIS} [{fmin_ef}→{fmax_ef}] se iban a BORRAR {borradas} y entran "
+              f"{insertadas} ({borradas - insertadas} de menos).\n"
+              f"   Esto NO debería poder pasar: o hay un fallo en la Guarda 8a, o alguien ha "
+              f"escrito en transacciones_movimientos mientras corría esta carga. No se "
+              f"escribe nada; avisa antes de volver a lanzarlo.", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
 
     # --- SELLO DE FRESCURA: una fila en informes_subidos (lo que lee frescura_informes) ---
     resumen = {
         'pais': PAIS, 'tipo': 'transacciones', 'archivo': fichero,
         'fecha_desde': fmin.isoformat(), 'fecha_hasta': fmax.isoformat(),
+        'rango_efectivo_desde': fmin_ef.isoformat(), 'rango_efectivo_hasta': fmax_ef.isoformat(),
         'filas': len(movs), 'tipos': dict(info['tipos']),
         'fuente': 'procesador_transacciones (Fase 0)',
-        # 🔒 Los huecos van EN EL DATO, no solo en el log. Sin esto, dentro de tres meses
-        # nadie podría saber que este rango se cargó con días adelgazados: la tarjeta de
-        # frescura saldría verde sobre un extracto agujereado, y una cifra sin la fecha
-        # del dato que la sostiene es una cifra que miente.
-        'dias_perdidos': [d.isoformat() for d in dias_perdidos],
-        'dias_adelgazan': [{'dia': d.isoformat(), 'antes': antes, 'ahora': ahora}
-                           for d, antes, ahora in dias_adelgazan],
-        'movs_sin_contrapartida': movs_sin_contrapartida,
+        # 🔒 El borde recortado va EN EL DATO, no solo en el log. Sin esto, dentro de tres
+        # meses nadie sabría que este rango se cargó con el borde estrechado: una cifra sin
+        # la fecha del dato que la sostiene es una cifra que miente.
+        'dias_recortados_borde': [{'dia': d.isoformat(), 'bd': antes, 'fichero': ahora}
+                                  for d, antes, ahora in adelgazan_borde],
+        'movimientos_descartados_borde': descartados_borde,
     }
     cur.execute(
         "INSERT INTO informes_subidos "
         "(tipo, archivo_nombre, filas_procesadas, filas_validas, filas_descartadas, "
         " fecha_dato_desde, fecha_dato_hasta, resumen_json, procesado_at, notas) "
-        "VALUES ('transacciones', %s, %s, %s, 0, %s, %s, %s, now(), %s);",
-        (fichero, len(movs), len(movs), fmin, fmax, Json(resumen),
+        "VALUES ('transacciones', %s, %s, %s, %s, %s, %s, %s, now(), %s);",
+        (fichero, len(movs), insertadas, descartados_borde, fmin, fmax, Json(resumen),
          f'procesador_transacciones Fase 0 · {PAIS}'))
 
     # --- Resumen ---
@@ -733,22 +782,21 @@ def main():
     print(f"   · BORRADOS del rango ({verbo}):    {borradas}")
     print(f"   · INSERTADOS ({verbo}):            {insertadas}")
     print(f"   · otros países y lo anterior a {fmin}: intactos")
-    if dias_perdidos or dias_adelgazan:
-        print(f"   · ⚠️  HUECOS POR DÍA en {PAIS} — {movs_sin_contrapartida} movimiento(s) del "
-              f"rango se quedan sin contrapartida:")
-        print(_pinta_huecos("        "))
-        print(f"        El TOTAL del rango no encoge (por eso no aborta), pero esos "
-              f"movimientos se borran igual.")
-        print(f"        MÍRALO antes de aplicar: el extracto es PELÍCULA y no se recupera.")
-        print(f"        (Queda anotado en resumen_json de informes_subidos.)")
+    if adelgazan_borde:
+        print(f"   · ✂️  BORDE recortado: rango efectivo {fmin_ef} → {fmax_ef}")
+        for d, antes, ahora in adelgazan_borde:
+            print(f"        {d}: se respeta la BD ({antes}) y se descarta lo del fichero ({ahora})")
+        print(f"        movimientos del fichero descartados por el borde: {descartados_borde}")
     else:
-        print(f"   · huecos por día (desaparecidos o adelgazados): 0")
+        print(f"   · borde recortado: no (los dos extremos vienen completos)")
+    print(f"   · huecos en días INTERMEDIOS:     0 (si hubiera, habría abortado)")
+    print(f"   · sello en informes_subidos ({verbo}): 1 fila (tipo='transacciones')")
 
     if MODO == 'aplicar':
         con.commit()
         print(f"\n✅ APLICADO en {ENTORNO}: {insertadas} movimientos de {PAIS} en "
-              f"transacciones_movimientos (rango recerrado; RLS activo sin políticas; "
-              f"sello escrito en informes_subidos).")
+              f"transacciones_movimientos (rango efectivo {fmin_ef}→{fmax_ef} recerrado; "
+              f"RLS activo sin políticas; sello escrito en informes_subidos).")
         # amazon_es (canales_producto) se calcula DESDE esta tabla y NO se refresca
         # solo: tras esta carga puede haber quedado desfasado. Aviso, no acción.
         # (Encadenarlo con workflow_run para que salga solo: otro encargo.)
@@ -764,10 +812,10 @@ def main():
 
     cur.close(); con.close()
     print(f"\n=== FIN · entorno={ENTORNO} · modo={MODO} · pais={PAIS} · "
-          f"movimientos={len(movs)} · rango={fmin}→{fmax} · borrados={borradas} · "
-          f"insertados={insertadas} · dias_perdidos={len(dias_perdidos)} · "
-          f"dias_adelgazan={len(dias_adelgazan)} · "
-          f"movs_sin_contrapartida={movs_sin_contrapartida} ===", flush=True)
+          f"movimientos={len(movs)} · rango={fmin}→{fmax} · rango_efectivo={fmin_ef}→{fmax_ef} · "
+          f"borrados={borradas} · insertados={insertadas} · "
+          f"borde_recortado={len(adelgazan_borde)} · descartados_borde={descartados_borde} "
+          f"===", flush=True)
 
 
 if __name__ == '__main__':
