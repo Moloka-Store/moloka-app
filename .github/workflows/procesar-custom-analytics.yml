@@ -1,0 +1,77 @@
+name: Moloka - Procesar CUSTOM ANALYTICS
+
+# Procesador propio de Fase 0 para el export "Custom Analytics" del Seller (el eje
+# de la DEMANDA: visitas, sesiones, conversión y LA BUY BOX, por ASIN). A DEMANDA,
+# sin reloj. Espejo de procesar-transacciones.yml + inputs de PERIODO (el fichero no
+# trae ni país ni periodo: los manda el selector). Cajón FOTO POR VENTANA: recierra
+# la ventana (pais, periodo_desde, periodo_hasta) por IGUALDAD y deja intactas las
+# demás ventanas y países. Escalera: staging ensayo → staging aplicar → verificación
+# SQL → producción ensayo → producción aplicar → SQL.
+on:
+  workflow_dispatch:
+    inputs:
+      entorno:
+        description: 'Base de datos destino'
+        type: choice
+        options: [staging, produccion]
+        default: staging
+      modo:
+        description: 'ensayo = solo comprueba y dice qué escribiría; aplicar = recierra la ventana en demanda_asin'
+        type: choice
+        options: [ensayo, aplicar]
+        default: ensayo
+      pais:
+        description: 'País del fichero (LO MANDA EL SELECTOR, no se deduce). Sube a informes/custom_analytics/ el .xlsx de ESE marketplace.'
+        type: choice
+        options: [ES, IT, FR]
+        default: ES
+      periodo_desde:
+        description: 'Inicio de la ventana (YYYY-MM-DD). El fichero NO trae el periodo: lo declaras tú.'
+        type: string
+        required: true
+      periodo_hasta:
+        description: 'Fin de la ventana (YYYY-MM-DD). Lo valida el procesador (no futuro, no posterior a la exportación).'
+        type: string
+        required: true
+      fichero:
+        # Con ES/IT/FR en la misma carpeta, "el más reciente" es una lotería: aquí
+        # pedir el nombre EXACTO es lo NORMAL. Vacío = el más reciente. Si el nombre
+        # no está en el buzón, ABORTA (no cae al más reciente). El catálogo v2 pasa
+        # el nombre exacto (inputFichero: 'fichero').
+        description: 'Nombre EXACTO del .xlsx a procesar. Vacío = el más reciente.'
+        type: string
+        required: false
+        default: ''
+
+concurrency:
+  group: procesar-custom-analytics
+  cancel-in-progress: false
+
+jobs:
+  procesar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        # Primer procesador que lee un .xlsx → openpyxl (versión ya fijada en
+        # requirements.txt, para no estrenar otra). Los workflows instalan a mano,
+        # no usan requirements.txt.
+        run: pip install --quiet supabase psycopg2-binary openpyxl==3.1.5
+
+      - name: Ejecutar procesador
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          ENTORNO: ${{ inputs.entorno }}
+          MODO: ${{ inputs.modo }}
+          PAIS: ${{ inputs.pais }}
+          PERIODO_DESDE: ${{ inputs.periodo_desde }}
+          PERIODO_HASTA: ${{ inputs.periodo_hasta }}
+          FICHERO: ${{ inputs.fichero }}
+          DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
+        run: python -u procesador_custom_analytics.py
