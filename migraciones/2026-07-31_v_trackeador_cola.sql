@@ -125,6 +125,10 @@ vd as (
       when coalesce(caja_mia, false) then 'CAJA_MIA'
       when fba_min is null then 'SIN_RIVAL_FBA'
       when margen_al_fba_min is null then 'SIN_DATOS'
+      -- Corrección #87.1: sin stock no hay ataque. Un margen>=0 sin disponible NO es
+      -- atacable: cae a SIN_DATOS (el motivo será SIN_STOCK). ES_COSTE (margen<0) no se
+      -- toca: es problema de coste con o sin stock.
+      when margen_al_fba_min >= 0 and coalesce(disponible, 0) = 0 then 'SIN_DATOS'
       when margen_al_fba_min >= 8 then 'ATACABLE_8'
       when margen_al_fba_min >= 0 then 'ATACABLE_FLOJO'
       else 'ES_COSTE_NO_PRECIO'
@@ -158,7 +162,9 @@ select
   end as motivo_sin_datos,
   -- Prioridad del briefing (§2.7), en ESTE orden exacto:
   case
-    when t30 > 0 and t7*4.3 < t30*0.6 then 1   -- caída T7 vs T30 (NUNCA por volumen T30)
+    when t30 >= 10 and t7*4.3 < t30*0.6 then 1  -- caída T7 vs T30 (NUNCA por volumen T30).
+                                                -- Corrección #87.2: suelo t30>=10; por debajo
+                                                -- es ruido estadístico (50 de 64 filas).
     when margen_hoy < 8 and coalesce(t7,0) > 0 then 2   -- liquidando sin querer
     when cobertura_dias_t7 < 21 then 3         -- cobertura corta
     else 4
