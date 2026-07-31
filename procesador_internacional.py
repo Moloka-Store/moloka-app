@@ -54,7 +54,7 @@ from psycopg2.extras import Json, execute_values
 from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cañerías de la Fase 0.
-from foto_comun import (Aborta, listar_buzon, descargar_buzon, fecha_del_dato_por_subida, guarda_anti_encogimiento,
+from foto_comun import (Aborta, conectar_bd, listar_buzon, descargar_buzon, fecha_del_dato_por_subida, guarda_anti_encogimiento,
                         claves_previas, barrer_sobrantes, resumen_foto)
 
 # ---------------------------------------------------------------------------
@@ -312,7 +312,7 @@ def main():
     print(f"   {'TOT':4}  {len(filas):6}  {sum(stock_pais.values()):6}")
 
     # --- Conectar al ENTORNO ---
-    con = psycopg2.connect(DB_URL)
+    con = conectar_bd(DB_URL)
     con.autocommit = False
     cur = con.cursor()
 

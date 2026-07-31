@@ -57,6 +57,7 @@
 import re
 from datetime import datetime
 
+import psycopg2
 from psycopg2.extras import execute_values
 
 
@@ -180,6 +181,80 @@ def descargar_buzon(sb, bucket, ruta):
     return _leer_con_reintentos(
         f"descargar {bucket}/{ruta}",
         lambda: sb.storage.from_(bucket).download(ruta))
+
+
+# ---------------------------------------------------------------------------
+# CONEXIÓN a Postgres con reintento — el hermano de los helpers de Storage, para
+# el OTRO extremo del cable. Añadido tras el 31-jul: un `connection … timed out`
+# contra el pooler de Supabase tiró un procesador que ya había leído y validado el
+# fichero entero — no fue el dato, fue la RED, y el mismo transitorio se curó solo
+# al relanzar 15 min después.
+#
+# 🔒 El reintento va SOLO en el connect, JAMÁS envolviendo la escritura. connect() es
+#    idempotente (aún no ha tocado nada), así que reintentarlo es seguro; una transacción
+#    a medias NO se reintenta (duplicaría). Por eso el procesador llama a esto ANTES de
+#    escribir el primer byte, y una vez con la conexión en la mano ya no hay más reintentos.
+#
+# 🔒 connect_timeout es imprescindible para que el reintento SIRVA de algo: sin él, un
+#    pooler que no responde tarda el timeout de TCP del SO en rendirse (el 31-jul fueron
+#    6m57s = 3 IPs × ~139s para UN intento) y el reintento llegaba tarde o nunca. Con él,
+#    cada intento se rinde en `connect_timeout`s por host (libpq lo aplica POR host) y el
+#    reintento puede pillar la red ya recuperada.
+# ---------------------------------------------------------------------------
+
+# SQLSTATE que, AL CONECTAR, son transitorios (merece reintentar). Toda la clase 08
+# (Connection Exception) se trata como transitoria vía el prefijo; estos son los del
+# servidor arrancando/saturado/cerrándose, que también lo son.
+_SQLSTATE_CONEXION_TRANSITORIA = {'57P03', '53300', '57P01'}
+
+
+def _es_transitorio_conexion(exc):
+    """Como `_es_transitorio` pero para el CONNECT. Un `psycopg2.OperationalError` SIN
+    `pgcode` = no llegamos ni a hablar con el servidor (red / pooler / timeout de conexión):
+    transitorio. CON `pgcode`, el servidor RESPONDIÓ: solo la clase 08 (conexión) y el
+    "servidor arrancando/saturado" son transitorios; un 28xxx (credenciales) o 3D000 (base
+    inexistente) NO lo son — reintentar no los arregla. Lo que no sea OperationalError cae en
+    `_es_transitorio` (mismo criterio que Storage). Ante la duda, conservador."""
+    if isinstance(exc, psycopg2.OperationalError):
+        code = getattr(exc, 'pgcode', None)
+        if not code:
+            return True
+        return code.startswith('08') or code in _SQLSTATE_CONEXION_TRANSITORIA
+    return _es_transitorio(exc)
+
+
+def conectar_bd(db_url, esperas=_ESPERAS_REINTENTO, connect_timeout=10):
+    """Abre la conexión a Postgres con REINTENTO ante cortes de red TRANSITORIOS, con espera
+    creciente y tope (igual que las lecturas de Storage). Devuelve la conexión ya abierta; el
+    procesador sigue como siempre (autocommit, cursor). Un fallo que NO es de red (credenciales,
+    host mal, base inexistente) aborta al PRIMER intento diciéndolo: reintentar no lo arregla.
+
+    🔒 SOLO el connect se reintenta. La escritura, jamás (ver cabecera de esta sección)."""
+    intentos = len(esperas) + 1
+    ultimo = None
+    for intento in range(1, intentos + 1):
+        try:
+            con = psycopg2.connect(db_url, connect_timeout=connect_timeout)
+            if intento > 1:
+                print(f"⚠️  [BD] conexión: falló {intento - 1} vez/veces "
+                      f"({ultimo}); intento {intento} OK.", flush=True)
+            return con
+        except Exception as e:
+            ultimo = e
+            if not _es_transitorio_conexion(e):
+                raise Aborta(
+                    f"[BD] No pude conectar y NO es un corte de red → {e}. Reintentar no lo "
+                    f"arregla (credenciales, host/puerto mal, base inexistente o la base rechaza "
+                    f"la conexión). Míralo y relanza. No se ha escrito nada.")
+            if intento <= len(esperas):
+                espera = esperas[intento - 1]
+                print(f"⚠️  [BD] no pude conectar ({e}). "
+                      f"Reintento {intento}/{len(esperas)} en {espera}s…", flush=True)
+                time.sleep(espera)
+    raise Aborta(
+        f"[BD] NO pude conectar a Postgres tras {intentos} intentos → {ultimo}. Es transitorio "
+        f"(corte/timeout de red) pero no cesó en {sum(esperas)}s de esperas. No se ha escrito "
+        f"nada; relanza cuando la conexión vaya.")
 
 
 # Los nombres de tabla/columna de este repo son literales del código, nunca

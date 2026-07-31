@@ -41,6 +41,7 @@
 import os, sys
 import psycopg2
 from psycopg2.extras import execute_values
+from foto_comun import conectar_bd  # reintento en el connect (transitorios de red), como los 8 procesadores
 
 DB_URL  = os.environ.get('DB_URL', '')
 MODO    = os.environ.get('MODO', 'ensayo').strip().lower()       # ensayo | aplicar
@@ -75,7 +76,7 @@ def main():
     if not DB_URL:
         sys.exit("Falta DB_URL. Revisa los secrets del workflow.")
 
-    con = psycopg2.connect(DB_URL)
+    con = conectar_bd(DB_URL)
     con.autocommit = False
     cur = con.cursor()
 
