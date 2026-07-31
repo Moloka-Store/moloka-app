@@ -1,5 +1,18 @@
 name: Moloka - Backup BD
 
+# Copia diaria a Cloudflare R2. Desde el 30-jul-2026 copia DOS cosas:
+#   · la BD (pg_dump --schema=public)              -> s3://moloka-backups/bd/
+#   · los FICHEROS de Supabase Storage             -> s3://moloka-backups/storage/<bucket>/
+# El pg_dump copiaba los APUNTES, no las FACTURAS. Y desde el DROP de la columna
+# `crudo` de keepa_escaparate_hist (PR #74, 29-jul) ese histórico depende de unos
+# CSV que viven SOLO en el bucket `informes`: sin esta copia no hay de dónde
+# reconstruirlos.
+#
+# 🔒 ORDEN DELIBERADO: el Storage se copia DESPUÉS de subir la BD a R2. Si se
+#    pusiera antes, un tropiezo bajando ficheros dejaría el volcado de la base sin
+#    subir — y la base es lo más crítico. Así, pase lo que pase con el Storage, la
+#    copia de la BD ya está a salvo (y el fallo salta igual por el Telegram).
+
 on:
   schedule:
     - cron: '15 2 * * *'
@@ -13,6 +26,14 @@ jobs:
   backup:
     runs-on: ubuntu-latest
     steps:
+      # Hasta hoy este job no bajaba el repo porque no ejecutaba nada de dentro.
+      # Ahora sí: necesita backup_storage.py.
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: 1) Instalar cliente Postgres 17 (la BD es 17.6)
         run: |
           sudo apt-get update -qq
@@ -45,7 +66,7 @@ jobs:
           zcat "$F" | grep -q "productos"    || { echo "::error::No aparece la tabla productos"; exit 1; }
           echo "Copia verificada: $BYTES bytes"
 
-      - name: 4) Subir a Cloudflare R2
+      - name: 4) Subir la BD a Cloudflare R2
         env:
           AWS_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -56,18 +77,73 @@ jobs:
             --region auto
           echo "Subido a R2: bd/moloka_${FECHA}.sql.gz"
 
-      - name: 5) Telegram OK
+      # --- LOS FICHEROS (facturas e informes) --------------------------------
+      # `fotos-fabrica` NO entra: 2.531 objetos / 598 MB medidos el 30-jul. Se
+      # decide aparte. Para meterlo bastaría con anadirlo a BUCKETS.
+      - name: 5) Bajar el Storage a disco (facturas e informes)
+        env:
+          SUPABASE_URL:    ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:    ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          BUCKETS: 'facturas-pdfs,informes'
+          DESTINO: storage_backup
+        run: |
+          pip install --quiet supabase
+          # 🔴 NÚMERO DE CONTROL EXTERNO. Preguntamos a Postgres cuántos FICHEROS tiene
+          # cada bucket (excluyendo los .emptyFolderPlaceholder, que el script no copia) y
+          # se lo pasamos al script. Si su listado recursivo no cuadra con esta cifra, la
+          # copia ABORTA en vez de salir en verde con media copia. Usamos el psql que ya
+          # se instaló en el paso 1 y el mismo secret que el pg_dump; no se mete psycopg2
+          # en el runner por esto. storage.objects vive en el schema `storage`.
+          ESPERADOS=""
+          for B in facturas-pdfs informes; do
+            N=$(psql "$SUPABASE_DB_URL" -At -c \
+              "select count(*) from storage.objects
+                 where bucket_id='$B' and name not like '%.emptyFolderPlaceholder';")
+            if ! [ "$N" -ge 0 ] 2>/dev/null; then
+              echo "::error::No pude leer el recuento de '$B' en storage.objects (psql: '$N')."
+              exit 1
+            fi
+            ESPERADOS="${ESPERADOS:+$ESPERADOS,}$B=$N"
+          done
+          echo "Recuento externo (Postgres): $ESPERADOS"
+          export ESPERADOS
+          python -u backup_storage.py
+
+      - name: 6) Sincronizar el Storage con R2
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID:         ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          # 🔒 SIN --delete, y es deliberado: esto es una COPIA DE SEGURIDAD, no un
+          # espejo. Si alguien borra un fichero en Supabase, la copia en R2 tiene que
+          # sobrevivir — es justo el caso contra el que protege (los CSV de Keepa no
+          # se borran nunca). Consecuencia buscada: R2 puede tener MÁS ficheros que
+          # Supabase, nunca menos.
+          aws s3 sync storage_backup/ "s3://moloka-backups/storage/" \
+            --endpoint-url "$EP" --region auto --no-progress
+          echo "--- Lo que hay en R2 tras sincronizar ---"
+          for B in facturas-pdfs informes; do
+            N=$(aws s3 ls "s3://moloka-backups/storage/$B/" --recursive \
+                  --endpoint-url "$EP" --region auto | wc -l)
+            echo "  storage/$B/: $N objeto(s)"
+          done
+
+      - name: 7) Telegram OK
         env:
           TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           BYTES=$(stat -c%s "moloka_${FECHA}.sql.gz")
           MB=$(awk "BEGIN {printf \"%.1f\", $BYTES/1048576}")
+          SMB=$(awk "BEGIN {printf \"%.1f\", ${STORAGE_BYTES:-0}/1048576}")
           curl -s "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
-            -d text="OK Backup BD Moloka (${FECHA}, ${MB} MB) -> R2" >/dev/null
+            -d text="OK Backup Moloka (${FECHA}) -> R2: BD ${MB} MB + ${STORAGE_OBJETOS:-0} ficheros de Storage (${SMB} MB)" >/dev/null
 
-      - name: 6) Telegram FALLO (solo si algo peta)
+      - name: 8) Telegram FALLO (solo si algo peta)
         if: failure()
         env:
           TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
