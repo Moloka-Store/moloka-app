@@ -373,12 +373,18 @@ def analizar(bytes_xlsx, pais, periodo_desde, periodo_hasta, fichero):
 #    empiezan tarde), así que exigir cobertura total saltaba la guarda SIEMPRE en el
 #    caso real. En su lugar se cruza sobre la INTERSECCIÓN de la ventana con lo que
 #    cubre transacciones del país declarado, y se compara la CUOTA de cada ASIN
-#    (uds_asin / total del conjunto): robusta al desfase de ventana. Medido con un
-#    desfase del 15% — por cuotas el país correcto queda en 0,4-3,4% y el incorrecto
-#    nunca baja del 74%; por absolutos el correcto subía a 14-15% y se confundía.
-#    Se SALTA la guarda (y se dice) si: el fichero no trae 'Unidades pedidas', o la
-#    intersección es < 40% de la ventana. NO caza una MEZCLA (esa la para el
-#    procedimiento: un marketplace por fichero).
+#    (uds_asin / total del conjunto): robusta al desfase de ventana. Se SALTA la
+#    guarda (y se dice) si el fichero no trae 'Unidades pedidas' o la intersección es
+#    < 40% de la ventana. NO caza una MEZCLA (un marketplace por fichero; eso lo para
+#    el procedimiento).
+#
+#    Medido contra PROD (ventana año→30-jul): correcto ES 1,2% · FR 11% · IT 11%;
+#    el incorrecto SIEMPRE >75%. El error del correcto es MAYOR en FR/IT que en ES
+#    porque su intersección es más corta (transacciones arranca en abr/ene) y se
+#    comparan cuotas de periodos con mix de producto distinto — NO es un fallo,
+#    discrimina de sobra. 🔑 Si algún día salta el aviso del 25%, mira la VENTANA
+#    antes que el país. (Con la 1ª carga real —julio natural, transacciones cubre el
+#    mes entero para los tres— la intersección es total y el error del correcto baja.)
 # ---------------------------------------------------------------------------
 def _puente_sku_asin(cur):
     """SKU→ASIN: listings_amazon ∪ productos(es_chase=false). El chase nace SIN ASIN,
