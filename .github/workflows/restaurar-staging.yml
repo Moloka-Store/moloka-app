@@ -1,5 +1,17 @@
 name: Moloka - Restaurar backup en STAGING
 
+# El SIMULACRO DE INCENDIO: coge el backup de R2 y lo restaura en staging para
+# demostrar que la copia sirve de verdad.
+#
+# 🔴 HASTA EL 30-jul-2026 ESTE SIMULACRO NO PODÍA FALLAR, ASÍ QUE NO PROBABA NADA:
+#   · psql corría con ON_ERROR_STOP=0 → seguía adelante pasara lo que pasara;
+#   · la única comprobación posterior imprimía un número y NO lo comparaba con nada.
+#   Una restauración que solo recuperase media base terminaba en VERDE.
+#
+# Ahora: ON_ERROR_STOP=1, la restauración va en UNA transacción (si falla, staging
+# se queda como estaba en vez de a medio destruir) y al final se comprueban los
+# recuentos de las tablas clave contra un mínimo. Si alguna no llega, el job FALLA.
+
 on:
   workflow_dispatch:
     inputs:
@@ -52,6 +64,65 @@ jobs:
           STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
         run: |
           gunzip -f backup.sql.gz
-          psql "$STAGING_DB_URL" -v ON_ERROR_STOP=0 -q -f backup.sql
-          echo "--- Comprobacion: filas en productos ---"
-          psql "$STAGING_DB_URL" -c "select count(*) as productos from public.productos;"
+          echo "Lineas del dump: $(wc -l < backup.sql)"
+          # 🔴 ON_ERROR_STOP=1: si una sentencia falla, se para AQUI.
+          # 🔒 --single-transaction: todo o nada. Sin esto, ON_ERROR_STOP=1 dejaria
+          #    staging a medio borrar (el dump lleva --clean: primero DROPea). Asi,
+          #    una restauracion que falla deja staging exactamente como estaba.
+          if ! psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 --single-transaction \
+                 -q -f backup.sql 2> restaurar_error.log; then
+            echo "::error::La restauracion ha FALLADO. Staging se queda como estaba."
+            echo "--- Donde se paro (psql se detiene en el PRIMER error) ---"
+            head -40 restaurar_error.log
+            echo "----------------------------------------------------------"
+            echo "Esto NO es un fallo del workflow: es el HALLAZGO. Mira que sentencia"
+            echo "es y decide si es benigna. Si lo es, se filtra ESE caso por su nombre."
+            echo "Lo que NO se hace nunca es volver a poner ON_ERROR_STOP=0."
+            exit 1
+          fi
+          echo "Restauracion aplicada sin errores."
+          # Los avisos que no llegan a error tambien se miran.
+          if [ -s restaurar_error.log ]; then
+            echo "--- Avisos de psql (no han parado la restauracion) ---"
+            head -40 restaurar_error.log
+          fi
+
+      - name: 5) Comprobar que la restauracion es REAL
+        env:
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+        run: |
+          # Los minimos estan puestos a ojo de buen cubero por DEBAJO de la mitad de lo
+          # que habia el 30-jul-2026 en produccion (productos 444, movimientos 911,
+          # facturas 44, ledger 16.646, transacciones 14.289, escaner_memoria 45.816),
+          # para que el crecimiento normal no los toque pero una restauracion a medias
+          # los reviente. Si alguna tabla crece mucho, subelos.
+          cat > comprobar.sql <<'SQL'
+          \echo '--- Recuentos tras la restauracion ---'
+          CREATE TEMP TABLE _chk(tabla text, n_filas bigint, minimo bigint);
+          INSERT INTO _chk VALUES
+            ('productos',                 (SELECT count(*) FROM public.productos),                   200),
+            ('movimientos',               (SELECT count(*) FROM public.movimientos),                 400),
+            ('facturas',                  (SELECT count(*) FROM public.facturas),                     20),
+            ('ledger_movimientos',        (SELECT count(*) FROM public.ledger_movimientos),         5000),
+            ('transacciones_movimientos', (SELECT count(*) FROM public.transacciones_movimientos),  5000),
+            ('escaner_memoria',           (SELECT count(*) FROM public.escaner_memoria),           20000);
+
+          SELECT tabla, n_filas, minimo,
+                 CASE WHEN n_filas >= minimo THEN 'OK' ELSE '*** POR DEBAJO ***' END AS veredicto
+          FROM _chk ORDER BY tabla;
+
+          DO $$
+          DECLARE fallos text;
+          BEGIN
+            SELECT string_agg(format('  - %s: %s filas (minimo %s)', tabla, n_filas, minimo),
+                              E'\n' ORDER BY tabla)
+              INTO fallos FROM _chk WHERE n_filas < minimo;
+            IF fallos IS NOT NULL THEN
+              RAISE EXCEPTION E'RESTAURACION INCOMPLETA. Tablas por debajo del minimo:\n%', fallos;
+            END IF;
+            RAISE INFO 'Restauracion verificada: las 6 tablas clave tienen datos.';
+          END $$;
+          SQL
+          # Si el DO lanza la excepcion, ON_ERROR_STOP=1 hace que psql salga != 0
+          # y el job entero falla. Esa es toda la diferencia con el `echo` de antes.
+          psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -f comprobar.sql
