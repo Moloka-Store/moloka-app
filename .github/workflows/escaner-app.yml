@@ -34,6 +34,9 @@ jobs:
         env:
           SUPABASE_URL:  ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY:  ${{ secrets.SUPABASE_KEY }}
+          # 🔒 service key para escribir escaner_detalle (lleva precio de coste; anon revocada) y para
+          #    el puente de chase (linea 1531). Sin esto, las dos quedaban apagadas en silencio.
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           KEEPA_API_KEY: ${{ secrets.KEEPA_API_KEY }}
           KEEPA_TIMEOUT: '120'    # la libreria trae 10s por defecto: demasiado poco para un lote grande
           LOTE_FASE1: '50'        # lotes mas pequenos = agujero mas pequeno si se pierde uno

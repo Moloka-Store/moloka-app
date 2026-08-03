@@ -1926,6 +1926,12 @@ except Exception as ex:
 #    COM_DIGITALES): el valor que se USO, no una constante copiada al lado. Asi el guardian "no
 #    cuadra" del informe (#84) no salta persiguiendo un fantasma.
 try:
+    # 🔒 escaner_detalle lleva pa/beneficio/margen (precio de COSTE): se escribe con la SERVICE KEY,
+    #    NUNCA con la anon (`sb`, linea 50; `anon` esta REVOCADA de la tabla a proposito). Es la regla
+    #    de la casa, la misma que el puente de chase (linea 1527). Sin la key: AVISO y NO se escribe
+    #    (no se abre anon por un informe); el escaneo y el Excel siguen intactos.
+    _svc_det = os.environ.get('SUPABASE_SERVICE_KEY')
+    sb_det = create_client(os.environ['SUPABASE_URL'], _svc_det) if _svc_det else None
     _ejec_det = os.path.basename(catalogo_local) if catalogo_local else f'{PROVEEDOR}_{TS}'
     # 🔒 La fecha de la pasada sale del SELLO DE ARRANQUE (TS, linea 428), NO de now(): en un escaneo
     #    largo que cruce medianoche, now() (que se evalua AQUI, al final) fecharia la pelicula un dia
@@ -1968,10 +1974,13 @@ try:
                 'fecha_ejecucion': _fecha_det,
                 'fichero': _ejec_det,
             })
-    if _filas_det:
+    if not sb_det:
+        print("AVISO: sin SUPABASE_SERVICE_KEY -> NO escribo escaner_detalle (va con service key, "
+              "nunca con la anon; lleva precio de coste). El escaneo y el Excel siguen intactos.")
+    elif _filas_det:
         _n_det = 0
         for _j in range(0, len(_filas_det), 500):   # por lotes: un scan de proveedor son miles de filas
-            sb.table('escaner_detalle').insert(_filas_det[_j:_j + 500]).execute()
+            sb_det.table('escaner_detalle').insert(_filas_det[_j:_j + 500]).execute()
             _n_det += len(_filas_det[_j:_j + 500])
         print(f"escaner_detalle: {_n_det} filas de detalle escritas (ejecucion={_ejec_det}).")
     else:
