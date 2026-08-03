@@ -37,7 +37,7 @@
 # ============================================================================
 
 import os, sys, io, csv, json
-from datetime import date
+from datetime import date, datetime
 
 import psycopg2
 from psycopg2.extras import Json, execute_values
@@ -666,12 +666,21 @@ def main():
     # informe de salud vino raro. Válvula para una descatalogación masiva legítima ya
     # revisada: PERMITIR_BAJAS_MASIVAS=1.
     n_tope = max(15, int(previas * 0.10))
-    if len(bajas) > n_tope and os.environ.get('PERMITIR_BAJAS_MASIVAS') != '1':
-        raise Aborta(
-            f"[Guarda A-tope] Esta carga daría de baja {len(bajas)} vidas de salud_fba (tope {n_tope}). "
-            f"Es demasiado para ser churn normal: casi siempre significa que internacional vino "
-            f"incompleto o que el informe de salud llegó raro. No se borra nada. Míralo; si es una "
-            f"descatalogación masiva de verdad ya revisada: PERMITIR_BAJAS_MASIVAS=1.")
+    if len(bajas) > n_tope:
+        if os.environ.get('PERMITIR_BAJAS_MASIVAS') != '1':
+            raise Aborta(
+                f"[Guarda A-tope] Esta carga daría de baja {len(bajas)} vidas de salud_fba (tope {n_tope}). "
+                f"Es demasiado para ser churn normal: casi siempre significa que internacional vino "
+                f"incompleto o que el informe de salud llegó raro. No se borra nada. Míralo; si es una "
+                f"descatalogación masiva de verdad ya revisada: PERMITIR_BAJAS_MASIVAS=1.")
+        # 🔓 VÁLVULA ABIERTA a propósito → queda ESCRITO en el log (nº de bajas + fechas).
+        # Por defecto está APAGADA; solo se entra aquí si alguien puso PERMITIR_BAJAS_MASIVAS=1
+        # en ESE run (es de un solo uso: no persiste). Una puerta trasera sin rastro acaba
+        # abierta (Fernando, 3-ago), así que se grita con el número y la fecha.
+        print(f"\n⚠️⚠️  [Guarda A-tope · VÁLVULA ABIERTA] PERMITIR_BAJAS_MASIVAS=1 → se SALTA el "
+              f"tope de {n_tope} y se dan de baja {len(bajas)} vidas de salud_fba. "
+              f"snapshot del informe {snap} · ejecutado {datetime.now().isoformat(timespec='seconds')} · "
+              f"ámbito {describir_ambito(AMBITO)}. La lista completa va justo debajo.", flush=True)
 
     # CONDICIÓN (Fernando, 3-ago): la lista de bajas se IMPRIME ENTERA (ensayo y aplicar),
     # nunca en silencio. En ENSAYO se ve lo que SE BORRARÍA, para revisarlo antes de aplicar.
