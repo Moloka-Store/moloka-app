@@ -1019,7 +1019,11 @@ else:
                       'nombre':row.get(cN,''), 'marca':MARCA, 'pa':pa,
                       'es_chase':_es_case, 'es_caja6':_es_caja6,
                       'uds_caja': (partir_ean(ean_in)[2] or UNIDADES_CASE_TCG),   # C12 son 12, no 6
-                      'volumen':vol, 'url':url})
+                      'volumen':vol, 'url':url,
+                      # La ficha viaja desde la FACTURA en el catalogo de B2 (columna 'producto_id'). Los
+                      # feeds de proveedor no traen esa columna -> '' -> None. Se escribe tal cual en
+                      # escaner_detalle.producto_id (camino de la factura): NO se cruza EAN->ficha.
+                      'producto_id': (str(row.get('producto_id','')).strip() or None)})
     print(f"Disponibles a escanear: {len(filas)} | fuera por estado/stock: {fuera_disp} | "
           f"EAN problematicos: {len(problematicos)} | CHASE: {sum(f['es_chase'] for f in filas)}")
     if chase_sueltos:
@@ -1224,7 +1228,12 @@ def _reduce_prod(prod):
     # de Fase 1 y hasta ahora se tiraba. Sin el, registra() no puede cotejar.
     st = prod.get('stats') or {}
     return {'asin': prod.get('asin'), 'title': prod.get('title') or '',
-            'stats': {'current': st.get('current'), 'avg90': st.get('avg90')},
+            # salesRankDrops30 y listedSince son SEÑALES DE IDENTIDAD (#85) que ya vienen GRATIS en esta
+            # misma respuesta de Fase 1 (la llamada usa stats=90) y hasta ahora se tiraban. Solo alimentan
+            # sondeo_keepa; NO tocan el cotejo ni la eleccion por rank. Cache vieja sin ellas -> None (ok).
+            'stats': {'current': st.get('current'), 'avg90': st.get('avg90'),
+                      'salesRankDrops30': st.get('salesRankDrops30')},
+            'listedSince': prod.get('listedSince'),
             'eanList': prod.get('eanList'), 'upcList': prod.get('upcList')}
 
 def keepa_rank(codigos, domain='ES'):
@@ -1277,6 +1286,9 @@ if filas:
             f = fila_por_ean[ein]
             cand = {'ean_in':ein,'asin':asin,'r_act':r_act,'r_90':r_90,'fila':f,'propio':es_propio(f['core'])}
             cand['title'] = prod.get('title') or ''
+            # señales de identidad para sondeo_keepa (#85), gratis en la respuesta de Fase 1.
+            cand['rank_drops_30d'] = st.get('salesRankDrops30')
+            cand['listed_since']   = prod.get('listedSince')
             cands_por_ean.setdefault(ein, []).append(cand)      # <- se guardan TODOS (para el cotejo)
             if ein in candidatos:
                 prev = candidatos[ein]
@@ -1417,6 +1429,28 @@ print(f"\nCon ASIN: {len(candidatos)} | PASAN: {len(pasan)} | sin rank: {len(sin
 # ============================================================
 # Celda 7 - FASE 2: informe ES/IT/FR (3 tok/pais, buybox sin offers)
 # ============================================================
+def _url_imagen(prod):
+    # Mismo montaje VERIFICADO que el v1 en produccion (moloka_actualizar_nube.py:1882): Keepa marco
+    # imagesCSV como DEPRECATED; el campo bueno es 'images' (lista), con imagesCSV de reserva. La URL
+    # es https://m.media-amazon.com/images/I/<nombre>. None si no hay imagen (hueco vacio, no icono roto).
+    imgs = prod.get('images')
+    if isinstance(imgs, list) and imgs:
+        el = imgs[0]; nombre = None
+        if isinstance(el, dict):
+            for k in ('l', 'large', 'hiRes', 'm', 'medium', 'image', 'name'):
+                if el.get(k): nombre = el[k]; break
+        elif isinstance(el, str):
+            nombre = el
+        if nombre:
+            nombre = str(nombre)
+            return nombre if nombre.startswith('http') else ('https://m.media-amazon.com/images/I/' + nombre)
+    csv = prod.get('imagesCSV')   # campo viejo, de reserva
+    if csv:
+        primer = str(csv).split(',')[0].strip()
+        if primer:
+            return 'https://m.media-amazon.com/images/I/' + primer
+    return None
+
 def datos_pais(asin, dom):
     res = keepa_query([asin], product_code_is_asin=True, domain=dom, stats=90, history=0, buybox=True)
     # 🔒 None (fallo de red tras reintentos) NO es lo mismo que [] (Keepa no
@@ -1452,6 +1486,7 @@ def datos_pais(asin, dom):
             'rank90':a90[IDX_RANK] if len(a90)>IDX_RANK else -1,
             'n_of':_pos(st.get('totalOfferCount')),
             'vendidos':p.get('monthlySold'),
+            'imagen':_url_imagen(p),
             'titulo':(p.get('title') or '')}
 
 lista = list(pasan.values())
@@ -1493,6 +1528,7 @@ for i,c in enumerate(lista,1):
     f = c['fila']
     item = {'nombre':f['nombre'],'ean':c['ean_in'],'asin':c['asin'],'marca':f['marca'],
             'pa':f['pa'],'core':f['core'],'es_chase':f['es_chase'],'propio':c['propio'],
+            'producto_id':f.get('producto_id'),   # viaja desde la factura (B2); None en feeds de proveedor
             'volumen':f.get('volumen'),'url':f.get('url',''),'titulo_amz':'',
             'ambiguo':c['ean_in'] in amb_eans,'paises':{},
             'cotejo':(cotejo_info.get(c['ean_in']) or {}).get('veredicto','—'),   # para marcar dudosos en Telegram
@@ -1949,6 +1985,12 @@ try:
                 'ejecucion': _ejec_det,
                 'ean': _it.get('ean'),
                 'nombre': _it.get('nombre'),
+                # asin = el ELEGIDO POR RANK (candidatos[ein]): vale para ENLAZAR (Keepa) y AUDITAR, JAMAS
+                # para escribir en una ficha (lo dice el comentario de la columna). imagen = foto del
+                # producto. producto_id = la ficha que viajo desde la FACTURA (B2); None en feeds de proveedor.
+                'asin': _it.get('asin'),
+                'imagen': _d.get('imagen'),
+                'producto_id': _it.get('producto_id'),
                 'pais': _dom,
                 'pa': _it.get('_pa_efectivo'),
                 'pa_dividido': _pa_div,
@@ -1987,6 +2029,100 @@ try:
         print("escaner_detalle: no habia filas de detalle que escribir.")
 except Exception as _ex_det:
     print("!!! CRITICO: no se pudo escribir escaner_detalle (el escaneo y el Excel SIGUEN intactos):", _ex_det)
+
+# ============================================================
+# Celda 9c - PELICULA: los CANDIDATOS del sondeo EAN->ASIN en sondeo_keepa (para el clasificador)
+# ============================================================
+# 🔴 El escaner YA resolvio el EAN->ASIN en Fase 1 y guardo TODOS los candidatos en cands_por_ean. Aqui
+#    SOLO se guarda lo que ya se sabe: NO se escribe ASIN en ninguna ficha, NO se toca candidatos[ein]
+#    (la eleccion por rank del Excel), ni la hoja Ambiguos, ni el Excel. El clasificador (clasificarSondeo,
+#    en la app v2) leera esto y decidira; el rank del Excel dice quien vende mas, no que producto ES.
+# 🔒 Su PROPIO try (independiente del de escaner_detalle) y la MISMA service key: sondeo_keepa tambien
+#    esta cerrada a la anon. Si falla (tabla, RLS, red), AVISA y el escaneo y el Excel siguen intactos.
+try:
+    _svc_snd = os.environ.get('SUPABASE_SERVICE_KEY')
+    sb_snd = create_client(os.environ['SUPABASE_URL'], _svc_snd) if _svc_snd else None
+    _lote_snd = os.path.basename(catalogo_local) if catalogo_local else f'{PROVEEDOR}_{TS}'
+    _fecha_snd = TS[0:4] + '-' + TS[4:6] + '-' + TS[6:8]   # del SELLO de arranque, no now() (regla de 9b)
+
+    def _ean_norm_py(cod):
+        # Replica de moloka_ean_norm() para DEDUP local por la clave unica de la tabla (que indexa por
+        # ean_norm, columna GENERADA). Sin 're' (no esta importado): filtramos digitos a mano. NO se
+        # escribe en la tabla (ean_norm la calcula Postgres); solo se usa aqui para no chocar en el lote.
+        s = ''.join(ch for ch in str(cod or '') if ch.isdigit()).lstrip('0')
+        return s or None
+
+    def _km_a_fecha(km):
+        # listedSince de Keepa viene en "Keepa minutes" (epoca 2011-01-01 = +21564000 min sobre Unix).
+        # 0 / negativo = desconocido -> None. listado_desde es DATE, asi que devolvemos 'YYYY-MM-DD'.
+        if not km or km <= 0:
+            return None
+        try:
+            return datetime.fromtimestamp((km + 21564000) * 60, timezone.utc).date().isoformat()
+        except Exception:
+            return None
+
+    _filas_snd = []
+    _vistos_snd = set()   # (ean_norm, asin_candidato) — la clave unica es NULLS NOT DISTINCT
+    _dups_snd = 0
+    # Una fila por candidato de cada EAN (cands_por_ean guarda TODOS los que devolvio Keepa en Fase 1).
+    for _ein, _cands in cands_por_ean.items():
+        for _pos, _cd in enumerate(_cands):
+            _asin_c = _cd.get('asin')
+            _k = (_ean_norm_py(_ein), _asin_c)
+            if _k in _vistos_snd:
+                _dups_snd += 1; continue
+            _vistos_snd.add(_k)
+            _rk = _cd.get('r_act')
+            _filas_snd.append({
+                'lote': _lote_snd,               # la EJECUCION (nombre del catalogo), no la factura
+                'ean_consultado': _ein,          # ean_norm lo calcula Postgres (columna generada)
+                'dominio': 'es',                 # Fase 1 pregunta a domain='ES'
+                'asin_candidato': _asin_c,
+                'posicion': _pos,                # indice dentro de cands_por_ean[ein]
+                'titulo': (_cd.get('title') or None),
+                'rank': _rk if (_rk or 0) > 0 else None,   # r_act llega -1 cuando no hay rank
+                'rank_drops_30d': _cd.get('rank_drops_30d'),
+                'listado_desde': _km_a_fecha(_cd.get('listed_since')),
+                'fecha_sondeo': _fecha_snd,
+                'fichero': _lote_snd,
+                'crudo': {'asin': _asin_c, 'title': _cd.get('title'), 'r_act': _cd.get('r_act'),
+                          'r_90': _cd.get('r_90'), 'ean_in': _cd.get('ean_in'), 'propio': _cd.get('propio'),
+                          'rank_drops_30d': _cd.get('rank_drops_30d'), 'listedSince': _cd.get('listed_since')},
+            })
+    # 🔴 CENTINELA: por cada EAN que Keepa NO devolvio (esta en no_encontrados) una fila con
+    #    asin_candidato = NULL. "Se pregunto y no habia" es un dato; el silencio no. Es lo que el
+    #    unique NULLS NOT DISTINCT (sobre ean_norm) permite distinguir EAN a EAN.
+    for _ne in no_encontrados:
+        _ein = _ne.get('EAN')
+        _k = (_ean_norm_py(_ein), None)
+        if _k in _vistos_snd:
+            _dups_snd += 1; continue
+        _vistos_snd.add(_k)
+        _filas_snd.append({
+            'lote': _lote_snd, 'ean_consultado': _ein, 'dominio': 'es',
+            'asin_candidato': None, 'posicion': None, 'titulo': None, 'rank': None,
+            'rank_drops_30d': None, 'listado_desde': None,
+            'fecha_sondeo': _fecha_snd, 'fichero': _lote_snd,
+            'crudo': {'centinela': True, 'motivo': _ne.get('Motivo')},
+        })
+    if _dups_snd:
+        # GRITARLO (regla del lote, CLAUDE.md §2): fila a fila esto era invisible.
+        print(f"sondeo_keepa: {_dups_snd} filas DESCARTADAS por clave repetida "
+              f"(lote,ean_norm,dominio,asin) -> se queda la primera.")
+    if not sb_snd:
+        print("AVISO: sin SUPABASE_SERVICE_KEY -> NO escribo sondeo_keepa (va con service key, nunca con "
+              "la anon). El escaneo y el Excel siguen intactos.")
+    elif _filas_snd:
+        _n_snd = 0
+        for _j in range(0, len(_filas_snd), 500):   # por lotes, como escaner_detalle
+            sb_snd.table('sondeo_keepa').insert(_filas_snd[_j:_j + 500]).execute()
+            _n_snd += len(_filas_snd[_j:_j + 500])
+        print(f"sondeo_keepa: {_n_snd} filas de sondeo escritas (lote={_lote_snd}).")
+    else:
+        print("sondeo_keepa: no habia candidatos ni centinelas que escribir.")
+except Exception as _ex_snd:
+    print("!!! CRITICO: no se pudo escribir sondeo_keepa (el escaneo y el Excel SIGUEN intactos):", _ex_snd)
 
 # ============================================================
 # Celda 10 - actualizar la memoria del proveedor (presentes / agotados)
