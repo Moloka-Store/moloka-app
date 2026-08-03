@@ -24,6 +24,17 @@
 --     `ventana_hasta` para que la interfaz lo ETIQUETE ("datos hasta 29-jul"), no
 --     se disimula (§1.4: una cifra sin la fecha del dato que la sostiene miente).
 --
+-- 🔴 FRESCURA — que la velocidad NO envejezca en silencio (Fernando, 3-ago). Esta
+--    velocidad depende de que se descarguen las transacciones. Si un día dejan de
+--    bajarse, `ventana_hasta` se congela y la velocidad se vuelve la de hace semanas
+--    SIN avisar — y una velocidad de hace 3 semanas engaña MÁS que la de solo-España
+--    que estamos arreglando. Por eso la vista expone `dias_desde_ultimo_dato`
+--    (= CURRENT_DATE − ventana_hasta): la ANTIGÜEDAD del dato, no un adorno. La
+--    interfaz avisa a partir de un umbral (propuesto para v2: ámbar > 7 días,
+--    "no fiable" > 14 — la mitad de la ventana de 30 d a ciegas, con margen antes
+--    de los 21 d que Fernando marca como claramente engañosos). El umbral vive en
+--    la UI; la vista solo da el dato.
+--
 -- EL PUENTE SKU→ASIN. Las transacciones traen SKU, no ASIN. El cruce va por
 -- `listings_amazon` (All Listings), que es la FUENTE DE IDENTIDAD (§1.1) y ve los
 -- SKU inactivos/muertos. Medido en prod (ventana 30-jun→29-jul):
@@ -87,7 +98,8 @@ select
     sum(cantidad)                                         as uds_30d_total,
     round(sum(cantidad)::numeric / 30, 2)                 as vel_dia_total,
     (select desde from ventana)                          as ventana_desde,
-    (select hasta from ventana)                          as ventana_hasta
+    (select hasta from ventana)                          as ventana_hasta,
+    (CURRENT_DATE - (select hasta from ventana))         as dias_desde_ultimo_dato
 from ventas
 group by asin;
 
