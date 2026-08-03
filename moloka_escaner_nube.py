@@ -1927,9 +1927,11 @@ except Exception as ex:
 #    cuadra" del informe (#84) no salta persiguiendo un fantasma.
 try:
     _ejec_det = os.path.basename(catalogo_local) if catalogo_local else f'{PROVEEDOR}_{TS}'
-    # Scan EN VIVO: la fecha de la pasada ES hoy. No es fechar un informe CARGADO con now() (la regla
-    # de la casa): el dato de Keepa se acaba de leer, la pasada es de hoy.
-    _fecha_det = datetime.now().strftime('%Y-%m-%d')
+    # 🔒 La fecha de la pasada sale del SELLO DE ARRANQUE (TS, linea 428), NO de now(): en un escaneo
+    #    largo que cruce medianoche, now() (que se evalua AQUI, al final) fecharia la pelicula un dia
+    #    por delante del Excel (que usa TS). Ademas asi la fecha viene del sello de la pasada y deja de
+    #    ser una excepcion a la regla del now(). TS = 'YYYYMMDD_HHMM'.
+    _fecha_det = TS[0:4] + '-' + TS[4:6] + '-' + TS[6:8]
     _filas_det = []
     for _it in registros:
         # ¿Se dividio el PA por el tamano de caja? MISMA condicion que uso el calculo; no se recalcula
@@ -1956,6 +1958,11 @@ try:
                 'margen': _d.get('margen'),
                 'decision': _d.get('decision'),
                 'rank': _rk if (_rk or 0) > 0 else None,   # rank_act llega -1 cuando no hay rank
+                # 'vendidos' = monthlySold de Keepa. VERIFICADO en Product.java del SDK oficial (3-ago):
+                # es un contador de compras (`int monthlySold = 0`), non-negative o AUSENTE (->None en
+                # el cliente python), NUNCA -1. El -1 de "no disponible" es de OTROS campos (rank,
+                # numberOfItems...), NO de este. Por eso va SIN guarda -1 (a diferencia del rank); None
+                # es legitimo -> NULL, "no lo se". No hay negativo del que protegerse.
                 'vendidos': _d.get('vendidos'),
                 'n_ofertas': _d.get('n_of'),
                 'fecha_ejecucion': _fecha_det,
