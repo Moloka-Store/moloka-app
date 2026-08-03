@@ -37,7 +37,7 @@
 # ============================================================================
 
 import os, sys, io, csv, json
-from datetime import date
+from datetime import date, datetime
 
 import psycopg2
 from psycopg2.extras import Json, execute_values
@@ -601,30 +601,102 @@ def main():
     claves_nuevas = [(f['registro']['asin'], f['registro']['marketplace'], f['registro']['sku'])
                      for f in filas]
 
-    # ── SALVAGUARDA anti-omisión ────────────────────────────────────────────
+    # ── SALVAGUARDA anti-omisión (CAMINO A · B3, 3-ago-2026) ────────────────
     # El informe FBA a veces OMITE productos SANOS (con stock). El patrón foto los
-    # borraría. Antes de barrer, PROTEGEMOS los (asin, ES) que ya están en salud_fba,
-    # NO vienen en el informe de hoy, y AÚN tienen stock real. Evidencia de stock:
-    #   (a) su propia foto de salud: available + fc_transfer > 0, o
-    #   (b) unidades en inventario_internacional (otra foto).
-    # Solo se borran los fantasmas de verdad (ausentes y sin stock por ningún lado).
+    # borraría. Antes de barrer, PROTEGEMOS las vidas (asin, mk, sku) que ya están en
+    # salud_fba, NO vienen en el informe de hoy, y AÚN tienen stock REAL.
+    #
+    # 🔴 CAMBIO 3-ago (B3): la ÚNICA evidencia de stock que vale es la ACTUAL. Antes se
+    # protegía también por el available+fc_transfer de la PROPIA fila vieja — un dato
+    # RANCIO que mantenía vivas filas de productos ya vacíos. Medido en prod: 7 filas
+    # con stock 0 hoy en internacional, sostenidas por su self-stock de hace 2-3 semanas,
+    # inflaban 121 uds de T30. Ahora la evidencia es SOLO inventario_internacional (la
+    # foto del inventario = el estado de HOY): si internacional dice 0, es un fantasma y
+    # se da de baja. (El impacto sobre la velocidad ya lo quitó v_velocidad_ventas; esto
+    # es higiene de la foto para el resto de consumidores.)
     en_fichero = {(a.upper(), mk.upper(), sku.upper()) for (a, mk, sku) in claves_nuevas}
     cur.execute("SELECT DISTINCT btrim(asin) FROM inventario_internacional WHERE quantity > 0;")
     intl_con_stock = {r[0].upper() for r in cur.fetchall() if r[0]}
+
+    # 🔒 Guarda A-intl (2a): la protección ahora DEPENDE de internacional. Si esa foto
+    # viene vacía o hundida, muchos productos sanos perderían el respaldo y se darían de
+    # baja EN MASA. Antes de fiarnos de ella, se comprueba que está sana:
+    #   · vacía (0 ASIN con stock) → ABORTA.
+    #   · < 50% de su foto ANTERIOR (idioma anti-encogimiento) → ABORTA.
+    cur.execute("SELECT max(fecha_foto) FROM inventario_internacional;")
+    intl_fecha = cur.fetchone()[0]
     cur.execute(
-        "SELECT asin, marketplace, sku, COALESCE(available,0)+COALESCE(fc_transfer,0) "
+        "SELECT count(*) FROM ("
+        "  SELECT btrim(asin) a FROM inventario_internacional_historico "
+        "  WHERE fecha_foto = (SELECT max(fecha_foto) FROM inventario_internacional_historico "
+        "                      WHERE fecha_foto < %s) AND quantity > 0 "
+        "  GROUP BY btrim(asin)) t;", (intl_fecha,))
+    intl_prev = cur.fetchone()[0]
+    intl_ahora = len(intl_con_stock)
+    if intl_ahora == 0:
+        raise Aborta(
+            "[Guarda A-intl] inventario_internacional no tiene ni un ASIN con stock: la red que "
+            "protege a salud_fba de dar de baja productos omitidos-pero-con-stock DEPENDE de esa "
+            "foto. Vacía, no puedo distinguir un fantasma de un omitido. No se borra nada en salud.")
+    if intl_prev and intl_ahora < intl_prev * 0.5:
+        raise Aborta(
+            f"[Guarda A-intl] inventario_internacional cayó a {intl_ahora} ASIN con stock (su foto "
+            f"anterior tenía {intl_prev}): menos del 50%. Parece una carga incompleta; no se da de "
+            f"baja nada en salud hasta que internacional vuelva a estar sana.")
+
+    # Candidatas a baja = vidas del ámbito ausentes del informe y SIN respaldo en
+    # internacional. Se traen con DETALLE (nombre, uds, T30, fecha) para poder ENSEÑAR
+    # la lista antes de aplicar: una baja NUNCA se cierra en silencio.
+    cur.execute(
+        "SELECT asin, marketplace, sku, product_name, "
+        "       COALESCE(available,0)+COALESCE(fc_transfer,0), units_shipped_t30, snapshot_date "
         "FROM salud_fba WHERE marketplace = ANY(%s);", (AMBITO[1],))
-    protegidas = []
-    for asin_p, mk_p, sku_p, disp_p in cur.fetchall():
-        # 🔴 Ahora se decide por SKU: si el informe trae UNA vida y la otra no, la
-        # ausente se protege si tiene stock PROPIO (su available+fc_transfer > 0).
+    protegidas, bajas = [], []
+    for asin_p, mk_p, sku_p, nombre_p, disp_p, t30_p, snap_p in cur.fetchall():
         if (asin_p.upper(), mk_p.upper(), sku_p.upper()) in en_fichero:
             continue  # esta vida sí viene en el informe: no es candidata a baja
-        if (disp_p or 0) > 0 or asin_p.upper() in intl_con_stock:
-            protegidas.append((asin_p, mk_p, sku_p))  # vida ausente pero CON stock → NO borrar
+        if asin_p.upper() in intl_con_stock:
+            protegidas.append((asin_p, mk_p, sku_p))                       # respaldo ACTUAL → NO borrar
+        else:
+            bajas.append((asin_p, mk_p, sku_p, nombre_p, disp_p, t30_p, snap_p))  # fantasma → baja
+
+    # 🔒 Guarda A-tope (2b): si una carga daría de baja MÁS de N vidas, PARA y avisa en
+    # vez de aplicar. N = max(15, 10% de las filas previas): la limpieza inicial son ~7
+    # y el régimen normal 0-3; pasar de ~15-22 solo ocurre si internacional falló o el
+    # informe de salud vino raro. Válvula para una descatalogación masiva legítima ya
+    # revisada: PERMITIR_BAJAS_MASIVAS=1.
+    n_tope = max(15, int(previas * 0.10))
+    if len(bajas) > n_tope:
+        if os.environ.get('PERMITIR_BAJAS_MASIVAS') != '1':
+            raise Aborta(
+                f"[Guarda A-tope] Esta carga daría de baja {len(bajas)} vidas de salud_fba (tope {n_tope}). "
+                f"Es demasiado para ser churn normal: casi siempre significa que internacional vino "
+                f"incompleto o que el informe de salud llegó raro. No se borra nada. Míralo; si es una "
+                f"descatalogación masiva de verdad ya revisada: PERMITIR_BAJAS_MASIVAS=1.")
+        # 🔓 VÁLVULA ABIERTA a propósito → queda ESCRITO en el log (nº de bajas + fechas).
+        # Por defecto está APAGADA; solo se entra aquí si alguien puso PERMITIR_BAJAS_MASIVAS=1
+        # en ESE run (es de un solo uso: no persiste). Una puerta trasera sin rastro acaba
+        # abierta (Fernando, 3-ago), así que se grita con el número y la fecha.
+        print(f"\n⚠️⚠️  [Guarda A-tope · VÁLVULA ABIERTA] PERMITIR_BAJAS_MASIVAS=1 → se SALTA el "
+              f"tope de {n_tope} y se dan de baja {len(bajas)} vidas de salud_fba. "
+              f"snapshot del informe {snap} · ejecutado {datetime.now().isoformat(timespec='seconds')} · "
+              f"ámbito {describir_ambito(AMBITO)}. La lista completa va justo debajo.", flush=True)
+
+    # CONDICIÓN (Fernando, 3-ago): la lista de bajas se IMPRIME ENTERA (ensayo y aplicar),
+    # nunca en silencio. En ENSAYO se ve lo que SE BORRARÍA, para revisarlo antes de aplicar.
+    if bajas:
+        print(f"\n--- 🗑️  BAJAS de salud_fba ({describir_ambito(AMBITO)}): {len(bajas)} vida(s) "
+              f"ausentes del informe y SIN stock en internacional HOY ---", flush=True)
+        print(f"   {'ASIN':<12} {'uds':>4} {'T30':>4} {'omit':>5}  producto", flush=True)
+        for asin_b, mk_b, sku_b, nombre_b, disp_b, t30_b, snap_b in sorted(
+                bajas, key=lambda r: (r[6] or date.min)):
+            dias = (snap - snap_b).days if snap_b else '?'
+            print(f"   {asin_b:<12} {disp_b or 0:>4} "
+                  f"{(t30_b if t30_b is not None else '—'):>4} {str(dias)+'d':>5}  "
+                  f"{(nombre_b or '')[:70]}", flush=True)
     if protegidas:
-        print(f"   · 🛡️ Salvaguarda: {len(protegidas)} vidas (asin, mk, sku) ausentes del "
-              f"informe PROTEGIDAS (tienen stock en salud o internacional): "
+        print(f"   · 🛡️ Salvaguarda: {len(protegidas)} vida(s) ausentes del informe PROTEGIDAS "
+              f"(con stock en internacional HOY): "
               f"{', '.join(a for a, _, _ in protegidas[:10])}"
               f"{' …' if len(protegidas) > 10 else ''}", flush=True)
     claves_barrido = claves_nuevas + protegidas
