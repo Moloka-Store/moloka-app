@@ -1914,6 +1914,72 @@ except Exception as ex:
     print("!!! CRITICO: no se pudo registrar en escaner_resultados (el Excel puede estar en Storage):", ex)
 
 # ============================================================
+# Celda 9b - PELICULA: el DETALLE por producto y pais en escaner_detalle (informe de la factura)
+# ============================================================
+# 🔴 SOLO se ANADE una escritura de lo que el escaner YA calculo: NO se toca la formula, ni el
+#    semaforo, ni escaner_memoria. Va en su PROPIO try y NO puede tumbar el escaneo: si la tabla no
+#    esta (migracion sin aplicar), la RLS, o lo que sea, se AVISA en el log y el Excel sale IGUAL.
+#    Ese fichero corre todos los dias para Elena y no puede depender de una tabla nueva.
+# 🔒 Se escribe TAMBIEN en MIS_COMPRAS (perfil efimero): "no toca memoria" es escaner_memoria, NO la
+#    pelicula. Sin esto el informe de la factura nace vacio, que es lo que veniamos a arreglar.
+# 🔒 almacen/com_digitales son los MISMOS globales que se pasan a calc_rentabilidad (ALMACEN,
+#    COM_DIGITALES): el valor que se USO, no una constante copiada al lado. Asi el guardian "no
+#    cuadra" del informe (#84) no salta persiguiendo un fantasma.
+try:
+    _ejec_det = os.path.basename(catalogo_local) if catalogo_local else f'{PROVEEDOR}_{TS}'
+    # 🔒 La fecha de la pasada sale del SELLO DE ARRANQUE (TS, linea 428), NO de now(): en un escaneo
+    #    largo que cruce medianoche, now() (que se evalua AQUI, al final) fecharia la pelicula un dia
+    #    por delante del Excel (que usa TS). Ademas asi la fecha viene del sello de la pasada y deja de
+    #    ser una excepcion a la regla del now(). TS = 'YYYYMMDD_HHMM'.
+    _fecha_det = TS[0:4] + '-' + TS[4:6] + '-' + TS[6:8]
+    _filas_det = []
+    for _it in registros:
+        # ¿Se dividio el PA por el tamano de caja? MISMA condicion que uso el calculo; no se recalcula
+        # nada, se lee de item tal cual estaba (item['pa'] es el PA crudo; _pa_efectivo, el ya dividido).
+        _pa_div = bool(_it.get('case_de_6') and _it.get('pa') and PERFIL.get('precio_caja6') == 'caja')
+        for _dom, _d in (_it.get('_paises_calc') or {}).items():
+            _rk = _d.get('rank_act')
+            _filas_det.append({
+                'ejecucion': _ejec_det,
+                'ean': _it.get('ean'),
+                'nombre': _it.get('nombre'),
+                'pais': _dom,
+                'pa': _it.get('_pa_efectivo'),
+                'pa_dividido': _pa_div,
+                'precio_venta': _d.get('precio'),
+                'canal': _d.get('canal'),
+                'ref_pct': _d.get('ref_pct'),
+                'fee_fba': _d.get('fee'),
+                'iva': _d.get('iva'),
+                'almacen': ALMACEN,
+                'com_digitales': COM_DIGITALES,
+                'beneficio': _d.get('beneficio'),
+                'roi': _d.get('roi'),
+                'margen': _d.get('margen'),
+                'decision': _d.get('decision'),
+                'rank': _rk if (_rk or 0) > 0 else None,   # rank_act llega -1 cuando no hay rank
+                # 'vendidos' = monthlySold de Keepa. VERIFICADO en Product.java del SDK oficial (3-ago):
+                # es un contador de compras (`int monthlySold = 0`), non-negative o AUSENTE (->None en
+                # el cliente python), NUNCA -1. El -1 de "no disponible" es de OTROS campos (rank,
+                # numberOfItems...), NO de este. Por eso va SIN guarda -1 (a diferencia del rank); None
+                # es legitimo -> NULL, "no lo se". No hay negativo del que protegerse.
+                'vendidos': _d.get('vendidos'),
+                'n_ofertas': _d.get('n_of'),
+                'fecha_ejecucion': _fecha_det,
+                'fichero': _ejec_det,
+            })
+    if _filas_det:
+        _n_det = 0
+        for _j in range(0, len(_filas_det), 500):   # por lotes: un scan de proveedor son miles de filas
+            sb.table('escaner_detalle').insert(_filas_det[_j:_j + 500]).execute()
+            _n_det += len(_filas_det[_j:_j + 500])
+        print(f"escaner_detalle: {_n_det} filas de detalle escritas (ejecucion={_ejec_det}).")
+    else:
+        print("escaner_detalle: no habia filas de detalle que escribir.")
+except Exception as _ex_det:
+    print("!!! CRITICO: no se pudo escribir escaner_detalle (el escaneo y el Excel SIGUEN intactos):", _ex_det)
+
+# ============================================================
 # Celda 10 - actualizar la memoria del proveedor (presentes / agotados)
 # ============================================================
 ahora = datetime.now(timezone.utc).isoformat()
