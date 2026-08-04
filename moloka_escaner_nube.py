@@ -1950,6 +1950,21 @@ except Exception as ex:
     print("!!! CRITICO: no se pudo registrar en escaner_resultados (el Excel puede estar en Storage):", ex)
 
 # ============================================================
+# La EJECUCION: el identificador de ESTA pasada (llave de escaner_detalle y de sondeo_keepa).
+# ============================================================
+# 🔴 CONTRATO EXPLICITO entre los dos repos (antes era un acuerdo tacito y por eso mordia):
+#    - Cuando la pasada es de la APP (factura), el id lo MANDA ella en el recado (SOLICITUD['ejecucion']),
+#      porque B2 ya le devolvio ?ejecucion=... a la pantalla ANTES de que el escaner corra. Si el escaner
+#      se inventara otro, la pantalla de la factura saldria vacia.
+#    - Si NO viene (escaneo de proveedor / manual de Fernando), el escaner se inventa uno UNICO con el
+#      sello TS. JAMAS el basename a secas: la app v1 sube el catalogo con el nombre del fichero del disco
+#      (index.html: nombre = file.name), asi que dos subidas de "catalogo.csv" colisionarian en el unique
+#      (ejecucion, ean_norm, pais) NULLS NOT DISTINCT -> abortaria el lote de 500 y el freno se lo tragaria
+#      en silencio. El TS hace unica cada pasada. Nadie depende de que dos repos coincidan por casualidad.
+_EJECUCION = SOLICITUD.get('ejecucion') or (
+    f'{os.path.basename(catalogo_local)}_{TS}' if catalogo_local else f'{PROVEEDOR}_{TS}')
+
+# ============================================================
 # Celda 9b - PELICULA: el DETALLE por producto y pais en escaner_detalle (informe de la factura)
 # ============================================================
 # 🔴 SOLO se ANADE una escritura de lo que el escaner YA calculo: NO se toca la formula, ni el
@@ -1968,7 +1983,7 @@ try:
     #    (no se abre anon por un informe); el escaneo y el Excel siguen intactos.
     _svc_det = os.environ.get('SUPABASE_SERVICE_KEY')
     sb_det = create_client(os.environ['SUPABASE_URL'], _svc_det) if _svc_det else None
-    _ejec_det = os.path.basename(catalogo_local) if catalogo_local else f'{PROVEEDOR}_{TS}'
+    _ejec_det = _EJECUCION   # id de la pasada: recado['ejecucion'] (app) o basename_TS (proveedor). Ver arriba.
     # 🔒 La fecha de la pasada sale del SELLO DE ARRANQUE (TS, linea 428), NO de now(): en un escaneo
     #    largo que cruce medianoche, now() (que se evalua AQUI, al final) fecharia la pelicula un dia
     #    por delante del Excel (que usa TS). Ademas asi la fecha viene del sello de la pasada y deja de
@@ -2042,7 +2057,7 @@ except Exception as _ex_det:
 try:
     _svc_snd = os.environ.get('SUPABASE_SERVICE_KEY')
     sb_snd = create_client(os.environ['SUPABASE_URL'], _svc_snd) if _svc_snd else None
-    _lote_snd = os.path.basename(catalogo_local) if catalogo_local else f'{PROVEEDOR}_{TS}'
+    _lote_snd = _EJECUCION   # MISMO id que escaner_detalle.ejecucion: ata informe y sondeo de la pasada.
     _fecha_snd = TS[0:4] + '-' + TS[4:6] + '-' + TS[6:8]   # del SELLO de arranque, no now() (regla de 9b)
 
     def _ean_norm_py(cod):
