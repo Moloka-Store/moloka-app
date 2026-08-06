@@ -45,7 +45,20 @@ PERFILES = {
     'HEO': {'tipo':'csv','sep':';','header':0,'col_marca':'marca','col_ean':'ean',
             'col_nombre':'nombre','col_pa':'precio','col_stock':None,
             'col_estado':'estado','estados_ok':['disponible']},
-    # Proveedores de Claude-in-Chrome (formato variable) se anaden con deteccion tolerante.
+    # ============================================================
+    # PROVEEDORES DE CLAUDE-IN-CHROME (formato VARIABLE) -> DETECCION TOLERANTE
+    # ------------------------------------------------------------
+    # Mismos perfiles y misma semantica que el escaner de tokens (moloka_escaner_nube.py):
+    # cada extraccion puede salir con columnas distintas (nombres, orden, xlsx/csv), asi que
+    # en vez de fijar nombres de columna el motor detecta EAN (12-13 digitos), precio
+    # (importe con o sin 'EUR'), nombre (texto largo) y, si existen, marca y stock.
+    # EAN no-12/13 -> a descartados (NO se inventan EANs). Stock ausente -> se asume
+    # disponible. CHASE no aplica.
+    # Anadir un proveedor nuevo de Claude-in-Chrome = una linea aqui + el desplegable.
+    # ============================================================
+    'DINOTOYS': {'tipo':'auto', 'deteccion':'tolerante'},   # mayorista holandes (Logic4)
+    'ZENTRADA': {'tipo':'auto', 'deteccion':'tolerante'},   # marketplace mayorista (xlsx/csv)
+    'MIS_COMPRAS': {'tipo':'auto', 'deteccion':'tolerante', 'efimero':True},   # compras ad-hoc: NO toca la memoria de ningun proveedor
 }
 
 # ===== Columnas del CSV del Visualizador (por NOMBRE: robusto a reordenacion) =====
@@ -83,6 +96,76 @@ def _stock_osma(x):
     s=s.lstrip('>').strip().replace('.','')
     try: return float(s)
     except Exception: return None
+def _num_eur(x):
+    """Precio tipo '1,77 EUR' o '2.01 €' (ZENTRADA) -> float. Quita el sufijo de moneda."""
+    s=str(x).upper().replace('EUR','').replace('€','').strip()
+    return _num(s)
+def _parse_precio_libre(x):
+    """Precio en cualquier formato razonable: '1,77 EUR', '2.01 €', '8,62', '11.34'."""
+    s=str(x)
+    tiene_moneda=('eur' in s.lower()) or ('€' in s)
+    return _num_eur(x) if tiene_moneda else _num(x)
+def _es_ean_valido(s):
+    """True si s es un EAN/UPC utilizable: 12 o 13 digitos."""
+    s=str(s).strip()
+    return s.isdigit() and len(s) in (12,13)
+def detectar_columnas(cat):
+    """Detecta por NOMBRE (pistas multiidioma) y, si falla, por CONTENIDO las columnas
+    de ean / precio / nombre / marca / stock en un catalogo de formato desconocido
+    (ficheros de Claude-in-Chrome). Devuelve los nombres REALES de columna (o None).
+    No inventa nada: si no encuentra EAN o precio con confianza, el llamante aborta.
+    Copia literal de la del escaner de tokens: los dos motores tienen que detectar IGUAL,
+    o el mismo fichero daria dos catalogos distintos segun por donde se escanee."""
+    cols=list(cat.columns)
+    low={c:str(c).strip().lower() for c in cols}
+
+    def por_nombre(claves, excluir=()):
+        for c in cols:
+            if c in excluir: continue
+            if any(k in low[c] for k in claves): return c
+        return None
+
+    # ---- EAN: nombre primero, si no, columna con mas valores de 12-13 digitos ----
+    ean=por_nombre(['ean','gtin','barcode','codigo de barras','código de barras','upc'])
+    if ean is None:
+        mejor, mejor_score = None, 0.0
+        for c in cols:
+            score=cat[c].astype(str).str.strip().apply(_es_ean_valido).mean()
+            if score>mejor_score: mejor, mejor_score = c, score
+        if mejor_score>=0.30: ean=mejor          # al menos 30% parecen EAN reales
+
+    # ---- PRECIO: nombre primero, si no, columna 'tipo importe' (con decimales/moneda) ----
+    precio=por_nombre(['precio','price','preis','prezzo','pvd','coste','cost','tarifa','eur','€'],
+                      excluir=(ean,))
+    if precio is None:
+        mejor, mejor_score = None, 0.0
+        for c in cols:
+            if c==ean: continue
+            vals=cat[c].astype(str)
+            parseables=vals.apply(lambda v: _parse_precio_libre(v) is not None).mean()
+            con_decimal=vals.apply(lambda v: (',' in v or '.' in v or 'eur' in v.lower() or '€' in v)).mean()
+            score=parseables*(0.4+0.6*con_decimal)   # premia decimales/moneda (evita indices N°)
+            if score>mejor_score: mejor, mejor_score = c, score
+        if mejor_score>=0.50: precio=mejor
+
+    # ---- NOMBRE: nombre primero, si no, columna de texto mas largo ----
+    nombre=por_nombre(['nombre','name','descrip','titre','title','producto','product',
+                       'bezeichnung','articolo','artikel','designation'], excluir=(ean,precio))
+    if nombre is None:
+        mejor, mejor_len = None, 0.0
+        for c in cols:
+            if c in (ean,precio): continue
+            avg=cat[c].astype(str).str.len().mean()
+            if avg>mejor_len: mejor, mejor_len = c, avg
+        nombre=mejor
+
+    # ---- MARCA y STOCK: opcionales (solo por nombre) ----
+    marca=por_nombre(['marca','brand','licencia','license','licens','fabricante',
+                      'manufacturer','publisher','fabricant'], excluir=(ean,precio,nombre))
+    stock=por_nombre(['stock','disponib','verfüg','verfug','qty','cantidad','quantity','quantità'],
+                     excluir=(ean,precio,nombre,marca))
+
+    return {'ean':ean,'precio':precio,'nombre':nombre,'marca':marca,'stock':stock}
 def _num_csv(x):
     s=(x or '').strip().replace('%','').strip()
     if s in ('','-','—'): return None
@@ -119,12 +202,45 @@ MIN_RATIO_LOTE = 0.5
 
 # ===== Lectura del catalogo del proveedor (misma logica que el escaner) =====
 def leer_proveedor(prov, marca, ruta):
+    if prov not in PERFILES:
+        raise ValueError(f'Proveedor desconocido: {prov}. Validos: {list(PERFILES)}')
     P=PERFILES[prov]
-    if P['tipo']=='excel':
+    if P['tipo']=='auto':
+        # Formato VARIABLE (Claude-in-Chrome): el extracto puede llegar como .xlsx o como
+        # .csv. Se detecta por los BYTES (un .xlsx es un ZIP -> empieza por 'PK'), no por el
+        # nombre ni la extension del fichero subido. Igual que el escaner de tokens.
+        try:
+            with open(ruta,'rb') as _fp: _es_excel = _fp.read(2)==b'PK'
+        except Exception:
+            _es_excel=False
+        if _es_excel:
+            cat=pd.read_excel(ruta, sheet_name=P.get('sheet',0), header=P.get('header',0),
+                              dtype=str).fillna('')
+        else:
+            cat=pd.read_csv(ruta, sep=P.get('sep',','), dtype=str, encoding='utf-8-sig',
+                            on_bad_lines='skip').fillna('')
+    elif P['tipo']=='excel':
         cat=pd.read_excel(ruta, sheet_name=P['sheet'], header=P['header'], dtype=str).fillna('')
     else:
         cat=pd.read_csv(ruta, sep=P.get('sep',';'), dtype=str, on_bad_lines='skip').fillna('')
-    cM=P.get('col_marca')
+    cat.columns=[str(c).strip() for c in cat.columns]   # BEMS trae espacios en los nombres
+
+    # ---- Columnas: fijas por perfil, o detectadas si el perfil es tolerante ----
+    _tolerante = (P.get('deteccion')=='tolerante')
+    if _tolerante:
+        det=detectar_columnas(cat)
+        print(f"Deteccion tolerante -> EAN={det['ean']!r} precio={det['precio']!r} "
+              f"nombre={det['nombre']!r} marca={det['marca']!r} stock={det['stock']!r}")
+        if not det['ean'] or not det['precio']:
+            # ABORTA, no adivina: sin EAN o sin precio no hay escaneo que valga.
+            raise ValueError('No pude detectar la columna de EAN o de precio en este catalogo. '
+                             'Revisalo (o pasaselo a Claude para normalizarlo).')
+        cM, cE, cN, cP, cS = (det['marca'], det['ean'], det['nombre'] or det['ean'],
+                              det['precio'], det['stock'])
+    else:
+        cM, cE, cN, cP, cS = (P.get('col_marca'), P['col_ean'], P['col_nombre'],
+                              P['col_pa'], P.get('col_stock'))
+
     if marca and marca.strip().upper()!='TODAS' and cM:
         cat=cat[cat[cM].str.contains(marca, case=False, na=False)]
     # ---- CAJAS (OcioStock mete la caja como "EAN base + C6"): coste el mas barato ----
@@ -134,11 +250,11 @@ def leer_proveedor(prov, marca, ruta):
     if _suf:
         _patc=_re2.compile(r'^(\d{12,13})\s+'+_re2.escape(_suf)+r'$')
         for _,row in cat.iterrows():
-            e=str(row.get(P['col_ean'],'')).strip()
+            e=str(row.get(cE,'')).strip()
             mm=_patc.match(e)
             if not mm: continue
             base=mm.group(1)
-            pd_=_num(row.get(P['col_pa'],''))
+            pd_=_num(row.get(cP,''))
             mv=_mejor_volumen(row.get(P['col_volumen'],'')) if P.get('col_volumen') else None
             cand=[]
             if pd_ and pd_>0: cand.append((6, pd_))          # comprar 1 caja (6 ud)
@@ -146,26 +262,26 @@ def leer_proveedor(prov, marca, ruta):
             if not cand: continue
             barato=min(cand, key=lambda x:x[1])              # el mas barato
             if base not in cajas or barato[1]<cajas[base]['pa']:
-                cajas[base]={'pa':round(barato[1],4),'uds':barato[0],'nombre':row.get(P['col_nombre'],''),
+                cajas[base]={'pa':round(barato[1],4),'uds':barato[0],'nombre':row.get(cN,''),
                              'url':str(row.get(P['col_url'],'')).strip() if P.get('col_url') else ''}
 
     filas=[]; problematicos=[]; vistos=set()
     for _,row in cat.iterrows():
         if P.get('estados_ok') and str(row.get(P['col_estado'],'')).strip() not in P['estados_ok']:
             continue
-        if P.get('sin_columna_stock') or not P.get('col_stock'):
-            stock=1.0
+        if P.get('sin_columna_stock') or not cS:
+            stock=1.0                                   # sin columna de stock -> se asume disponible
         elif P.get('stock_especial')=='osma':
-            stock=_stock_osma(row.get(P['col_stock'],''))
+            stock=_stock_osma(row.get(cS,''))
         else:
-            stock=_num(row.get(P['col_stock'],''))
+            stock=_num(row.get(cS,''))
         if stock is None or stock<=0: continue
-        ean_in=str(row[P['col_ean']]).strip()
+        ean_in=str(row[cE]).strip()
         core=core_ean(ean_in)
         if (not core.isdigit()) or len(core) not in (12,13):
-            problematicos.append({'EAN':ean_in,'Cabecera':row.get(P['col_nombre'],''),
+            problematicos.append({'EAN':ean_in,'Cabecera':row.get(cN,''),
                                   'Motivo':f'EAN forma rara (len={len(core)})'}); continue
-        pa=_num(row.get(P['col_pa'],''))
+        pa=_parse_precio_libre(row.get(cP,'')) if _tolerante else _num(row.get(cP,''))
         if P.get('col_pa_promo'):
             promo=_num(row.get(P['col_pa_promo'],''))
             if promo and promo>0: pa=promo
@@ -181,7 +297,7 @@ def leer_proveedor(prov, marca, ruta):
         vistos.add(core)
         _cu=P.get('col_url')
         url=str(row.get(_cu,'')).strip() if _cu else ''
-        filas.append({'ean_in':ean_in,'core':core,'nombre':row.get(P['col_nombre'],''),
+        filas.append({'ean_in':ean_in,'core':core,'nombre':row.get(cN,''),
                       'marca':marca,'pa':pa,'es_chase':es_chase_ean(ean_in),
                       'variantes':variantes_ean(core),'volumen':vol,
                       'es_caja':es_caja,'uds_caja':uds_caja,'url':url})
@@ -265,6 +381,11 @@ def _coincide_titulo(nombre_prov, titulo_amz):
     if not str(titulo_amz or '').strip(): return '?'
     a=_tokens_tit(nombre_prov); b=_tokens_tit(titulo_amz)
     if not a or not b: return '?'
+    # 🔒 RED DE SEGURIDAD. Con deteccion tolerante, si el motor no encuentra columna de
+    # nombre usa la del EAN como nombre (`det['nombre'] or det['ean']`). Un "nombre" que
+    # son solo digitos NO es un nombre: sin esto, ZENTRADA/DINOTOYS saldrian con la
+    # columna Coincide en "⚠ NO" en el catalogo entero, que es una alarma falsa.
+    if not [w for w in a if not w.isdigit()]: return '?'
     return 'SÍ' if (a & b) else '⚠ NO'
 def _score_titulo(nombre_prov, titulo_amz):
     # nº de palabras distintivas en común (para ELEGIR entre varias fichas del mismo EAN)

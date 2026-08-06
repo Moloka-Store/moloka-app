@@ -22,7 +22,7 @@ from collections import Counter
 from supabase import create_client
 
 # Motor validado (mismo repo). No re-implementamos formulas: se reutilizan tal cual.
-from moloka_escaner_pro import (leer_proveedor, escanear_pro, escribir_excel, norm)
+from moloka_escaner_pro import (leer_proveedor, escanear_pro, escribir_excel, norm, PERFILES)
 
 SUPABASE_URL = os.environ['SUPABASE_URL']
 SUPABASE_KEY = os.environ.get('SUPABASE_SERVICE_KEY') or os.environ['SUPABASE_KEY']
@@ -111,7 +111,12 @@ def main():
     filas = res['filas']
 
     # 2) Memoria: estado de cada fila + agotados
-    mem = leer_memoria(prov)
+    #    Perfil EFIMERO (Mis Compras): no hay memoria que consultar ni que escribir. Se lee
+    #    como si todo fuera nuevo y mas abajo NO se toca escaner_memoria.
+    efimero = bool(PERFILES.get(prov, {}).get('efimero'))
+    mem = {} if efimero else leer_memoria(prov)
+    if efimero:
+        print(f"Perfil EFIMERO ({prov}): NO se escribe en escaner_memoria; ningun proveedor real se ve afectado.")
     for f in filas: f['_estado_mem'] = estado_mem(f, mem)
     cnt = Counter(f['_estado_mem'] for f in filas)
     claves_hoy = {(norm(f['core']), bool(f['es_chase'])) for f in filas}
@@ -153,13 +158,15 @@ def main():
     #    agotados SOLO si el catalogo de hoy trajo productos (evita falso vaciado).
     ahora = datetime.now(timezone.utc).isoformat()
     regs = []; vistos = set()
-    for f in filas:
+    for f in ([] if efimero else filas):
         k = (prov, norm(f['core']), bool(f['es_chase']))
         if k in vistos: continue
         vistos.add(k)
         regs.append({'proveedor': prov, 'ean': f['core'], 'es_case': bool(f['es_chase']), 'marca': marca,
                      'pa': float(f['pa']) if f['pa'] is not None else None, 'presente': True, 'fecha': ahora})
-    if filas:
+    if efimero:
+        print("Perfil EFIMERO: memoria intacta (0 altas, 0 agotados).")
+    elif filas:
         for (ean_norm, es_case), inf in ausentes:
             k = (prov, ean_norm, es_case)
             if k in vistos: continue
@@ -176,7 +183,8 @@ def main():
             n_ok += len(regs[i:i+500])
         except Exception as ex:
             print(f'  AVISO lote memoria {i//500+1}: {ex}')
-    print(f"Memoria actualizada: {n_ok}/{len(regs)} [{prov}/{marca}]")
+    if not efimero:
+        print(f"Memoria actualizada: {n_ok}/{len(regs)} [{prov}/{marca}]")
 
     # 6) Limpiar el buzon SOLO si el Excel se subio bien (si no, se deja para reintentar)
     if subido_ok:
