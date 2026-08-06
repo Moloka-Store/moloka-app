@@ -71,7 +71,7 @@ CSV_COLS = {
     'vendidos':'Tendencias de ventas mensuales: Ventas mensuales (Último conocido)',
     'vendidos2':'Tendencias de ventas mensuales: Comprados el mes pasado',
     'nvar':'Recuento de variaciones',
-    'titulo':'Título principal',
+    'titulo':'Título',   # la de la FICHA, no la del ASIN padre (ver el porque en leer_csv_visualizador)
 }
 
 # ===== Helpers (identicos al escaner) =====
@@ -320,9 +320,15 @@ def leer_csv_visualizador(rutas):
       with open(ruta, encoding='utf-8-sig', newline='') as f:
         rr=csv.reader(f); H=next(rr); rows=list(rr)
       idx={c:i for i,c in enumerate(H)}
-      # Columna del titulo de Amazon (robusto al nombre exacto del export de Keepa)
+      # Columna del titulo de Amazon (robusto al nombre exacto del export de Keepa).
+      # 🔒 EL ORDEN IMPORTA, y no es por el idioma: en el export del Visualizador las dos
+      # columnas EXISTEN siempre, pero 'Titulo principal' es el titulo del ASIN PADRE y solo
+      # trae dato cuando el producto tiene variaciones. Medido en el export del 6-ago-2026
+      # (191 filas, dominio es): 'Titulo' relleno 191/191, 'Titulo principal' 45/191.
+      # Al preferir la del padre, el cotejo se quedaba ciego en el 76% de las filas.
+      # 'Titulo' es ademas la que ya usa procesador_keepa_escaparate.py sobre este mismo CSV.
       _tit=None
-      for _cand in ('Título principal','Titulo principal','Título','Titulo','Title'):
+      for _cand in ('Título','Titulo','Title','Título principal','Titulo principal'):
         if _cand in idx: _tit=_cand; break
       if _tit is None:
         for _c in H:
