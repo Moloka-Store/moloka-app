@@ -208,7 +208,7 @@ WITH ranked AS (
          lag(sesiones)            OVER (PARTITION BY pais, asin ORDER BY leido_at) AS sesiones_ant,
          lag(unidades_pedidas)    OVER (PARTITION BY pais, asin ORDER BY leido_at) AS uds_ant,
          lag(ventas_enviadas_eur) OVER (PARTITION BY pais, asin ORDER BY leido_at) AS ventas_ant
-  FROM demanda_asin
+  FROM demanda_asin d          -- el alias `d` es obligatorio: arriba se usa `d.*`
 )
 SELECT pais, asin, nombre_producto, leido_at, leido_anterior,
        -- ACUMULADOS TAL CUAL. No dicen de qué periodo son: son el cuentakilómetros.
