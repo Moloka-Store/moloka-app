@@ -1,0 +1,362 @@
+name: Moloka - Aplicar MIGRACION
+
+# La via unica para que un fichero de migraciones/ llegue a una base de datos.
+#
+# POR QUE EXISTE. Hasta hoy no habia ninguna: las migraciones se aplicaban a mano
+# desde donde cada uno pudiera, y el rastro de lo aplicado vivia en la memoria de
+# quien lo hizo. Eso es exactamente el desfase repo-base que llevamos cazando desde
+# el 30-jul (el caso de entrada_factura_pvd: la migracion llevaba su REVOKE, pero
+# alguien habia recreado la funcion por otro camino y las dos bases dejaron de ser
+# iguales -- y entonces un ensayo en staging ya no demuestra nada sobre produccion).
+#
+# LAS TRES REGLAS QUE LO SOSTIENEN
+#   1) SOLO SE APLICA LO QUE ESTA EN main. El input es un NOMBRE de fichero de
+#      migraciones/, jamas SQL ni una ruta libre, y el checkout es de `main` a la
+#      fuerza (no del ref desde el que despaches). Asi, por el camino normal, todo
+#      lo que toca una base ha pasado por un PR que aprobo Fernando.
+#      ⚠️ HASTA DONDE LLEGA ESTO, sin adornos: workflow_dispatch ejecuta la
+#      DEFINICION del .yml de la rama que elijas en el selector, no la de main. El
+#      `ref: main` del paso 1 fija el SQL QUE SE APLICA, no el workflow que corre.
+#      Quien pueda empujar una rama y lanzar Actions puede editar este fichero y
+#      saltarse sus propios cerrojos -- igual que puede leer los secrets desde
+#      cualquier rama. Eso es de GitHub Actions, no de aqui, y no se cierra desde
+#      dentro: lo que lo acota es quien tiene permiso de escritura y la proteccion
+#      de main. Este workflow hace SEGURO Y AUDITABLE EL CAMINO NORMAL; no es una
+#      defensa contra alguien con acceso de escritura al repo.
+#   2) ON_ERROR_STOP=1 + UNA transaccion. Si una sentencia falla, se para ahi y la
+#      base se queda EXACTAMENTE como estaba. Nunca a medias.
+#   3) SE IMPRIME EL SHA256 DEL .sql ANTES DE APLICARLO. Sin ese hash, el rastro de
+#      Actions dice que corriste algo, no QUE corriste. Con el, cualquiera puede
+#      contrastar contra el fichero de main:
+#          sha256sum migraciones/<fichero>.sql
+#
+# LIMITACION CONOCIDA, dicha a la cara: como todo va en UNA transaccion, una
+#   migracion que necesite CREATE INDEX CONCURRENTLY (o VACUUM, o REINDEX
+#   CONCURRENTLY) NO puede ir por aqui -- Postgres no los admite dentro de una
+#   transaccion. El cerrojo 4 las detecta y ABORTA con el motivo, en vez de dejarte
+#   descubrirlo a mitad. Si algun dia hace falta una asi, se para y se decide; lo que
+#   NO se hace es quitar el --single-transaction.
+#
+# ESCALERA DE SIEMPRE:
+#   staging ensayo -> staging aplicar -> verificacion SQL -> produccion ensayo ->
+#   produccion aplicar -> verificacion SQL.  Y Elena avisada antes de tocar produccion.
+
+on:
+  workflow_dispatch:
+    inputs:
+      entorno:
+        description: 'Base de datos destino'
+        type: choice
+        options: [staging, produccion]
+        default: staging
+      fichero:
+        description: 'Nombre EXACTO del .sql dentro de migraciones/ (p.ej. 2026-08-07_demanda_asin_contador.sql). Tiene que existir en main.'
+        type: string
+        required: true
+      modo:
+        description: 'ensayo = lo corre de verdad contra la base y lo DESHACE (rollback); aplicar = lo deja escrito'
+        type: choice
+        options: [ensayo, aplicar]
+        default: ensayo
+      confirmacion:
+        description: 'Solo para produccion + aplicar: reescribe aqui el nombre del fichero, tal cual. En cualquier otro caso, dejalo vacio.'
+        type: string
+        required: false
+        default: ''
+
+concurrency:
+  # Por ENTORNO, no por workflow: dos migraciones contra la MISMA base se serializan,
+  # y staging y produccion no se estorban entre si. Nunca se cancela una a medias
+  # (cancel-in-progress: false): abortar un psql a mitad es justo lo que este
+  # workflow existe para evitar.
+  #
+  # 🔴 TRAMPA QUE MADURA SOLA -- leer antes de anadir otro disparador.
+  #   El contexto `inputs` SI esta disponible en la clave `concurrency` a nivel de
+  #   workflow (doc oficial de GitHub, tabla "Context availability": github, inputs,
+  #   vars), pero SOLO esta poblado en workflow_dispatch y workflow_call. Si algun
+  #   dia alguien le anade a este .yml un `schedule:` o un `push:`, en ESOS eventos
+  #   `inputs.entorno` sera null, el grupo colapsa a "aplicar-migracion-" para todos
+  #   y staging y produccion volverian a estorbarse. Si anades un disparador, cambia
+  #   tambien esta clave.
+  #   https://docs.github.com/en/actions/reference/workflows-and-actions/contexts
+  group: aplicar-migracion-${{ inputs.entorno }}
+  cancel-in-progress: false
+
+jobs:
+  aplicar:
+    runs-on: ubuntu-latest
+    steps:
+      # ── 1) El codigo SIEMPRE sale de main ────────────────────────────────
+      # ref: main a proposito. Si despachas desde otra rama, el .yml sera el de esa
+      # rama pero el CONTENIDO que se aplica es el de main. Regla 1: a la base solo
+      # llega lo aprobado.
+      - name: 1) Checkout de main (no del ref despachado)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: 2) Avisar si se ha despachado desde otra rama
+        env:
+          REF_DESPACHO: ${{ github.ref_name }}
+        run: |
+          if [ "$REF_DESPACHO" != "main" ]; then
+            echo "::warning::Has despachado desde '$REF_DESPACHO', pero el fichero que se"
+            echo "::warning::aplica sale de main. Si tu migracion aun no esta fusionada, el"
+            echo "::warning::cerrojo 3 va a abortar: fusiona el PR primero."
+          fi
+          echo "Commit de main que se va a usar: $(git rev-parse HEAD)"
+
+      # ── 3) Cerrojos: el nombre del fichero ───────────────────────────────
+      # 🔴 El input NO se interpola en el shell: entra por `env`. Interpolar
+      #    ${{ inputs.fichero }} dentro de un `run:` seria inyeccion de comandos --
+      #    GitHub sustituye el texto ANTES de que arranque bash, asi que un nombre
+      #    como `x; rm -rf .` se ejecutaria. Por `env` es solo una cadena.
+      - name: 3) Cerrojo - el fichero es un nombre de migraciones/ que existe en main
+        env:
+          FICHERO: ${{ inputs.fichero }}
+        run: |
+          case "$FICHERO" in
+            "")        echo "::error::El nombre del fichero viene vacio."; exit 1;;
+            */*|*\\*)  echo "::error::'$FICHERO' lleva una ruta. Aqui solo va el NOMBRE del fichero: se busca siempre dentro de migraciones/."; exit 1;;
+            *..*)      echo "::error::'$FICHERO' lleva '..'. No se sale de migraciones/."; exit 1;;
+          esac
+          if ! printf '%s' "$FICHERO" | grep -qE '^[A-Za-z0-9._-]+\.sql$'; then
+            echo "::error::'$FICHERO' no es un nombre de .sql valido (solo letras, numeros, punto, guion y guion bajo, y termina en .sql)."
+            exit 1
+          fi
+          if [ ! -f "migraciones/$FICHERO" ]; then
+            echo "::error::migraciones/$FICHERO NO existe en main. Si tu migracion sigue en una rama, fusiona el PR antes: a la base solo llega lo aprobado."
+            echo "--- Lo que SI hay en migraciones/ en main ---"
+            ls -1 migraciones/
+            exit 1
+          fi
+          echo "Cerrojo OK: migraciones/$FICHERO existe en main."
+
+      # ── 4) Cerrojo: la migracion tiene que dejarse envolver ──────────────
+      - name: 4) Cerrojo - ni transacciones propias ni CONCURRENTLY
+        env:
+          FICHERO: ${{ inputs.fichero }}
+        run: |
+          RUTA="migraciones/$FICHERO"
+          # 🔴 POR QUE EL REGEX ES ASI DE LARGO. La primera version solo miraba
+          #   begin|commit|rollback seguidos de ';'. Se le escapaban COMMIT WORK;,
+          #   COMMIT TRANSACTION;, END; (sinonimo de COMMIT fuera de PL/pgSQL),
+          #   END TRANSACTION;, ABORT; (sinonimo de ROLLBACK) y COMMIT AND CHAIN;.
+          #   Cualquiera de esos cierra la transaccion por su cuenta, y en modo
+          #   ENSAYO eso significa que el fichero ESCRIBE de verdad (ver el paso 9).
+          # 🔒 Medido el 8-ago-2026 antes de adoptarlo: 0 falsos positivos sobre las
+          #   18 migraciones del repo, caza las 14 variantes de control de
+          #   transaccion, y deja pasar END IF; / END $$; / END LOOP; / END AS ...
+          #   (que es lo que usan los bloques DO y los CASE de verdad).
+          # ⚠️ Falso positivo conocido y aceptado: el dia que una migracion cree una
+          #   funcion plpgsql con `END;` a solo en su linea antes del `$$;`, esto
+          #   bloqueara. Falla CERRADO (no escribe) y se arregla escribiendo `END$$;`.
+          RE_TX='^[[:space:]]*(begin|commit|rollback|abort|end)[[:space:]]*(work|transaction)?[[:space:]]*(and[[:space:]]+(no[[:space:]]+)?chain[[:space:]]*)?;|^[[:space:]]*start[[:space:]]+transaction'
+          if grep -qiE "$RE_TX" "$RUTA"; then
+            echo "::error::$RUTA maneja su propia transaccion (BEGIN/COMMIT/ROLLBACK/END/ABORT)."
+            echo "::error::Este workflow envuelve el fichero entero en UNA transaccion, y las dos"
+            echo "::error::cosas se pelean: en modo ensayo el fichero ESCRIBIRIA de verdad."
+            echo "::error::Quita el control de transaccion del .sql y relanza."
+            grep -niE "$RE_TX" "$RUTA" | head -10
+            exit 1
+          fi
+          if grep -qiE '\bconcurrently\b' "$RUTA"; then
+            echo "::error::$RUTA usa CONCURRENTLY, que Postgres NO admite dentro de una transaccion."
+            echo "::error::Esta migracion no puede ir por este workflow. Para y decidelo: lo que NO"
+            echo "::error::se hace es quitar el --single-transaction para que quepa."
+            grep -niE '\bconcurrently\b' "$RUTA" | head -10
+            exit 1
+          fi
+          echo "Cerrojo OK: el fichero se deja envolver en una transaccion."
+
+      # ── 5) Cerrojo: la base es la que dices que es ───────────────────────
+      - name: 5) Cerrojo - entorno vs base de datos
+        env:
+          ENTORNO: ${{ inputs.entorno }}
+          DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
+        run: |
+          if [ -z "$DB_URL" ]; then
+            echo "::error::Falta el secret de la base para entorno='$ENTORNO' (SUPABASE_DB_URL o STAGING_DB_URL)."
+            exit 1
+          fi
+          # Mismo cerrojo que restaurar-staging.yml: la referencia de produccion es
+          # publica (esta en la URL del proyecto), no es una credencial.
+          case "$ENTORNO:$DB_URL" in
+            staging:*ogfbjjdxcltzpygzuyla*)
+              echo "::error::Has pedido STAGING pero la URL es la de PRODUCCION. Me niego."; exit 1;;
+            produccion:*ogfbjjdxcltzpygzuyla*)
+              echo "Cerrojo OK: produccion confirmada.";;
+            produccion:*)
+              echo "::error::Has pedido PRODUCCION pero la URL no es la suya. Me niego."; exit 1;;
+            *)
+              echo "Cerrojo OK: no es produccion.";;
+          esac
+
+      # ── 6) Cerrojo: escribir en produccion se teclea a proposito ─────────
+      - name: 6) Cerrojo - confirmacion para produccion + aplicar
+        env:
+          ENTORNO: ${{ inputs.entorno }}
+          MODO: ${{ inputs.modo }}
+          FICHERO: ${{ inputs.fichero }}
+          CONFIRMACION: ${{ inputs.confirmacion }}
+        run: |
+          if [ "$ENTORNO" = "produccion" ] && [ "$MODO" = "aplicar" ]; then
+            if [ "$CONFIRMACION" != "$FICHERO" ]; then
+              echo "::error::Vas a ESCRIBIR en la base de PRODUCCION de Elena."
+              echo "::error::Para seguir, reescribe el nombre del fichero en 'confirmacion':"
+              echo "::error::    $FICHERO"
+              echo "::error::(Recibido: '$CONFIRMACION'.) No es burocracia: es que lo mires."
+              exit 1
+            fi
+            echo "Confirmacion OK. Recuerda: Elena avisada ANTES de esto."
+          else
+            echo "No aplica (entorno=$ENTORNO, modo=$MODO)."
+          fi
+
+      - name: 7) Instalar cliente Postgres 17
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common >/dev/null
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null
+          sudo apt-get install -y -qq postgresql-client-17 >/dev/null
+
+      # ── 8) LA HUELLA ─────────────────────────────────────────────────────
+      # Lo que convierte el rastro de Actions en una prueba. Va ANTES de aplicar y
+      # tambien al resumen del job, para verlo sin abrir el log.
+      - name: 8) Huella del fichero que se va a aplicar (sha256)
+        env:
+          FICHERO: ${{ inputs.fichero }}
+          ENTORNO: ${{ inputs.entorno }}
+          MODO: ${{ inputs.modo }}
+        run: |
+          RUTA="migraciones/$FICHERO"
+          SHA=$(sha256sum "$RUTA" | cut -d' ' -f1)
+          COMMIT=$(git rev-parse HEAD)
+          BYTES=$(wc -c < "$RUTA")
+          LINEAS=$(wc -l < "$RUTA")
+          echo "================ QUE SE VA A APLICAR ================"
+          echo "  fichero : migraciones/$FICHERO"
+          echo "  sha256  : $SHA"
+          echo "  bytes   : $BYTES"
+          echo "  lineas  : $LINEAS"
+          echo "  commit  : $COMMIT   (main)"
+          echo "  entorno : $ENTORNO"
+          echo "  modo    : $MODO"
+          echo "===================================================="
+          echo "Para contrastar contra main:  sha256sum migraciones/$FICHERO"
+          {
+            echo "### Migracion: lo que se VA A aplicar"
+            echo ""
+            echo "| campo | valor |"
+            echo "|---|---|"
+            echo "| fichero | \`migraciones/$FICHERO\` |"
+            echo "| sha256 | \`$SHA\` |"
+            echo "| bytes | $BYTES |"
+            echo "| commit (main) | \`$COMMIT\` |"
+            echo "| entorno | **$ENTORNO** |"
+            echo "| modo | **$MODO** |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ── 9) Aplicar ───────────────────────────────────────────────────────
+      - name: 9) Aplicar la migracion
+        env:
+          FICHERO: ${{ inputs.fichero }}
+          ENTORNO: ${{ inputs.entorno }}
+          MODO: ${{ inputs.modo }}
+          DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
+        run: |
+          RUTA="migraciones/$FICHERO"
+          # lock_timeout corto: criterio DDL de la casa. Si Elena tiene la tabla
+          # ocupada, preferimos fallar en 5s a bloquearla. Por PGOPTIONS para que
+          # valga en TODA la sesion, incluida la transaccion (un SET LOCAL dentro
+          # del .sql no cubriria el resto del script).
+          export PGOPTIONS="-c lock_timeout=5s"
+
+          if [ "$MODO" = "aplicar" ]; then
+            echo "--- APLICANDO en $ENTORNO (una transaccion; si falla, no queda nada) ---"
+            EJECUTAR="$RUTA"
+            PSQL_TX="--single-transaction"
+          else
+            # ENSAYO: se corre de VERDAD contra la base -- con su esquema real, no
+            # con datos de mentira -- y se deshace al final. Es la unica forma de
+            # saber si la migracion casa con lo que hay, sin dejar rastro.
+            echo "--- ENSAYO en $ENTORNO (se ejecuta y se DESHACE con rollback) ---"
+            { echo 'BEGIN;'; cat "$RUTA"; printf '\n'; echo 'ROLLBACK;'; } > _ensayo.sql
+            EJECUTAR="_ensayo.sql"
+            PSQL_TX=""
+          fi
+
+          if ! psql "$DB_URL" -v ON_ERROR_STOP=1 $PSQL_TX -f "$EJECUTAR" 2> _psql_error.log; then
+            echo "::error::La migracion ha FALLADO. La base se queda como estaba."
+            echo "--- Donde se paro (psql se detiene en el PRIMER error) ---"
+            head -60 _psql_error.log
+            echo "----------------------------------------------------------"
+            exit 1
+          fi
+
+          # Los avisos que no llegan a error tambien se miran (un NOTICE de
+          # 'IF EXISTS' que no encontro nada puede ser justo el dato que buscas).
+          if [ -s _psql_error.log ]; then
+            echo "--- Avisos de psql (no han parado la migracion) ---"
+            head -60 _psql_error.log
+          fi
+
+          # 🔴 EL DETECTOR QUE DE VERDAD CIERRA EL AGUJERO (el cerrojo 4 es la
+          #   primera linea; esta es la segunda, y no depende de adivinar sintaxis).
+          #   Si el .sql cerro la transaccion por su cuenta, el COMMIT/ROLLBACK que
+          #   ponemos nosotros al final llega sin transaccion abierta y Postgres
+          #   emite "there is no transaction in progress". Eso es un WARNING, NO un
+          #   error: ON_ERROR_STOP no salta, psql sale 0 y el job saldria VERDE
+          #   diciendo "no se ha escrito nada" cuando SI ha escrito (ensayo) o con
+          #   la base a medias (aplicar). Se mira a mano, porque psql no lo hace.
+          # ⚠️ Punto ciego conocido: una migracion con `SET client_min_messages =
+          #   error;` silenciaria el warning. Por eso existe TAMBIEN el cerrojo 4.
+          if grep -qi 'no transaction in progress' _psql_error.log; then
+            echo "::error::La migracion ha CERRADO LA TRANSACCION por su cuenta (COMMIT/END/ABORT dentro del .sql)."
+            if [ "$MODO" = "aplicar" ]; then
+              echo "::error::En modo APLICAR esto significa que la base ha quedado A MEDIAS: lo anterior"
+              echo "::error::al COMMIT quedo escrito y lo posterior corrio suelto."
+            else
+              echo "::error::En modo ENSAYO esto significa que SI SE HA ESCRITO: el rollback final no"
+              echo "::error::ha deshecho nada porque la transaccion ya estaba cerrada."
+            fi
+            echo "::error::NO relances. Verifica por SQL el estado real de $ENTORNO antes de tocar nada."
+            exit 1
+          fi
+
+          if [ "$MODO" = "aplicar" ]; then
+            echo ""
+            echo "APLICADO en $ENTORNO. Ahora toca la verificacion por SQL: el log NO es la prueba."
+          else
+            echo ""
+            echo "ENSAYO correcto: la migracion corre contra el esquema real de $ENTORNO y se ha deshecho."
+            echo "NO se ha escrito nada. Relanza con modo=aplicar cuando quieras dejarlo."
+          fi
+
+      # ── 10) EL VEREDICTO ─────────────────────────────────────────────────
+      # El paso 8 dice lo que se IBA a aplicar; este dice lo que PASO. Va con
+      # `always()` para que escriba tambien cuando aborta un cerrojo o revienta el
+      # psql: un resumen que se calla en el fallo es un resumen que miente, y el
+      # resumen es justo lo que se mira sin abrir el log.
+      - name: 10) Veredicto real al resumen del job
+        if: always()
+        env:
+          ESTADO: ${{ job.status }}
+          MODO: ${{ inputs.modo }}
+          ENTORNO: ${{ inputs.entorno }}
+        run: |
+          if [ "$ESTADO" != "success" ]; then
+            RESULTADO="FALLIDO ($ESTADO) - la base de $ENTORNO se queda EXACTAMENTE como estaba"
+          elif [ "$MODO" = "aplicar" ]; then
+            RESULTADO="APLICADO en $ENTORNO - ahora la verificacion por SQL; el log NO es la prueba"
+          else
+            RESULTADO="ENSAYO OK en $ENTORNO - deshecho con rollback, NO se ha escrito nada"
+          fi
+          echo "Veredicto: $RESULTADO"
+          # Bloque propio, no una fila de la tabla del paso 8: si aborta un cerrojo,
+          # el paso 8 no llego a correr y una fila suelta se veria como texto huerfano.
+          {
+            echo ""
+            echo "**resultado: $RESULTADO**"
+          } >> "$GITHUB_STEP_SUMMARY"
