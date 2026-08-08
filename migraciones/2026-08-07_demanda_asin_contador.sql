@@ -56,10 +56,12 @@
 --   `pais`, `asin`, `fichero`, `procesado_at`, la RLS de la tabla, su política
 --   `inventario_read_authenticated` y su ACL (`authenticated=r`). El ALTER los conserva.
 --
--- 🔒 ESCALERA: staging (TRUNCATE + apply) → verificación SQL → producción (apply) →
---   verificación SQL. Advisors después. lock_timeout corto al aplicar en prod:
---       SET lock_timeout = '5s';   -- antes de correr esto
---   (El riesgo real de lock es nulo: 0 filas y nadie escribe todavía.)
+-- 🔒 ESCALERA: staging (ensayo → aplicar) → verificación SQL → producción (ensayo →
+--   aplicar) → verificación SQL. Advisors después.
+--   Se aplica con `.github/workflows/aplicar-migracion.yml`, que ya pone
+--   `lock_timeout=5s` por PGOPTIONS y envuelve todo en UNA transacción: no hay que
+--   teclear nada suelto antes. (El riesgo real de lock es nulo: 0 filas y nadie
+--   escribe todavía.)
 --
 -- 🔒 IDEMPOTENTE: DROP … IF EXISTS, DROP COLUMN IF EXISTS, DROP CONSTRAINT IF EXISTS,
 --   CREATE VIEW tras DROP, REVOKE/GRANT y COMMENT. Aplicarla dos veces = no-op.
@@ -67,16 +69,37 @@
 -- ============================================================================
 
 
--- ── 0) STAGING: vaciar antes ────────────────────────────────────────────────
--- 🔴 En STAGING la tabla tiene ~950 filas de prueba con el modelo viejo, y sus
---    "ventanas" eran etiquetas inventadas: no son una serie de lecturas, no se pueden
---    reinterpretar y no valen para nada. Es banco de pruebas → se tiran.
---    DESCOMENTAR SOLO AL APLICAR EN STAGING:
+-- ── 0) LAS FILAS DEL MODELO VIEJO SE VAN ────────────────────────────────────
+-- 🔴 Esto era un `TRUNCATE` comentado, para descomentar a mano al aplicar en staging.
+--    YA NO VALE, y el motivo importa: desde el 8-ago-2026 las migraciones se aplican
+--    con `.github/workflows/aplicar-migracion.yml`, que corre el fichero de `main`
+--    TAL CUAL y publica su sha256 como prueba de qué se aplicó. Un paso manual
+--    "descomenta esta línea antes de correr" no existe en ese mundo — y si alguien lo
+--    hiciera, el hash dejaría de cuadrar, que es justo lo que el hash impide.
+--    Así que el vaciado deja de ser una instrucción para el operador y pasa a ser
+--    parte de la migración, que es donde se puede razonar y auditar.
 --
---        TRUNCATE demanda_asin;
+-- POR QUÉ UN DELETE INCONDICIONAL ES SEGURO AQUÍ (medido el 7-ago-2026):
+--   · PRODUCCIÓN tiene 0 filas → es un no-op, no borra nada.
+--   · STAGING tiene ~950 filas del modelo viejo, cuyas "ventanas" eran etiquetas
+--     inventadas. No son lecturas de un contador, no se pueden reinterpretar como
+--     acumulados, y además ROMPERÍAN la llave nueva: varias ventanas cargadas del
+--     mismo fichero comparten `exportado_at`, así que darían duplicado en
+--     (pais, leido_at, asin). O se van, o la migración no entra.
 --
---    En PRODUCCIÓN no hace falta: 0 filas (medido el 7-ago-2026).
---    La guarda del paso 2 aborta con un mensaje claro si te lo saltas.
+-- 🔒 Y POR QUÉ NO PUEDE BORRAR DATOS BUENOS EL DÍA DE MAÑANA: va dentro del IF de que
+--    TODAVÍA exista `periodo_desde`. En cuanto esta migración corre una vez, esa
+--    columna ya no está, así que una segunda pasada no entra aquí y no toca una fila.
+--    El borrado solo alcanza a filas del modelo viejo, por construcción.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_schema='public' AND table_name='demanda_asin'
+                AND column_name='periodo_desde') THEN
+    DELETE FROM demanda_asin;
+    RAISE NOTICE 'Borradas las filas del modelo viejo (ventanas declaradas: no son lecturas de un contador y no se pueden reinterpretar).';
+  END IF;
+END $$;
 
 
 -- ── 1) FUERA LAS DOS VISTAS (en orden: la de arriba primero) ────────────────
@@ -101,9 +124,10 @@ BEGIN
     IF n_huerfanas > 0 THEN
       RAISE EXCEPTION
         'ABORTA: quedan % filas en demanda_asin sin exportado_at. leido_at va a ser '
-        'NOT NULL y no se puede inventar la fecha de una lectura. Si estás en STAGING, '
-        'descomenta el TRUNCATE del paso 0 y relanza. Si estás en PRODUCCIÓN, PARA: '
-        'aquí no debería haber ni una fila (medido 0 el 7-ago-2026).', n_huerfanas;
+        'NOT NULL y no se puede inventar la fecha de una lectura. El paso 0 debería '
+        'haberlas borrado ya; si has llegado aquí es que periodo_desde ya no existía '
+        'y estas filas son del modelo NUEVO. PARA y mira qué son antes de tocar nada.',
+        n_huerfanas;
     END IF;
   END IF;
 END $$;
