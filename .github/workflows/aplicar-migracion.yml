@@ -194,13 +194,32 @@ jobs:
           esac
 
       # ── 6) Cerrojo: escribir en produccion se teclea a proposito ─────────
-      - name: 6) Cerrojo - confirmacion para produccion + aplicar
+      - name: 6) Cerrojo - produccion: los fixtures nunca, y aplicar se teclea a proposito
         env:
           ENTORNO: ${{ inputs.entorno }}
           MODO: ${{ inputs.modo }}
           FICHERO: ${{ inputs.fichero }}
           CONFIRMACION: ${{ inputs.confirmacion }}
         run: |
+          # 🔴 LOS FIXTURES NUNCA TOCAN PRODUCCION -- ni en ensayo, ni con
+          #   confirmacion, ni con nada. Los ficheros _PRUEBA_* son ficheros ROTOS A
+          #   PROPOSITO que existen para hacer saltar las guardas (§3 de CLAUDE.md:
+          #   una guarda no vale hasta que se la ha hecho saltar). Viven en
+          #   migraciones/ porque el cerrojo 3 solo mira ahi, y ese es el unico
+          #   riesgo de tenerlos en la bandeja de lo aprobado. Se cierra aqui.
+          case "$FICHERO" in
+            _PRUEBA*)
+              if [ "$ENTORNO" = "produccion" ]; then
+                echo "::error::'$FICHERO' es un FIXTURE de prueba (_PRUEBA*), no una migracion."
+                echo "::error::No se lanza contra PRODUCCION jamas: ni en ensayo, ni con confirmacion."
+                echo "::error::Si buscabas una migracion de verdad, revisa el nombre del fichero."
+                exit 1
+              fi
+              echo "Fixture de prueba ($FICHERO). Permitido: entorno='$ENTORNO' no es produccion."
+              echo "Recuerda: este fichero DEBE hacer fallar el job. Si sale verde, la guarda miente."
+              ;;
+          esac
+
           if [ "$ENTORNO" = "produccion" ] && [ "$MODO" = "aplicar" ]; then
             if [ "$CONFIRMACION" != "$FICHERO" ]; then
               echo "::error::Vas a ESCRIBIR en la base de PRODUCCION de Elena."
