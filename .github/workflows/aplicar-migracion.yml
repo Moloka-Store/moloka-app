@@ -194,7 +194,7 @@ jobs:
           esac
 
       # ── 6) Cerrojo: escribir en produccion se teclea a proposito ─────────
-      - name: 6) Cerrojo - produccion: los fixtures nunca, y aplicar se teclea a proposito
+      - name: 6) Cerrojo - produccion (los fixtures nunca, y aplicar se teclea a proposito)
         env:
           ENTORNO: ${{ inputs.entorno }}
           MODO: ${{ inputs.modo }}
