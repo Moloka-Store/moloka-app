@@ -721,10 +721,20 @@ jobs:
           #   sondeo_keepa, v_factura_cuadre, v_producto_amazon y v_velocidad_ventas.
           #
           # 🔑 Y EL DATO QUE CONVIERTE ESTO EN UNA REGLA: de las DIEZ cerradas en
-          #   produccion, las dos unicas que SOBREVIVEN al restore son
-          #   `v_demanda_asin_ultima` y `v_trackeador_cola` -- justo las dos que tienen
-          #   su REVOKE y su GRANT escritos dentro de una migracion de `migraciones/`.
-          #     LO QUE ESTA EN EL REPO SOBREVIVE A UN RESTORE. LO QUE SE CERRO A MANO, NO.
+          #   produccion, las dos unicas que se recuperan son `v_demanda_asin_ultima` y
+          #   `v_trackeador_cola` -- justo las dos que tienen su REVOKE y su GRANT
+          #   escritos dentro de una migracion de `migraciones/`.
+          #     LO QUE ESTA EN EL REPO SE PUEDE RECONSTRUIR. LO CERRADO A MANO, NO.
+          #
+          # ⚠️ Y OJO AL MATIZ, MEDIDO EN EL RUN 31318814366: esas dos NO "sobreviven" al
+          #   restore. JUSTO DESPUES DE RESTAURAR, LAS 83 RELACIONES ESTAN ABIERTAS, las
+          #   dos incluidas. Se vuelven a cerrar cuando se REAPLICA su migracion, y por
+          #   eso el numero baja de 83 a 81 en cuanto la migracion del contador entra.
+          #   O sea: el repo no CONSERVA el permiso a traves de una restauracion, permite
+          #   REHACERLO. Y solo si alguien vuelve a pasar todas las migraciones. El dia
+          #   del incendio, lo unico que estaria cerrado es lo que alguien se acuerde de
+          #   volver a aplicar. Es un argumento mas para que el dump traiga los
+          #   privilegios en vez de que haya que reconstruirlos.
           #   Por eso el PR pendiente de `backup-bd.yml` deja de ser "copiar las
           #   politicas de storage" y pasa a ser "copiar los PRIVILEGIOS", que ya
           #   sabemos exactamente cuales se pierden.
@@ -746,7 +756,15 @@ jobs:
           echo ""
           echo "======= PERMISOS: lo que el backup NO restaura ======="
           echo "  huella md5 de los ACL de public en staging : $HUELLA_ACL"
-          echo "  relaciones con permiso para anon           : $CON_ANON de $STOT"
+          # 🔴 EL DENOMINADOR SON LAS RELACIONES, NO LOS OBJETOS. Aqui puso `$STOT`
+          #   (los 181 objetos de las CINCO clases) frente a un recuento que solo mira
+          #   relaciones, y salio "83 de 181": se lee como menos de la mitad cuando la
+          #   verdad es 83 de 83, o sea TODAS. Un denominador equivocado no es un
+          #   detalle de formato: minimiza justo el hallazgo que esta linea existe para
+          #   medir. Medido en el run 31318814366, que es donde se vio.
+          REL_TOTAL=$((ST+SV))
+          echo "  relaciones (tablas+vistas)                 : $REL_TOTAL"
+          echo "  … de ellas, con permiso para anon          : $CON_ANON"
           echo "====================================================="
           echo "El backup va con --no-privileges: NO trae permisos. Cada relacion nace"
           echo "con el default de Supabase, o sea con anon dentro. Esta huella NO tiene"
@@ -868,7 +886,7 @@ jobs:
             echo "> de la que conservarlas y los buzones se quedarían sin ninguna. Pendiente en \`backup-bd.yml\`."
             echo ""
             echo "> 🔴 **Permisos: el backup no los restaura** (\`--no-privileges\`). Huella md5 de los ACL de"
-            echo "> \`public\` en staging: \`$HUELLA_ACL\` — **$CON_ANON de $STOT relaciones con permiso para \`anon\`**."
+            echo "> \`public\` en staging: \`$HUELLA_ACL\` — **$CON_ANON de $REL_TOTAL relaciones con permiso para \`anon\`**."
             echo "> No tiene por qué coincidir con producción, y hoy no coincide: esa diferencia **es la medida**"
             echo "> del frente, no un fallo del restore. Lo único que conserva su ACL es lo que lleva su"
             echo "> \`REVOKE\` escrito en \`migraciones/\`. Ver una tabla abierta aquí **no** acusa a ninguna migración."
