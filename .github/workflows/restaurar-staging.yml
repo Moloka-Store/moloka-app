@@ -709,6 +709,55 @@ jobs:
           echo "    no habria de donde conservarlas y los buzones se quedarian sin ninguna."
           echo "    Pendiente en backup-bd.yml. Esto se dice tambien cuando todo sale bien."
 
+          # ── LA HUELLA DE LOS ACL: la medida exacta del frente abierto ─────────
+          # 🔴 EL RESTORE REABRE PERMISOS, Y HAY QUE VERLO EN CADA EJECUCION.
+          #   El dump va con `--no-privileges`: NO trae ni un GRANT ni un REVOKE. Asi
+          #   que toda relacion restaurada nace con el `pg_default_acl` de Supabase, o
+          #   sea con `anon` dentro. Medido el 9-ago-2026 tras el primer restore bueno:
+          #     produccion : 83 relaciones, 73 con permiso para anon
+          #     staging    : 83 relaciones, 81 con permiso para anon
+          #   Ocho que en produccion estan CERRADAS vuelven ABIERTAS: demanda_asin,
+          #   escaner_detalle, factura_lineas_no_inventario, parametro_coste,
+          #   sondeo_keepa, v_factura_cuadre, v_producto_amazon y v_velocidad_ventas.
+          #
+          # 🔑 Y EL DATO QUE CONVIERTE ESTO EN UNA REGLA: de las DIEZ cerradas en
+          #   produccion, las dos unicas que SOBREVIVEN al restore son
+          #   `v_demanda_asin_ultima` y `v_trackeador_cola` -- justo las dos que tienen
+          #   su REVOKE y su GRANT escritos dentro de una migracion de `migraciones/`.
+          #     LO QUE ESTA EN EL REPO SOBREVIVE A UN RESTORE. LO QUE SE CERRO A MANO, NO.
+          #   Por eso el PR pendiente de `backup-bd.yml` deja de ser "copiar las
+          #   politicas de storage" y pasa a ser "copiar los PRIVILEGIOS", que ya
+          #   sabemos exactamente cuales se pierden.
+          #
+          # ⚠️ NO HACE FALLAR EL JOB, y es deliberado mientras el frente este abierto:
+          #   hoy esta diferencia es CIERTA en toda restauracion, asi que un rojo aqui
+          #   saltaria siempre y en dos semanas nadie lo miraria -- el fallo de siempre.
+          #   Se IMPRIME para que la diferencia tenga numero. El dia que el backup traiga
+          #   los privilegios, esto pasa a ser una comprobacion mas y entonces si falla.
+          HUELLA_ACL=$(psql "$STAGING_DB_URL" -At -c "
+            select md5(string_agg(x,'|' order by x)) from (
+              select c.relname||' :: '||coalesce(array_to_string(c.relacl,' | '),'(sin acl)') as x
+                from pg_class c join pg_namespace n on n.oid=c.relnamespace
+               where n.nspname='public' and c.relkind in ('r','p','v','m')) t")
+          CON_ANON=$(psql "$STAGING_DB_URL" -At -c "
+            select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
+             where n.nspname='public' and c.relkind in ('r','p','v','m')
+               and exists (select 1 from aclexplode(c.relacl) a where a.grantee = 'anon'::regrole)")
+          echo ""
+          echo "======= PERMISOS: lo que el backup NO restaura ======="
+          echo "  huella md5 de los ACL de public en staging : $HUELLA_ACL"
+          echo "  relaciones con permiso para anon           : $CON_ANON de $STOT"
+          echo "====================================================="
+          echo "El backup va con --no-privileges: NO trae permisos. Cada relacion nace"
+          echo "con el default de Supabase, o sea con anon dentro. Esta huella NO tiene"
+          echo "por que coincidir con la de produccion, y hoy NO coincide: esa diferencia"
+          echo "es la medida del frente, no un fallo del restore."
+          echo ""
+          echo "🔴 AVISO PARA QUIEN LEA STAGING DESPUES: ver una tabla con anon=arwdDxtm"
+          echo "   aqui NO significa que una migracion la haya abierto. LO HIZO EL RESTORE."
+          echo "   Lo unico que conserva su ACL al restaurar es lo que lleva su REVOKE"
+          echo "   escrito en migraciones/. Antes de acusar a nadie, mira eso."
+
           comm -23 dump_objetos.txt stg_objetos.txt > faltan.txt
           comm -13 dump_objetos.txt stg_objetos.txt > sobran.txt
 
@@ -817,6 +866,12 @@ jobs:
             echo "> ⚠️ **$NPOL_FUERA políticas RLS de \`storage\` CONSERVADAS de la propia staging, NO restauradas del backup.**"
             echo "> El backup es \`--schema=public\` y no las cubre. El día del incendio no habría staging"
             echo "> de la que conservarlas y los buzones se quedarían sin ninguna. Pendiente en \`backup-bd.yml\`."
+            echo ""
+            echo "> 🔴 **Permisos: el backup no los restaura** (\`--no-privileges\`). Huella md5 de los ACL de"
+            echo "> \`public\` en staging: \`$HUELLA_ACL\` — **$CON_ANON de $STOT relaciones con permiso para \`anon\`**."
+            echo "> No tiene por qué coincidir con producción, y hoy no coincide: esa diferencia **es la medida**"
+            echo "> del frente, no un fallo del restore. Lo único que conserva su ACL es lo que lleva su"
+            echo "> \`REVOKE\` escrito en \`migraciones/\`. Ver una tabla abierta aquí **no** acusa a ninguna migración."
             if [ -s faltan.txt ]; then
               echo ""
               echo "**El backup NO lo trajo:**"
