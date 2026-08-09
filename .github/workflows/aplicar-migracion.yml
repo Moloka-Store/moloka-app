@@ -28,7 +28,14 @@ name: Moloka - Aplicar MIGRACION
 #   3) SE IMPRIME EL SHA256 DEL .sql ANTES DE APLICARLO. Sin ese hash, el rastro de
 #      Actions dice que corriste algo, no QUE corriste. Con el, cualquiera puede
 #      contrastar contra el fichero de main:
-#          sha256sum migraciones/<fichero>.sql
+#          git show origin/main:migraciones/<fichero>.sql | sha256sum
+#      ⚠️ NO con `sha256sum migraciones/<fichero>.sql` a secas, que es lo que ponia
+#      aqui hasta el 9-ago-2026 y NO CUADRA en Windows: la copia de trabajo lleva
+#      CRLF y el runner lee LF. Medido: mismo fichero, 586 bytes de diferencia (uno
+#      por linea) y dos hashes distintos. `git show` devuelve el blob del repo, que es
+#      exactamente lo que baja el runner, asi que no depende del checkout de nadie.
+#      Una prueba que no se puede comprobar en la maquina de quien la comprueba es
+#      media prueba.
 #
 # LIMITACION CONOCIDA, dicha a la cara: como todo va en UNA transaccion, una
 #   migracion que necesite CREATE INDEX CONCURRENTLY (o VACUUM, o REINDEX
@@ -285,7 +292,21 @@ jobs:
           echo "  entorno : $ENTORNO"
           echo "  modo    : $MODO"
           echo "===================================================="
-          echo "Para contrastar contra main:  sha256sum migraciones/$FICHERO"
+          # 🔴 LA FORMA DE CONTRASTAR NO PUEDE SER `sha256sum` A SECAS, y esto no es
+          #   quisquilloso: la huella es TODA la prueba de que se aplico ESTE fichero.
+          #   Si la manera documentada de comprobarla no funciona en la maquina de quien
+          #   la comprueba, la prueba vale menos de lo que parece.
+          #   Medido el 9-ago-2026: la copia de trabajo en Windows tiene CRLF y el
+          #   runner lee LF. Mismo fichero, 586 bytes de diferencia (uno por linea) y
+          #   dos sha256 distintos: b960c46e… en local contra 8089525820… aqui. Quien
+          #   comprobase con `sha256sum migraciones/<fichero>` concluiria que no cuadra,
+          #   y estaria mirando el mismo contenido.
+          #   `git show` devuelve el BLOB tal cual esta en el repo, que es exactamente
+          #   lo que baja el runner, asi que no depende del checkout de nadie.
+          echo "Para contrastar contra main (independiente de CRLF/LF y del checkout):"
+          echo "    git show origin/main:migraciones/$FICHERO | sha256sum"
+          echo "  NO uses 'sha256sum migraciones/$FICHERO' a secas: en Windows tu copia"
+          echo "  de trabajo lleva CRLF y no cuadrara aunque el contenido sea el mismo."
           {
             echo "### Migracion: lo que se VA A aplicar"
             echo ""
@@ -297,6 +318,9 @@ jobs:
             echo "| commit (main) | \`$COMMIT\` |"
             echo "| entorno | **$ENTORNO** |"
             echo "| modo | **$MODO** |"
+            echo ""
+            echo "Para contrastar la huella: \`git show origin/main:migraciones/$FICHERO | sha256sum\`"
+            echo "(no \`sha256sum\` a secas: en Windows la copia de trabajo lleva CRLF y da otro hash)."
           } >> "$GITHUB_STEP_SUMMARY"
 
       # ── 9) Aplicar ───────────────────────────────────────────────────────
@@ -312,7 +336,33 @@ jobs:
           # ocupada, preferimos fallar en 5s a bloquearla. Por PGOPTIONS para que
           # valga en TODA la sesion, incluida la transaccion (un SET LOCAL dentro
           # del .sql no cubriria el resto del script).
-          export PGOPTIONS="-c lock_timeout=5s"
+          #
+          # 🔴 Y EL search_path SE FIJA AQUI, QUE HASTA HOY SE HEREDABA DE LA CONEXION.
+          #   No es una mejora estetica: es convertir un SUPUESTO en una GARANTIA, y ya
+          #   hay TRES cosas colgando de el.
+          #     · Las migraciones escriben nombres sin cualificar (`FROM v_salud_asin`,
+          #       `FROM v_producto_amazon`, `moloka_buzones_fase0()`…). Si `public` no
+          #       estuviera en el path, no resolverian.
+          #     · La captura de politicas de `restaurar-staging.yml` (PR #105) depende
+          #       de que el `qual` que devuelve `pg_policies` -- RENDERIZADO con el
+          #       search_path del momento -- se pueda volver a interpretar igual.
+          #     · Y cualquier definicion sin cualificar que venga detras.
+          #   Hoy las dos bases traen `"$user", public, extensions` y por eso todo
+          #   funciona. Pero eso no esta escrito en ninguna parte: el dia que alguien
+          #   haga un `ALTER DATABASE … SET search_path`, TODO ESTO CAMBIA DE
+          #   COMPORTAMIENTO SIN UN SOLO AVISO. Migraciones que hoy corren dejarian de
+          #   resolver, y en el peor caso resolverian a OTRO objeto del mismo nombre.
+          #
+          # 🔒 SE FIJA EXACTAMENTE LO DE HOY, NO "LO QUE DEBERIA SER": el objetivo es
+          #   hacer explicito el supuesto, no cambiarlo. Se omite `"$user"` porque es
+          #   INERTE -- medido el 9-ago-2026: no existe ningun esquema con el nombre del
+          #   rol de conexion, y ninguno de los diez esquemas de la base lo parece
+          #   (auth, extensions, graphql, graphql_public, pgbouncer, public, realtime,
+          #   storage, supabase_migrations, vault). Si algun dia naciera uno asi, esta
+          #   linea habria que revisarla -- y entonces sera un cambio visible, que es
+          #   justo lo que se busca.
+          export PGOPTIONS="-c lock_timeout=5s -c search_path=public,extensions"
+          echo "search_path fijado a 'public,extensions' (antes se heredaba de la conexion)."
 
           if [ "$MODO" = "aplicar" ]; then
             echo "--- APLICANDO en $ENTORNO (una transaccion; si falla, no queda nada) ---"
