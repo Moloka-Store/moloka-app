@@ -97,6 +97,12 @@ jobs:
   restaurar:
     runs-on: ubuntu-latest
     steps:
+      # Hace falta por `sql/capturar_politicas_fuera_de_public.sql`, que es la pieza
+      # que este workflow comparte con `backup-bd.yml`. Se escribe una vez y la
+      # consumen los dos: aqui para CONSERVAR lo que el backup no cubre, y alli para
+      # que la copia deje de tener ese agujero.
+      - uses: actions/checkout@v4
+
       - name: 1) Cerrojo anti-produccion
         env:
           STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
@@ -136,7 +142,24 @@ jobs:
       # ── 4) Vaciar y restaurar, TODO EN UNA TRANSACCION ────────────────────
       # 🔒 Este paso es el unico que escribe, y en su entorno SOLO existe la URL de
       #    staging. La de produccion no esta aqui: no puede tocarla ni por error.
-      - name: 4) Restaurar en staging (vaciado + carga, en UNA transaccion)
+      #
+      # 🔴 LO QUE EL BACKUP NO CUBRE, ESTE PASO LO CONSERVA -- y hay que entender por
+      #   que existe esto, porque nacio de un susto de verdad (run 31299419508):
+      #   el vaciado de `public` se llevaba por delante, VIA CASCADE, cuatro politicas
+      #   de `storage.objects` (`buzones_v2_*`), porque su clausula usa
+      #   `public.moloka_buzones_fase0()`. Y el backup NO PUEDE DEVOLVERLAS: se hace
+      #   con `pg_dump --schema=public`, asi que `storage` no esta dentro. Aquella vez
+      #   se salvaron de casualidad -- la restauracion fallo despues por otra cosa y la
+      #   transaccion entera hizo rollback. De no fallar, habrian desaparecido y nada
+      #   las habria recreado.
+      #   Asi que ahora: se CAPTURAN antes de vaciar y se RECREAN despues de restaurar.
+      #
+      # 🔒 Y TODO -- comprobar, capturar, vaciar, cargar y recrear -- VA EN LA MISMA
+      #   TRANSACCION, en un solo psql. Si el recrear quedara en una llamada aparte, un
+      #   fallo ahi dejaria staging sin las politicas y sin vuelta atras: exactamente el
+      #   escenario que aquel rollback evito por suerte. Es el mismo argumento por el
+      #   que el vaciado y la carga van juntos.
+      - name: 4) Restaurar en staging (comprobar + capturar + vaciar + cargar + recrear, en UNA transaccion)
         env:
           STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
         run: |
@@ -162,10 +185,89 @@ jobs:
           fi
           echo "Formato OK: el dump no trae bloque de borrados."
 
-          # 🔒 EL VACIADO. Se borran los OBJETOS de public, no el esquema (ver cabecera).
+          # 🔴 SE FILTRA UNA SOLA SENTENCIA, POR SU NOMBRE, Y ES BENIGNA.
+          #   `pg_dump --schema=public` incluye `CREATE SCHEMA public;`. Con `--clean`
+          #   no molestaba porque delante iba un DROP; sin el, choca con el esquema que
+          #   aqui se conserva A PROPOSITO (ver mas abajo: el cajon, no el mueble).
+          #   Medido en el run 31299419508: `ERROR: schema "public" already exists` en
+          #   la linea 26 del dump. Crear un esquema que ya existe, y que ademas
+          #   queremos que siga existiendo, no aporta nada: se quita ESA linea y se
+          #   dice cuantas se han quitado. Lo que NO se hace es filtrar por categorias.
+          N_SCHEMA=$(grep -c '^CREATE SCHEMA public;$' backup.sql || true)
+          echo "Sentencias 'CREATE SCHEMA public;' filtradas del dump: $N_SCHEMA"
+          grep -v '^CREATE SCHEMA public;$' backup.sql > dump_sin_schema.sql
+
+          # ── 4.1) ANTES DE TOCAR NADA: ¿puedo escribir en storage.objects? ─────
+          # 🔴 NO SE DA POR HECHO PORQUE LA CONEXION SEA `postgres`: `storage` es de
+          #   Supabase y sus permisos son suyos. Destruir las politicas y descubrir
+          #   DESPUES que no puedo devolverlas es el peor orden posible. Asi que se
+          #   prueba de verdad -- crear y borrar una politica de mentira -- antes de
+          #   que el vaciado toque una sola cosa. Va dentro de la transaccion, asi que
+          #   no deja rastro pase lo que pase.
+          # ⚠️ AVISO PARA EL DIA QUE ESTO SE REUTILICE: el `CREATE POLICY` de prueba
+          #   toma ACCESS EXCLUSIVE sobre `storage.objects`, y ese lock NO se suelta
+          #   con el `DROP POLICY` -- los locks duran hasta el COMMIT, o sea hasta el
+          #   final de TODA la restauracion. En staging da igual, no lo usa nadie. Pero
+          #   si algun dia esta pieza se apunta a una base de la que dependa Elena, le
+          #   bloquearia los buzones durante todo el restore. Ese dia hay que comprobar
+          #   el permiso de otra forma (mirando el owner de la tabla, por ejemplo), no
+          #   escribiendo en ella.
+          cat > 00_permisos.sql <<'SQL'
+          \echo '--- Comprobando que puedo escribir politicas en storage.objects ---'
+          DO $$
+          BEGIN
+            EXECUTE 'CREATE POLICY moloka_prueba_permisos_restore ON storage.objects FOR SELECT USING (false)';
+            EXECUTE 'DROP POLICY moloka_prueba_permisos_restore ON storage.objects';
+            RAISE INFO 'Permiso OK: puedo crear y borrar politicas en storage.objects.';
+          EXCEPTION WHEN OTHERS THEN
+            RAISE EXCEPTION 'ABORTA ANTES DE TOCAR NADA: no puedo escribir politicas en storage.objects (%). '
+                            'El vaciado de public destruiria las politicas de los buzones via CASCADE y no '
+                            'habria forma de devolverlas: el backup no las trae.', SQLERRM;
+          END $$;
+          SQL
+
+          # ── 4.2) CAPTURAR lo que el backup no cubre ───────────────────────────
+          # 🔒 EL `SET LOCAL search_path = public` NO ES DECORACION, y esto costo un
+          #   susto: `pg_policies.qual` devuelve la expresion RENDERIZADA con el
+          #   search_path del momento, y ahi `moloka_buzones_fase0()` sale SIN
+          #   esquema (porque `public` estaba en el path cuando se creo la politica).
+          #   Como el dump hace `set_config('search_path','')` unas lineas mas abajo,
+          #   al recrear la politica esa funcion NO resolveria. Se fija el MISMO path
+          #   al capturar y al recrear, para reproducirla igual. Lo que NO se hace es
+          #   reescribir la expresion cualificando la funcion a mano: eso seria
+          #   reinterpretar una politica que no es nuestra.
+          {
+            echo "SET LOCAL search_path = public;"
+            echo "\\echo '--- Capturando las politicas que viven fuera de public ---'"
+            cat sql/capturar_politicas_fuera_de_public.sql
+            cat <<'SQL'
+          -- Censo de lo que hay FUERA de public, para poder demostrar al final que el
+          -- CASCADE del vaciado no se ha llevado nada mas por delante.
+          CREATE TEMP TABLE moloka_censo_fuera_public AS
+            SELECT 'relaciones'::text AS que, count(*) AS n
+              FROM pg_catalog.pg_class c
+              JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+             WHERE n.nspname NOT IN ('public','information_schema') AND n.nspname NOT LIKE 'pg\_%'
+            UNION ALL
+            SELECT 'rutinas', count(*)
+              FROM pg_catalog.pg_proc p
+              JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+             WHERE n.nspname NOT IN ('public','information_schema') AND n.nspname NOT LIKE 'pg\_%';
+
+          DO $$
+          DECLARE n_pol int;
+          BEGIN
+            SELECT count(*) INTO n_pol FROM moloka_politicas_fuera_public;
+            RAISE INFO 'Politicas capturadas fuera de public: %', n_pol;
+          END $$;
+          SQL
+          } > 01_capturar.sql
+
+          # ── 4.3) EL VACIADO ───────────────────────────────────────────────────
+          # 🔒 Se borran los OBJETOS de public, no el esquema (ver cabecera).
           #    Los objetos que pertenecen a una extension se dejan en paz: el dump
           #    tampoco los trae, y borrarlos romperia la extension.
-          cat > vaciar_public.sql <<'SQL'
+          cat > 02_vaciar.sql <<'SQL'
           \echo '--- Vaciando public en staging (el cajon, no el mueble) ---'
           DO $$
           DECLARE r record; n int := 0;
@@ -205,14 +307,16 @@ jobs:
 
             -- 🔴 EL NOMBRE VA CUALIFICADO A MANO, NO POR `::regprocedure`.
             --   regprocedure imprime el nombre SIN el esquema cuando `public` esta en
-            --   el search_path, y aqui el search_path es el que traiga la conexion
-            --   (el dump no fija el suyo hasta unas lineas mas abajo). Un DROP sin
-            --   esquema se resuelve por search_path: en el mejor caso acierta por
-            --   casualidad, en el peor borra la funcion de OTRO esquema.
+            --   el search_path, y un DROP sin esquema se resuelve por search_path: en
+            --   el mejor caso acierta por casualidad, en el peor borra la funcion de
+            --   OTRO esquema.
             -- ⚠️ DROP ROUTINE cubre funciones y procedimientos, no AGREGADOS. Hoy en
             --   produccion las 16 son funciones normales (medido el 9-ago-2026). Si
             --   algun dia aparece un agregado, esto fallara con su nombre y su motivo
             --   -- falla CERRADO, que es como tiene que fallar.
+            -- 🔴 Y ESTE CASCADE ES EL QUE SE SALE DE public: `moloka_buzones_fase0()`
+            --   sostiene cuatro politicas de `storage.objects`. Por eso estan
+            --   capturadas antes (4.2) y se recrean despues (4.5).
             FOR r IN
               SELECT format('%I.%I(%s)', ns.nspname, p.proname,
                             pg_get_function_identity_arguments(p.oid)) AS firma
@@ -239,14 +343,92 @@ jobs:
           END $$;
           SQL
 
-          # 🔒 UN SOLO psql para el vaciado Y la carga. Si se hicieran en dos
-          #    llamadas, un fallo en la carga dejaria staging VACIO -- que es peor que
-          #    dejarlo divergente. Concatenados, `--single-transaction` cubre los dos.
-          cat vaciar_public.sql backup.sql > restaurar.sql
-          # Para poder traducir un "psql:restaurar.sql:X" al numero de linea del dump:
-          # el vaciado va delante y ocupa estas lineas.
-          echo "El vaciado ocupa $(wc -l < vaciar_public.sql) lineas: en un error"
-          echo "'psql:restaurar.sql:X', la linea del dump es X menos esas."
+          # ── 4.5) RECREAR lo capturado, y demostrar que no falta nada mas ──────
+          cat > 03_recrear.sql <<'SQL'
+          -- Mismo search_path que al capturar (ver 4.2): sin esto,
+          -- `moloka_buzones_fase0()` no resuelve y las politicas de los buzones no se
+          -- pueden recrear.
+          SET LOCAL search_path = public;
+          \echo '--- Recreando las politicas de fuera de public que el backup no trae ---'
+          DO $$
+          DECLARE r record; n_creadas int := 0; n_ya int := 0;
+          BEGIN
+            FOR r IN SELECT * FROM moloka_politicas_fuera_public LOOP
+              IF EXISTS (SELECT 1 FROM pg_catalog.pg_policies pp
+                          WHERE pp.schemaname = r.schemaname
+                            AND pp.tablename  = r.tablename
+                            AND pp.policyname = r.policyname) THEN
+                n_ya := n_ya + 1;      -- el CASCADE no llego a esta: se queda como esta
+              ELSE
+                EXECUTE r.sentencia;
+                n_creadas := n_creadas + 1;
+                RAISE INFO 'Recreada: %.% / %', r.schemaname, r.tablename, r.policyname;
+              END IF;
+            END LOOP;
+            RAISE INFO 'Politicas fuera de public: % recreadas, % intactas.', n_creadas, n_ya;
+          END $$;
+
+          -- 🔴 LA DEMOSTRACION, no la confianza. El CASCADE del vaciado pudo llevarse
+          --   por delante algo mas que politicas (una vista, un disparador, una funcion
+          --   de otro esquema). Si el censo de fuera de public ha ENCOGIDO, se aborta y
+          --   la transaccion entera se deshace: staging se queda como estaba. Esto es
+          --   lo que convierte en garantia lo que el 9-ago-2026 fue pura suerte.
+          DO $$
+          DECLARE r record; fallos text := '';
+          BEGIN
+            FOR r IN
+              SELECT c.que, c.n AS antes,
+                     CASE c.que
+                       WHEN 'relaciones' THEN (SELECT count(*) FROM pg_catalog.pg_class cl
+                                                 JOIN pg_catalog.pg_namespace nn ON nn.oid = cl.relnamespace
+                                                WHERE nn.nspname NOT IN ('public','information_schema')
+                                                  AND nn.nspname NOT LIKE 'pg\_%')
+                       ELSE                  (SELECT count(*) FROM pg_catalog.pg_proc pr
+                                                 JOIN pg_catalog.pg_namespace nn ON nn.oid = pr.pronamespace
+                                                WHERE nn.nspname NOT IN ('public','information_schema')
+                                                  AND nn.nspname NOT LIKE 'pg\_%')
+                     END AS ahora
+                FROM moloka_censo_fuera_public c
+            LOOP
+              IF r.ahora < r.antes THEN
+                fallos := fallos || format(E'\n  - %s: habia %s y quedan %s', r.que, r.antes, r.ahora);
+              END IF;
+            END LOOP;
+            IF fallos <> '' THEN
+              RAISE EXCEPTION E'ABORTA: el vaciado de public se ha llevado por delante cosas de OTROS esquemas:%\nStaging se queda como estaba. Mira que dependencia hay y captura tambien eso.', fallos;
+            END IF;
+            RAISE INFO 'Comprobado: fuera de public no falta nada.';
+          END $$;
+
+          -- Y que ninguna politica capturada se haya quedado sin recrear.
+          DO $$
+          DECLARE n_falta int;
+          BEGIN
+            SELECT count(*) INTO n_falta
+              FROM moloka_politicas_fuera_public g
+             WHERE NOT EXISTS (SELECT 1 FROM pg_catalog.pg_policies pp
+                                WHERE pp.schemaname = g.schemaname
+                                  AND pp.tablename  = g.tablename
+                                  AND pp.policyname = g.policyname);
+            IF n_falta > 0 THEN
+              RAISE EXCEPTION 'ABORTA: % politica(s) capturada(s) no estan tras recrearlas.', n_falta;
+            END IF;
+          END $$;
+          SQL
+
+          # 🔒 UN SOLO psql PARA TODO. Si el recrear fuera una llamada aparte, un fallo
+          #    ahi dejaria staging vaciado y SIN las politicas, sin vuelta atras.
+          cat 00_permisos.sql 01_capturar.sql 02_vaciar.sql dump_sin_schema.sql 03_recrear.sql > restaurar.sql
+          # Para poder traducir un "psql:restaurar.sql:X" a la linea del dump ORIGINAL,
+          # que es lo que se contrasta contra el fichero de R2. Son DOS correcciones,
+          # no una: el preambulo que va delante y las lineas filtradas. En esta casa el
+          # numero de linea de un error es lo que ha resuelto los tres agujeros, asi
+          # que la cuenta se da bien o no se da.
+          PREAMBULO=$(cat 00_permisos.sql 01_capturar.sql 02_vaciar.sql | wc -l)
+          echo "Traduccion de lineas para leer un error:"
+          echo "  restaurar.sql:X  →  dump_sin_schema.sql: X - $PREAMBULO"
+          echo "  y en el backup.sql ORIGINAL, $N_SCHEMA linea(s) mas abajo de esa,"
+          echo "  si el error cae despues del 'CREATE SCHEMA public;' filtrado."
 
           if ! psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 --single-transaction \
                  -q -f restaurar.sql 2> restaurar_error.log; then
@@ -260,10 +442,12 @@ jobs:
             exit 1
           fi
           echo "Restauracion aplicada sin errores."
-          # Los avisos que no llegan a error tambien se miran.
+          # Los avisos que no llegan a error tambien se miran. Y aqui hay que mirarlos
+          # de verdad: los NOTICE de "drop cascades to ..." son los que descubrieron
+          # que el vaciado se salia de public.
           if [ -s restaurar_error.log ]; then
             echo "--- Avisos de psql (no han parado la restauracion) ---"
-            head -40 restaurar_error.log
+            head -60 restaurar_error.log
           fi
 
       # ── 5) EL VEREDICTO ───────────────────────────────────────────────────
@@ -469,6 +653,17 @@ jobs:
              where n.nspname = 'public'
                and not exists (select 1 from pg_depend d where d.objid = p.oid and d.deptype = 'e')")
 
+          # 🔴 ESTO SE DICE SIEMPRE, TAMBIEN EN VERDE, Y NO ES UN ADORNO.
+          #   Las politicas de fuera de `public` NO vienen del backup: el backup es
+          #   `pg_dump --schema=public` y no las contiene. Estan porque el paso 4 las
+          #   CONSERVA de la propia staging. Si el veredicto saliera en verde a secas,
+          #   estaria mintiendo sobre lo unico que aqui importa de verdad: que la copia
+          #   de seguridad NO cubre `storage`. En un incendio de verdad no habria
+          #   staging de la que conservarlas y los buzones se quedarian sin ninguna.
+          #   🔒 ESTA LINEA SE BORRA EL DIA QUE `backup-bd.yml` LAS TRAIGA. No antes.
+          NPOL_FUERA=$(psql "$STAGING_DB_URL" -At -c "
+            select count(*) from pg_policies where schemaname <> 'public'")
+
           cuantos() { awk -v t="$2" '$1==t' "$1" | wc -l; }
           DT=$(cuantos dump_objetos.txt tabla);     DV=$(cuantos dump_objetos.txt vista)
           DF=$(cuantos dump_objetos.txt funcion);   DS=$(cuantos dump_objetos.txt secuencia)
@@ -491,6 +686,12 @@ jobs:
           echo "El dump trae $NSETVAL sentencia(s) setval. NINGUNA se comprueba todavia:"
           echo "una secuencia puede volver EXISTIENDO y con el contador mal, y eso aqui"
           echo "sale verde. Es un agujero conocido y abierto (ver el comentario del paso)."
+          echo ""
+          echo "⚠️  $NPOL_FUERA politica(s) RLS de fuera de public (storage.objects) estan en"
+          echo "    staging CONSERVADAS de la propia staging, NO restauradas del backup:"
+          echo "    el backup es --schema=public y NO LAS CUBRE. En un incendio de verdad"
+          echo "    no habria de donde conservarlas y los buzones se quedarian sin ninguna."
+          echo "    Pendiente en backup-bd.yml. Esto se dice tambien cuando todo sale bien."
 
           comm -23 dump_objetos.txt stg_objetos.txt > faltan.txt
           comm -13 dump_objetos.txt stg_objetos.txt > sobran.txt
@@ -596,6 +797,10 @@ jobs:
             echo "| filas (todas las tablas) | $TOTD | $TOTS |"
             echo ""
             echo "\`setval\` en el dump: $NSETVAL — **sin comprobar** (agujero conocido)."
+            echo ""
+            echo "> ⚠️ **$NPOL_FUERA políticas RLS de \`storage\` CONSERVADAS de la propia staging, NO restauradas del backup.**"
+            echo "> El backup es \`--schema=public\` y no las cubre. El día del incendio no habría staging"
+            echo "> de la que conservarlas y los buzones se quedarían sin ninguna. Pendiente en \`backup-bd.yml\`."
             if [ -s faltan.txt ]; then
               echo ""
               echo "**El backup NO lo trajo:**"
@@ -640,5 +845,6 @@ jobs:
           echo "ANTES DE ENSAYAR UNA MIGRACION EN STAGING, SE RESTAURA STAGING."
           {
             echo ""
-            echo "**resultado: VERIFICADO -- el backup reconstruye lo que contiene ($DTOT objetos, $TOTD filas)**"
+            echo "**resultado: VERIFICADO -- el backup reconstruye lo que contiene ($DTOT objetos, $TOTD filas),"
+            echo "con $NPOL_FUERA politicas de storage CONSERVADAS de staging, NO restauradas del backup**"
           } >> "$GITHUB_STEP_SUMMARY"
