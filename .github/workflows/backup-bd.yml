@@ -12,6 +12,13 @@ name: Moloka - Backup BD
 #    pusiera antes, un tropiezo bajando ficheros dejaría el volcado de la base sin
 #    subir — y la base es lo más crítico. Así, pase lo que pase con el Storage, la
 #    copia de la BD ya está a salvo (y el fallo salta igual por el Telegram).
+#
+# 🔴 FRENTE ABIERTO, DICHO EN ALTO: este volcado lleva `--no-privileges`, así que
+#    el fichero NO contiene ni un GRANT ni un REVOKE. El día que haya que restaurar
+#    de verdad, la base vuelve con los ACL POR DEFECTO de Supabase — o sea, con
+#    `anon` dentro de todo (§4 del CLAUDE.md). Restauras el incendio y te queda la
+#    casa abierta. No se toca en este PR a propósito, pero no es una nota al pie:
+#    está sin cerrar. Ver el PENDIENTE de §4.
 
 on:
   schedule:
@@ -48,9 +55,25 @@ jobs:
         run: |
           FECHA=$(date -u +%Y-%m-%d_%H%M)
           echo "FECHA=$FECHA" >> "$GITHUB_ENV"
+          # 🔴 SIN `--clean --if-exists`, Y ES EL CAMBIO IMPORTANTE (9-ago-2026).
+          #   Con `--clean` el dump empezaba por un bloque de borrados, y ahi pg_dump
+          #   escribe sentencias del tipo:
+          #       ALTER TABLE ONLY public.x DROP CONSTRAINT IF EXISTS y;
+          #   donde el "IF EXISTS" protege a la RESTRICCION, NO a la TABLA. Si la tabla
+          #   no esta, revienta. Consecuencia, medida en el run 31296420722: aquel
+          #   backup SOLO se podia restaurar encima de una base que YA tuviera el
+          #   esquema entero. En un incendio de verdad -- proyecto nuevo y vacio -- se
+          #   habria parado en la linea 27 de 111.734, antes de restaurar un solo dato.
+          #   El simulacro salia verde solo porque psql corria con ON_ERROR_STOP=0 y
+          #   pasaba por encima de esos errores sin mirarlos.
+          # 🔒 Ahora el dump es SOLO `CREATE` + `COPY`, y quien vacia el destino es
+          #   quien restaura (restaurar-staging.yml), que es donde se puede hacer
+          #   dentro de la misma transaccion. Un dump que no borra nada tambien es un
+          #   dump que no puede destruir nada por su cuenta.
+          # ⚠️ Los backups ANTERIORES a este cambio llevan el bloque de borrados y
+          #   restaurar-staging.yml los RECHAZA por su nombre, con el motivo dicho.
           /usr/lib/postgresql/17/bin/pg_dump "$SUPABASE_DB_URL" \
             --schema=public --no-owner --no-privileges \
-            --clean --if-exists \
             | gzip > "moloka_${FECHA}.sql.gz"
           ls -lh "moloka_${FECHA}.sql.gz"
 
