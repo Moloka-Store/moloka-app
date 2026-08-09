@@ -361,6 +361,21 @@ jobs:
           #   storage, supabase_migrations, vault). Si algun dia naciera uno asi, esta
           #   linea habria que revisarla -- y entonces sera un cambio visible, que es
           #   justo lo que se busca.
+          # ✅ Y QUE ESTE CAMBIO NO CAMBIA NADA NO ES UN ARGUMENTO: ESTA MEDIDO, DOS
+          #   VECES Y SOBRE EL RESULTADO. La migracion del contador se recorrio ENTERA
+          #   en staging (restaurar → ensayo → aplicar) con la version VIEJA de este
+          #   workflow y otra vez con esta, y las siete huellas del estado salieron
+          #   IDENTICAS bit a bit:
+          #       columnas       8be441ff0aa597d02ced74a6bd29ee4c
+          #       indices        413cb344f712d5ae8b1b6c55c287d1cb
+          #       restricciones  4380d0c41d84c841981697daa7213a31
+          #       funciones      4248c7d460565322e27c43c4331643e3
+          #       politicas      b9f1aa5ed955a8511f02853138694001
+          #       def_vistas     2e4c07648576a3ed3c7a24187f3748f9
+          #       ACL            161fde22668cfb6290713e14d8616975
+          #   Antes de eso, "es identico en efecto" era una hipotesis bien razonada. Es
+          #   distinto. El metodo esta en §3 del CLAUDE.md por si hay que repetirlo con
+          #   el siguiente cambio de canieria.
           export PGOPTIONS="-c lock_timeout=5s -c search_path=public,extensions"
           echo "search_path fijado a 'public,extensions' (antes se heredaba de la conexion)."
 
