@@ -255,6 +255,23 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   y entonces el dump arrastra dueños y ACL, con lo que eso implica al restaurar en otro proyecto), o
   que el restore aplique al terminar un guion de permisos propio y **medido**. Sin cerrar desde el
   9-ago-2026.
+- ⚠️ **PENDIENTE — el simulacro comprueba que las SECUENCIAS existan, y eso no es lo que importa.**
+  Una secuencia puede volver de la copia **existiendo y con el contador a 1 sobre una tabla llena**:
+  la primera inserción del día del incendio choca con clave duplicada. Por nombre, eso sale **verde**.
+  El contraste que vale es de **valores**: los `setval` que emite el dump contra
+  `pg_sequences.last_value`. Medido el 9-ago-2026: las **23** secuencias de producción tienen el
+  contador avanzado (0 sin estrenar), así que le aplica a las 23. `restaurar-staging.yml` ya
+  imprime en cada ejecución cuántos `setval` trae el dump, para que el agujero se vea. Es otro
+  diseño y merece su propio PR.
+- ⚠️ **PENDIENTE — el simulacro no compara las RESTRICCIONES, y son las que deciden si un ensayo vale.**
+  Lo que importa de un índice no es el índice: es la **garantía**. Si staging admite un duplicado que
+  producción rechaza, un ensayo sale verde y la migración revienta al aplicarla de verdad — que es
+  exactamente el agujero que el simulacro existe para cerrar. Y las garantías viven en
+  `pg_constraint` (PK, UNIQUE, FK, CHECK), con nombre, y en el dump como `ADD CONSTRAINT`:
+  comparación limpia. Ojo al detalle que hace inútil el atajo: **los índices que respaldan una PK o
+  un UNIQUE NO aparecen en el dump como `CREATE INDEX`**, sino dentro de un `ALTER TABLE … ADD
+  CONSTRAINT`, así que contar `CREATE INDEX` da de menos y se inventa un rojo falso. Los índices de
+  puro rendimiento no cambian si un ensayo es válido. Ese PR se llama **restricciones**, no índices.
 - ⚠️ **PENDIENTE — la copia de FICHEROS a R2 no tiene simulacro de restauración.** Desde el
   30-jul-2026 el backup diario (`backup-bd.yml` + `backup_storage.py`) copia a R2 los buckets
   `facturas-pdfs` e `informes` (las facturas de proveedor y el archivo histórico de Keepa). Pero
@@ -270,6 +287,20 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
 ## 5. CÓMO SE TRABAJA AQUÍ
 
 - **UN PR, UNA COSA.** Sin excepciones.
+- 🔴 **ANTES DE ENSAYAR UNA MIGRACIÓN EN STAGING, SE RESTAURA STAGING.** Se lanza
+  `restaurar-staging.yml` y se espera a que salga en VERDE. La escalera entera es:
+  **restaurar staging → staging ensayo → staging aplicar → verificación SQL → producción ensayo →
+  producción aplicar → verificación SQL**, con Elena avisada antes de tocar producción.
+  **Por qué:** un ensayo en staging solo demuestra algo sobre producción si las dos bases se parecen.
+  El 9-ago-2026 staging tenía 54 objetos contra los 83 de producción — faltaban 29, entre ellos
+  `v_salud_asin` y `v_trackeador_cola` — y con eso los ensayos de semanas enteras no demostraban
+  nada. El caso concreto: el ensayo de `2026-08-07_demanda_asin_contador.sql` murió con
+  `ERROR: relation "v_salud_asin" does not exist`, que no era un problema de la migración sino de la
+  base contra la que se probaba.
+  **Y por qué así y no con un vigilante de deriva:** porque la deriva no se mide, se **elimina**. Una
+  alarma diaria cuya única acción posible es siempre la misma —restaurar staging— se deja de leer en
+  dos semanas. Es el `ON_ERROR_STOP=0` por el otro extremo. Restaurando antes de cada ensayo, staging
+  nunca es más viejo que el backup de anoche y no queda deriva que vigilar.
 - **Antes de picar: lee cómo se hizo lo anterior.** Hay procesadores en producción que funcionan;
   el siguiente se les tiene que parecer. Si algo se aparta del patrón, dilo y explica por qué.
 - **Las dudas de diseño no se resuelven en caliente.** Se anotan en una línea y se deciden en frío.

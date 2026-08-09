@@ -37,9 +37,31 @@ name: Moloka - Aplicar MIGRACION
 #   descubrirlo a mitad. Si algun dia hace falta una asi, se para y se decide; lo que
 #   NO se hace es quitar el --single-transaction.
 #
+# 🔴 ANTES DE ENSAYAR EN STAGING, SE RESTAURA STAGING. Regla de la casa desde el
+#   9-ago-2026, y no es burocracia: es lo que hace que la escalera signifique algo.
+#   Se lanza `restaurar-staging.yml` y se espera a que salga en VERDE.
+#
+#   POR QUE. Un ensayo en staging solo demuestra algo sobre produccion si las dos
+#   bases se parecen. El 9-ago-2026 staging tenia 54 objetos contra los 83 de
+#   produccion -- faltaban 29, entre ellos `v_salud_asin` y `v_trackeador_cola` --, y
+#   con eso los ensayos de semanas enteras no demostraban NADA: reventaban (o peor,
+#   pasaban) por motivos que no tenian que ver con la migracion. El caso concreto:
+#   el ensayo de `2026-08-07_demanda_asin_contador.sql` murio con
+#   `ERROR: relation "v_salud_asin" does not exist`, que no era un problema de la
+#   migracion sino de la base contra la que se probaba.
+#
+#   Y POR QUE ASI Y NO CON UN VIGILANTE DE DERIVA: porque la deriva no hay que
+#   medirla, hay que ELIMINARLA. Un workflow diario que avisara "staging se ha
+#   quedado atras" cuya unica accion posible es siempre la misma -- restaurar
+#   staging -- se dejaria de leer en dos semanas. Es el ON_ERROR_STOP=0 por el otro
+#   extremo: una alarma que salta por rutina deja de ser una alarma. Restaurando
+#   antes de cada ensayo, staging nunca es mas viejo que el backup de anoche y no
+#   queda deriva que vigilar.
+#
 # ESCALERA DE SIEMPRE:
-#   staging ensayo -> staging aplicar -> verificacion SQL -> produccion ensayo ->
-#   produccion aplicar -> verificacion SQL.  Y Elena avisada antes de tocar produccion.
+#   RESTAURAR STAGING -> staging ensayo -> staging aplicar -> verificacion SQL ->
+#   produccion ensayo -> produccion aplicar -> verificacion SQL.
+#   Y Elena avisada antes de tocar produccion.
 
 on:
   workflow_dispatch:
