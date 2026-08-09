@@ -24,9 +24,27 @@
 --       taparse.
 --
 -- 🔒 SE RECONSTRUYE, NO SE INVENTA. Los cinco trozos de una politica salen tal cual
---   de `pg_policies`: `permissive`, `cmd`, `roles`, `qual` y `with_check`. Postgres
---   ya devuelve `qual`/`with_check` como expresiones validas y con los nombres
---   cualificados, asi que no hay que reescribir ni una coma.
+--   de `pg_policies`: `permissive`, `cmd`, `roles`, `qual` y `with_check`. La
+--   expresion no se toca: ni una coma.
+--
+-- 🔴 PERO `qual` Y `with_check` NO VIENEN CUALIFICADOS -- LEER ESTO ANTES DE
+--   REUTILIZAR EL FICHERO, PORQUE ES DONDE SE INCUBA EL BUG.
+--   Postgres los devuelve RENDERIZADOS CON EL `search_path` DEL MOMENTO, asi que un
+--   nombre que estuviera en el path cuando se creo la politica sale SIN esquema.
+--   Medido el 9-ago-2026 contra produccion: en 4 de las 13 politicas,
+--   `moloka_buzones_fase0()` sale desnuda (`storage.foldername()`, en cambio, sale
+--   cualificada, porque `storage` no estaba en el path).
+--   Lo que muerde: si capturas con un `search_path` y recreas con otro, esa expresion
+--   NO RESUELVE y la politica no se puede volver a crear. Y no es hipotetico: el dump
+--   hace `set_config('search_path','')` por su cuenta.
+--   👉 LA REGLA: se fija el MISMO `search_path` al capturar y al recrear (hoy
+--   `SET LOCAL search_path = public`), y la expresion se deja intacta. Cualificar la
+--   funcion a mano en el texto seria reinterpretar una politica que no es nuestra.
+--   🔴 QUIEN LLEVE ESTA PIEZA A `backup-bd.yml`: sin ese `SET LOCAL` al capturar, la
+--   copia guardaria politicas QUE NO SE PUEDEN RESTAURAR -- y saldria verde. Aqui
+--   vivio una frase que decia justo lo contrario ("Postgres ya las devuelve con los
+--   nombres cualificados"), escrita el mismo dia en que se habia medido que no. Asi
+--   es exactamente como esta casa se ha comido ya una nota que mintio diez dias.
 -- 🔒 `%I` para los identificadores (aplica la regla de comillas de Postgres: solo
 --   entrecomilla cuando hace falta) y los roles uno por uno con `quote_ident`, que
 --   deja `public` sin tocar -- que es lo correcto para un `TO public`.

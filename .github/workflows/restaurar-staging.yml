@@ -204,6 +204,14 @@ jobs:
           #   prueba de verdad -- crear y borrar una politica de mentira -- antes de
           #   que el vaciado toque una sola cosa. Va dentro de la transaccion, asi que
           #   no deja rastro pase lo que pase.
+          # ⚠️ AVISO PARA EL DIA QUE ESTO SE REUTILICE: el `CREATE POLICY` de prueba
+          #   toma ACCESS EXCLUSIVE sobre `storage.objects`, y ese lock NO se suelta
+          #   con el `DROP POLICY` -- los locks duran hasta el COMMIT, o sea hasta el
+          #   final de TODA la restauracion. En staging da igual, no lo usa nadie. Pero
+          #   si algun dia esta pieza se apunta a una base de la que dependa Elena, le
+          #   bloquearia los buzones durante todo el restore. Ese dia hay que comprobar
+          #   el permiso de otra forma (mirando el owner de la tabla, por ejemplo), no
+          #   escribiendo en ella.
           cat > 00_permisos.sql <<'SQL'
           \echo '--- Comprobando que puedo escribir politicas en storage.objects ---'
           DO $$
