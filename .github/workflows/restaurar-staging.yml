@@ -524,6 +524,21 @@ jobs:
           #   avanzado (0 sin estrenar), asi que esto le aplica a las 23.
           #   Mas abajo se imprime cuantos `setval` trae el dump, para que el agujero
           #   se vea en cada ejecucion en vez de vivir solo en este comentario.
+          #   ✅ Y el `setval` YA ESTA MEDIDO, que era la duda: el dump del 9-ago-2026
+          #   trae 23 sentencias `setval`, una por secuencia. Lo que falta es
+          #   COMPARARLAS, no averiguar si estan.
+          #
+          # 🔴 LAS SECUENCIAS SE CUENTAN POR DOS SITIOS, Y OMITIR EL SEGUNDO DABA UN
+          #   ROJO FALSO (medido en el run 31300759981: el veredicto decia 10 en el
+          #   dump contra 23 en staging, y encima acusaba al vaciado de no haber
+          #   borrado 13 que si habia borrado).
+          #   El motivo: `pg_dump` solo escribe `CREATE SEQUENCE` para las secuencias
+          #   SUELTAS o de columna `serial`. Las de una columna `IDENTITY` no llevan
+          #   sentencia propia: se declaran DENTRO del `ALTER TABLE … ADD GENERATED …
+          #   AS IDENTITY ( SEQUENCE NAME public.x_id_seq … )`, o sea que nacen y
+          #   mueren con su tabla. Medido en produccion el 9-ago-2026: 10 sueltas y
+          #   13 de identidad, que son las 23. Por eso se lee tambien la linea
+          #   `SEQUENCE NAME`.
           #
           # 🔴 POR QUE UN SOLO LECTOR Y NO VARIOS `grep` SUELTOS: dentro de un bloque
           #   COPY las lineas son DATOS. Una columna de texto que empezara por
@@ -556,6 +571,7 @@ jobs:
             /^CREATE VIEW /              { print "OBJ|vista  " $3; next }
             /^CREATE MATERIALIZED VIEW / { print "OBJ|vista  " $4; next }
             /^CREATE SEQUENCE /          { print "OBJ|secuencia  " $3; next }
+            /^[ \t]*SEQUENCE NAME /      { print "OBJ|secuencia  " $3; next }
             /^SELECT pg_catalog.setval/  { nsetval++; next }
             /^CREATE (FUNCTION|PROCEDURE) / {
               s = $0
