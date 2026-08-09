@@ -22,19 +22,57 @@
 --   rehacerlos y coordinarlos con otra sesión. Con la tabla a 0 filas en producción
 --   (medido hoy) el ALTER es trivial y no toca la seguridad de la TABLA.
 --
--- 🔴 LAS DOS VISTAS SÍ HAY QUE RECREARLAS — y eso NO estaba en el encargo.
---   Medido en pg_depend contra producción: cuelgan de las columnas que se van.
+-- 🔴 LAS TRES VISTAS HAY QUE RECREARLAS — y eso NO estaba en el encargo.
+--   Medido con pg_depend RECURSIVO contra producción (9-ago-2026). La cadena tiene
+--   CUATRO pisos y no hay quinto: `v_amazon_se_despierta` es la cima, nada cuelga de ella.
 --       demanda_asin.periodo_desde / periodo_hasta / dias
 --         └── v_demanda_asin_ultima          (authenticated=r)
 --               └── v_trackeador_cola        (authenticated=r)
+--                     └── v_amazon_se_despierta   (ACL ABIERTA — ver más abajo)
 --   · El primer `ALTER … DROP COLUMN dias` YA falla ("cannot drop column … because
 --     other objects depend on it"): Postgres SÍ registra las dependencias de vistas.
 --   · `CREATE OR REPLACE VIEW` no sirve para la vista nueva: REPLACE solo deja AÑADIR
 --     columnas al final, y aquí se QUITAN tres. Hay que DROP + CREATE.
---   · Y por §4 de CLAUDE.md, **DROP + CREATE PIERDE EL ACL**: las dos vistas renacerían
+--   · Y por §4 de CLAUDE.md, **DROP + CREATE PIERDE EL ACL**: las vistas renacerían
 --     con el default de Supabase (anon Y authenticated con arwdDxtm). Por eso el
 --     revoke+grant va DESPUÉS de cada CREATE, en esta misma migración, y se MIDE al
---     terminar. Hoy las dos tienen `authenticated=r` y así se quedan.
+--     terminar. Las dos primeras tienen hoy `authenticated=r` y así se quedan.
+--
+-- 🔴 EL TERCER PISO SE DESCUBRIÓ EJECUTANDO, NO LEYENDO (9-ago-2026).
+--   El ensayo en staging —el primero que corrió contra una base restaurada, o sea
+--   contra algo con la misma FORMA que producción— se paró aquí:
+--       ERROR: cannot drop view v_trackeador_cola because other objects depend on it
+--       DETAIL: view v_amazon_se_despierta depends on view v_trackeador_cola
+--   Con el staging viejo, al que le faltaban 29 objetos, el ensayo moría antes en
+--   `v_salud_asin` y esto no se habría visto nunca. Tal y como estaba fusionada, esta
+--   migración **también habría fallado en producción**: la dependencia es real allí.
+--
+-- 🔒 `v_amazon_se_despierta` SE RECREA LITERAL. Su definición no está en NINGÚN
+--   fichero de ninguno de los dos repos (buscado el 9-ago-2026): vive solo en la base,
+--   y lo que va más abajo es su `pg_get_viewdef` copiado tal cual. No usa NI UNA
+--   columna de demanda —solo `asin`, `dominio`, `nombre`, `disponible` y
+--   `your_price_min` de `v_trackeador_cola`—, así que el cambio de eje no la toca y
+--   no hay nada que reinterpretar.
+--
+-- 🔴 Y SU ACL SE QUEDA ABIERTA, A PROPÓSITO. Hoy es
+--       postgres=arwdDxtm | anon=arwdDxtm | authenticated=arwdDxtm | service_role=arwdDxtm
+--   Aquí NO se escribe ni un GRANT ni un REVOKE para ella, y **eso no es un olvido**:
+--   medido el 9-ago-2026, el DEFAULT ACL de `public` para relaciones es EXACTAMENTE
+--   ese mismo, carácter por carácter, así que un DROP + CREATE la devuelve idéntica.
+--   Escribir grants sería no-op y escribir revokes la CAMBIARÍA.
+--   Por qué no se cierra aquí, con dos motivos medidos y no por prudencia genérica:
+--     · No es un caso suelto: son **15 vistas** en producción con el mismo patrón
+--       (sin `security_invoker`, dueño `postgres`, `anon=arwdDxtm`), y en **13** el
+--       bypass está demostrado — sirven tablas que `anon` no puede leer directamente
+--       (`salud_fba`, `transacciones_movimientos`, `keepa_escaparate`,
+--       `seller_observaciones`, `monitor_analisis`, `incidencias_*`…). Cerrar una de
+--       las quince dentro de un PR de desbloqueo no arregla el frente y sí lo camufla.
+--     · Y poner `security_invoker=true` a una vista que consume `anon` **no da error:
+--       devuelve 0 FILAS**. Rompe en silencio. Como esta vista no aparece en ningún
+--       fichero, no sabemos quién la lee; si la v1 la consume con la clave `anon`, la
+--       romperíamos sin un solo ruido.
+--   Ese frente va aparte, y va junto con las políticas de `storage` sin copiar y el
+--   `--no-privileges` del backup: son la misma enfermedad del §4.
 --
 -- 🔴 Y frescura_informes() SE ROMPE EN SILENCIO — tampoco estaba en el encargo.
 --   Su cuerpo lleva `(select max(periodo_hasta) from demanda_asin)`. Es LANGUAGE sql
@@ -102,8 +140,16 @@ BEGIN
 END $$;
 
 
--- ── 1) FUERA LAS DOS VISTAS (en orden: la de arriba primero) ────────────────
--- Se recrean más abajo, en esta misma migración, con su revoke+grant detrás.
+-- ── 1) FUERA LAS TRES VISTAS (en orden: la de arriba primero) ───────────────
+-- Se recrean más abajo, en esta misma migración.
+-- 🔒 El orden es el de la cadena al revés, de la cima a la base. Sin la primera
+--    línea, el DROP de v_trackeador_cola falla con "cannot drop view … because other
+--    objects depend on it" — que es justo donde se paró el ensayo del 9-ago-2026.
+--    Y NO se usa CASCADE a propósito: un CASCADE borraría lo que encontrase sin
+--    decir qué, y aquí lo que se quiere es que la lista de lo que se tira esté
+--    escrita a la vista. Si mañana nace un quinto piso, esto vuelve a fallar en el
+--    ensayo — y así debe ser.
+DROP VIEW IF EXISTS public.v_amazon_se_despierta;
 DROP VIEW IF EXISTS public.v_trackeador_cola;
 DROP VIEW IF EXISTS public.v_demanda_asin_ultima;
 
@@ -377,6 +423,67 @@ REVOKE ALL ON public.v_trackeador_cola FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON public.v_trackeador_cola TO authenticated;
 
 
+-- ── 6bis) v_amazon_se_despierta — LITERAL, SIN UNA COMA DE MÁS ──────────────
+-- 🔴 Está aquí porque cuelga de v_trackeador_cola y el DROP de arriba se la lleva.
+--    Lo descubrió el ensayo del 9-ago-2026, no una lectura. Ver la cabecera.
+-- 🔒 COPIA EXACTA de su `pg_get_viewdef` contra producción (9-ago-2026). Su
+--    definición NO existe en ningún fichero de ninguno de los dos repos: la base es
+--    la única fuente, y por eso se pega tal cual. De v_trackeador_cola solo usa
+--    `asin`, `dominio`, `nombre`, `disponible` y `your_price_min` — NINGUNA columna
+--    de demanda, así que el cambio de eje no la roza.
+-- 🔴 SIN `revoke` NI `grant`, Y NO ES UN OLVIDO. Su ACL de hoy
+--    (`postgres|anon|authenticated|service_role = arwdDxtm`) es EXACTAMENTE el
+--    default de `public` para relaciones, medido en `pg_default_acl` el 9-ago-2026:
+--    un DROP + CREATE la devuelve idéntica sola. Un grant sería no-op; un revoke la
+--    cambiaría, y cambiarla NO toca aquí (cabecera: son 15 vistas, y
+--    `security_invoker` a una vista que consume `anon` devuelve 0 filas EN SILENCIO).
+-- ⚠️ Los nombres van sin cualificar, igual que en el resto de este fichero: se apoya
+--    en que `public` esté en el search_path, que es como corre aplicar-migracion.yml.
+CREATE VIEW public.v_amazon_se_despierta AS
+ WITH foto AS (
+         SELECT keepa_escaparate.asin,
+            keepa_escaparate.dominio,
+            keepa_escaparate.fecha_foto,
+            keepa_escaparate.amazon_disponibilidad,
+            keepa_escaparate.amazon_precio,
+            keepa_escaparate.bb_precio,
+            keepa_escaparate.bb_pct_amazon_30d
+           FROM keepa_escaparate
+          WHERE keepa_escaparate.dominio = 'es'::text
+        ), previo AS (
+         SELECT DISTINCT ON (keepa_escaparate_hist.asin) keepa_escaparate_hist.asin,
+            keepa_escaparate_hist.fecha_foto,
+            keepa_escaparate_hist.amazon_disponibilidad,
+            keepa_escaparate_hist.amazon_precio
+           FROM keepa_escaparate_hist
+          WHERE keepa_escaparate_hist.dominio = 'es'::text AND keepa_escaparate_hist.fecha_foto < (( SELECT max(keepa_escaparate.fecha_foto) AS max
+                   FROM keepa_escaparate
+                  WHERE keepa_escaparate.dominio = 'es'::text))
+          ORDER BY keepa_escaparate_hist.asin, keepa_escaparate_hist.fecha_foto DESC
+        )
+ SELECT f.asin,
+    c.nombre,
+    c.disponible AS mi_stock,
+    c.your_price_min AS mi_precio,
+    f.amazon_precio,
+    round(c.your_price_min - f.amazon_precio, 2) AS cuanto_estoy_por_encima,
+    p.amazon_disponibilidad AS amazon_antes,
+    f.amazon_disponibilidad AS amazon_ahora,
+    p.fecha_foto AS foto_anterior,
+    f.fecha_foto AS foto_actual,
+    f.bb_pct_amazon_30d,
+        CASE
+            WHEN f.amazon_disponibilidad = 'La oferta de Amazon está en stock y se puede enviar'::text AND COALESCE(p.amazon_disponibilidad, ''::text) <> 'La oferta de Amazon está en stock y se puede enviar'::text THEN 'AMAZON_SE_HA_DESPERTADO'::text
+            WHEN f.amazon_disponibilidad = 'El envío de la oferta de Amazon está retrasado'::text THEN 'amazon_presente_pero_lento'::text
+            WHEN f.amazon_disponibilidad = 'La oferta de Amazon está en stock y se puede enviar'::text THEN 'amazon_activo_ya_lo_estaba'::text
+            ELSE 'sin_amazon'::text
+        END AS alerta
+   FROM foto f
+     JOIN v_trackeador_cola c ON c.asin = f.asin AND c.dominio = 'es'::text
+     LEFT JOIN previo p ON p.asin = f.asin
+  WHERE f.amazon_precio IS NOT NULL AND COALESCE(c.disponible, 0::bigint) >= 0;
+
+
 -- ── 7) frescura_informes(): la fecha del dato de custom_analytics ───────────
 -- 🔒 COPIA VERBATIM del cuerpo actual (pg_get_functiondef contra producción, medido el
 --    7-ago-2026). NO se reescribe de memoria. Cambia UNA expresión: el fecha_dato de
@@ -437,12 +544,19 @@ REVOKE EXECUTE ON FUNCTION public.frescura_informes() FROM PUBLIC, anon;
 --    where schemaname='public' and tablename='demanda_asin'; -- serie sí, ventana no
 --
 -- 3) 🔒 SEGURIDAD INTACTA (§9.8 del encargo). RLS activa, la política del Cockpit
---    sigue ahí, y las DOS vistas recuperaron authenticated=r SIN anon:
+--    sigue ahí, las DOS primeras vistas recuperaron authenticated=r SIN anon, y
+--    v_amazon_se_despierta quedó EXACTAMENTE como estaba (ACL abierta a propósito:
+--    postgres|anon|authenticated|service_role = arwdDxtm). Si esa tercera sale
+--    distinta de como entró, algo se ha "mejorado" de rondón y hay que pararlo:
 --   select relname, relkind, relrowsecurity,
 --          coalesce(array_to_string(relacl,' | '),'(sin acl)') acl
 --     from pg_class where oid in ('public.demanda_asin'::regclass,
 --                                 'public.v_demanda_asin_ultima'::regclass,
---                                 'public.v_trackeador_cola'::regclass);
+--                                 'public.v_trackeador_cola'::regclass,
+--                                 'public.v_amazon_se_despierta'::regclass);
+--    Y que sigue SIN security_invoker (reloptions a null), como estaba:
+--   select relname, reloptions from pg_class
+--    where oid = 'public.v_amazon_se_despierta'::regclass;
 --   select policyname from pg_policies
 --    where schemaname='public' and tablename='demanda_asin';  -- inventario_read_authenticated
 --
@@ -451,9 +565,22 @@ REVOKE EXECUTE ON FUNCTION public.frescura_informes() FROM PUBLIC, anon;
 --   select * from frescura_informes();
 --   select * from frescura_informes_sondeo() where informe='custom_analytics';
 --
--- 5) Las dos vistas responden (vacías hoy, pero sin error de columna):
+-- 5) Las TRES vistas responden (vacías hoy, pero sin error de columna):
 --   select count(*) from v_demanda_asin_ultima;   -- 0 hasta la primera carga
 --   select count(*) from v_trackeador_cola;       -- 371 (la demanda va a NULL por LEFT JOIN)
+--   select count(*) from v_amazon_se_despierta;   -- lo que diera antes; no la toca el cambio
+--
+-- 5bis) 🔒 Y que la cadena sigue teniendo CUATRO pisos y no cinco. Si sale un quinto,
+--    es que ha nacido algo nuevo colgando y esta migración se queda corta otra vez:
+--   with recursive t as (
+--     select 'public.demanda_asin'::text obj, 0 n
+--     union all
+--     select (c.oid::regclass)::text, t.n+1 from t
+--       join pg_depend d on d.refobjid = (t.obj)::regclass
+--       join pg_rewrite rw on rw.oid = d.objid
+--       join pg_class c on c.oid = rw.ev_class
+--      where c.relkind in ('v','m') and (c.oid::regclass)::text <> t.obj and t.n < 6)
+--   select distinct n, obj from t order by n, obj;
 --
 -- 6) Advisors de Supabase después de aplicar, por si el security_invoker cambió algo.
 -- ============================================================================
