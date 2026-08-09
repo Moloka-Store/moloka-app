@@ -744,15 +744,21 @@ jobs:
           #   saltaria siempre y en dos semanas nadie lo miraria -- el fallo de siempre.
           #   Se IMPRIME para que la diferencia tenga numero. El dia que el backup traiga
           #   los privilegios, esto pasa a ser una comprobacion mas y entonces si falla.
-          HUELLA_ACL=$(psql "$STAGING_DB_URL" -At -c "
-            select md5(string_agg(x,'|' order by x)) from (
-              select c.relname||' :: '||coalesce(array_to_string(c.relacl,' | '),'(sin acl)') as x
-                from pg_class c join pg_namespace n on n.oid=c.relnamespace
-               where n.nspname='public' and c.relkind in ('r','p','v','m')) t")
-          CON_ANON=$(psql "$STAGING_DB_URL" -At -c "
-            select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
-             where n.nspname='public' and c.relkind in ('r','p','v','m')
-               and exists (select 1 from aclexplode(c.relacl) a where a.grantee = 'anon'::regrole)")
+          # 🔒 LA FORMULA NO SE ESCRIBE AQUI: vive en `sql/huella_acl.sql` y la consumen
+          #   los dos lados -- este workflow y quien la compruebe a mano. Una huella
+          #   calculada con dos codigos no es una huella: basta otro separador, otro
+          #   orden o otro texto para el `(sin acl)` para que dos md5 distintos no
+          #   prueben nada aunque el estado sea el mismo. Y que hoy coincidan es una
+          #   coincidencia, no una garantia. El porque completo, en la cabecera del
+          #   fichero.
+          # 🔒 Los tres numeros salen de LA MISMA consulta, asi que el denominador y el
+          #   numerador de "cuantas con anon" son por construccion la misma poblacion.
+          IFS='|' read -r HUELLA_ACL REL_TOTAL CON_ANON < <(psql "$STAGING_DB_URL" -At -F'|' -f sql/huella_acl.sql)
+          if [ -z "$HUELLA_ACL" ]; then
+            echo "::error::No he podido calcular la huella de los ACL con sql/huella_acl.sql."
+            echo "::error::Sin ella, este paso no puede decir cuanto reabre el restore. Para y mira."
+            exit 1
+          fi
           echo ""
           echo "======= PERMISOS: lo que el backup NO restaura ======="
           echo "  huella md5 de los ACL de public en staging : $HUELLA_ACL"
@@ -762,9 +768,18 @@ jobs:
           #   verdad es 83 de 83, o sea TODAS. Un denominador equivocado no es un
           #   detalle de formato: minimiza justo el hallazgo que esta linea existe para
           #   medir. Medido en el run 31318814366, que es donde se vio.
-          REL_TOTAL=$((ST+SV))
+          #   Ahora el denominador lo da la propia consulta compartida, asi que no puede
+          #   volver a desparejarse del numerador.
           echo "  relaciones (tablas+vistas)                 : $REL_TOTAL"
           echo "  … de ellas, con permiso para anon          : $CON_ANON"
+          # 🔒 Aviso si la poblacion de la huella no cuadra con la del inventario. Hoy
+          #   coinciden (0 objetos de extension en public, medido); si algun dia una
+          #   extension planta una tabla ahi, las dos cifras se separan y conviene
+          #   saberlo en vez de que una de las dos mienta en silencio.
+          if [ "$REL_TOTAL" != "$((ST+SV))" ]; then
+            echo "  ⚠️  ojo: el inventario ve $((ST+SV)) relaciones y la huella $REL_TOTAL."
+            echo "      La huella NO excluye objetos de extension y el inventario si."
+          fi
           echo "====================================================="
           echo "El backup va con --no-privileges: NO trae permisos. Cada relacion nace"
           echo "con el default de Supabase, o sea con anon dentro. Esta huella NO tiene"
