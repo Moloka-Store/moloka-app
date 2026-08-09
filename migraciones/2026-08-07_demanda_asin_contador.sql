@@ -117,25 +117,42 @@
 --    Así que el vaciado deja de ser una instrucción para el operador y pasa a ser
 --    parte de la migración, que es donde se puede razonar y auditar.
 --
--- POR QUÉ UN DELETE INCONDICIONAL ES SEGURO AQUÍ (medido el 7-ago-2026):
---   · PRODUCCIÓN tiene 0 filas → es un no-op, no borra nada.
---   · STAGING tiene ~950 filas del modelo viejo, cuyas "ventanas" eran etiquetas
---     inventadas. No son lecturas de un contador, no se pueden reinterpretar como
---     acumulados, y además ROMPERÍAN la llave nueva: varias ventanas cargadas del
+-- POR QUÉ UN DELETE INCONDICIONAL ES SEGURO AQUÍ:
+--   · PRODUCCIÓN tiene 0 filas → es un no-op, no borra nada (remedido el 9-ago-2026).
+--   · Las filas del modelo viejo, allá donde queden, tienen "ventanas" que eran
+--     etiquetas inventadas. No son lecturas de un contador, no se pueden reinterpretar
+--     como acumulados, y además ROMPERÍAN la llave nueva: varias ventanas cargadas del
 --     mismo fichero comparten `exportado_at`, así que darían duplicado en
 --     (pais, leido_at, asin). O se van, o la migración no entra.
+--   ⚠️ Aquí vivía "STAGING tiene ~950 filas del modelo viejo", medido el 7-ago. El
+--     9-ago dejó de ser verdad —el simulacro de restauración recargó staging desde
+--     producción, donde la tabla está a 0— y esa cifra caducada se contó en una
+--     conversación como si fuera lo que acababa de pasar. Por eso el aviso de abajo
+--     ahora dice la cifra REAL de cada ejecución en vez de que haya que buscarla en un
+--     comentario: **el número lo pone la ejecución, no la nota.**
 --
 -- 🔒 Y POR QUÉ NO PUEDE BORRAR DATOS BUENOS EL DÍA DE MAÑANA: va dentro del IF de que
 --    TODAVÍA exista `periodo_desde`. En cuanto esta migración corre una vez, esa
 --    columna ya no está, así que una segunda pasada no entra aquí y no toca una fila.
 --    El borrado solo alcanza a filas del modelo viejo, por construcción.
+-- 🔴 EL AVISO DICE CUÁNTAS, y no es cosmética. Antes decía "Borradas las filas del
+--    modelo viejo" a secas: el mismo texto exacto tanto si borraba 0 como si borraba
+--    12.000 que no tocaba. Un aviso que no trae su MAGNITUD no se puede auditar — es
+--    la misma familia que un fee sin procedencia o un margen sin la fecha del dato que
+--    lo sostiene (§1.4). `GET DIAGNOSTICS … = ROW_COUNT` lo convierte en un número que
+--    se puede contrastar.
+--    Deliberadamente AVISA, no aborta: la guarda que impide que esto borre datos buenos
+--    es el `IF EXISTS (periodo_desde)` de aquí mismo, y está razonada abajo. Poner
+--    además un umbral sería otra decisión y no se toma de rondón.
 DO $$
+DECLARE n_borradas bigint;
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns
               WHERE table_schema='public' AND table_name='demanda_asin'
                 AND column_name='periodo_desde') THEN
     DELETE FROM demanda_asin;
-    RAISE NOTICE 'Borradas las filas del modelo viejo (ventanas declaradas: no son lecturas de un contador y no se pueden reinterpretar).';
+    GET DIAGNOSTICS n_borradas = ROW_COUNT;
+    RAISE NOTICE 'Borradas % filas del modelo viejo (ventanas declaradas: no son lecturas de un contador y no se pueden reinterpretar).', n_borradas;
   END IF;
 END $$;
 
