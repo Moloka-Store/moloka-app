@@ -244,6 +244,17 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
 - **SP-API: jamás con credenciales de Moloka SL.** Decidido y cerrado. Las cuentas de Moloka
   (Elena) y Fernando (autónomo) están separadas a nivel de credenciales.
 - **Confirmar una factura SIEMPRE inyecta stock.** Nunca subir facturas antiguas retroactivamente.
+- 🔴 **PENDIENTE — el backup NO copia los permisos: restaurar te deja la base ABIERTA.**
+  `backup-bd.yml` vuelca con `--no-privileges`, así que el fichero **no contiene ni un `GRANT` ni un
+  `REVOKE`**. Dicho en alto y sin adornos: **el día que haya que restaurar de verdad, la base vuelve
+  con los ACL por defecto de Supabase — o sea, con `anon` dentro de todo** (es el mismo
+  `pg_default_acl` de los dos puntos de arriba: los objetos nacen con `arwdDxtm` para `anon` y
+  `authenticated`, y aquí nadie revoca después). Restauras el incendio y te queda la casa abierta.
+  **Esto no es una nota al pie: es un frente propio y hoy está abierto.** Lo que falta por decidir en
+  frío es cuál de los dos caminos: que el volcado se lleve los privilegios (quitar `--no-privileges`,
+  y entonces el dump arrastra dueños y ACL, con lo que eso implica al restaurar en otro proyecto), o
+  que el restore aplique al terminar un guion de permisos propio y **medido**. Sin cerrar desde el
+  9-ago-2026.
 - ⚠️ **PENDIENTE — la copia de FICHEROS a R2 no tiene simulacro de restauración.** Desde el
   30-jul-2026 el backup diario (`backup-bd.yml` + `backup_storage.py`) copia a R2 los buckets
   `facturas-pdfs` e `informes` (las facturas de proveedor y el archivo histórico de Keepa). Pero

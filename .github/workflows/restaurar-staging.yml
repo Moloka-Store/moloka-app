@@ -3,14 +3,54 @@ name: Moloka - Restaurar backup en STAGING
 # El SIMULACRO DE INCENDIO: coge el backup de R2 y lo restaura en staging para
 # demostrar que la copia sirve de verdad.
 #
-# 🔴 HASTA EL 30-jul-2026 ESTE SIMULACRO NO PODÍA FALLAR, ASÍ QUE NO PROBABA NADA:
-#   · psql corría con ON_ERROR_STOP=0 → seguía adelante pasara lo que pasara;
-#   · la única comprobación posterior imprimía un número y NO lo comparaba con nada.
-#   Una restauración que solo recuperase media base terminaba en VERDE.
+# 🔴 PRIMER AGUJERO (hasta el 30-jul-2026): EL SIMULACRO NO PODIA FALLAR, ASI QUE
+#   NO PROBABA NADA.
+#   · psql corria con ON_ERROR_STOP=0 → seguia adelante pasara lo que pasara;
+#   · la unica comprobacion posterior imprimia un numero y NO lo comparaba con nada.
+#   Una restauracion que solo recuperase media base terminaba en VERDE.
 #
-# Ahora: ON_ERROR_STOP=1, la restauración va en UNA transacción (si falla, staging
-# se queda como estaba en vez de a medio destruir) y al final se comprueban los
-# recuentos de las tablas clave contra un mínimo. Si alguna no llega, el job FALLA.
+# 🔴 SEGUNDO AGUJERO, EL GORDO (encontrado el 9-ago-2026, run 31296420722, en cuanto
+#   el simulacro endurecido se pudo caer por primera vez). Se paro en la linea 27 de
+#   111.734, antes de restaurar un solo dato:
+#       psql:backup.sql:27: ERROR:  relation "public.monitor_resultados" does not exist
+#   El dump se hacia con `--clean --if-exists`, o sea que empezaba por un bloque de
+#   borrados, y ahi pg_dump escribe sentencias del tipo:
+#       ALTER TABLE ONLY public.x DROP CONSTRAINT IF EXISTS y;
+#   donde el "IF EXISTS" protege a la RESTRICCION, NO a la TABLA. Si la tabla no
+#   esta, revienta. Traducido: aquel backup SOLO se podia restaurar encima de una
+#   base que YA tuviera el esquema entero. En el incendio de verdad -- produccion
+#   perdida, proyecto nuevo y VACIO -- habria fallado en esa misma linea 27.
+#   El backup no estaba roto (los datos estaban); lo que estaba roto es que no habia
+#   forma de distinguir "errores inofensivos de cabecera" de "restauracion a medias".
+#
+# 🔴 TERCER AGUJERO, el que hacia inutiles TODOS los ensayos: NADIE COMPROBABA QUE
+#   STAGING SE PARECIERA A PRODUCCION. El 9-ago-2026 staging tenia 46 tablas + 8
+#   vistas contra las 59 + 24 de produccion: faltaban 29 objetos, entre ellos
+#   v_salud_asin y v_trackeador_cola. Con esa divergencia, cualquier ensayo de una
+#   migracion en staging demostraba sobre produccion exactamente NADA. Un restore
+#   que no termina diciendo "esto tiene TODO lo que tenia que tener" no es un
+#   restore verificado: es un restore esperanzado.
+#
+# COMO QUEDA
+#   1) El dump ya NO lleva `--clean` (backup-bd.yml): es solo CREATE + COPY. Un dump
+#      que no borra nada tampoco puede destruir nada por su cuenta.
+#   2) VACIAR lo hace este workflow, y vacia EL CAJON, NO TIRA EL MUEBLE: se borran
+#      los objetos de `public`, pero NO se hace `DROP SCHEMA public`.
+#      🔒 Por que importa: tirar el esquema se llevaria por delante sus permisos y,
+#      sobre todo, sus DEFAULT PRIVILEGES -- los de §4 del CLAUDE.md, los que hacen
+#      que en Supabase todo objeto nuevo nazca con `anon` dentro. Staging dejaria de
+#      comportarse como produccion justo en la dimension donde mas caro sale que se
+#      parezcan, y volveriamos a tener dos bases distintas por otro camino.
+#   3) El vaciado y la carga van en LA MISMA transaccion (`--single-transaction`):
+#      si algo falla, staging se queda EXACTAMENTE como estaba. Nunca vacia, nunca
+#      a medias.
+#   4) Y al final hay un VEREDICTO que compara staging contra PRODUCCION VIVA:
+#      objeto a objeto por su nombre, y las filas de las tablas gordas. Si no cuadra,
+#      el job sale ROJO diciendo QUE falta.
+#      ⚠️ Limite conocido y buscado: comparamos contra produccion TAL Y COMO ESTA
+#      AHORA, no como estaba cuando se hizo el backup. Si entre medias alguien aplica
+#      una migracion a produccion, la diferencia saldra aqui. Eso es INFORMACION
+#      (staging se ha quedado atras), no ruido -- que nadie lo silencie.
 
 on:
   workflow_dispatch:
@@ -19,6 +59,10 @@ on:
         description: "Nombre del backup (vacio = el mas reciente)"
         required: false
         default: ""
+
+concurrency:
+  group: restaurar-staging
+  cancel-in-progress: false
 
 jobs:
   restaurar:
@@ -56,21 +100,124 @@ jobs:
                       | awk '{print $4}' | sort | tail -1)
           fi
           echo "Restaurando: $FICHERO"
+          echo "BACKUP_FICHERO=$FICHERO" >> "$GITHUB_ENV"
           aws s3 cp "s3://moloka-backups/bd/$FICHERO" backup.sql.gz \
             --endpoint-url "$EP" --region auto
 
-      - name: 4) Restaurar en staging
+      # ── 4) Vaciar y restaurar, TODO EN UNA TRANSACCION ────────────────────
+      # 🔒 Este paso es el unico que escribe, y en su entorno SOLO existe la URL de
+      #    staging. La de produccion no esta aqui: no puede tocarla ni por error.
+      - name: 4) Restaurar en staging (vaciado + carga, en UNA transaccion)
         env:
           STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
         run: |
           gunzip -f backup.sql.gz
           echo "Lineas del dump: $(wc -l < backup.sql)"
-          # 🔴 ON_ERROR_STOP=1: si una sentencia falla, se para AQUI.
-          # 🔒 --single-transaction: todo o nada. Sin esto, ON_ERROR_STOP=1 dejaria
-          #    staging a medio borrar (el dump lleva --clean: primero DROPea). Asi,
-          #    una restauracion que falla deja staging exactamente como estaba.
+
+          # 🔴 GUARDA DE FORMATO -- falla CERRADO y con el motivo dicho.
+          #   Los backups anteriores al 9-ago-2026 se hicieron con `--clean --if-exists`
+          #   y empiezan por un bloque de borrados que NO se puede aplicar sobre un
+          #   `public` vacio (es exactamente el fallo del run 31296420722). Sin esta
+          #   guarda, el job reventaria con un "relation does not exist" en la linea 27
+          #   y habria que diagnosticarlo entero otra vez.
+          if grep -qEm1 '^(ALTER TABLE ONLY .* DROP CONSTRAINT IF EXISTS|DROP (TABLE|VIEW|SEQUENCE|INDEX|FUNCTION|ROUTINE) IF EXISTS)' backup.sql; then
+            echo "::error::'$BACKUP_FICHERO' es del formato ANTIGUO (pg_dump con --clean)."
+            echo "::error::Trae un bloque de borrados que no se puede aplicar sobre un esquema vacio:"
+            echo "::error::sus 'DROP CONSTRAINT IF EXISTS' protegen la restriccion, no la tabla."
+            echo "::error::Usa un backup posterior al 9-ago-2026, o relanza backup-bd.yml a mano"
+            echo "::error::para generar uno con el formato nuevo."
+            exit 1
+          fi
+          echo "Formato OK: el dump no trae bloque de borrados."
+
+          # 🔒 EL VACIADO. Se borran los OBJETOS de public, no el esquema (ver cabecera).
+          #    Los objetos que pertenecen a una extension se dejan en paz: el dump
+          #    tampoco los trae, y borrarlos romperia la extension.
+          cat > vaciar_public.sql <<'SQL'
+          \echo '--- Vaciando public en staging (el cajon, no el mueble) ---'
+          DO $$
+          DECLARE r record; n int := 0;
+          BEGIN
+            -- Vistas primero: dependen de las tablas.
+            FOR r IN
+              SELECT c.relname, c.relkind
+                FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+               WHERE n.nspname = 'public' AND c.relkind IN ('v','m')
+                 AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = c.oid AND d.deptype = 'e')
+            LOOP
+              EXECUTE format('DROP %s IF EXISTS public.%I CASCADE',
+                             CASE r.relkind WHEN 'm' THEN 'MATERIALIZED VIEW' ELSE 'VIEW' END,
+                             r.relname);
+              n := n + 1;
+            END LOOP;
+
+            FOR r IN
+              SELECT c.relname
+                FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+               WHERE n.nspname = 'public' AND c.relkind IN ('r','p')
+                 AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = c.oid AND d.deptype = 'e')
+            LOOP
+              EXECUTE format('DROP TABLE IF EXISTS public.%I CASCADE', r.relname);
+              n := n + 1;
+            END LOOP;
+
+            FOR r IN
+              SELECT c.relname
+                FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+               WHERE n.nspname = 'public' AND c.relkind = 'S'
+                 AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = c.oid AND d.deptype = 'e')
+            LOOP
+              EXECUTE format('DROP SEQUENCE IF EXISTS public.%I CASCADE', r.relname);
+              n := n + 1;
+            END LOOP;
+
+            -- 🔴 EL NOMBRE VA CUALIFICADO A MANO, NO POR `::regprocedure`.
+            --   regprocedure imprime el nombre SIN el esquema cuando `public` esta en
+            --   el search_path, y aqui el search_path es el que traiga la conexion
+            --   (el dump no fija el suyo hasta unas lineas mas abajo). Un DROP sin
+            --   esquema se resuelve por search_path: en el mejor caso acierta por
+            --   casualidad, en el peor borra la funcion de OTRO esquema.
+            -- ⚠️ DROP ROUTINE cubre funciones y procedimientos, no AGREGADOS. Hoy en
+            --   produccion las 16 son funciones normales (medido el 9-ago-2026). Si
+            --   algun dia aparece un agregado, esto fallara con su nombre y su motivo
+            --   -- falla CERRADO, que es como tiene que fallar.
+            FOR r IN
+              SELECT format('%I.%I(%s)', ns.nspname, p.proname,
+                            pg_get_function_identity_arguments(p.oid)) AS firma
+                FROM pg_proc p JOIN pg_namespace ns ON ns.oid = p.pronamespace
+               WHERE ns.nspname = 'public'
+                 AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')
+            LOOP
+              EXECUTE format('DROP ROUTINE IF EXISTS %s CASCADE', r.firma);
+              n := n + 1;
+            END LOOP;
+
+            FOR r IN
+              SELECT t.typname
+                FROM pg_type t JOIN pg_namespace ns ON ns.oid = t.typnamespace
+               WHERE ns.nspname = 'public' AND t.typtype IN ('e','d','c')
+                 AND NOT EXISTS (SELECT 1 FROM pg_class c WHERE c.reltype = t.oid)
+                 AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = t.oid AND d.deptype = 'e')
+            LOOP
+              EXECUTE format('DROP TYPE IF EXISTS public.%I CASCADE', r.typname);
+              n := n + 1;
+            END LOOP;
+
+            RAISE INFO 'Objetos borrados de public en staging: %', n;
+          END $$;
+          SQL
+
+          # 🔒 UN SOLO psql para el vaciado Y la carga. Si se hicieran en dos
+          #    llamadas, un fallo en la carga dejaria staging VACIO -- que es peor que
+          #    dejarlo divergente. Concatenados, `--single-transaction` cubre los dos.
+          cat vaciar_public.sql backup.sql > restaurar.sql
+          # Para poder traducir un "psql:restaurar.sql:X" al numero de linea del dump:
+          # el vaciado va delante y ocupa estas lineas.
+          echo "El vaciado ocupa $(wc -l < vaciar_public.sql) lineas: en un error"
+          echo "'psql:restaurar.sql:X', la linea del dump es X menos esas."
+
           if ! psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 --single-transaction \
-                 -q -f backup.sql 2> restaurar_error.log; then
+                 -q -f restaurar.sql 2> restaurar_error.log; then
             echo "::error::La restauracion ha FALLADO. Staging se queda como estaba."
             echo "--- Donde se paro (psql se detiene en el PRIMER error) ---"
             head -40 restaurar_error.log
@@ -87,42 +234,163 @@ jobs:
             head -40 restaurar_error.log
           fi
 
-      - name: 5) Comprobar que la restauracion es REAL
+      # ── 5) EL VEREDICTO ───────────────────────────────────────────────────
+      # Aqui es donde el simulacro deja de ser esperanzado. Antes este paso miraba
+      # 6 recuentos contra unos minimos puestos a ojo, que caducaban solos: con
+      # aquellos numeros, un staging al que le faltaban 29 objetos ENTEROS salia
+      # verde. Ahora se compara contra produccion, objeto a objeto y por su nombre.
+      - name: 5) VEREDICTO - staging tiene que ser IGUAL que produccion
         env:
           STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+          PROD_DB_URL:    ${{ secrets.SUPABASE_DB_URL }}
         run: |
-          # Los minimos estan puestos a ojo de buen cubero por DEBAJO de la mitad de lo
-          # que habia el 30-jul-2026 en produccion (productos 444, movimientos 911,
-          # facturas 44, ledger 16.646, transacciones 14.289, escaner_memoria 45.816),
-          # para que el crecimiento normal no los toque pero una restauracion a medias
-          # los reviente. Si alguna tabla crece mucho, subelos.
-          cat > comprobar.sql <<'SQL'
-          \echo '--- Recuentos tras la restauracion ---'
-          CREATE TEMP TABLE _chk(tabla text, n_filas bigint, minimo bigint);
-          INSERT INTO _chk VALUES
-            ('productos',                 (SELECT count(*) FROM public.productos),                   200),
-            ('movimientos',               (SELECT count(*) FROM public.movimientos),                 400),
-            ('facturas',                  (SELECT count(*) FROM public.facturas),                     20),
-            ('ledger_movimientos',        (SELECT count(*) FROM public.ledger_movimientos),         5000),
-            ('transacciones_movimientos', (SELECT count(*) FROM public.transacciones_movimientos),  5000),
-            ('escaner_memoria',           (SELECT count(*) FROM public.escaner_memoria),           20000);
+          # 🔴 LC_ALL=C NO ES DECORACION. `sort` ordena segun el idioma y `comm`/`join`
+          #   comparan byte a byte: con un idioma que no sea C, en_US ignora el guion
+          #   bajo al ordenar y los dos dejan de estar de acuerdo. Con nombres como
+          #   `salud_fba` / `salud_fba_hist` eso significa diferencias INVENTADAS en el
+          #   inventario -- justo el error que este paso existe para no cometer.
+          # 🔒 pipefail: sin el, un `psql | sort > fichero` que falla en el psql sale 0
+          #   (manda el `sort`), el fichero queda vacio y el veredicto se lo cree.
+          export LC_ALL=C
+          set -o pipefail
 
-          SELECT tabla, n_filas, minimo,
-                 CASE WHEN n_filas >= minimo THEN 'OK' ELSE '*** POR DEBAJO ***' END AS veredicto
-          FROM _chk ORDER BY tabla;
+          # 🔴 ESTE PASO -- Y SOLO ESTE -- VE LA URL DE PRODUCCION, Y SOLO PARA LEER.
+          #   Aqui no hay una sola sentencia que no sea un SELECT. El paso 4, que es
+          #   el que escribe, no tiene esta variable en su entorno.
+          case "$PROD_DB_URL" in
+            "") echo "::error::Falta el secret SUPABASE_DB_URL: sin produccion no hay contra que comparar."; exit 1;;
+            *ogfbjjdxcltzpygzuyla*) echo "Cerrojo OK: comparando contra produccion (solo lectura).";;
+            *)  echo "::error::SUPABASE_DB_URL no apunta a produccion. Me niego a comparar contra otra cosa."; exit 1;;
+          esac
+          case "$STAGING_DB_URL" in
+            *ogfbjjdxcltzpygzuyla*) echo "::error::STAGING_DB_URL es produccion. Me niego."; exit 1;;
+          esac
 
-          DO $$
-          DECLARE fallos text;
-          BEGIN
-            SELECT string_agg(format('  - %s: %s filas (minimo %s)', tabla, n_filas, minimo),
-                              E'\n' ORDER BY tabla)
-              INTO fallos FROM _chk WHERE n_filas < minimo;
-            IF fallos IS NOT NULL THEN
-              RAISE EXCEPTION E'RESTAURACION INCOMPLETA. Tablas por debajo del minimo:\n%', fallos;
-            END IF;
-            RAISE INFO 'Restauracion verificada: las 6 tablas clave tienen datos.';
-          END $$;
-          SQL
-          # Si el DO lanza la excepcion, ON_ERROR_STOP=1 hace que psql salga != 0
-          # y el job entero falla. Esa es toda la diferencia con el `echo` de antes.
-          psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -f comprobar.sql
+          # --- A) Inventario de objetos, por su nombre --------------------------
+          INV="select c.relkind || '  ' || c.relname
+                 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+                where n.nspname = 'public' and c.relkind in ('r','p','v','m')"
+          psql "$PROD_DB_URL"    -At -c "$INV" | sort > inv_prod.txt
+          psql "$STAGING_DB_URL" -At -c "$INV" | sort > inv_stg.txt
+
+          n_tablas() { awk '$1=="r"||$1=="p"' "$1" | wc -l; }
+          n_vistas() { awk '$1=="v"||$1=="m"' "$1" | wc -l; }
+          PT=$(n_tablas inv_prod.txt); PV=$(n_vistas inv_prod.txt); PTOT=$((PT+PV))
+          ST=$(n_tablas inv_stg.txt);  SV=$(n_vistas inv_stg.txt);  STOT=$((ST+SV))
+
+          echo ""
+          echo "=============== OBJETOS EN public ==============="
+          echo "  produccion : $PT tablas + $PV vistas = $PTOT objetos"
+          echo "  staging    : $ST tablas + $SV vistas = $STOT objetos"
+          echo "================================================="
+
+          comm -23 inv_prod.txt inv_stg.txt > faltan.txt
+          comm -13 inv_prod.txt inv_stg.txt > sobran.txt
+
+          FALLO=0
+          if [ -s faltan.txt ]; then
+            FALLO=1
+            echo "::error::FALTAN en staging $(wc -l < faltan.txt) objeto(s) que SI estan en produccion:"
+            sed 's/^r  /  tabla  /; s/^p  /  tabla  /; s/^v  /  vista  /; s/^m  /  vista  /' faltan.txt
+          fi
+          if [ -s sobran.txt ]; then
+            FALLO=1
+            echo "::error::SOBRAN en staging $(wc -l < sobran.txt) objeto(s) que NO estan en produccion:"
+            sed 's/^r  /  tabla  /; s/^p  /  tabla  /; s/^v  /  vista  /; s/^m  /  vista  /' sobran.txt
+          fi
+          if [ "$FALLO" = "0" ]; then
+            echo "Inventario IDENTICO: los $PTOT objetos de produccion estan en staging, y ni uno de mas."
+          fi
+
+          # --- B) Filas de las tablas gordas ------------------------------------
+          # 🔴 POR QUE UN UMBRAL Y NO LA IGUALDAD EXACTA: el backup es de esta noche y
+          #   produccion no para. Staging SIEMPRE tendra algo menos, y exigir el mismo
+          #   numero seria un rojo garantizado todos los dias. El 90% esta puesto para
+          #   que el crecimiento de un dia no lo roce y una carga a medias lo reviente:
+          #   medido el 9-ago-2026, produccion tenia productos 455, salud_fba 225,
+          #   ledger 18.114, transacciones 15.433, escaner_memoria 46.333. Y se
+          #   imprimen LOS DOS numeros, no solo el veredicto: un falso rojo se ve a
+          #   simple vista, y un rojo de verdad tambien.
+          # ⚠️ salud_fba es una FOTO (§1.6): se reemplaza entera cada dia y puede
+          #   encoger de un dia para otro. Es la unica de las cinco que puede rozar el
+          #   umbral sin que pase nada malo. Si lo hace, se mira, no se sube el umbral.
+          UMBRAL=90
+          FILAS="select 'productos', count(*) from public.productos
+                 union all select 'salud_fba', count(*) from public.salud_fba
+                 union all select 'ledger_movimientos', count(*) from public.ledger_movimientos
+                 union all select 'transacciones_movimientos', count(*) from public.transacciones_movimientos
+                 union all select 'escaner_memoria', count(*) from public.escaner_memoria"
+          psql "$PROD_DB_URL"    -At -F'|' -c "$FILAS" | sort > filas_prod.txt
+          psql "$STAGING_DB_URL" -At -F'|' -c "$FILAS" | sort > filas_stg.txt
+          join -t'|' filas_prod.txt filas_stg.txt > filas.txt
+
+          # 🔴 SIN ESTA GUARDA EL VEREDICTO TIENE UN AGUJERO. Si a staging le falta
+          #   una de las cinco tablas, el psql de staging casca, su fichero sale corto
+          #   y el `join` simplemente NO produce esa fila: el bucle de abajo no la
+          #   recorre y nadie marca fallo. Un recuento que se salta lo que falta es
+          #   justo la clase de comprobacion que nos ha traido hasta aqui.
+          if [ "$(wc -l < filas.txt)" -ne 5 ]; then
+            echo "::error::Esperaba 5 tablas en la comparacion de filas y han salido $(wc -l < filas.txt)."
+            echo "::error::Alguna no existe en una de las dos bases. Esto es el HALLAZGO, no un fallo del script."
+            echo "--- produccion ---"; cat filas_prod.txt
+            echo "--- staging ---";    cat filas_stg.txt
+            FALLO=1
+          fi
+
+          echo ""
+          echo "============= FILAS: staging vs produccion ============="
+          printf "%-28s %12s %12s %8s  %s\n" "tabla" "produccion" "staging" "%" "veredicto"
+          while IFS='|' read -r T P S; do
+            PCT=$(awk -v p="$P" -v s="$S" 'BEGIN{ printf "%.1f", (p>0 ? s*100/p : 100) }')
+            VER="OK"
+            if awk -v pct="$PCT" -v u="$UMBRAL" 'BEGIN{ exit !(pct < u) }'; then
+              VER="*** POR DEBAJO ***"
+              FALLO=1
+            fi
+            printf "%-28s %12s %12s %7s%%  %s\n" "$T" "$P" "$S" "$PCT" "$VER"
+          done < filas.txt
+          echo "========================================================"
+
+          # --- C) El veredicto, tambien al resumen del job ----------------------
+          {
+            echo "### Simulacro de restauracion: veredicto"
+            echo ""
+            echo "| | produccion | staging |"
+            echo "|---|---|---|"
+            echo "| tablas | $PT | $ST |"
+            echo "| vistas | $PV | $SV |"
+            echo "| **objetos** | **$PTOT** | **$STOT** |"
+            echo ""
+            echo "backup restaurado: \`${BACKUP_FICHERO:-?}\`"
+            if [ -s faltan.txt ]; then
+              echo ""
+              echo "**FALTAN en staging:**"
+              echo ""
+              sed 's/^r  /- tabla `/; s/^p  /- tabla `/; s/^v  /- vista `/; s/^m  /- vista `/; s/$/`/' faltan.txt
+            fi
+            if [ -s sobran.txt ]; then
+              echo ""
+              echo "**SOBRAN en staging:**"
+              echo ""
+              sed 's/^r  /- tabla `/; s/^p  /- tabla `/; s/^v  /- vista `/; s/^m  /- vista `/; s/$/`/' sobran.txt
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$FALLO" != "0" ]; then
+            echo ""
+            echo "::error::RESTAURACION INCOMPLETA: staging NO es igual que produccion."
+            echo "Mientras esto no salga en verde, un ensayo en staging no demuestra"
+            echo "NADA sobre produccion. No lo des por bueno."
+            {
+              echo ""
+              echo "**resultado: RESTAURACION INCOMPLETA -- staging NO es igual que produccion**"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          echo ""
+          echo "VERIFICADO: staging tiene los $PTOT objetos de produccion y las tablas gordas cargadas."
+          {
+            echo ""
+            echo "**resultado: VERIFICADO -- staging es igual que produccion ($PTOT objetos)**"
+          } >> "$GITHUB_STEP_SUMMARY"
