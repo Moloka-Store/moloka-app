@@ -44,13 +44,33 @@ name: Moloka - Restaurar backup en STAGING
 #   3) El vaciado y la carga van en LA MISMA transaccion (`--single-transaction`):
 #      si algo falla, staging se queda EXACTAMENTE como estaba. Nunca vacia, nunca
 #      a medias.
-#   4) Y al final hay un VEREDICTO que compara staging contra PRODUCCION VIVA:
-#      objeto a objeto por su nombre, y las filas de las tablas gordas. Si no cuadra,
-#      el job sale ROJO diciendo QUE falta.
-#      ⚠️ Limite conocido y buscado: comparamos contra produccion TAL Y COMO ESTA
-#      AHORA, no como estaba cuando se hizo el backup. Si entre medias alguien aplica
-#      una migracion a produccion, la diferencia saldra aqui. Eso es INFORMACION
-#      (staging se ha quedado atras), no ruido -- que nadie lo silencie.
+#   4) Y al final hay un VEREDICTO que compara staging contra EL PROPIO DUMP:
+#      los `CREATE TABLE` / `CREATE VIEW` que el fichero dice traer contra los objetos
+#      que quedaron en staging, por su nombre; y las filas de CADA bloque `COPY`
+#      contra las filas de esa tabla, por IGUALDAD EXACTA. Si no cuadra, ROJO con la
+#      lista de que falta.
+#
+#      🔴 POR QUE CONTRA EL DUMP Y NO CONTRA PRODUCCION -- esto es el corazon del
+#      asunto y se equivoco una version anterior de este mismo paso:
+#      · El backup es de anoche y produccion no para (Elena carga informes a diario).
+#        Comparar contra produccion VIVA daria ROJO en una restauracion PERFECTA en
+#        cuanto produccion tuviera una fila mas. Y una guarda que da falsos rojos deja
+#        de mirarse en dos semanas: asi es como se muere una guarda.
+#      · Y sobre todo: EL DIA DEL INCENDIO NO HAY PRODUCCION CONTRA LA QUE COMPARAR.
+#        Un veredicto que necesita produccion para funcionar es un veredicto que no
+#        funciona el dia que hace falta. Lo que hay que demostrar es que el BACKUP
+#        puede reconstruir lo que contiene, y eso se mide DENTRO del fichero.
+#      · Efecto lateral que importa: este workflow NO necesita la credencial de
+#        produccion. La base cuyo trabajo es vaciar y recargar no tiene por que poder
+#        abrir la de Elena.
+#      · Y no hay ni un numero fijo escrito a mano: los que caducan solos son los que
+#        acaban tapando un agujero de 29 objetos con un verde.
+#
+#      ⚠️ Lo que este veredicto NO dice: si produccion ha cambiado desde el backup.
+#      No es su trabajo. Como el backup ES produccion, una restauracion verificada
+#      deja staging igual a produccion EN EL INSTANTE DE LA COPIA, que es justo lo que
+#      hace que un ensayo signifique algo. Vigilar la deriva del dia a dia entre las
+#      dos bases es otra guarda distinta, y va en otro sitio.
 
 on:
   workflow_dispatch:
@@ -124,8 +144,11 @@ jobs:
             echo "::error::'$BACKUP_FICHERO' es del formato ANTIGUO (pg_dump con --clean)."
             echo "::error::Trae un bloque de borrados que no se puede aplicar sobre un esquema vacio:"
             echo "::error::sus 'DROP CONSTRAINT IF EXISTS' protegen la restriccion, no la tabla."
-            echo "::error::Usa un backup posterior al 9-ago-2026, o relanza backup-bd.yml a mano"
-            echo "::error::para generar uno con el formato nuevo."
+            echo "::error::ESTO NO ES UNA AVERIA: es el ORDEN. Al fusionar el cambio, TODOS los"
+            echo "::error::backups que ya habia en R2 son del formato viejo. Hay que generar uno"
+            echo "::error::nuevo ANTES de restaurar:"
+            echo "::error::  1. lanzar backup-bd.yml a mano (o esperar al cron: 02:15 UTC)"
+            echo "::error::  2. y entonces relanzar este workflow"
             exit 1
           fi
           echo "Formato OK: el dump no trae bloque de borrados."
@@ -235,14 +258,22 @@ jobs:
           fi
 
       # ── 5) EL VEREDICTO ───────────────────────────────────────────────────
-      # Aqui es donde el simulacro deja de ser esperanzado. Antes este paso miraba
-      # 6 recuentos contra unos minimos puestos a ojo, que caducaban solos: con
-      # aquellos numeros, un staging al que le faltaban 29 objetos ENTEROS salia
-      # verde. Ahora se compara contra produccion, objeto a objeto y por su nombre.
-      - name: 5) VEREDICTO - staging tiene que ser IGUAL que produccion
+      # Aqui es donde el simulacro deja de ser esperanzado.
+      #
+      # Version 1 de este paso miraba 6 recuentos contra unos minimos puestos a ojo:
+      # con aquellos numeros, un staging al que le faltaban 29 objetos ENTEROS salia
+      # VERDE. Version 2 comparaba contra produccion viva, y estaba mal por dos
+      # motivos que se explican en la cabecera: daba falsos rojos (el backup es de
+      # anoche y produccion no para) y, sobre todo, EL DIA DEL INCENDIO NO HAY
+      # PRODUCCION CONTRA LA QUE COMPARAR.
+      #
+      # 🔑 La pregunta correcta no es "¿se parece staging a produccion?", es
+      #   "¿tiene staging TODO lo que el backup decia traer?". Y esa se contesta
+      #   DENTRO del propio fichero: el dump lleva su numero de control escrito.
+      #   Por eso este paso NO necesita la credencial de produccion.
+      - name: 5) VEREDICTO - staging tiene TODO lo que el backup traia
         env:
           STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
-          PROD_DB_URL:    ${{ secrets.SUPABASE_DB_URL }}
         run: |
           # 🔴 LC_ALL=C NO ES DECORACION. `sort` ordena segun el idioma y `comm`/`join`
           #   comparan byte a byte: con un idioma que no sea C, en_US ignora el guion
@@ -254,143 +285,266 @@ jobs:
           export LC_ALL=C
           set -o pipefail
 
-          # 🔴 ESTE PASO -- Y SOLO ESTE -- VE LA URL DE PRODUCCION, Y SOLO PARA LEER.
-          #   Aqui no hay una sola sentencia que no sea un SELECT. El paso 4, que es
-          #   el que escribe, no tiene esta variable en su entorno.
-          case "$PROD_DB_URL" in
-            "") echo "::error::Falta el secret SUPABASE_DB_URL: sin produccion no hay contra que comparar."; exit 1;;
-            *ogfbjjdxcltzpygzuyla*) echo "Cerrojo OK: comparando contra produccion (solo lectura).";;
-            *)  echo "::error::SUPABASE_DB_URL no apunta a produccion. Me niego a comparar contra otra cosa."; exit 1;;
-          esac
           case "$STAGING_DB_URL" in
             *ogfbjjdxcltzpygzuyla*) echo "::error::STAGING_DB_URL es produccion. Me niego."; exit 1;;
+            "")                     echo "::error::Falta el secret STAGING_DB_URL"; exit 1;;
           esac
 
-          # --- A) Inventario de objetos, por su nombre --------------------------
-          INV="select c.relkind || '  ' || c.relname
-                 from pg_class c join pg_namespace n on n.oid = c.relnamespace
-                where n.nspname = 'public' and c.relkind in ('r','p','v','m')"
-          psql "$PROD_DB_URL"    -At -c "$INV" | sort > inv_prod.txt
-          psql "$STAGING_DB_URL" -At -c "$INV" | sort > inv_stg.txt
+          FALLO=0
 
-          n_tablas() { awk '$1=="r"||$1=="p"' "$1" | wc -l; }
-          n_vistas() { awk '$1=="v"||$1=="m"' "$1" | wc -l; }
-          PT=$(n_tablas inv_prod.txt); PV=$(n_vistas inv_prod.txt); PTOT=$((PT+PV))
-          ST=$(n_tablas inv_stg.txt);  SV=$(n_vistas inv_stg.txt);  STOT=$((ST+SV))
+          # ── A) LO QUE EL DUMP DICE TRAER: un solo lector, una sola pasada ─────
+          # El dump se lee tal cual: sus `CREATE TABLE` / `CREATE VIEW` /
+          # `CREATE FUNCTION` son la lista de lo que promete, y las lineas de cada
+          # bloque `COPY` son las filas. No hay ni un numero escrito a mano.
+          #
+          # 🔴 LAS FUNCIONES CUENTAN, y no es un adorno. El vaciado del paso 4 las
+          #   borra (DROP ROUTINE … CASCADE). Un restore que recuperase las 59 tablas
+          #   y las 24 vistas pero se dejase una funcion por el camino saldria VERDE
+          #   con el veredicto mirando solo tablas y vistas -- y una de esas funciones
+          #   es `frescura_informes()`, de la que cuelga la pantalla de Buzones de
+          #   Elena entera. Es el mismo agujero que este workflow existe para cerrar,
+          #   en el objeto que mas duele. Medido el 9-ago-2026: produccion 16
+          #   funciones, staging 14.
+          #
+          # 🔴 POR QUE UN SOLO LECTOR Y NO VARIOS `grep` SUELTOS: dentro de un bloque
+          #   COPY las lineas son DATOS. Una columna de texto que empezara por
+          #   "CREATE TABLE ..." o por "COPY ... FROM stdin;" enganaria a un grep, y el
+          #   veredicto se inventaria un objeto que no existe. Un rojo falso es
+          #   exactamente como se mata una guarda. Aqui, mientras estamos DENTRO de un
+          #   bloque de datos, lo unico que se obedece es el terminador.
+          #   🔒 PROBADO el 9-ago-2026 contra un dump de mentira hecho a proposito con
+          #   esas dos lineas trampa DENTRO de los datos: el lector no se las tragó.
+          # 🔒 EL TERMINADOR SE CONSTRUYE CON sprintf("%c.", 92) -- el caracter 92 es la
+          #   contrabarra -- para no escribir NI UNA contrabarra en el codigo. Escrito
+          #   como "\\." dependia de cuantas capas de comillas atravesara el programa:
+          #   medido, en una de ellas awk lo leia como un simple punto, no casaba nunca
+          #   con el terminador y EL RECUENTO DE FILAS NO SE HACIA. Salia verde sin
+          #   contar nada. Asi no puede pasar.
+          # ⚠️ Punto ciego que queda, dicho: el cuerpo de una funcion va FUERA de todo
+          #   COPY, asi que un `CREATE TABLE` a principio de linea ahi dentro contaria
+          #   de mas. Medido el 9-ago-2026 contra produccion: 0 de las 16 funciones de
+          #   `public` tienen uno.
+          awk '
+            BEGIN { FIN = sprintf("%c.", 92) }
+            dentro { if ($0 == FIN) { print "FILA|" tabla "|" n; dentro = 0 } else { n++ }; next }
+            /^COPY .* FROM stdin;$/      { tabla = $2; n = 0; dentro = 1; next }
+            /^CREATE TABLE /             { print "OBJ|tabla  " $3; next }
+            /^CREATE VIEW /              { print "OBJ|vista  " $3; next }
+            /^CREATE MATERIALIZED VIEW / { print "OBJ|vista  " $4; next }
+            /^CREATE (FUNCTION|PROCEDURE) / {
+              s = $0
+              sub(/^CREATE (FUNCTION|PROCEDURE) /, "", s)
+              sub(/[(].*$/, "", s)
+              print "OBJ|funcion  " s
+              nrut++
+              next
+            }
+            END { print "NRUT|" nrut + 0 }
+          ' backup.sql > dump_crudo.txt
+
+          grep '^OBJ|'  dump_crudo.txt | cut -d'|' -f2- | sort -u > dump_objetos.txt
+          grep '^FILA|' dump_crudo.txt | cut -d'|' -f2- | sort    > dump_filas.txt
+          NRUT_DUMP=$(grep '^NRUT|' dump_crudo.txt | cut -d'|' -f2)
+
+          # 🔒 Este lector parte los nombres por espacios. Hoy ninguno de los 83 objetos
+          #   de produccion necesita comillas (medido el 9-ago-2026), pero si algun dia
+          #   nace uno con espacios o mayusculas, pg_dump lo escribiria entrecomillado y
+          #   el corte saldria mal. Antes que inventar una diferencia, se para y se dice.
+          if grep -q '"' dump_objetos.txt dump_filas.txt; then
+            echo "::error::Hay nombres entrecomillados en el dump y este lector no sabe partirlos."
+            echo "::error::Para y arreglalo antes de fiarte de este veredicto:"
+            grep '"' dump_objetos.txt dump_filas.txt | sed 's/^/  /'
+            exit 1
+          fi
+
+          # 🔒 Si esto sale vacio, el fichero no es lo que dice ser (o pg_dump ha
+          #    cambiado de formato). Callarse aqui seria dar por buena una copia que
+          #    no hemos sabido leer.
+          if [ ! -s dump_objetos.txt ]; then
+            echo "::error::No he encontrado NI UN 'CREATE TABLE/VIEW/FUNCTION' en el dump."
+            echo "::error::O el backup no es lo que dice ser, o el formato de pg_dump ha cambiado."
+            exit 1
+          fi
+
+          # ── LO QUE HA QUEDADO EN STAGING ──────────────────────────────────────
+          # 🔒 format('%I.%I') reproduce la MISMA regla de comillas que usa pg_dump
+          #    (entrecomilla solo cuando hace falta). Con `nspname || '.' || relname`
+          #    a pelo, un nombre que necesitara comillas saldria distinto en cada lado
+          #    y el veredicto inventaria una diferencia.
+          # 🔒 Se excluyen los objetos de una EXTENSION, exactamente igual que hace el
+          #    vaciado del paso 4: ni el vaciado los borra ni el dump los trae, asi que
+          #    contarlos aqui seria un "sobran" que no es culpa de nadie.
+          psql "$STAGING_DB_URL" -At -c "
+            select 'tabla  ' || format('%I.%I', n.nspname, c.relname)
+              from pg_class c join pg_namespace n on n.oid = c.relnamespace
+             where n.nspname = 'public' and c.relkind in ('r','p')
+               and not exists (select 1 from pg_depend d where d.objid = c.oid and d.deptype = 'e')
+            union all
+            select 'vista  ' || format('%I.%I', n.nspname, c.relname)
+              from pg_class c join pg_namespace n on n.oid = c.relnamespace
+             where n.nspname = 'public' and c.relkind in ('v','m')
+               and not exists (select 1 from pg_depend d where d.objid = c.oid and d.deptype = 'e')
+            union all
+            select 'funcion  ' || format('%I.%I', n.nspname, p.proname)
+              from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+             where n.nspname = 'public'
+               and not exists (select 1 from pg_depend d where d.objid = p.oid and d.deptype = 'e')" \
+            | sort -u > stg_objetos.txt
+
+          NRUT_STG=$(psql "$STAGING_DB_URL" -At -c "
+            select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+             where n.nspname = 'public'
+               and not exists (select 1 from pg_depend d where d.objid = p.oid and d.deptype = 'e')")
+
+          cuantos() { awk -v t="$2" '$1==t' "$1" | wc -l; }
+          DT=$(cuantos dump_objetos.txt tabla);   DV=$(cuantos dump_objetos.txt vista)
+          DF=$(cuantos dump_objetos.txt funcion); DTOT=$((DT+DV+DF))
+          ST=$(cuantos stg_objetos.txt tabla);    SV=$(cuantos stg_objetos.txt vista)
+          SF=$(cuantos stg_objetos.txt funcion);  STOT=$((ST+SV+SF))
 
           echo ""
-          echo "=============== OBJETOS EN public ==============="
-          echo "  produccion : $PT tablas + $PV vistas = $PTOT objetos"
-          echo "  staging    : $ST tablas + $SV vistas = $STOT objetos"
-          echo "================================================="
+          echo "=================== OBJETOS EN public ==================="
+          echo "  el backup trae : $DT tablas + $DV vistas + $DF funciones = $DTOT"
+          echo "  staging tiene  : $ST tablas + $SV vistas + $SF funciones = $STOT"
+          echo "========================================================="
 
-          comm -23 inv_prod.txt inv_stg.txt > faltan.txt
-          comm -13 inv_prod.txt inv_stg.txt > sobran.txt
+          comm -23 dump_objetos.txt stg_objetos.txt > faltan.txt
+          comm -13 dump_objetos.txt stg_objetos.txt > sobran.txt
 
-          FALLO=0
           if [ -s faltan.txt ]; then
             FALLO=1
-            echo "::error::FALTAN en staging $(wc -l < faltan.txt) objeto(s) que SI estan en produccion:"
-            sed 's/^r  /  tabla  /; s/^p  /  tabla  /; s/^v  /  vista  /; s/^m  /  vista  /' faltan.txt
+            echo "::error::El backup traia $(wc -l < faltan.txt) objeto(s) que NO han quedado en staging:"
+            sed 's/^/  /' faltan.txt
+            echo "  (la restauracion se ha dejado algo por el camino)"
           fi
           if [ -s sobran.txt ]; then
             FALLO=1
-            echo "::error::SOBRAN en staging $(wc -l < sobran.txt) objeto(s) que NO estan en produccion:"
-            sed 's/^r  /  tabla  /; s/^p  /  tabla  /; s/^v  /  vista  /; s/^m  /  vista  /' sobran.txt
-          fi
-          if [ "$FALLO" = "0" ]; then
-            echo "Inventario IDENTICO: los $PTOT objetos de produccion estan en staging, y ni uno de mas."
+            echo "::error::En staging hay $(wc -l < sobran.txt) objeto(s) que NO venian del backup:"
+            sed 's/^/  /' sobran.txt
+            echo "  (el vaciado del paso 4 se ha dejado algo sin borrar)"
           fi
 
-          # --- B) Filas de las tablas gordas ------------------------------------
-          # 🔴 POR QUE UN UMBRAL Y NO LA IGUALDAD EXACTA: el backup es de esta noche y
-          #   produccion no para. Staging SIEMPRE tendra algo menos, y exigir el mismo
-          #   numero seria un rojo garantizado todos los dias. El 90% esta puesto para
-          #   que el crecimiento de un dia no lo roce y una carga a medias lo reviente:
-          #   medido el 9-ago-2026, produccion tenia productos 455, salud_fba 225,
-          #   ledger 18.114, transacciones 15.433, escaner_memoria 46.333. Y se
-          #   imprimen LOS DOS numeros, no solo el veredicto: un falso rojo se ve a
-          #   simple vista, y un rojo de verdad tambien.
-          # ⚠️ salud_fba es una FOTO (§1.6): se reemplaza entera cada dia y puede
-          #   encoger de un dia para otro. Es la unica de las cinco que puede rozar el
-          #   umbral sin que pase nada malo. Si lo hace, se mira, no se sube el umbral.
-          UMBRAL=90
-          FILAS="select 'productos', count(*) from public.productos
-                 union all select 'salud_fba', count(*) from public.salud_fba
-                 union all select 'ledger_movimientos', count(*) from public.ledger_movimientos
-                 union all select 'transacciones_movimientos', count(*) from public.transacciones_movimientos
-                 union all select 'escaner_memoria', count(*) from public.escaner_memoria"
-          psql "$PROD_DB_URL"    -At -F'|' -c "$FILAS" | sort > filas_prod.txt
-          psql "$STAGING_DB_URL" -At -F'|' -c "$FILAS" | sort > filas_stg.txt
-          join -t'|' filas_prod.txt filas_stg.txt > filas.txt
-
-          # 🔴 SIN ESTA GUARDA EL VEREDICTO TIENE UN AGUJERO. Si a staging le falta
-          #   una de las cinco tablas, el psql de staging casca, su fichero sale corto
-          #   y el `join` simplemente NO produce esa fila: el bucle de abajo no la
-          #   recorre y nadie marca fallo. Un recuento que se salta lo que falta es
-          #   justo la clase de comprobacion que nos ha traido hasta aqui.
-          if [ "$(wc -l < filas.txt)" -ne 5 ]; then
-            echo "::error::Esperaba 5 tablas en la comparacion de filas y han salido $(wc -l < filas.txt)."
-            echo "::error::Alguna no existe en una de las dos bases. Esto es el HALLAZGO, no un fallo del script."
-            echo "--- produccion ---"; cat filas_prod.txt
-            echo "--- staging ---";    cat filas_stg.txt
+          # 🔒 La comparacion de arriba es POR NOMBRE, y dos funciones sobrecargadas
+          #   comparten nombre: si el dump trae `f(int)` y `f(text)` y la restauracion
+          #   solo deja una, los NOMBRES cuadran y el fallo pasaria inadvertido. El
+          #   recuento en bruto no se deja enganar. (Medido el 9-ago-2026: hoy no hay
+          #   ninguna sobrecarga en produccion -- 16 rutinas, 16 nombres distintos --
+          #   pero esto es para el dia que la haya.)
+          if [ "$NRUT_DUMP" != "$NRUT_STG" ]; then
             FALLO=1
+            echo "::error::El backup trae $NRUT_DUMP rutina(s) y en staging hay $NRUT_STG."
+            echo "::error::Si los nombres cuadran pero el recuento no, hay una sobrecarga perdida."
+          fi
+
+          if [ "$FALLO" = "0" ]; then
+            echo "Objetos: los $DTOT que trae el backup estan en staging, y ni uno de mas."
+          fi
+
+          # ── B) FILAS: cada bloque COPY del dump, contra su tabla ──────────────
+          # 🔑 IGUALDAD EXACTA, no un umbral. El dump dice cuantas filas trae de cada
+          #   tabla, y tras restaurar sobre un esquema VACIO staging no puede tener ni
+          #   una mas ni una menos. Nada escribe en staging durante el job, y pg_dump
+          #   crea los disparadores DESPUES de cargar los datos, asi que no hay nada
+          #   que pueda anadir filas por su cuenta.
+          # Y se comprueban TODAS las tablas del dump, no cinco elegidas a mano.
+          # (La lista `dump_filas.txt` ya la saco el lector unico del apartado A.)
+          if [ ! -s dump_filas.txt ]; then
+            echo "::error::El dump no trae ni un bloque COPY. Una copia sin datos no es una copia."
+            exit 1
+          fi
+
+          # Un solo viaje a la base: el runner esta en EEUU y Supabase en Irlanda
+          # (~90 ms por ida y vuelta). 59 count(*) sueltos serian 59 viajes.
+          awk -F'|' -v q="'" '{ if (NR > 1) printf " union all ";
+                                printf "select %s%s%s, count(*) from %s", q, $1, q, $1 }' \
+              dump_filas.txt > cuenta.sql
+          psql "$STAGING_DB_URL" -At -F'|' -f cuenta.sql | sort > stg_filas.txt
+          join -t'|' dump_filas.txt stg_filas.txt > filas.txt
+
+          # 🔴 SIN ESTA GUARDA EL VEREDICTO TIENE UN AGUJERO: si una tabla del dump no
+          #   existe en staging, el `join` simplemente NO produce esa fila, el bucle no
+          #   la recorre y nadie marca fallo. Un recuento que se salta lo que falta es
+          #   justo la clase de comprobacion que nos ha traido hasta aqui.
+          ND=$(wc -l < dump_filas.txt); NJ=$(wc -l < filas.txt)
+          if [ "$ND" -ne "$NJ" ]; then
+            FALLO=1
+            echo "::error::El dump trae $ND tablas con datos pero solo he podido comparar $NJ."
+            echo "::error::Alguna no existe en staging. Es el HALLAZGO, no un fallo del script."
+            comm -23 <(cut -d'|' -f1 dump_filas.txt) <(cut -d'|' -f1 stg_filas.txt) | sed 's/^/  falta: /'
           fi
 
           echo ""
-          echo "============= FILAS: staging vs produccion ============="
-          printf "%-28s %12s %12s %8s  %s\n" "tabla" "produccion" "staging" "%" "veredicto"
-          while IFS='|' read -r T P S; do
-            PCT=$(awk -v p="$P" -v s="$S" 'BEGIN{ printf "%.1f", (p>0 ? s*100/p : 100) }')
-            VER="OK"
-            if awk -v pct="$PCT" -v u="$UMBRAL" 'BEGIN{ exit !(pct < u) }'; then
-              VER="*** POR DEBAJO ***"
-              FALLO=1
+          echo "======== FILAS: lo que trae el backup vs lo que hay en staging ========"
+          printf "%-44s %12s %12s  %s\n" "tabla" "en el backup" "en staging" "veredicto"
+          TOTD=0; TOTS=0; DESCUADRES=0
+          while IFS='|' read -r T D S; do
+            if [ "$D" = "$S" ]; then
+              VER="OK"
+            else
+              VER="*** NO CUADRA ***"; FALLO=1; DESCUADRES=$((DESCUADRES+1))
+              echo "$T|$D|$S" >> descuadres.txt
             fi
-            printf "%-28s %12s %12s %7s%%  %s\n" "$T" "$P" "$S" "$PCT" "$VER"
+            TOTD=$((TOTD+D)); TOTS=$((TOTS+S))
+            printf "%-44s %12s %12s  %s\n" "$T" "$D" "$S" "$VER"
           done < filas.txt
-          echo "========================================================"
+          printf "%-44s %12s %12s\n" "TOTAL" "$TOTD" "$TOTS"
+          echo "======================================================================="
+          echo "$NJ tabla(s) comparada(s), $DESCUADRES descuadre(s)."
 
-          # --- C) El veredicto, tambien al resumen del job ----------------------
+          # ── C) El veredicto, tambien al resumen del job ───────────────────────
           {
             echo "### Simulacro de restauracion: veredicto"
             echo ""
-            echo "| | produccion | staging |"
-            echo "|---|---|---|"
-            echo "| tablas | $PT | $ST |"
-            echo "| vistas | $PV | $SV |"
-            echo "| **objetos** | **$PTOT** | **$STOT** |"
-            echo ""
             echo "backup restaurado: \`${BACKUP_FICHERO:-?}\`"
+            echo ""
+            echo "| | trae el backup | hay en staging |"
+            echo "|---|---|---|"
+            echo "| tablas | $DT | $ST |"
+            echo "| vistas | $DV | $SV |"
+            echo "| funciones | $DF | $SF |"
+            echo "| **objetos** | **$DTOT** | **$STOT** |"
+            echo "| filas (todas las tablas) | $TOTD | $TOTS |"
             if [ -s faltan.txt ]; then
               echo ""
-              echo "**FALTAN en staging:**"
+              echo "**El backup lo traia y NO ha quedado en staging:**"
               echo ""
-              sed 's/^r  /- tabla `/; s/^p  /- tabla `/; s/^v  /- vista `/; s/^m  /- vista `/; s/$/`/' faltan.txt
+              sed 's/^\([a-z]*\)  /- \1 `/; s/$/`/' faltan.txt
             fi
             if [ -s sobran.txt ]; then
               echo ""
-              echo "**SOBRAN en staging:**"
+              echo "**Esta en staging y NO venia del backup (el vaciado se dejo algo):**"
               echo ""
-              sed 's/^r  /- tabla `/; s/^p  /- tabla `/; s/^v  /- vista `/; s/^m  /- vista `/; s/$/`/' sobran.txt
+              sed 's/^\([a-z]*\)  /- \1 `/; s/$/`/' sobran.txt
+            fi
+            if [ -s descuadres.txt ]; then
+              echo ""
+              echo "**Tablas cuyo numero de filas NO cuadra:**"
+              echo ""
+              echo "| tabla | en el backup | en staging |"
+              echo "|---|---|---|"
+              sed 's/^/| /; s/|/ | /g; s/$/ |/' descuadres.txt
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "$FALLO" != "0" ]; then
             echo ""
-            echo "::error::RESTAURACION INCOMPLETA: staging NO es igual que produccion."
-            echo "Mientras esto no salga en verde, un ensayo en staging no demuestra"
-            echo "NADA sobre produccion. No lo des por bueno."
+            echo "::error::EL BACKUP NO SIRVE: staging NO tiene todo lo que el fichero decia traer."
+            echo "Ojo al nombre: esto NO dice 'staging se ha quedado atras respecto a produccion'."
+            echo "Dice que la copia no reconstruye ni siquiera su propio contenido. Es el incendio."
             {
               echo ""
-              echo "**resultado: RESTAURACION INCOMPLETA -- staging NO es igual que produccion**"
+              echo "**resultado: EL BACKUP NO SIRVE -- no reconstruye ni su propio contenido**"
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
 
           echo ""
-          echo "VERIFICADO: staging tiene los $PTOT objetos de produccion y las tablas gordas cargadas."
+          echo "VERIFICADO: el backup traia $DTOT objetos y $TOTD filas, y eso es exactamente"
+          echo "lo que hay en staging. La copia reconstruye lo que contiene."
+          echo ""
+          echo "Lo que esto NO dice: si produccion ha cambiado desde que se hizo la copia."
+          echo "Eso es DERIVA, es otra pregunta y tiene que salir con otro nombre."
           {
             echo ""
-            echo "**resultado: VERIFICADO -- staging es igual que produccion ($PTOT objetos)**"
+            echo "**resultado: VERIFICADO -- el backup reconstruye lo que contiene ($DTOT objetos, $TOTD filas)**"
           } >> "$GITHUB_STEP_SUMMARY"
