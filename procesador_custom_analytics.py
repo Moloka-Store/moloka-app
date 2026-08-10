@@ -160,6 +160,13 @@ COLS_NUMERICAS = {'estrellas', 'conversion', 'precio_venta_medio', 'ventas_envia
 COLS_ADITIVAS = ('visitas', 'unidades_enviadas', 'ventas_enviadas_eur', 'inventario_disponible',
                  'buybox_visiones', 'reembolsado_eur', 'unidades_reembolsadas', 'sesiones',
                  'unidades_pedidas', 'facturacion_pedida_eur')
+# Las NUEVE que de verdad ACUMULAN. `inventario_disponible` se cae de la lista: es un NIVEL
+# (lo que hay ahora), no un acumulado, y baja legítimamente cada vez que se vende algo.
+# Ratios y medias (conversión, buy box, estrellas, precio medio) tampoco acumulan nada.
+# 🔒 UNA sola definición: la usan la guarda 6.14 (que ABORTA la carga) y el inventario del
+# ensayo (que informa). Si fueran dos listas, el ensayo podría dar por bueno lo que la
+# carga rechaza.
+COLS_ACUMULADAS = tuple(c for c in COLS_ADITIVAS if c != 'inventario_disponible')
 
 # Columnas de la tabla en el orden del INSERT (id/procesado_at aparte).
 # 🔒 Son 22, y con `id` y `procesado_at` dan las 24 que tiene la tabla tras la migración
@@ -273,6 +280,33 @@ def analizar(bytes_xlsx, pais, fichero):
     # siempre, un `lastModifiedBy` que Amazon no pone.
     modificado = _fecha_utc(getattr(wb.properties, 'modified', None))
     ultimo_autor = _clean(getattr(wb.properties, 'lastModifiedBy', '') or '')
+
+    # 🔴 ¿DICE EL FICHERO EN ALGÚN SITIO DE QUÉ PERIODO ES? Es la pregunta que decide si la
+    #   serie mide el mercado o solo la cadencia de Amazon. Medido el 10-ago-2026: el panel
+    #   va NUEVE DÍAS por detrás ("datos disponibles hasta el 1/8/2026" con fecha 10-ago) y
+    #   permite elegir rango, así que `leido_at` —que es cuándo se EXPORTÓ— no es la fecha
+    #   de los datos. Si el rango viniera dentro, sería la llave de verdad.
+    #   Se recoge TODO lo que podría llevarlo y se imprime en el inventario, en vez de
+    #   suponer que no está: las otras hojas del libro y las propiedades del documento.
+    hojas = list(wb.sheetnames)
+    props_doc = {}
+    for _k in ('title', 'subject', 'description', 'keywords', 'category', 'identifier'):
+        _v = _clean(getattr(wb.properties, _k, '') or '')
+        if _v:
+            props_doc[_k] = _v
+    pistas_periodo = []
+    for _hn in hojas:
+        if _hn == ws.title:
+            continue                       # la hoja de datos ya se lee entera más abajo
+        try:
+            for _fila in wb[_hn].iter_rows(min_row=1, max_row=10, values_only=True):
+                for _c in (_fila or ()):
+                    _t = _clean(_c)
+                    if _t:
+                        pistas_periodo.append(f"[{_hn}] {_t}")
+        except Exception:                  # una hoja ilegible no tumba el parseo
+            pistas_periodo.append(f"[{_hn}] (no se ha podido leer)")
+
     filas = list(ws.iter_rows(values_only=True))
     wb.close()
 
@@ -465,6 +499,9 @@ def analizar(bytes_xlsx, pais, fichero):
         'ultimo_autor': ultimo_autor,
         'huella_datos': _h.hexdigest(),
         'cabecera': [str(c) for c in cabecera],   # tal cual viene: delata otro panel (§3)
+        'hojas': hojas,
+        'props_doc': props_doc,
+        'pistas_periodo': pistas_periodo[:40],
         'avisos': avisos,
         'columnas_ausentes': sorted(ausentes),
         'columnas_desconocidas': desconocidas,
@@ -694,13 +731,26 @@ def guarda_pais(cur, pais_declarado, leido_at, uds_fichero):
 #   lecturas sin refresco meten en la serie un tramo de cero movimiento que es cierto del
 #   panel y FALSO del mercado.
 #
-# 📌 PENDIENTE DE MODELO, ANOTADO AQUÍ Y NO RESUELTO EN CALIENTE (§5 de CLAUDE.md).
-#   Lo correcto es que una lectura con la misma huella que la anterior del mismo país
-#   quede REGISTRADA como «sin refresco» y que `v_demanda_asin_ultima` NO la use como
-#   punto de resta. Eso pide dos cosas que este PR no trae: una columna de huella en
-#   `demanda_asin` (para poder compararla con la anterior en la carga, sin recalcularla
-#   con otro código) y que la vista la salte. Es otra migración y va por la escalera.
-#   Hoy el procesador DETECTA y GRITA en el ensayo, y guarda la huella en el sello
+# 📌 PENDIENTE DE MODELO, DECIDIDO EL 10-AGO-2026 PERO NO EN ESTE PR (§5 de CLAUDE.md).
+#   Una lectura que no sea comparable con la serie —sin refresco, o con otro inicio de
+#   acumulación— ENTRA Y SE MARCA: no se tira una descarga real. Pero marcarla no basta,
+#   y esto está MEDIDO sobre `v_demanda_asin_ultima` en producción:
+#     · Los DELTAS ya están a salvo: el `CASE WHEN visitas >= visitas_ant … ELSE NULL`
+#       devuelve NULL en vez de un negativo.
+#     · Pero la vista elige fila con `row_number() OVER (PARTITION BY pais, asin ORDER BY
+#       leido_at DESC)` y `WHERE rn = 1`, y de esa fila sirve los ABSOLUTOS tal cual
+#       (visitas, sesiones, unidades_pedidas, ventas_enviadas_eur). Así que una lectura
+#       rara, si es la más reciente, se convierte en «la última buena» para todo lo que
+#       cuelga: `v_trackeador_cola` expone visitas, sesiones, conversión y buy box.
+#     Con el `metric-data (14)` dentro, el trackeador habría visto las visitas de ES al
+#     ~1% de lo real y una conversión disparatada, con los deltas en NULL y nadie
+#     mirándolos. Silencioso, que es la forma en que duele.
+#   Así que la lectura marcada tiene que quedar FUERA del `rn = 1`: que la partición
+#   ordene solo entre lecturas comparables. Eso toca la vista y, con ella, los cuatro
+#   pisos de la cadena (`v_trackeador_cola`, `v_amazon_se_despierta`). Es otra migración,
+#   va por la escalera y con su propio ensayo: NO se cuela en el PR del procesador.
+#   Hoy el procesador DETECTA y GRITA en el ensayo, ABORTA en la carga si el contador
+#   retrocede (guarda 6.14), y guarda la huella en el sello
 #   (`informes_subidos.resumen_json`) para que ese PR tenga con qué empezar.
 # ---------------------------------------------------------------------------
 def inventario_lecturas(sb, xlsxs, pais, cur):
@@ -769,12 +819,12 @@ def inventario_lecturas(sb, xlsxs, pais, cur):
                   "dos días'. Eso es CIERTO del panel de Amazon y FALSO del mercado. Entra "
                   "UNA: la de fecha MÁS ANTIGUA, que es la lectura en la que el contador "
                   "valía eso de verdad; la posterior no midió nada nuevo.", flush=True)
-            print("        📌 PENDIENTE DE MODELO (no lo arregla este procesador): una lectura "
-                  "con la misma huella que la anterior del mismo país debería quedar "
-                  "REGISTRADA como 'sin refresco' y que la serie NO la use como punto de "
-                  "resta. Eso pide una columna de huella en demanda_asin y que "
-                  "v_demanda_asin_ultima la salte: es otra migración y va por la escalera.",
-                  flush=True)
+            print("        📌 PENDIENTE DE MODELO (decidido el 10-ago-2026, no lo trae este "
+                  "PR): la lectura no comparable ENTRA Y SE MARCA —no se tira una descarga "
+                  "real— pero tiene que quedar FUERA del rn=1 de v_demanda_asin_ultima, no "
+                  "solo fuera de la resta: esa vista sirve los ABSOLUTOS de la fila elegida y "
+                  "v_trackeador_cola los expone. Toca la cadena de cuatro pisos y va en su "
+                  "propio PR, con su ensayo.", flush=True)
 
     if leidos and not gemelas:
         print(f"\n    ✅ Ninguna pareja con los mismos datos y distinta fecha: los "
@@ -798,7 +848,7 @@ def inventario_lecturas(sb, xlsxs, pais, cur):
     #   distintos. El país se identifica cruzando con transacciones (`etiquetar_pais`),
     #   que es el método de la guarda 6.6. Un fichero que no se pueda etiquetar NO se
     #   compara con nadie, y se dice.
-    ACUMULADAS = tuple(c for c in COLS_ADITIVAS if c != 'inventario_disponible')
+    ACUMULADAS = COLS_ACUMULADAS
     hay_bajadas = 0
     por_pais = defaultdict(list)
     sin_etiqueta = [r['nombre'] for r in leidos if not r['pais']]
@@ -809,13 +859,19 @@ def inventario_lecturas(sb, xlsxs, pais, cur):
         print(f"\n    ⚠️  Sin país identificable, NO se comparan con nadie: "
               f"{', '.join(sorted(sin_etiqueta))}", flush=True)
 
+    # 🔒 SE COMPARAN TODOS LOS PARES, no solo los consecutivos. Medido el 10-ago-2026: la
+    #   cadena ES iba 30-jul → 1-ago → 2-ago → 7-ago, y el 2-ago resultó tener otro inicio
+    #   de acumulación. Con solo los consecutivos, la pareja que de verdad se iba a cargar
+    #   —30-jul contra 7-ago— NO se llegaba a comparar nunca: la cadena pasaba por el
+    #   fichero roto y no encadenaba. Un par sin medir es un par del que no se sabe nada.
     for pais_s in sorted(por_pais):
         s = sorted(por_pais[pais_s], key=lambda x: x['leido_at'])
         if len(s) < 2:
             print(f"\n    · {pais_s}: una sola lectura ({s[0]['nombre']}), nada que comparar.",
                   flush=True)
             continue
-        for ant, pos in zip(s, s[1:]):
+        pares = [(s[a], s[b]) for a in range(len(s)) for b in range(a + 1, len(s))]
+        for ant, pos in pares:
             a, p = ant['porasin'], pos['porasin']
             comunes, nuevos, faltan = set(a) & set(p), set(p) - set(a), set(a) - set(p)
             solape = 100 * len(comunes) / max(1, min(len(a), len(p)))
@@ -878,6 +934,41 @@ def inventario_lecturas(sb, xlsxs, pais, cur):
     elif leidos:
         print(f"\n    ✅ Los {len(leidos)} ficheros traen la MISMA cabecera "
               f"({len(next(iter(por_cab)))} columnas).", flush=True)
+
+    # 5) 🔴 ¿TRAE EL FICHERO SU PERIODO? La pregunta que decide qué mide la serie.
+    #   `leido_at` es cuándo se EXPORTÓ, no la fecha de los datos: medido el 10-ago-2026,
+    #   el panel de Amazon iba NUEVE DÍAS por detrás ("datos disponibles hasta el 1/8/2026").
+    #   Si el rango viniera dentro del .xlsx, sería la llave de verdad; si no viene, hay que
+    #   decirlo en voz alta, porque entonces la resta entre dos lecturas mide la CADENCIA DE
+    #   AMAZON, no lo que pasó en el mercado entre esas dos fechas.
+    if leidos:
+        r0 = leidos[0]
+        print("\n    ── ¿DICE EL FICHERO DE QUÉ PERIODO ES? ──", flush=True)
+        print(f"        hojas del libro: {r0['hojas']}", flush=True)
+        print(f"        cabecera completa ({len(r0['cabecera'])} col): {r0['cabecera']}",
+              flush=True)
+        algo = False
+        for r in leidos:
+            if r.get('props_doc'):
+                print(f"        · {r['nombre']} · propiedades: {r['props_doc']}", flush=True)
+                algo = True
+            for p in (r.get('pistas_periodo') or []):
+                print(f"        · {r['nombre']} · {p}", flush=True)
+                algo = True
+        if not algo:
+            print("        🔴 NADA. Ni otras hojas, ni propiedades de documento, ni una "
+                  "columna de periodo: el .xlsx NO dice de qué rango es. Consecuencias, "
+                  "dichas en alto:\n"
+                  "          · La única fecha del fichero es `created` = cuándo se exportó,\n"
+                  "            y Amazon publica con días de retraso (9 el 10-ago-2026).\n"
+                  "          · Por tanto restar dos lecturas NO da 'lo que pasó entre esas\n"
+                  "            dos fechas': da lo que Amazon contó entre dos cortes suyos\n"
+                  "            que no conocemos. La serie mide CADENCIA DE AMAZON, no de\n"
+                  "            mercado. Sirve para tendencia y comparación entre ASIN; no\n"
+                  "            para decir 'en agosto se vendieron X'.\n"
+                  "          · Y el rango solo se garantiza por PROCEDIMIENTO: exportar\n"
+                  "            siempre con «Desde el inicio de año». La guarda 6.14 es la\n"
+                  "            red que caza al que no lo haga.", flush=True)
     return leidos
 
 
@@ -1094,6 +1185,70 @@ def main():
               f"esta trae {len(datos)}: menos del 50%. Un informe a medias no da información "
               f"incompleta, da información FALSA. No se borra ni se escribe nada.", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
+
+    # --- Guarda 6.14: EL CONTADOR NO RETROCEDE ---------------------------------
+    # 🔴 ESTA ES LA GUARDA QUE SOSTIENE EL MODELO ENTERO, y nació de un fichero real.
+    #   El panel de Custom Analytics permite elegir el periodo, y por defecto viene con
+    #   «Desde el inicio de año» (1-ene, inicio FIJO, fin móvil). Eso es lo que lo convierte
+    #   en un contador acumulado y lo que hace que restar dos lecturas signifique algo.
+    #   Pero si alguien exporta con OTRO rango —un «Custom date range» más corto—, el
+    #   fichero resultante NO es una lectura de este contador: es otra ventana, y sus
+    #   cifras son más pequeñas. Cargarlo mete restas NEGATIVAS en la serie.
+    # 🔴 Caso real medido el 10-ago-2026 (`metric-data (14)`, subido como
+    #   CA_ES_02ago_DISCONTINUO.xlsx): 246 ASIN contra los 321 de la lectura anterior, y
+    #   1.583 bajadas sobre 2.214 comparaciones. Un ASIN cualquiera: visitas 35.400 → 428,
+    #   unidades_enviadas 2.615 → 4. No es que el contador retrocediera: es que ese fichero
+    #   empezaba a contar en otra fecha.
+    # 🔒 ABORTA, no grita. Un acumulado que baja no es un dato incompleto: es un dato de
+    #   OTRA cosa, y mezclado con la serie la envenena en silencio — que es justo lo que §1.4
+    #   de CLAUDE.md dice de un informe caducado.
+    # 🔒 Solo se aplica hacia ADELANTE (leido_at posterior a la referencia). Cargar una
+    #   lectura anterior a la última ya la avisa la guarda 6.8, y compararlas al revés daría
+    #   bajadas falsas por construcción.
+    if ref_cual is not None and leido_at > ref_cual:
+        cur.execute(
+            "SELECT asin, " + ", ".join(COLS_ACUMULADAS) + " FROM demanda_asin "
+            " WHERE pais=%s AND leido_at=%s;", (PAIS, ref_cual))
+        previo = {r[0]: r[1:] for r in cur.fetchall()}
+        nuevo = {r['asin']: r for r in datos}
+        faltan_asin = sorted(set(previo) - set(nuevo))
+        bajadas = []
+        for asin, vals in previo.items():
+            fila_nueva = nuevo.get(asin)
+            if fila_nueva is None:
+                continue
+            for i, col in enumerate(COLS_ACUMULADAS):
+                va, vn = vals[i], fila_nueva.get(col)
+                if va is not None and vn is not None and vn < va:
+                    bajadas.append((asin, col, va, vn))
+        if faltan_asin or bajadas:
+            print(f"\n❌ ABORTA (no se ha escrito nada):\n"
+                  f"[Guarda 6.14 · EL CONTADOR RETROCEDE] Esta lectura de {PAIS} "
+                  f"({leido_at}) es MENOR que la anterior ({ref_cual}), y un contador "
+                  f"acumulado no puede menguar.", flush=True)
+            if faltan_asin:
+                print(f"   · {len(faltan_asin)} ASIN de la lectura anterior NO vienen en "
+                      f"ésta. Ejemplos: {faltan_asin[:5]}", flush=True)
+            if bajadas:
+                comparadas = len(set(previo) & set(nuevo)) * len(COLS_ACUMULADAS)
+                print(f"   · {len(bajadas)} bajadas sobre {comparadas} comparaciones "
+                      f"ASIN×métrica acumulada:", flush=True)
+                for asin, col, va, vn in bajadas[:8]:
+                    print(f"        · {asin} · {col}: {va} → {vn}", flush=True)
+                if len(bajadas) > 8:
+                    print(f"        · … y {len(bajadas) - 8} más", flush=True)
+            print("   🔑 LA CAUSA CASI SEGURA: este .xlsx se exportó con OTRO PERIODO. El "
+                  "panel de Custom Analytics deja elegir rango (hay un 'Custom date range' "
+                  "con tope de 92 días), y esta cañería SOLO admite el periodo por defecto, "
+                  "«Desde el inicio de año» — inicio 1-ene fijo, fin móvil. Cualquier otro "
+                  "rango produce un fichero que NO es una lectura de este contador.\n"
+                  "   Vuelve al Seller, pon «Desde el inicio de año», re-exporta y sube ese.",
+                  flush=True)
+            con.rollback(); cur.close(); con.close(); sys.exit(1)
+        print(f"\n✅ [Guarda 6.14] El contador no retrocede contra la lectura anterior "
+              f"({ref_cual}): 0 bajadas en "
+              f"{len(set(previo) & set(nuevo)) * len(COLS_ACUMULADAS)} comparaciones "
+              f"ASIN×métrica acumulada, y no falta ningún ASIN.", flush=True)
 
     # --- Carga PELÍCULA: DELETE de ESTA lectura por IGUALDAD + INSERT (misma transacción) ---
     # 🔒 El DELETE no contradice el cajón PELÍCULA (§1.6): no borra el histórico, recierra

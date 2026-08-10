@@ -108,6 +108,24 @@ el histórico y no hay de dónde recuperarlo.
     este repo todavía: cuando lo tengan, se mide, no se hereda de aquí.
 - **El LEDGER se descarga SIEMPRE en `.txt`.** El `.csv` se come los ceros a la izquierda de
   MSKU/ASIN/FNSKU. Lo avisa el propio Seller.
+- 🔴 **CUSTOM ANALYTICS se exporta SIEMPRE con el periodo «Desde el inicio de año».** Es el
+  que viene por defecto (1-ene → hoy): **inicio FIJO, fin móvil**. Eso es lo que convierte
+  el informe en un **contador acumulado** y lo que hace que restar dos lecturas signifique
+  algo. El panel deja elegir otro rango (hay un *Custom date range* con tope de 92 días), y
+  **cualquier otro periodo produce un fichero que NO es una lectura de este contador**: sus
+  cifras son más pequeñas y, mezcladas con la serie, meten restas negativas.
+  *Medido el 10-ago-2026: un export con rango corto (`metric-data (14)`) traía 246 ASIN
+  contra los 321 de la lectura anterior y 1.583 bajadas sobre 2.214 comparaciones — un ASIN
+  cualquiera pasaba de 35.400 visitas a 428.* La red que lo caza es la **guarda 6.14** del
+  procesador, que ABORTA si el contador retrocede; pero la red no sustituye a la regla, que
+  es de quien exporta.
+- ⚠️ **Y el panel de Custom Analytics va DÍAS POR DETRÁS.** El 10-ago-2026 avisaba *"datos
+  disponibles hasta el 1/8/2026"*: **nueve días**. Consecuencias que no se pueden olvidar:
+  dos exportaciones de días distintos pueden traer **cifras idénticas** (el corte no se
+  movió — no es un fichero duplicado), y `leido_at` es **cuándo se exportó, no la fecha de
+  los datos**. Restar dos lecturas mide **la cadencia de Amazon**, no lo que pasó en el
+  mercado entre esas dos fechas: vale para tendencia y para comparar ASIN, no para decir
+  *"en agosto se vendieron X"*.
 - **La DESPENSA COMÚN:** `crudo` guarda todas las columnas aunque hoy no se usen. Caso real: el
   `sales-rank` llevaba semanas descargándose sin mirarse — y resultó ser el detector de ASIN muertos.
 - 🔴 **Los CSV de Keepa en Storage (`informes/keepa_escaparate/`) NO SE BORRAN NUNCA.** Dejaron de
