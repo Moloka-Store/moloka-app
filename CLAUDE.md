@@ -233,6 +233,25 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
 - **Escribe los números esperados ANTES de correr.** Si no salen, di lo que sale — no ajustes la
   expectativa al resultado.
 - **Haz saltar las guardas a propósito** antes de dar un procesador por bueno.
+- 🔴 **UN ENSAYO SOBRE UN ESTADO QUE YA ES EL DE DESTINO NO PRUEBA NADA.** Sale verde,
+  parece una verificación y no lo es: solo dice que el destino ya estaba como se quería.
+  *Caso real del 10-ago-2026, y es mío: la migración de los comentarios de `demanda_asin` se
+  probó primero "en humo" escribiéndola a mano en staging para ver si el SQL parseaba. Luego
+  iba a correr el `aplicar` encima — sobre unos comentarios que ya eran los nuevos. Habría
+  dado verde verificando algo que ya era cierto antes de empezar. Se salvó devolviendo
+  staging al texto viejo ANTES del ensayo, y entonces sí midió algo.*
+  **Antes de fiarte de un ensayo, mira en qué estado está el destino.** Aplica a todo lo
+  idempotente: `CREATE OR REPLACE`, `IF NOT EXISTS`, `COMMENT ON`, un `setval` que ya estaba
+  bien, un upsert que no cambia una fila. Y es hermano del simulacro de restauración: una
+  copia en la que se confía y que nadie ha probado **contra un estado distinto** no está
+  probada.
+  📌 **PENDIENTE — convertirlo en guarda, que es mejor que en regla.** `aplicar-migracion.yml`
+  puede detectarlo solo: si en modo `ensayo` la migración no cambia NADA —cero filas
+  afectadas, cero objetos tocados— que lo GRITE (*"este ensayo no ha cambiado nada; o la
+  migración es un no-op o el destino ya estaba en el estado final, y en los dos casos esto
+  NO prueba que funcione"*). **Sin abortar**: hay migraciones legítimamente idempotentes que
+  se relanzan a propósito. Pero que un verde mudo no pueda hacerse pasar por una
+  verificación. Va **detrás** del registro de migraciones de §4.
 - **"Lo ha revisado un agente" NO es prueba.** Un revisor lee código, no lo ejecuta.
 - **Greps parciales no son lectura.** Si te preguntan "¿seguro que el código hace X?", lee el
   fichero entero.
