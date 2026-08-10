@@ -98,18 +98,12 @@ MODO          = os.environ.get('MODO', 'ensayo').strip().lower()       # ensayo 
 ENTORNO       = os.environ.get('ENTORNO', 'staging').strip().lower()   # staging | produccion
 PAIS          = os.environ.get('PAIS', '').strip().upper()             # ES | IT | FR (selector)
 FICHERO       = os.environ.get('FICHERO', '').strip()                  # nombre EXACTO; vacío = más reciente
-# ⚠️ OBSOLETOS desde el modelo contador (10-ago-2026): SE ACEPTAN Y SE IGNORAN.
-#   No se borran todavía a propósito. La pantalla de Buzones de la v2 sigue mandando los
-#   dos inputs, y el `workflow_dispatch` de GitHub rechaza el disparo entero si le llega
-#   un input que el .yml no declara. Quitarlos aquí y en el .yml ANTES de que la v2 deje
-#   de mandarlos le rompería el botón a Elena. Se amplía antes de contraer:
-#     1) este PR: el .yml los acepta como opcionales y el procesador los IGNORA (y lo dice),
-#     2) moloka-app-v2: la ficha del catálogo deja de mandarlos,
-#     3) y entonces se borran de los dos sitios.
-#   Se leen SOLO para poder avisar de que llegaron y no se usaron: un dato que entra y se
-#   tira sin decirlo es exactamente lo que no se hace en esta casa.
-PERIODO_DESDE = os.environ.get('PERIODO_DESDE', '').strip()            # OBSOLETO — ignorado
-PERIODO_HASTA = os.environ.get('PERIODO_HASTA', '').strip()            # OBSOLETO — ignorado
+# (Aquí se leían PERIODO_DESDE y PERIODO_HASTA, obsoletos desde el modelo contador y
+#  borrados el 10-ago-2026 al cerrarse la secuencia de tres pasos: primero el procesador
+#  dejó de usarlos y lo dijo en el log, luego la ficha de moloka-app-v2 dejó de mandarlos,
+#  y solo entonces desaparecen de aquí y del .yml. El orden no era una preferencia: un
+#  `workflow_dispatch` rechaza el disparo ENTERO si le llega un input que el .yml no
+#  declara, así que hacerlo al revés le habría dado un 422 al botón de Elena.)
 
 BUCKET, CARPETA = 'informes', 'custom_analytics'
 # 🔒 Escalabilidad (§8): la lista de países vive en UN solo sitio por lado. Añadir DE
@@ -1046,15 +1040,9 @@ def main():
     if not SUPABASE_KEY or not DB_URL:
         sys.exit("Faltan credenciales (SUPABASE_KEY / DB_URL). Revisa los secrets del workflow.")
 
-    # --- Inputs OBSOLETOS: si llegan con valor, se dice. No se usan para nada. ---
-    # 🔒 Una obsolescencia DECLARADA no es una mentira; una silenciosa sí. Si la pantalla
-    #   sigue mandando un periodo, que quede en el log que llegó y que no se usó — así el
-    #   día que alguien lea este run sabe que el dato entró y murió aquí, y por qué.
-    for _nombre, _valor in (('periodo_desde', PERIODO_DESDE), ('periodo_hasta', PERIODO_HASTA)):
-        if _valor:
-            print(f"⚠️  recibido {_nombre}={_valor} — IGNORADO, el modelo es de contador: la "
-                  f"fecha del dato la trae el fichero (leido_at), no el selector. Este input "
-                  f"desaparece en cuanto el catálogo de la v2 deje de mandarlo.", flush=True)
+    # (Aquí vivía el aviso de "recibido periodo_desde=… — IGNORADO". Cumplió su función
+    #  durante la mudanza —una obsolescencia declarada no es una mentira, una silenciosa
+    #  sí— y se va con los inputs que anunciaba: ya no los manda nadie.)
 
     # --- Bajar el fichero del buzón (Storage de PRODUCCIÓN) ---
     from supabase import create_client

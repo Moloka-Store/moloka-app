@@ -33,19 +33,11 @@ on:
         type: choice
         options: [ES, IT, FR]
         default: ES
-      # ⚠️ LOS DOS SIGUIENTES ESTÁN MUERTOS. Se declaran solo para que el disparo de la
-      #   app v2 siga siendo válido mientras su catálogo los mande. Paso 3 de la
-      #   secuencia: se borran de aquí en cuanto moloka-app-v2 deje de enviarlos.
-      periodo_desde:
-        description: 'OBSOLETO desde el modelo contador (10-ago-2026): se acepta pero SE IGNORA. Se borra cuando el catálogo v2 deje de mandarlo.'
-        type: string
-        required: false
-        default: ''
-      periodo_hasta:
-        description: 'OBSOLETO desde el modelo contador (10-ago-2026): se acepta pero SE IGNORA. Se borra cuando el catálogo v2 deje de mandarlo.'
-        type: string
-        required: false
-        default: ''
+      # (Aquí vivían `periodo_desde` y `periodo_hasta`, y se fueron el 10-ago-2026 al
+      #  cerrarse la secuencia de tres pasos: el procesador dejó de usarlos, luego la ficha
+      #  de moloka-app-v2 dejó de mandarlos, y solo entonces se borran de aquí. Ese orden
+      #  era obligatorio: un `workflow_dispatch` rechaza el disparo ENTERO si le llega un
+      #  input no declarado, así que borrarlos antes le habría dado 422 a Elena.)
       fichero:
         # Con ES/IT/FR en la misma carpeta, "el más reciente" es una lotería: aquí
         # pedir el nombre EXACTO es lo NORMAL. Vacío = el más reciente. Si el nombre
@@ -83,8 +75,6 @@ jobs:
           ENTORNO: ${{ inputs.entorno }}
           MODO: ${{ inputs.modo }}
           PAIS: ${{ inputs.pais }}
-          PERIODO_DESDE: ${{ inputs.periodo_desde }}
-          PERIODO_HASTA: ${{ inputs.periodo_hasta }}
           FICHERO: ${{ inputs.fichero }}
           DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
         run: python -u procesador_custom_analytics.py
