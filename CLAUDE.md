@@ -333,6 +333,27 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   y compruebe que abre. Hasta que exista, la copia de ficheros está **hecha pero no verificada de
   extremo a extremo**. *(El backup sí tiene número de control externo contra `storage.objects`, así
   que una copia CORTA no pasa por buena — pero eso valida la subida, no la restauración.)*
+- 🔴 **PENDIENTE — NO EXISTE UNA LISTA FIABLE DE QUÉ MIGRACIONES SE HAN APLICADO A PRODUCCIÓN.**
+  `supabase_migrations.schema_migrations` existe y tiene **37 registros, el último
+  `20260806085625`** — o sea del **6-ago-2026**. Ni el contador ni el `setval` del 10-ago están
+  ahí, ni nada de lo aplicado desde entonces. **Medido el 10-ago-2026.**
+  Son **dos agujeros, uno encima del otro**:
+  1. `aplicar-migracion.yml` aplica con **psql directo**, no por la CLI de Supabase, así que ese
+     registro no se toca nunca. No es un fallo del workflow: es que nadie lo escribe.
+  2. Y esa tabla vive en el esquema **`supabase_migrations`**, mientras el volcado es
+     `pg_dump --schema=public`. Así que **aunque estuviera al día, el backup no la copiaría.**
+
+  🔴 **Lo que esto significa el día del incendio:** *"restaurar y reaplicar lo posterior al
+  backup"* NO se puede resolver mirando la base. Hay que reconstruirlo del historial de runs de
+  GitHub o de memoria — y la memoria es justo lo que no funciona a las tres de la mañana. Es el
+  mismo patrón que las tres viñetas de arriba: **el estado en un sitio que el backup no cubre.**
+
+  🔑 **El arreglo es barato porque la pieza ya existe:** el paso 8 de `aplicar-migracion.yml` YA
+  calcula el `sha256` del fichero. Basta con que escriba una fila en una tabla **de `public`** —
+  fichero, sha256, entorno, quién lo despachó, cuándo, y si fue `ensayo` o `aplicar`— y el
+  registro pasa a **sobrevivir al restore**. Con eso, restaurar deja de ser *"acordarse"* y pasa a
+  ser *"mira qué falta desde la fecha del dump"*. Va **detrás** del PR del modelo y del
+  `--no-privileges`; se anota aquí para que no dependa de que alguien lo recuerde.
 
 ---
 
