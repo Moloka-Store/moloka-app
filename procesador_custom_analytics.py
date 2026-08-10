@@ -1234,7 +1234,19 @@ def main():
                 continue
             for i, col in enumerate(COLS_ACUMULADAS):
                 va, vn = vals[i], fila_nueva.get(col)
-                if va is not None and vn is not None and vn < va:
+                # 🔴 float(...) EN LOS DOS LADOS, Y NO ES UNA COMPARACIÓN INOCENTE.
+                #   La base devuelve `numeric` como Decimal EXACTO y el .xlsx da float
+                #   BINARIO. En Python `43.98 < Decimal('43.98')` es True, porque el float
+                #   43.98 vale en realidad 43.9799999… Medido el 10-ago-2026: 7 de 9 valores
+                #   de euros reales del fichero daban BAJADA FALSA comparados así.
+                #   Sin este float(), la guarda abortaría una carga buena en cuanto un ASIN
+                #   pasara una semana sin vender: su importe seguiría igual y la guarda lo
+                #   leería como retroceso. Una guarda que dice que no cuando debería decir
+                #   que sí es tan mala como la que no salta.
+                #   🔒 Se descubrió porque el inventario contó 1.583 bajadas y la guarda
+                #   1.605 sobre la MISMA pareja. Veintidós de diferencia, y explicarlas al
+                #   dígito (§1.3) es lo que destapó el bug.
+                if va is not None and vn is not None and float(vn) < float(va):
                     bajadas.append((asin, col, va, vn))
         if faltan_asin or bajadas:
             print(f"\n❌ ABORTA (no se ha escrito nada):\n"
