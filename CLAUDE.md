@@ -255,6 +255,22 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
 - **Escribe los números esperados ANTES de correr.** Si no salen, di lo que sale — no ajustes la
   expectativa al resultado.
 - **Haz saltar las guardas a propósito** antes de dar un procesador por bueno.
+- 🔴 **UNA GUARDA COMPARA INVARIANTES, NO CIFRAS ABSOLUTAS** — y con más motivo si mide algo que
+  el backup no copia. `backup-bd.yml` vuelca con `--schema=public`, así que `storage`, `auth` y
+  todo lo demás **no están en la copia** y `restaurar-staging.yml` no los repone. Cualquier número
+  fijo sobre lo que no se copia da **rojo en staging por el alcance del backup, no por la
+  migración**: un falso rojo esperando su día.
+  *Medido el 10-ago-2026 en `2026-08-10_buzon_custom_analytics.sql`: el encargo pedía comprobar
+  `n_politicas <> 4` sobre `storage.objects`. Se cambió a guardar el recuento ANTES y compararlo
+  DESPUÉS, porque el invariante real de un `CREATE OR REPLACE` es "no se llevó ninguna política
+  por delante", y eso es cierto valgan 4 o valga otra cosa.*
+  🔑 **La regla de la que esto es un caso: una comprobación que puede saltar por una causa
+  distinta de la que dice medir no es una guarda, es ruido futuro.** Se deja de mirar en dos
+  semanas — es el `ON_ERROR_STOP=0` por el otro extremo. El 10-ago-2026 el mismo patrón apareció
+  **tres veces por caminos que no se parecen en nada**: los tipos (`Decimal` contra `float`, §2),
+  un `LIKE` más ancho de lo que decía medir, y este número fijo de políticas. Antes de dar una
+  guarda por buena, pregúntale: *¿puedes ponerte roja por el entorno, por el tipo de dato o por
+  el alcance de una copia?* Si la respuesta es sí, todavía no es una guarda.
 - 🔴 **UN ENSAYO SOBRE UN ESTADO QUE YA ES EL DE DESTINO NO PRUEBA NADA.** Sale verde,
   parece una verificación y no lo es: solo dice que el destino ya estaba como se quería.
   *Caso real del 10-ago-2026, y es mío: la migración de los comentarios de `demanda_asin` se
