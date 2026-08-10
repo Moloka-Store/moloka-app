@@ -177,8 +177,11 @@ RE_ASIN = re.compile(r'/dp/([A-Z0-9]{10})')
 
 # 🔴 Nombres que PARECEN de usar y tirar. No decide nada: sirve para GRITAR cuando uno de
 #   estos se carga como lectura buena, que es exactamente lo que pasó el 10-ago-2026.
-#   `PRUEBA_ES/IT/FR.xlsx` resultaron ser las lecturas VERDADERAS del 30-jul 18:06, y los
-#   `CA_*_01ago.xlsx` —con nombre de formales— eran esos mismos ficheros reescritos.
+#   `PRUEBA_ES/IT/FR.xlsx` resultaron ser las lecturas VERDADERAS del 30-jul 18:06.
+#   ⚠️ Y OJO CON EL NOMBRE EN GENERAL: los del buzón se los puso a mano quien subió los
+#   ficheros el 8-ago-2026; los originales de Amazon son `metric-data (7)`…`(14)`, sin
+#   fecha y sin etiqueta. Un sufijo como `_01ago` o `_DISCONTINUO` es una anotación
+#   humana, no un dato: no hay registro de por qué se puso.
 #   Lo que decide qué es una lectura son sus DATOS y su `leido_at`, nunca cómo se llame el
 #   fichero. El aviso existe para que nadie los borre del buzón creyendo que son basura.
 RE_NOMBRE_DESECHABLE = re.compile(
@@ -631,10 +634,30 @@ def guarda_pais(cur, pais_declarado, leido_at, uds_fichero):
 #   Por eso junto a la fecha va una HUELLA DE LOS DATOS (§1, `huella_datos`), y el
 #   veredicto tiene tres salidas:
 #       · mismo leido_at                      → misma lectura, recarga idempotente, OK
-#       · misma huella y leido_at distinto    → 🔴 la misma exportación con dos fechas
+#       · misma huella y leido_at distinto    → 🔴 EL PANEL NO REFRESCÓ (ver abajo)
 #       · huella distinta y fecha distinta    → dos lecturas de verdad, adelante
 #   Todo esto se imprime ANTES de cargar nada y en modo ensayo, que es donde se mira y
 #   se decide, no después.
+#
+# 🔴 Y LA SALIDA DEL MEDIO RESULTÓ SER OTRA COSA, MÁS GRANDE. Al principio se leyó como
+#   "el mismo fichero reescrito". No lo es: medido contra Drive el 10-ago-2026, las
+#   exportaciones del 30-jul 18:06 y las del 1-ago 08:06 salieron de DOS descargas
+#   distintas, en carpetas distintas, y devolvieron cifras IDÉNTICAS. O sea que no es un
+#   problema de ficheros:
+#       AMAZON NO REFRESCA EL PANEL CUANDO TÚ LO PIDES, SINO CUANDO ÉL QUIERE.
+#   Así que la huella no sirve solo para cazar copias: es lo único que distingue
+#   "no pasó nada en el mercado" de "Amazon todavía no lo ha contado". Sin ella, dos
+#   lecturas sin refresco meten en la serie un tramo de cero movimiento que es cierto del
+#   panel y FALSO del mercado.
+#
+# 📌 PENDIENTE DE MODELO, ANOTADO AQUÍ Y NO RESUELTO EN CALIENTE (§5 de CLAUDE.md).
+#   Lo correcto es que una lectura con la misma huella que la anterior del mismo país
+#   quede REGISTRADA como «sin refresco» y que `v_demanda_asin_ultima` NO la use como
+#   punto de resta. Eso pide dos cosas que este PR no trae: una columna de huella en
+#   `demanda_asin` (para poder compararla con la anterior en la carga, sin recalcularla
+#   con otro código) y que la vista la salte. Es otra migración y va por la escalera.
+#   Hoy el procesador DETECTA y GRITA en el ensayo, y guarda la huella en el sello
+#   (`informes_subidos.resumen_json`) para que ese PR tenga con qué empezar.
 # ---------------------------------------------------------------------------
 def inventario_lecturas(sb, xlsxs, pais):
     """Abre TODOS los .xlsx del buzón y, por cada uno, dice qué `leido_at` le tocaría y
@@ -688,16 +711,22 @@ def inventario_lecturas(sb, xlsxs, pais):
                 print(f"        · {r['nombre']}  →  leido_at={r['leido_at']}  ·  "
                       f"modificado={r['modificado']}  ·  autor={r['autor'] or '(vacío)'}",
                       flush=True)
-            print("        Es la MISMA exportación con dos fechas. NO se recierran entre sí: "
-                  "entrarían como DOS lecturas con cifras idénticas, y la resta entre ellas "
-                  "daría CERO movimiento en un tramo donde sí lo hubo. DECIDE CUÁL SE DESCARTA "
-                  "antes de aplicar.", flush=True)
-            print("        🔑 CÓMO SE DESEMPATA, por orden: (1) el bueno es el que NO ha sido "
-                  "reescrito — `modificado` pegado a su `leido_at` y `ultimo_autor` vacío; el "
-                  "reescrito trae `modificado` posterior y, casi siempre, un autor. (2) Si eso "
-                  "no decide, GANA LA FECHA MÁS ANTIGUA: un fichero se reescribe DESPUÉS de "
-                  "existir, nunca antes, así que el contenido no puede venir de la fecha "
-                  "posterior.", flush=True)
+            print("        EL PANEL DE AMAZON NO REFRESCÓ ENTRE LAS DOS. No es un fichero "
+                  "duplicado ni una copia: son exportaciones de verdad, hechas en momentos "
+                  "distintos, que devolvieron EL MISMO contador porque Amazon no lo había "
+                  "actualizado todavía. Medido el 10-ago-2026 contra Drive: las del 30-jul "
+                  "18:06 y las del 1-ago 08:06 salieron de dos descargas distintas, en "
+                  "carpetas distintas, con cifras idénticas.", flush=True)
+            print("        🔴 SI SE CARGAN LAS DOS, la resta entre ellas dice 'cero visitas en "
+                  "dos días'. Eso es CIERTO del panel de Amazon y FALSO del mercado. Entra "
+                  "UNA: la de fecha MÁS ANTIGUA, que es la lectura en la que el contador "
+                  "valía eso de verdad; la posterior no midió nada nuevo.", flush=True)
+            print("        📌 PENDIENTE DE MODELO (no lo arregla este procesador): una lectura "
+                  "con la misma huella que la anterior del mismo país debería quedar "
+                  "REGISTRADA como 'sin refresco' y que la serie NO la use como punto de "
+                  "resta. Eso pide una columna de huella en demanda_asin y que "
+                  "v_demanda_asin_ultima la salte: es otra migración y va por la escalera.",
+                  flush=True)
 
     if leidos and not gemelas:
         print(f"\n    ✅ Ninguna pareja con los mismos datos y distinta fecha: los "
@@ -865,8 +894,8 @@ def main():
               f"una LECTURA BUENA: lo que decide qué es una lectura son sus DATOS y su "
               f"leido_at, no cómo se llame.\n"
               f"   Caso real (10-ago-2026): PRUEBA_ES/IT/FR.xlsx eran las lecturas VERDADERAS "
-              f"del 30-jul 18:06, y los CA_*_01ago.xlsx —con nombre de formales— eran esos "
-              f"mismos ficheros reescritos, que es lo que les cambió el created.\n"
+              f"del 30-jul 18:06. Los nombres del buzón se pusieron a mano al subirlos; los "
+              f"que da Amazon son 'metric-data (N)', sin fecha y sin etiqueta.\n"
               f"   🔴 NO BORRES ESTE FICHERO DEL BUZÓN pensando que es basura de test.",
               flush=True)
 
@@ -1024,6 +1053,11 @@ def main():
         'asin': len(datos), 'huerfanos': len(huerfanos),
         'totales': info['totales_fichero'],
         'lectura_anterior': ref_cual.isoformat() if ref_cual else None,
+        # 🔴 La huella de los DATOS entra en el sello. Hoy no la usa nadie al cargar —no hay
+        #    columna con la que compararla—, pero es lo único que distingue "no pasó nada" de
+        #    "Amazon no lo ha refrescado". El PR que meta la columna en demanda_asin y haga
+        #    que v_demanda_asin_ultima salte las lecturas sin refresco arranca desde aquí.
+        'huella_datos': info['huella_datos'],
         # 🔴 Que el sello lo diga TAMBIÉN, y no solo el log: el log de un run caduca, la
         #    fila de informes_subidos se queda. Si el fichero se llama PRUEBA_* y es una
         #    lectura buena, esto es lo que lo dirá dentro de tres meses.
