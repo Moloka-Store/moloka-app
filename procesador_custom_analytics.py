@@ -1328,51 +1328,122 @@ def main():
                 #   dígito (§1.3) es lo que destapó el bug.
                 if va is not None and vn is not None and float(vn) < float(va):
                     bajadas.append((asin, col, va, vn))
+        comunes = set(previo) & set(nuevo)
+        comparadas = len(comunes) * len(COLS_ACUMULADAS)
+
         if faltan_asin or bajadas:
-            print(f"\n❌ ABORTA (no se ha escrito nada):\n"
-                  f"[Guarda 6.14 · EL CONTADOR RETROCEDE] Esta lectura de {PAIS} "
-                  f"({leido_at}) es MENOR que la anterior ({ref_cual}), y un contador "
-                  f"acumulado no puede menguar.", flush=True)
+            # 🔴 EL DIAGNÓSTICO SE CALCULA, NO SE SUPONE. Hasta el 10-ago-2026 esta guarda
+            #   abortaba por CUALQUIER bajada y culpaba siempre al periodo del export:
+            #   "LA CAUSA CASI SEGURA: este .xlsx se exportó con OTRO PERIODO". Ese día
+            #   rechazó una carga BUENA de IT por DOS bajadas sobre 1.008 comparaciones
+            #   —un solo ASIN, unidades_pedidas 9→8 y facturacion 188,14→168,15, o sea
+            #   19,99 € con una unidad menos: UNA CANCELACIÓN— y mandó a Fernando a repetir
+            #   una descarga que estaba bien hecha.
+            #   Lo que lo hace evitable: la hipótesis era comprobable EN EL MISMO SITIO. El
+            #   propio procesador había impreso los totales cinco segundos antes y TODOS
+            #   subían (visitas 53.586→61.241, sesiones 42.153→48.243, uds 380→493). Con
+            #   otro rango habrían bajado todos. Un mensaje que da por segura una causa sin
+            #   medirla hace perder el mismo tiempo que un verde falso.
+            #
+            # LOS DOS CASOS, que son distintos y ya no se tratan igual:
+            #   · RETROCESO GLOBAL  → los TOTALES acumulados bajan (o desaparece un montón
+            #     de ASIN). Eso sí huele a otro rango: la serie se rompería. ABORTA.
+            #   · RETROCESO PUNTUAL → los totales SUBEN y bajan unos pocos ASIN. Eso es
+            #     Amazon recalculando por cancelaciones o devoluciones: la vida normal de
+            #     un marketplace. GRITA con la lista, y CARGA.
+            # 🔒 Y lo que cierra el argumento para cargar: `v_demanda_asin_ultima` YA
+            #   protege aguas abajo. Su `CASE WHEN visitas >= visitas_ant … ELSE NULL`
+            #   devuelve NULL en vez de un delta negativo (verificado el 10-ago-2026 leyendo
+            #   la definición en producción). Cargar una lectura con bajadas puntuales NO
+            #   puede producir una resta negativa: la vista ya sabe qué hacer con ellas.
+            #   La guarda estaba abortando por algo que ya estaba resuelto más abajo.
+            tot_antes, tot_ahora = {}, {}
+            for i, col in enumerate(COLS_ACUMULADAS):
+                # 🔴 float() en los DOS lados, por lo mismo que en la comparación de arriba:
+                #   la base da Decimal y el .xlsx float binario (§2 de CLAUDE.md).
+                tot_antes[col] = sum(float(previo[a][i])
+                                     for a in comunes if previo[a][i] is not None)
+                tot_ahora[col] = sum(float(nuevo[a].get(col))
+                                     for a in comunes if nuevo[a].get(col) is not None)
+            # Medio céntimo de holgura: sumar floats no da exacto, y un 1e-10 de ruido no
+            # es un retroceso. Sin esto, la guarda nueva heredaría el bug de la vieja.
+            totales_abajo = [c for c in COLS_ACUMULADAS
+                             if tot_ahora[c] < tot_antes[c] - 0.005]
+            pct_faltan = (len(faltan_asin) / len(previo) * 100.0) if previo else 0.0
+            # El 5% viene del encargo v3 §4.1: por debajo de ahí no es un cambio de rango.
+            es_global = bool(totales_abajo) or pct_faltan > 5.0
+
+            print(f"\n[Guarda 6.14] La lectura de {PAIS} ({leido_at}) trae retrocesos "
+                  f"contra la anterior ({ref_cual}). Mirando qué clase de retroceso es:",
+                  flush=True)
             if faltan_asin:
                 print(f"   · {len(faltan_asin)} ASIN de la lectura anterior NO vienen en "
-                      f"ésta. Ejemplos: {faltan_asin[:5]}", flush=True)
+                      f"ésta ({pct_faltan:.1f}% de {len(previo)}). "
+                      f"Ejemplos: {faltan_asin[:5]}", flush=True)
             if bajadas:
-                comparadas = len(set(previo) & set(nuevo)) * len(COLS_ACUMULADAS)
                 print(f"   · {len(bajadas)} bajadas sobre {comparadas} comparaciones "
                       f"ASIN×métrica acumulada:", flush=True)
                 for asin, col, va, vn in bajadas[:8]:
                     print(f"        · {asin} · {col}: {va} → {vn}", flush=True)
                 if len(bajadas) > 8:
                     print(f"        · … y {len(bajadas) - 8} más", flush=True)
-            print("   🔑 LA CAUSA CASI SEGURA: este .xlsx se exportó con OTRO PERIODO. El "
-                  "panel de Custom Analytics deja elegir rango (hay un 'Custom date range' "
-                  "con tope de 92 días), y esta cañería SOLO admite el periodo por defecto, "
-                  "«Desde el inicio de año» — inicio 1-ene fijo, fin móvil. Cualquier otro "
-                  "rango produce un fichero que NO es una lectura de este contador.\n"
-                  "   Vuelve al Seller, pon «Desde el inicio de año», re-exporta y sube ese.",
-                  flush=True)
-            # 🔴 …SALVO EN ENERO. A partir del 1-ene-2027 la causa de arriba puede ser la
-            #   equivocada, y mandar a re-exportar con el MISMO periodo no arreglaría nada.
-            #   «Desde el inicio de año» tiene el inicio FIJO en el 1 de enero: el contador
-            #   se reinicia a cero, y la primera lectura del año nuevo es legítimamente
-            #   MENOR que la última del anterior. La guarda hace bien en abortar —esa resta
-            #   sería basura—, pero el diagnóstico es otro. Ver §2 de CLAUDE.md: hasta que
-            #   la tabla guarde el AÑO DE ACUMULACIÓN de cada lectura, esto se resuelve a
-            #   mano y no hay automatismo que lo distinga.
-            # `ref_cual` no puede ser None aquí: lo garantiza el `if` que abre este bloque.
-            if leido_at.year != ref_cual.year:
-                print(f"   ⚠️ OJO, HAY OTRA CAUSA POSIBLE Y AQUÍ ENCAJA: la lectura anterior "
-                      f"es de {ref_cual.year} y esta de {leido_at.year}. El contador se "
-                      f"REINICIA cada 1 de enero, así que esta bajada puede ser el reinicio "
-                      f"y no un fichero mal exportado. NO la fuerces: la resta entre dos "
-                      f"años distintos no significa nada. Es el caso escrito en §2 de "
-                      f"CLAUDE.md, pendiente de que el modelo guarde el año de acumulación.",
+            # LA MEDICIÓN que decide, impresa siempre: que se vea en qué se basa el fallo.
+            print(f"   · TOTALES acumulados sobre los {len(comunes)} ASIN comunes "
+                  f"(esto es lo que distingue un caso del otro):", flush=True)
+            for col in COLS_ACUMULADAS:
+                flecha = "BAJA" if col in totales_abajo else "sube/igual"
+                print(f"        · {col}: {tot_antes[col]:g} → {tot_ahora[col]:g}  [{flecha}]",
                       flush=True)
-            con.rollback(); cur.close(); con.close(); sys.exit(1)
-        print(f"\n✅ [Guarda 6.14] El contador no retrocede contra la lectura anterior "
-              f"({ref_cual}): 0 bajadas en "
-              f"{len(set(previo) & set(nuevo)) * len(COLS_ACUMULADAS)} comparaciones "
-              f"ASIN×métrica acumulada, y no falta ningún ASIN.", flush=True)
+
+            if es_global:
+                # El motivo se arma aparte y no dentro del f-string: esta rama solo corre
+                # el día que haya un retroceso global de verdad, y un condicional anidado
+                # en una f-string es justo donde se esconde un bug que nadie ve hasta
+                # entonces. Legible > compacto cuando el código tarda meses en ejecutarse.
+                motivos = []
+                if totales_abajo:
+                    motivos.append("bajan los totales de " + ", ".join(totales_abajo))
+                if pct_faltan > 5.0:
+                    motivos.append(f"falta el {pct_faltan:.1f}% de los ASIN")
+                print(f"\n❌ ABORTA (no se ha escrito nada):\n"
+                      f"[Guarda 6.14 · RETROCESO GLOBAL] No es un recálculo puntual: "
+                      f"{' y '.join(motivos)}. Un contador acumulado no mengua en bloque.",
+                      flush=True)
+                print("   🔑 CAUSA MÁS PROBABLE, y ahora sí está medida: este .xlsx se "
+                      "exportó con OTRO RANGO. El panel deja elegir (hay un 'Custom date "
+                      "range' con tope de 92 días) y esta cañería SOLO admite «Desde el "
+                      "inicio de año» — inicio 1-ene fijo, fin móvil.\n"
+                      "   Vuelve al Seller, pon «Desde el inicio de año», re-exporta y "
+                      "sube ese.", flush=True)
+                # 🔴 …SALVO EN ENERO. A partir del 1-ene-2027 la causa de arriba puede ser
+                #   la equivocada, y mandar a re-exportar con el MISMO periodo no arreglaría
+                #   nada. «Desde el inicio de año» tiene el inicio FIJO en el 1 de enero: el
+                #   contador se reinicia a cero, y la primera lectura del año nuevo es
+                #   legítimamente MENOR que la última del anterior. Abortar está bien —esa
+                #   resta sería basura—, pero el diagnóstico es otro. Ver §2 de CLAUDE.md.
+                # `ref_cual` no puede ser None aquí: lo garantiza el `if` que abre el bloque.
+                if leido_at.year != ref_cual.year:
+                    print(f"   ⚠️ OJO, HAY OTRA CAUSA POSIBLE Y AQUÍ ENCAJA: la lectura "
+                          f"anterior es de {ref_cual.year} y esta de {leido_at.year}. El "
+                          f"contador se REINICIA cada 1 de enero, así que esto puede ser el "
+                          f"reinicio y no un fichero mal exportado. NO la fuerces: la resta "
+                          f"entre dos años distintos no significa nada. Es el caso escrito "
+                          f"en §2 de CLAUDE.md, pendiente de que el modelo guarde el año de "
+                          f"acumulación.", flush=True)
+                con.rollback(); cur.close(); con.close(); sys.exit(1)
+
+            print(f"\n⚠️  [Guarda 6.14 · RETROCESO PUNTUAL] Los totales acumulados SUBEN y "
+                  f"solo bajan {len(bajadas)} valores sobre {comparadas}. Eso NO es otro "
+                  f"rango: es Amazon recalculando (cancelaciones, devoluciones), que es la "
+                  f"vida normal de un marketplace.", flush=True)
+            print(f"    SE CARGA. La lista de arriba queda GRITADA en el log a propósito, y "
+                  f"`v_demanda_asin_ultima` devuelve NULL —no un negativo— en el delta de "
+                  f"esos ASIN. Si la lista crece mucho de una lectura a otra, míralo: eso ya "
+                  f"no sería recálculo.", flush=True)
+        else:
+            print(f"\n✅ [Guarda 6.14] El contador no retrocede contra la lectura anterior "
+                  f"({ref_cual}): 0 bajadas en {comparadas} comparaciones "
+                  f"ASIN×métrica acumulada, y no falta ningún ASIN.", flush=True)
 
     # --- Carga PELÍCULA: DELETE de ESTA lectura por IGUALDAD + INSERT (misma transacción) ---
     # 🔒 El DELETE no contradice el cajón PELÍCULA (§1.6): no borra el histórico, recierra
