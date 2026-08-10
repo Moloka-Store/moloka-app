@@ -777,7 +777,9 @@ def inventario_lecturas(sb, xlsxs, pais, cur):
         leidos.append({'nombre': nom, 'leido_at': info_i['leido_at'],
                        'huella': info_i['huella_datos'], 'n': info_i['n_asin'],
                        'modificado': info_i['modificado'], 'autor': info_i['ultimo_autor'],
-                       'cabecera': info_i['cabecera'], 'pais': etiqueta, 'porasin': porasin})
+                       'cabecera': info_i['cabecera'], 'pais': etiqueta, 'porasin': porasin,
+                       'hojas': info_i['hojas'], 'props_doc': info_i['props_doc'],
+                       'pistas_periodo': info_i['pistas_periodo']})
         print(f"        · {nom}: leido_at={info_i['leido_at']}  ·  "
               f"datos={info_i['huella_datos'][:12]}…  ·  {info_i['n_asin']} ASIN", flush=True)
         print(f"              modificado={info_i['modificado']}  ·  "
