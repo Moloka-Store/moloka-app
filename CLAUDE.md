@@ -192,6 +192,23 @@ el histórico y no hay de dónde recuperarlo.
   y ahí las físicas son lo correcto: contando facturadas, la ficha de packs ganaría artificialmente.
   **No entra en costes ni en rentabilidad**, así que no hay riesgo contable — solo un nombre que
   miente. Medido el 30-jul-2026.
+- 🔴 **Al comparar un número del FICHERO contra uno de la BASE, iguala los tipos ANTES.**
+  `psycopg2` devuelve los `numeric` como **`Decimal` exacto**; el fichero da **`float`
+  binario**. Y en Python `43.98 < Decimal('43.98')` es **`True`**, porque el float 43,98 vale
+  en realidad 43,9799999… Medido el 10-ago-2026 con nueve importes reales de un export:
+  **siete daban "bajada" siendo idénticos.**
+  Una guarda de no-retroceso escrita sin igualar tipos **aborta cargas buenas y no da
+  error**: dice que el contador retrocedió. Es peor que no tenerla, porque miente con
+  autoridad. Se arregla con un `float()` en los dos lados.
+  ⚠️ **Hoy solo hay UN procesador que cruce esos dos mundos** (`procesador_custom_analytics`),
+  y no es suerte: **es que el patrón es nuevo.** Los demás son FOTO o PELÍCULA —tiran la hoja
+  vieja o apilan—, así que ninguno necesita saber qué había antes. La comparación
+  fichero-contra-base nació con el **modelo contador**; el día que otro informe acumulado
+  tenga su cañería, hereda la trampa.
+  🔒 Y la forma de dar por bueno el arreglo, que vale para cualquier bug de comparación:
+  **las dos mitades**. Que el falso positivo desaparezca *y* que el verdadero siga saltando,
+  con el recuento cuadrando al dígito contra la otra vía que mide lo mismo. Aquí: 1.583
+  bajadas del fichero malo, idénticas a las que ya contaba el inventario, y 0 sobre el bueno.
 - **`FNSKU = ASIN` ⇒ listing commingled** (pozo común por EAN entre vendedores). FNSKU propio
   (`X0…`) ⇒ etiquetado. Explica stock que aparece en países donde no enviaste nada.
 - **El "país" del INTERNACIONAL puede ser de PROGRAMA, no físico** (stock en Praga contado como DE).
