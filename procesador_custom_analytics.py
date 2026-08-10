@@ -41,6 +41,12 @@
 #   Amazon) → `leido_at`. Sin ella se ABORTA (guarda 6.5): es el eje del dato y no se
 #   puede inventar.
 #
+# 🔴 Y EN ENSAYO SE INVENTARÍA EL BUZÓN ANTES DE NADA (§3): se abre CADA .xlsx y se dice
+#   qué `leido_at` le tocaría. Nació el 10-ago-2026 de un error concreto: dar por
+#   idénticos dos ficheros porque pesaban lo mismo AL BYTE. Los eTag de Storage decían
+#   que no. Un .xlsx es un ZIP y la fecha es una cadena de longitud fija: mismo peso y
+#   distinto contenido es exactamente lo que pasa aquí. DEL TAMAÑO NO SE DEDUCE NADA.
+#
 # 🔒 EL CARGADOR NO INTERPRETA (§3.2)
 #   Los tres RATIOS (conversión, ratio de oferta destacada = buy box, ratio de
 #   reembolsos) vienen 0-1 AUNQUE la cabecera de Amazon diga "(%)". Se guardan TAL
@@ -213,6 +219,17 @@ def _ent(v):
 def _bt(s):
     return _clean(s)
 
+def _created_de_wb(wb):
+    """LA FECHA DEL DATO, leída tal como la lee el cargador. UNA sola función para los dos
+    sitios que la necesitan —el cargador y el inventario del ensayo— porque si el
+    inventario la leyera por su cuenta podría ANUNCIAR una fecha y cargarse otra, y
+    entonces el inventario no probaría nada. Es la lección de `sql/huella_acl.sql`: una
+    misma cosa medida con dos códigos no es una medida."""
+    v = getattr(wb.properties, 'created', None)
+    if isinstance(v, datetime) and v.tzinfo is None:
+        v = v.replace(tzinfo=timezone.utc)      # Amazon exporta en UTC
+    return v
+
 
 # ---------------------------------------------------------------------------
 # 1) PARSEO — recibe BYTES, devuelve filas + totales. NO toca Storage ni la base.
@@ -229,9 +246,7 @@ def analizar(bytes_xlsx, pais, fichero):
     wb = openpyxl.load_workbook(io.BytesIO(bytes_xlsx), read_only=True)
     ws = wb['metric-data'] if 'metric-data' in wb.sheetnames else wb.active
     creator = _clean(getattr(wb.properties, 'creator', '') or '')
-    leido_at = getattr(wb.properties, 'created', None)
-    if isinstance(leido_at, datetime) and leido_at.tzinfo is None:
-        leido_at = leido_at.replace(tzinfo=timezone.utc)   # Amazon exporta en UTC
+    leido_at = _created_de_wb(wb)
     filas = list(ws.iter_rows(values_only=True))
     wb.close()
 
@@ -542,6 +557,64 @@ def guarda_pais(cur, pais_declarado, leido_at, uds_fichero):
 
 
 # ---------------------------------------------------------------------------
+# 3) INVENTARIO DEL BUZÓN — qué fecha trae CADA .xlsx. Solo en ensayo.
+#
+# 🔴 POR QUÉ EXISTE, con nombre y fecha. El 10-ago-2026 se dio por hecho que tres
+#   parejas del buzón (PRUEBA_ES/IT/FR contra CA_ES/IT/FR_01ago) eran el mismo fichero
+#   subido dos veces, y se dedujo de que pesaban lo mismo AL BYTE. Era FALSO: los eTag
+#   de Storage —md5 del contenido, subida de una sola parte— diferían en las tres
+#   parejas. Un .xlsx es un ZIP y `dcterms:created` es una cadena de longitud FIJA, así
+#   que dos exports pueden pesar exactamente igual y traer fechas distintas.
+#   Y la fecha no es un detalle: ES la llave (pais, leido_at, asin).
+#       DEL TAMAÑO NO SE DEDUCE NADA. HAY QUE ABRIR EL FICHERO.
+#
+# 🔴 LO QUE ESTÁ EN JUEGO. Dos ficheros con el MISMO contenido y fechas DISTINTAS no se
+#   recierran: cargan DOS lecturas. Y como el contenido es idéntico, la resta entre
+#   ellas da CERO movimiento donde no lo hubo — un dato falso que parece un dato bueno.
+#   Por eso esto se imprime ANTES de cargar nada y en modo ensayo, que es donde se mira
+#   y se decide, no después.
+# ---------------------------------------------------------------------------
+def inventario_lecturas(sb, xlsxs):
+    """Abre TODOS los .xlsx del buzón y dice qué `leido_at` le tocaría a cada uno.
+    No carga nada ni toca la base: es para MIRAR antes de decidir."""
+    print(f"\n--- INVENTARIO DEL BUZÓN: la fecha que trae cada .xlsx ({len(xlsxs)}) ---",
+          flush=True)
+    print("    (se abre CADA fichero: el tamaño no dice nada, la llave es leido_at)",
+          flush=True)
+    por_fecha = defaultdict(list)
+    for o in xlsxs:
+        nom = o.get('name') or '?'
+        try:
+            crudo = descargar_buzon(sb, BUCKET, f"{CARPETA}/{nom}")
+            wb = openpyxl.load_workbook(io.BytesIO(crudo), read_only=True)
+            try:
+                cr = _created_de_wb(wb)
+            finally:
+                wb.close()
+        except Exception as e:                      # un fichero ilegible no tumba el inventario
+            print(f"        · {nom}: NO se ha podido leer ({type(e).__name__}: {e})", flush=True)
+            continue
+        print(f"        · {nom}: leido_at = "
+              f"{cr if cr else '(SIN FECHA → este fichero ABORTARÍA, guarda 6.5)'}", flush=True)
+        if cr:
+            por_fecha[cr].append(nom)
+
+    repetidas = {k: v for k, v in por_fecha.items() if len(v) > 1}
+    if repetidas:
+        print("\n    ⚠️  Ficheros que COMPARTEN leido_at → son LA MISMA lectura. Cargarlos en "
+              "el mismo país se recierra (idempotente), no duplica:", flush=True)
+        for k, v in sorted(repetidas.items()):
+            print(f"        · {k}: {', '.join(sorted(v))}", flush=True)
+    if len(por_fecha) == len(xlsxs) and len(xlsxs) > 1:
+        print("\n    🔴 NINGÚN leido_at se repite: cada .xlsx es una lectura DISTINTA, aunque "
+              "dos pesen lo mismo. Si dos de ellos traen además las MISMAS cifras, cargar los "
+              "dos mete en la serie dos lecturas de idéntico contenido con fechas distintas, y "
+              "la resta entre ellas dará cero movimiento donde no lo hubo. Decide cuáles subes "
+              "ANTES de aplicar.", flush=True)
+    return por_fecha
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 def main():
@@ -579,6 +652,12 @@ def main():
         sys.exit(f"No hay ningún .xlsx en {BUCKET}/{CARPETA}/. Sube el export de Custom "
                  f"Analytics de {PAIS} y relanza.")
     xlsxs.sort(key=lambda o: (o.get('updated_at') or o.get('created_at') or ''), reverse=True)
+
+    # En ENSAYO, antes de nada: qué fecha trae cada fichero del buzón (§3 del fichero).
+    # No se hace en `aplicar` a propósito: el botón de Elena dispara aplicar y no tiene
+    # que bajarse el buzón entero cada vez. El ensayo es donde se MIRA y se decide.
+    if MODO == 'ensayo':
+        inventario_lecturas(sb, xlsxs)
 
     # Con ES/IT/FR en la misma carpeta "el más reciente" es una lotería: aquí pedir el
     # nombre EXACTO es lo NORMAL. Si se pide y no está → ABORTA (no cae al más reciente).
