@@ -229,6 +229,17 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
 - **La verificación final es SQL contra la BD. NUNCA el log.**
 - **Compilar no es ejecutar.** `py_compile` pasa un script que redefine un built-in y peta en
   runtime. Ejecuta contra **el fichero real**.
+- 🔴 **UN TEST VERDE SOLO CUENTA SI HAS VISTO SU NOMBRE EN LA SALIDA.** El «✅ TODO OK» del final
+  **no demuestra que tu suite se haya ejecutado**: demuestra que no falló ninguno de los que
+  corrieron. Si el tuyo no está en la lista, no ha corrido — y el runner no tiene forma de saber
+  que falta. **Es el falso verde peor de todos: no es un test que falla, es un test que no existe**,
+  y encima te da la sensación contraria.
+  *Medido el 10-ago-2026 en `moloka-app-v2`: un suite nuevo quedó con el `import` puesto y sin su
+  entrada en el array `SUITES` de `tests/run.mjs`. `npm test` dio «TODO OK» con 16 casos sin
+  ejecutar. Se cazó al ir a leer el suite por su nombre en la salida en vez de fiarse del verde.*
+  Regla práctica: después de añadir un suite, `npm test | grep "<su cabecera>"`. Si no sale, no
+  existe. Vale igual para cualquier runner en el que registrar el test sea un paso aparte de
+  escribirlo.
 - **Los datos sintéticos no prueban nada.** Una vista se prueba con la tabla **poblada**.
 - **Escribe los números esperados ANTES de correr.** Si no salen, di lo que sale — no ajustes la
   expectativa al resultado.
