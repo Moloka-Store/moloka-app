@@ -326,6 +326,15 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   y entonces el dump arrastra dueños y ACL, con lo que eso implica al restaurar en otro proyecto), o
   que el restore aplique al terminar un guion de permisos propio y **medido**. Sin cerrar desde el
   9-ago-2026.
+  🔬 **YA NO ES HIPOTÉTICO: medido el 10-ago en staging, recién restaurado.** `v_velocidad_ventas` y
+  `v_producto_amazon` tenían ahí `anon=arwdDxtm`, y en producción las dos tienen `authenticated=r`
+  sin `anon`. La restauración las devolvió abiertas, exactamente como dice el párrafo de arriba.
+  🔒 **Y de ahí sale una REGLA para cualquier migración que se ensaye:** *un test de ACL en staging
+  NO prueba nada sobre producción.* Staging viene del dump sin privilegios, así que sus ACL son los
+  de Supabase por defecto, no los de prod. La ÚNICA excepción es el objeto que crea la propia
+  migración que estás ensayando, porque lleva su `revoke` dentro y por eso sí nace bien allí.
+  **Conclusión práctica: el ACL se verifica EN PRODUCCIÓN, después de aplicar** — `relacl` y
+  `has_table_privilege('anon', …)`, no en el ensayo. Con `v_presencia_pais` se hizo así.
 - ⚠️ **PENDIENTE — el simulacro comprueba que las SECUENCIAS existan, y eso no es lo que importa.**
   Una secuencia puede volver de la copia **existiendo y con el contador a 1 sobre una tabla llena**:
   la primera inserción del día del incendio choca con clave duplicada. Por nombre, eso sale **verde**.
