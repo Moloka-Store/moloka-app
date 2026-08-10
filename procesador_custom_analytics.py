@@ -254,12 +254,21 @@ def huella_serie(filas):
     md5 de `asin:visitas:unidades_pedidas`, unido por '|' y ORDENADO por asin.
     `filas` = iterable de (asin, visitas, unidades_pedidas).
 
-    🔒 SOLO TRES COLUMNAS, Y LAS TRES ENTERAS, a propósito. Esta huella cruza los dos
-    mundos, y ahí un `numeric` vuelve de la base como Decimal mientras el .xlsx da float:
-    `repr()` de uno y otro no coinciden y la huella dejaría de ser comparable — la misma
-    trampa que costó el bug de la guarda 6.14 (§2 de CLAUDE.md). Los enteros van y vuelven
-    exactos. La huella ancha de 16 métricas (`huella_datos`) se queda para comparar fichero
-    contra fichero, donde no hay base de por medio.
+    🔴 REGLA, NO DESCRIPCIÓN: ESTA HUELLA SOLO USA COLUMNAS ENTERAS.
+    No se le añaden euros (`ventas_enviadas_eur`, `facturacion_pedida_eur`,
+    `reembolsado_eur`) ni ratios, por muy tentador que sea "para que sea más específica".
+    El motivo: esta huella cruza los dos mundos, y un `numeric` vuelve de la base como
+    **Decimal** mientras el .xlsx da **float**. Su texto no coincide, y entonces la huella
+    de la base y la del fichero NO cuadran NUNCA — la guarda dejaría de saltar, o saltaría
+    siempre, y en los dos casos sin dar error. Es la misma trampa que costó el bug de la
+    guarda 6.14 (§2 de CLAUDE.md: `43.98 < Decimal('43.98')` es True).
+    ⚠️ Y conviene decir la verdad de cómo salieron estas tres: se eligieron el 10-ago-2026
+    por ser las que identificaban una lectura con lo que había a mano, NO pensando en el
+    ida y vuelta a la base. Que sean enteras fue SUERTE. Por eso queda escrito como
+    restricción: la próxima vez no puede depender de que alguien acierte sin saberlo.
+    Los tres enteros van y vuelven exactos. La huella ancha de 16 métricas
+    (`huella_datos`) se queda para comparar fichero contra fichero, donde no hay base de
+    por medio y los floats se comparan entre floats.
 
     🔒 ES REPRODUCIBLE EN SQL, que es como se ancló:
         md5(string_agg(asin||':'||visitas||':'||unidades_pedidas, '|' order by asin))
@@ -1246,6 +1255,18 @@ def main():
     # 🔒 ABORTA, y aquí abortar no pierde nada: el fichero se queda en el buzón y se carga
     #   cuando el aviso del panel avance. No hay dato que rescatar — el dato ya está
     #   cargado, con su fecha buena, en la lectura anterior.
+    #
+    # 🔴 POR QUÉ CONTRA LA ÚLTIMA LECTURA Y NO CONTRA TODAS, que parece un hueco y no lo es.
+    #   Son DOS casos distintos con DOS mecanismos distintos, y ninguno sobra:
+    #     · MISMO FICHERO cargado dos veces → mismo `created` → mismo `leido_at` → la clave
+    #       única (pais, leido_at, asin) lo convierte en una recarga IDEMPOTENTE. Ni
+    #       siquiera llega aquí: no hay nada que comparar, se recierra y ya.
+    #     · FICHERO NUEVO con datos idénticos (el panel no refrescó) → `leido_at` distinto,
+    #       la clave única no lo ve, y ES ESTA GUARDA la que lo para. Y siempre es contra la
+    #       ÚLTIMA: un panel que no avanza repite lo último, no algo de hace un mes.
+    #   🔒 Si alguien "simplifica" quitando uno de los dos, se abre justo el agujero que el
+    #   otro no cubre. Comparar contra TODAS las lecturas no añade nada y costaría una
+    #   pasada por toda la serie en cada carga.
     # 📌 Esta es la versión de HOY. La fina —que la lectura entre MARCADA y quede fuera del
     #   `rn = 1` de v_demanda_asin_ultima, para no tirar una descarga real— pide columna
     #   nueva y tocar los cuatro pisos de la cadena: va en su PR y con su escalera.
