@@ -15,6 +15,40 @@ name: Moloka - Procesar CUSTOM ANALYTICS
 #   inputs de este fichero no se tocan a la ligera: quitar uno que la app todavía manda
 #   hace que GitHub rechace el disparo entero y Elena se come el error sin saber por qué.
 #   Se amplía antes de contraer (ver los dos inputs OBSOLETOS de abajo).
+#
+# ============================================================================
+# CÓMO SE LANZA UNA CARGA A MANO (sin depender de que nadie se acuerde)
+# ----------------------------------------------------------------------------
+#   entorno = produccion   ·   modo = aplicar
+#   pais    = el del fichero        (ES / IT / FR — lo verifica la guarda 6.6)
+#   fichero = el nombre EXACTO subido a informes/custom_analytics/
+#
+# 🔴 UNA EJECUCIÓN POR FICHERO. Los tres países se cargan por separado: no hay
+#    forma de subir tres en una pasada, ni debe haberla (cada uno declara su país).
+#
+# 🔴 Y SI HAY MÁS DE UNA LECTURA DEL MISMO PAÍS, SIEMPRE DE MÁS ANTIGUA A MÁS
+#    NUEVA. El orden NO es cosmético: la guarda 6.14 compara cada lectura contra la
+#    última ya cargada de ese país, así que si se mete primero la del 7 y luego la
+#    del 30 de julio, la vieja parece un retroceso y se rechaza. La fecha de cada
+#    fichero es su `wb.properties.created`, y el ENSAYO la imprime para todos los
+#    ficheros del buzón antes de tocar nada — lánzalo con `modo=ensayo` si no sabes
+#    en qué orden van.
+#
+# ⚠️ QUÉ ESPERAR DE LAS GUARDAS, PARA QUE UN ROJO NO PAREZCA UNA AVERÍA. Las tres
+#    abortan sin escribir nada, y ninguna de las tres es un fallo del sistema:
+#    · 6.6  el país no cuadra al cruzar cuotas con transacciones
+#           → te has equivocado de selector, o el .xlsx es de otro marketplace.
+#    · 6.15 la lectura trae los MISMOS datos que la anterior de ese país
+#           → Amazon no ha refrescado su panel. NO es un fallo y no se pierde nada:
+#             el fichero se queda en el buzón. Mira hasta qué fecha dice el Seller
+#             que hay datos y vuelve a intentarlo cuando ese aviso avance.
+#    · 6.14 alguna métrica acumulada BAJA respecto a la lectura anterior
+#           → ese export se generó con OTRO periodo. Vuelve al Seller, pon «Desde
+#             el inicio de año» (§2 de CLAUDE.md) y re-exporta.
+#
+# 🔒 Y en `ensayo` NO se escribe nada: corre entero contra la base real y se deshace.
+#    Es gratis, así que ante la duda, ensayo primero.
+# ============================================================================
 on:
   workflow_dispatch:
     inputs:
@@ -24,12 +58,15 @@ on:
         options: [staging, produccion]
         default: staging
       modo:
-        description: 'ensayo = solo comprueba y dice qué escribiría; aplicar = recierra la ventana en demanda_asin'
+        # ⚠️ Esto decía "recierra la ventana en demanda_asin" hasta el 10-ago-2026, y era
+        #   una frase del modelo VIEJO que se leía en el propio formulario de disparo.
+        #   Ya no hay ventanas: se apila una lectura.
+        description: 'ensayo = corre entero contra la base real y lo DESHACE, no escribe nada (es gratis: ante la duda, ensayo). aplicar = apila la lectura en demanda_asin'
         type: choice
         options: [ensayo, aplicar]
         default: ensayo
       pais:
-        description: 'País del fichero (LO MANDA EL SELECTOR, no se deduce). Sube a informes/custom_analytics/ el .xlsx de ESE marketplace.'
+        description: 'País del fichero (LO MANDA EL SELECTOR, no se deduce). La guarda 6.6 lo VERIFICA cruzando cuotas con transacciones: si no cuadra, ABORTA.'
         type: choice
         options: [ES, IT, FR]
         default: ES
@@ -43,7 +80,7 @@ on:
         # pedir el nombre EXACTO es lo NORMAL. Vacío = el más reciente. Si el nombre
         # no está en el buzón, ABORTA (no cae al más reciente). El catálogo v2 pasa
         # el nombre exacto (inputFichero: 'fichero').
-        description: 'Nombre EXACTO del .xlsx a procesar. Vacío = el más reciente.'
+        description: 'Nombre EXACTO del .xlsx del buzón. UNA ejecución por fichero. Si hay varias lecturas del mismo país, cárgalas de MÁS ANTIGUA a MÁS NUEVA (la guarda 6.14 rechaza una vieja detrás de una nueva). Vacío = el más reciente.'
         type: string
         required: false
         default: ''
