@@ -42,10 +42,14 @@
 #   puede inventar.
 #
 # 🔴 Y EN ENSAYO SE INVENTARÍA EL BUZÓN ANTES DE NADA (§3): se abre CADA .xlsx y se dice
-#   qué `leido_at` le tocaría. Nació el 10-ago-2026 de un error concreto: dar por
-#   idénticos dos ficheros porque pesaban lo mismo AL BYTE. Los eTag de Storage decían
-#   que no. Un .xlsx es un ZIP y la fecha es una cadena de longitud fija: mismo peso y
-#   distinto contenido es exactamente lo que pasa aquí. DEL TAMAÑO NO SE DEDUCE NADA.
+#   qué `leido_at` le tocaría Y qué huella tienen sus DATOS. Nació el 10-ago-2026 de un
+#   error concreto: dar por idénticos dos ficheros porque pesaban lo mismo AL BYTE. Los
+#   eTag de Storage decían que no. Un .xlsx es un ZIP y la fecha es una cadena de
+#   longitud fija: mismo peso y distinto contenido es exactamente lo que pasa aquí.
+#   DEL TAMAÑO NO SE DEDUCE NADA.
+#   Y se compara por los DOS lados: la fecha repetida es el duplicado inofensivo (se
+#   recierra solo); el peligroso es la fecha DISTINTA con datos IDÉNTICOS, que entra
+#   como dos lecturas y mete un tramo de cero movimiento en la serie.
 #
 # 🔒 EL CARGADOR NO INTERPRETA (§3.2)
 #   Los tres RATIOS (conversión, ratio de oferta destacada = buy box, ratio de
@@ -70,7 +74,7 @@
 #   ahí sería volver a contar el cuento de la ventana por la puerta de atrás.
 # ============================================================================
 
-import os, sys, io, re, unicodedata
+import os, sys, io, re, hashlib, unicodedata
 from datetime import date, datetime, timezone
 from collections import Counter, defaultdict
 from statistics import median
@@ -409,12 +413,33 @@ def analizar(bytes_xlsx, pais, fichero):
                 "el fichero (columnas desplazadas, filas perdidas…). NO se carga:\n        · "
                 + "\n        · ".join(descuadres))
 
+    # --- HUELLA DE LOS DATOS: md5 de ASIN + métricas, SIN nada de metadata ---
+    # 🔴 Para qué. Dos exports de la MISMA lectura pueden traer `dcterms:created` distinto
+    #   (es una cadena de longitud fija dentro del ZIP: cambiarla no mueve ni el tamaño del
+    #   fichero). Entonces sus `leido_at` difieren, no se recierran, y entran en la serie
+    #   como DOS lecturas con las mismas cifras. La resta entre ellas da CERO movimiento
+    #   donde no lo hubo. Comparar fechas no lo detecta: hay que comparar los DATOS.
+    # 🔒 Qué entra: `asin` + las 16 métricas, en orden fijo. NO entran ni `fichero`, ni
+    #   `leido_at`, ni `pais`, ni `crudo` (metadata, y `crudo` arrastraría las cabeceras).
+    #   NO entra `nombre_producto`: es descriptivo y Amazon lo retoca sin que el contador se
+    #   mueva, así que ensuciaría la comparación con falsos "son distintos".
+    # 🔒 Se ordena por ASIN: el md5 no puede depender del orden en que vengan las filas.
+    _metricas = sorted(COLS_ENTERAS | COLS_NUMERICAS)
+    _h = hashlib.md5()
+    for r in sorted(datos, key=lambda x: x['asin']):
+        _h.update(r['asin'].encode('utf-8'))
+        for _c in _metricas:
+            _v = r.get(_c)
+            _h.update(b'|' + (b'' if _v is None else repr(_v).encode('utf-8')))
+        _h.update(b'\n')
+
     return {
         'datos': datos,
         'n_asin': len(datos),
         'totales_fichero': totales_fichero,
         'creator': creator,
         'leido_at': leido_at,
+        'huella_datos': _h.hexdigest(),
         'avisos': avisos,
         'columnas_ausentes': sorted(ausentes),
         'columnas_desconocidas': desconocidas,
@@ -568,50 +593,77 @@ def guarda_pais(cur, pais_declarado, leido_at, uds_fichero):
 #   Y la fecha no es un detalle: ES la llave (pais, leido_at, asin).
 #       DEL TAMAÑO NO SE DEDUCE NADA. HAY QUE ABRIR EL FICHERO.
 #
-# 🔴 LO QUE ESTÁ EN JUEGO. Dos ficheros con el MISMO contenido y fechas DISTINTAS no se
-#   recierran: cargan DOS lecturas. Y como el contenido es idéntico, la resta entre
-#   ellas da CERO movimiento donde no lo hubo — un dato falso que parece un dato bueno.
-#   Por eso esto se imprime ANTES de cargar nada y en modo ensayo, que es donde se mira
-#   y se decide, no después.
+# 🔴 Y MIRA LOS DOS SENTIDOS, PORQUE SE ESCAPABA EL QUE IMPORTA. La primera versión de
+#   este inventario solo comparaba FECHAS. Con eso detectaba el duplicado obvio —dos
+#   ficheros con el mismo `leido_at`—, que además es el INOFENSIVO: el DELETE por
+#   (pais, leido_at) lo recierra solo. Y se le escapaba justo el caso que sugieren los
+#   eTag, que es el traicionero:
+#       FECHAS DISTINTAS CON DATOS IDÉNTICOS.
+#   Ahí el inventario habría impreso dos fechas distintas, habría dicho "ninguna se
+#   repite" y habría dado luz verde a cargar dos veces la misma lectura. No se
+#   recierran: entran como dos, con las mismas cifras, y la resta entre ellas da CERO
+#   movimiento en un tramo donde sí lo hubo. Un dato falso con pinta de dato bueno.
+#   Por eso junto a la fecha va una HUELLA DE LOS DATOS (§1, `huella_datos`), y el
+#   veredicto tiene tres salidas:
+#       · mismo leido_at                      → misma lectura, recarga idempotente, OK
+#       · misma huella y leido_at distinto    → 🔴 la misma exportación con dos fechas
+#       · huella distinta y fecha distinta    → dos lecturas de verdad, adelante
+#   Todo esto se imprime ANTES de cargar nada y en modo ensayo, que es donde se mira y
+#   se decide, no después.
 # ---------------------------------------------------------------------------
-def inventario_lecturas(sb, xlsxs):
-    """Abre TODOS los .xlsx del buzón y dice qué `leido_at` le tocaría a cada uno.
-    No carga nada ni toca la base: es para MIRAR antes de decidir."""
-    print(f"\n--- INVENTARIO DEL BUZÓN: la fecha que trae cada .xlsx ({len(xlsxs)}) ---",
-          flush=True)
-    print("    (se abre CADA fichero: el tamaño no dice nada, la llave es leido_at)",
-          flush=True)
-    por_fecha = defaultdict(list)
+def inventario_lecturas(sb, xlsxs, pais):
+    """Abre TODOS los .xlsx del buzón y, por cada uno, dice qué `leido_at` le tocaría y
+    qué huella tienen sus DATOS. No escribe nada: es para MIRAR antes de decidir.
+    🔒 Parsea con `analizar()`, el MISMO código que carga. Si el inventario parseara por
+    su cuenta podría anunciar una cosa y cargarse otra, y entonces no probaría nada."""
+    print(f"\n--- INVENTARIO DEL BUZÓN: qué trae cada .xlsx ({len(xlsxs)}) ---", flush=True)
+    print("    (se abre CADA fichero: ni el tamaño ni el nombre dicen nada)", flush=True)
+    leidos = []                                  # (nombre, leido_at, huella_datos, n_asin)
     for o in xlsxs:
         nom = o.get('name') or '?'
         try:
-            crudo = descargar_buzon(sb, BUCKET, f"{CARPETA}/{nom}")
-            wb = openpyxl.load_workbook(io.BytesIO(crudo), read_only=True)
-            try:
-                cr = _created_de_wb(wb)
-            finally:
-                wb.close()
-        except Exception as e:                      # un fichero ilegible no tumba el inventario
+            info_i = analizar(descargar_buzon(sb, BUCKET, f"{CARPETA}/{nom}"), pais, nom)
+        except Aborta as e:
+            print(f"        · {nom}: ABORTARÍA → {str(e).splitlines()[0]}", flush=True)
+            continue
+        except Exception as e:                   # un fichero ilegible no tumba el inventario
             print(f"        · {nom}: NO se ha podido leer ({type(e).__name__}: {e})", flush=True)
             continue
-        print(f"        · {nom}: leido_at = "
-              f"{cr if cr else '(SIN FECHA → este fichero ABORTARÍA, guarda 6.5)'}", flush=True)
-        if cr:
-            por_fecha[cr].append(nom)
+        leidos.append((nom, info_i['leido_at'], info_i['huella_datos'], info_i['n_asin']))
+        print(f"        · {nom}: leido_at={info_i['leido_at']}  ·  "
+              f"datos={info_i['huella_datos'][:12]}…  ·  {info_i['n_asin']} ASIN", flush=True)
 
-    repetidas = {k: v for k, v in por_fecha.items() if len(v) > 1}
-    if repetidas:
-        print("\n    ⚠️  Ficheros que COMPARTEN leido_at → son LA MISMA lectura. Cargarlos en "
-              "el mismo país se recierra (idempotente), no duplica:", flush=True)
-        for k, v in sorted(repetidas.items()):
-            print(f"        · {k}: {', '.join(sorted(v))}", flush=True)
-    if len(por_fecha) == len(xlsxs) and len(xlsxs) > 1:
-        print("\n    🔴 NINGÚN leido_at se repite: cada .xlsx es una lectura DISTINTA, aunque "
-              "dos pesen lo mismo. Si dos de ellos traen además las MISMAS cifras, cargar los "
-              "dos mete en la serie dos lecturas de idéntico contenido con fechas distintas, y "
-              "la resta entre ellas dará cero movimiento donde no lo hubo. Decide cuáles subes "
-              "ANTES de aplicar.", flush=True)
-    return por_fecha
+    # 1) MISMA FECHA → misma lectura. El caso inofensivo: se recierra solo.
+    por_fecha = defaultdict(list)
+    for nom, la, _hu, _n in leidos:
+        por_fecha[la].append(nom)
+    for la, noms in sorted(por_fecha.items()):
+        if len(noms) > 1:
+            print(f"\n    ⚠️  MISMO leido_at ({la}): {', '.join(sorted(noms))}\n"
+                  f"        Son LA MISMA lectura. Cargarlas en el mismo país se recierra "
+                  f"(idempotente): ni duplica ni ensucia la serie.", flush=True)
+
+    # 2) 🔴 MISMOS DATOS Y FECHA DISTINTA → el traicionero. Es lo que sugieren los eTag.
+    por_huella = defaultdict(list)
+    for nom, la, hu, _n in leidos:
+        por_huella[hu].append((nom, la))
+    gemelas = 0
+    for hu, pares in sorted(por_huella.items()):
+        if len(pares) > 1 and len({la for _n, la in pares}) > 1:
+            gemelas += 1
+            print(f"\n    🔴 MISMOS DATOS, FECHAS DISTINTAS (huella de datos {hu[:12]}…):",
+                  flush=True)
+            for nom, la in sorted(pares):
+                print(f"        · {nom}  →  leido_at={la}", flush=True)
+            print("        Es la MISMA exportación con dos fechas. NO se recierran entre sí: "
+                  "entrarían como DOS lecturas con cifras idénticas, y la resta entre ellas "
+                  "daría CERO movimiento en un tramo donde sí lo hubo. DECIDE CUÁL SE DESCARTA "
+                  "antes de aplicar.", flush=True)
+
+    if leidos and not gemelas:
+        print(f"\n    ✅ Ninguna pareja con los mismos datos y distinta fecha: los "
+              f"{len(por_huella)} contenidos distintos son lecturas de verdad.", flush=True)
+    return leidos
 
 
 # ---------------------------------------------------------------------------
@@ -657,7 +709,7 @@ def main():
     # No se hace en `aplicar` a propósito: el botón de Elena dispara aplicar y no tiene
     # que bajarse el buzón entero cada vez. El ensayo es donde se MIRA y se decide.
     if MODO == 'ensayo':
-        inventario_lecturas(sb, xlsxs)
+        inventario_lecturas(sb, xlsxs, PAIS)
 
     # Con ES/IT/FR en la misma carpeta "el más reciente" es una lotería: aquí pedir el
     # nombre EXACTO es lo NORMAL. Si se pide y no está → ABORTA (no cae al más reciente).
