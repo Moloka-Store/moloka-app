@@ -469,13 +469,16 @@ def analizar(bytes_xlsx, pais, fichero):
 #    tramo tiene menos de DIAS_MIN_CRUCE_PAIS días. NO caza una MEZCLA (un marketplace
 #    por fichero; eso lo para el procedimiento).
 #
-#    ⚠️ LA MEDICIÓN DE ABAJO ES DEL MODELO VIEJO Y NO SE REHACE SOLA. Medido contra PROD
-#    con ventana declarada año→30-jul: correcto ES 1,2% · FR 11% · IT 11%; el incorrecto
-#    SIEMPRE >75%. Discriminaba de sobra. Con el tramo nuevo —más largo, porque ya no lo
-#    recorta una ventana— los errores del correcto deberían BAJAR y separarse aún más del
-#    incorrecto, pero eso es una expectativa, NO una medición: la primera carga real del
-#    modelo contador todavía no ha ocurrido. 🔑 Cuando ocurra, mírense los tres números
-#    del log y actualícese esta nota con los de verdad.
+#    MEDIDO CON EL TRAMO NUEVO (staging, ensayo del 10-ago-2026, run 31367604666,
+#    fichero CA_ES_07ago.xlsx declarado ES):
+#        ES = 2,0%   ·   IT = 97,6%   ·   FR = 90,4%
+#    sobre un tramo de 220 días (2025-12-31 → 2026-08-07, cortado en la lectura).
+#    O sea: el correcto por debajo del 3% y los incorrectos por encima del 90%. Separa
+#    más que el modelo de ventana, donde el correcto daba 1,2% pero los incorrectos se
+#    quedaban en ">75%". El suelo de DIAS_MIN_CRUCE_PAIS (30) no llegó a atar: sobraban
+#    190 días.
+#    ⚠️ La medición del modelo VIEJO era: correcto ES 1,2% · FR 11% · IT 11%, con ventana
+#    declarada año→30-jul. Se deja escrita para poder comparar, no porque siga vigente.
 # ---------------------------------------------------------------------------
 def _puente_sku_asin(cur):
     """SKU→ASIN: listings_amazon ∪ productos(es_chase=false). El chase nace SIN ASIN,
