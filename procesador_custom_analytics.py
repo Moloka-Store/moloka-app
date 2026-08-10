@@ -949,15 +949,28 @@ def inventario_lecturas(sb, xlsxs, pais, cur):
         print(f"        hojas del libro: {r0['hojas']}", flush=True)
         print(f"        cabecera completa ({len(r0['cabecera'])} col): {r0['cabecera']}",
               flush=True)
-        algo = False
+        # 🔒 El veredicto NO puede darse por satisfecho con cualquier cadena. Medido el
+        #   10-ago-2026: los ocho ficheros traen `title='Workbook'` y nada más, y con un
+        #   "¿hay algo?" a secas eso bastaba para SUPRIMIR la conclusión — un diagnóstico
+        #   que no llega nunca a su conclusión no sirve de nada. Se imprime todo lo
+        #   encontrado (transparencia) pero solo cuenta como PISTA lo que podría llevar un
+        #   periodo: algo con un dígito o con una palabra de rango.
+        re_pista = re.compile(r'\d|periodo|period|rango|range|fecha|date|desde|hasta', re.I)
+        pistas_reales = []
         for r in leidos:
-            if r.get('props_doc'):
-                print(f"        · {r['nombre']} · propiedades: {r['props_doc']}", flush=True)
-                algo = True
+            for k, v in (r.get('props_doc') or {}).items():
+                print(f"        · {r['nombre']} · propiedad {k}={v!r}", flush=True)
+                if re_pista.search(v):
+                    pistas_reales.append(f"{r['nombre']} · {k}={v}")
             for p in (r.get('pistas_periodo') or []):
                 print(f"        · {r['nombre']} · {p}", flush=True)
-                algo = True
-        if not algo:
+                if re_pista.search(p):
+                    pistas_reales.append(f"{r['nombre']} · {p}")
+        if pistas_reales:
+            print(f"        ⚠️  Hay {len(pistas_reales)} cadena(s) que PODRÍAN llevar un "
+                  f"periodo. Míralas: si alguna lo trae, esa es la llave de verdad y este "
+                  f"modelo mejora. {pistas_reales[:5]}", flush=True)
+        else:
             print("        🔴 NADA. Ni otras hojas, ni propiedades de documento, ni una "
                   "columna de periodo: el .xlsx NO dice de qué rango es. Consecuencias, "
                   "dichas en alto:\n"
