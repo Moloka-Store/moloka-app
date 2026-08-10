@@ -240,6 +240,17 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   Regla práctica: después de añadir un suite, `npm test | grep "<su cabecera>"`. Si no sale, no
   existe. Vale igual para cualquier runner en el que registrar el test sea un paso aparte de
   escribirlo.
+- 🔴 **ANTES DE CREAR RAMA, `git fetch`.** Una rama nacida de un `origin/main` viejo construye
+  sobre un bug **ya arreglado**, y los tests no lo cazan porque el arreglo simplemente **no está**:
+  no hay nada que se ponga rojo. Sales con todo en verde y devuelves el fallo a `main` por la
+  puerta de atrás, encima con la firma de haberlo verificado.
+  *Medido el 10-ago-2026: la rama de las seis correcciones de pantalla se creó de un `origin/main`
+  que no tenía el PR recién fusionado con el arreglo del doble conteo de la tira de país. Se
+  descubrió por casualidad, buscando otra cosa —el suite que no aparecía por su nombre, la regla de
+  arriba— y se integró antes de seguir.*
+  🔑 Y de ahí, lo que hay que hacer cuando pasa: **integrar `origin/main` EN CUANTO se detecta**, no
+  al final. Cuanto más tarde, más código escrito sobre la base equivocada. Ojo también con `gh pr
+  merge`: fusiona en GitHub y **no actualiza tu `origin/main` local** — hace falta el `fetch`.
 - **Los datos sintéticos no prueban nada.** Una vista se prueba con la tabla **poblada**.
 - **Escribe los números esperados ANTES de correr.** Si no salen, di lo que sale — no ajustes la
   expectativa al resultado.
