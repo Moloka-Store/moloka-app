@@ -361,6 +361,36 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   y compruebe que abre. Hasta que exista, la copia de ficheros está **hecha pero no verificada de
   extremo a extremo**. *(El backup sí tiene número de control externo contra `storage.objects`, así
   que una copia CORTA no pasa por buena — pero eso valida la subida, no la restauración.)*
+- 🔴 **PENDIENTE — las tablas `monitor_*` del trackeador están abiertas a `anon`, y no solo para
+  leer: para BORRAR.** Medido el 10-ago en producción, al cerrar el gate de las tres vistas (§6):
+
+  | Tabla | Política | Rol | Qué permite |
+  |---|---|---|---|
+  | `monitor_reglas` | `anon_all_regla` `ALL using(true)` | **anon** | leer, MODIFICAR y **BORRAR** |
+  | `monitor_snapshots` | `anon_all_snap` `ALL using(true)` | **anon** | leer, MODIFICAR y **BORRAR** |
+  | `monitor_resultados` | `p_resultados_all` `ALL using(true)` | **PUBLIC** | leer, MODIFICAR y **BORRAR** |
+  | `monitor_recomendaciones` | 2 políticas `anon` | **anon** | leer y ACTUALIZAR |
+  | `monitor_analisis` · `monitor_doctrina` · `monitor_reponibilidad_manual` | — | — | ✅ RLS y 0 políticas: cerradas |
+
+  `monitor_reglas` son **las 21 reglas del trackeador**: la doctrina de precios de la casa, expuesta a
+  un `DELETE` anónimo. La clave publicable viaja en el JavaScript de la app por diseño, así que esto
+  no es teórico.
+
+  🔴 **PERO NO SE CIERRA A CIEGAS, y esta es la parte que hay que resolver ANTES:** hay que saber con
+  qué clave escribe el trackeador. Medido en el repo: sus scripts hacen
+  `os.environ.get('SUPABASE_SERVICE_KEY') or os.environ['SUPABASE_KEY']` (y `moloka_tracker_snapshot.py`
+  usa **solo** `SUPABASE_KEY`, sin alternativa), y **sus dos workflows —`tracker-app.yml` y
+  `tracker-cerebro.yml`— inyectan ÚNICAMENTE `secrets.SUPABASE_KEY`**, no la de servicio. O sea que
+  el `or` cae siempre al mismo lado: **el trackeador corre con `SUPABASE_KEY`**.
+  ⚠️ Lo que falta por saber es **qué contiene ese secret**: si es la publicable (`anon`), cerrar estas
+  políticas **rompe el trackeador el día que vuelva a arrancar** — y está parado desde el 11-jul, así
+  que el fallo no se vería hasta entonces, que es la peor forma de encontrarlo. Que los dos secrets
+  existan por separado apunta a que son distintas, pero **no se ha comprobado y no se supone**.
+  Lo mira Fernando (GitHub → Settings → Secrets); no se toca la BD hasta tenerlo.
+
+  Cuando se sepa: si es `anon`, el arreglo es darle al trackeador la clave de servicio (que salta la
+  RLS por `rolbypassrls`) y solo DESPUÉS quitar las políticas de `anon`. En ese orden, nunca al revés.
+  ⚠️ Y `productos` sigue con **455 filas legibles por `anon`** (§6 ya lo señalaba): mismo frente.
 - 🔴 **PENDIENTE — NO EXISTE UNA LISTA FIABLE DE QUÉ MIGRACIONES SE HAN APLICADO A PRODUCCIÓN.**
   `supabase_migrations.schema_migrations` existe y tiene **37 registros, el último
   `20260806085625`** — o sea del **6-ago-2026**. Ni el contador ni el `setval` del 10-ago están
