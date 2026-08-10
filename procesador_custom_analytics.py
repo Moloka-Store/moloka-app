@@ -524,6 +524,85 @@ def _puente_sku_asin(cur):
     return sku2asin
 
 
+def _errores_de_cuota(cur, ini, fin, uds_fichero):
+    """Error mediano de CUOTA del fichero contra CADA país, sobre el tramo [ini, fin].
+    Devuelve ({pais: error|None}, tabla_legible).
+
+    🔒 UNA SOLA IMPLEMENTACIÓN, y no es cosmética: la usan la guarda 6.6 (que decide si
+    ABORTA la carga) y el etiquetado de países del inventario (que decide qué lecturas se
+    comparan entre sí). Si el inventario etiquetara con otra fórmula, podría emparejar dos
+    ficheros que la guarda considera de países distintos, y entonces sus comparaciones
+    dirían cualquier cosa. Es la misma regla de `sql/huella_acl.sql`."""
+    total_fichero = sum(uds_fichero.values())
+    sku2asin = _puente_sku_asin(cur)
+
+    # Unidades pedidas por (país, asin) sobre el tramo, para TODOS los candidatos.
+    cur.execute(
+        "SELECT pais, sku, sum(cantidad)::numeric FROM transacciones_movimientos "
+        " WHERE tipo_norm='pedido' AND fecha BETWEEN %s AND %s "
+        "   AND cantidad IS NOT NULL AND sku IS NOT NULL "
+        " GROUP BY pais, sku;", (ini, fin))
+    trans = defaultdict(lambda: defaultdict(float))   # pais → asin → uds
+    for p, sku, uds in cur.fetchall():
+        asin = sku2asin.get(_bt(sku))
+        if asin:
+            trans[p][asin] += float(uds)
+
+    # CUOTAS: cuota de cada ASIN en el fichero (sobre el acumulado) y en cada candidato
+    # (sobre el tramo). Comparar cuotas neutraliza que los dos tramos no coincidan.
+    cuota_fichero = {a: u / total_fichero for a, u in uds_fichero.items()} if total_fichero else {}
+    errores = {}
+    for cand in PAISES_VALIDOS:
+        total_cand = sum(trans[cand].values())
+        if total_cand <= 0:
+            errores[cand] = None
+            continue
+        # Los 12 ASIN de más unidades del candidato; error relativo de su CUOTA vs el fichero.
+        top = sorted(trans[cand].items(), key=lambda kv: kv[1], reverse=True)[:12]
+        errs = []
+        for asin, tu in top:
+            if tu <= 0:                       # no dividir por cero (medido: qty mín = 1)
+                continue
+            ts = tu / total_cand
+            errs.append(abs(cuota_fichero.get(asin, 0.0) - ts) / ts)
+        errores[cand] = median(errs) if errs else None
+
+    tabla = " · ".join(
+        f"{c}={'s/d' if errores[c] is None else format(100*errores[c], '.1f')+'%'}"
+        for c in PAISES_VALIDOS)
+    return errores, tabla
+
+
+def etiquetar_pais(cur, leido_at, uds_fichero):
+    """Para el INVENTARIO: ¿de qué marketplace es este fichero? Devuelve (pais|None, tabla).
+
+    🔴 POR QUÉ HACE FALTA, medido el 10-ago-2026. El inventario agrupaba las lecturas por
+    SOLAPE DE ASIN para decidir cuáles comparar entre sí, dando por hecho que cada
+    marketplace tiene sus ASIN. Es FALSO: en Amazon EU el mismo ASIN vale para varios
+    países. El solape medido entre el fichero de ES y el de FR fue del 86%, y entre FR e IT
+    del 97%, así que los tres se agruparon como una sola serie y la comparación "de
+    contador" acabó restando España contra Francia — 1.129 falsas bajadas.
+    El país NO se adivina por solape: se identifica cruzando con transacciones, que es lo
+    que ya hace la guarda 6.6. Aquí se reutiliza su misma fórmula para ETIQUETAR (sin
+    abortar: el inventario informa, no decide).
+    🔒 El tramo se toma sobre TODOS los países, no sobre uno declarado: aquí no hay
+    declaración que respetar y el tramo tiene que ser el mismo para los tres candidatos."""
+    if sum(uds_fichero.values()) <= 0:
+        return (None, "sin 'Unidades pedidas': no hay con qué cruzar")
+    cur.execute("SELECT min(fecha), max(fecha) FROM transacciones_movimientos;")
+    fmin, fmax = cur.fetchone()
+    if fmin is None:
+        return (None, "transacciones vacía")
+    ini, fin = fmin, min(fmax, leido_at.date())
+    if (fin - ini).days + 1 < DIAS_MIN_CRUCE_PAIS:
+        return (None, f"tramo de {(fin - ini).days + 1} días, menos de {DIAS_MIN_CRUCE_PAIS}")
+    errores, tabla = _errores_de_cuota(cur, ini, fin, uds_fichero)
+    validos = [c for c in PAISES_VALIDOS if errores[c] is not None]
+    if not validos:
+        return (None, f"sin cruce ({tabla})")
+    return (min(validos, key=lambda c: errores[c]), tabla)
+
+
 def guarda_pais(cur, pais_declarado, leido_at, uds_fichero):
     """Devuelve (veredicto, detalle). veredicto ∈ {'ok','grita','salta'}; si el país
     declarado NO gana, lanza Aborta. `uds_fichero` = {asin: unidades_pedidas} del fichero.
@@ -551,42 +630,7 @@ def guarda_pais(cur, pais_declarado, leido_at, uds_fichero):
                          f"la lectura ({fmin}→{fmax}, cortado en {leido_dia}): menos de "
                          f"{DIAS_MIN_CRUCE_PAIS}, demasiado poco para fiarse. Guarda SALTADA.")
 
-    sku2asin = _puente_sku_asin(cur)
-
-    # 2) Unidades pedidas por (país, asin) sobre la INTERSECCIÓN, para TODOS los candidatos.
-    cur.execute(
-        "SELECT pais, sku, sum(cantidad)::numeric FROM transacciones_movimientos "
-        " WHERE tipo_norm='pedido' AND fecha BETWEEN %s AND %s "
-        "   AND cantidad IS NOT NULL AND sku IS NOT NULL "
-        " GROUP BY pais, sku;", (ini, fin))
-    trans = defaultdict(lambda: defaultdict(float))   # pais → asin → uds
-    for p, sku, uds in cur.fetchall():
-        asin = sku2asin.get(_bt(sku))
-        if asin:
-            trans[p][asin] += float(uds)
-
-    # 3) CUOTAS: cuota de cada ASIN en el fichero (sobre el acumulado) y en cada candidato
-    #    (sobre el tramo). Comparar cuotas neutraliza que los dos tramos no coincidan.
-    cuota_fichero = {a: u / total_fichero for a, u in uds_fichero.items()}
-    errores = {}
-    for cand in PAISES_VALIDOS:
-        total_cand = sum(trans[cand].values())
-        if total_cand <= 0:
-            errores[cand] = None
-            continue
-        # Los 12 ASIN de más unidades del candidato; error relativo de su CUOTA vs el fichero.
-        top = sorted(trans[cand].items(), key=lambda kv: kv[1], reverse=True)[:12]
-        errs = []
-        for asin, tu in top:
-            if tu <= 0:                       # no dividir por cero (medido: qty mín = 1)
-                continue
-            ts = tu / total_cand
-            errs.append(abs(cuota_fichero.get(asin, 0.0) - ts) / ts)
-        errores[cand] = median(errs) if errs else None
-
-    tabla = " · ".join(
-        f"{c}={'s/d' if errores[c] is None else format(100*errores[c], '.1f')+'%'}"
-        for c in PAISES_VALIDOS)
+    errores, tabla = _errores_de_cuota(cur, ini, fin, uds_fichero)
 
     if errores.get(pais_declarado) is None:
         return ('salta', f"no hay unidades cruzables para {pais_declarado} en la intersección "
@@ -659,7 +703,7 @@ def guarda_pais(cur, pais_declarado, leido_at, uds_fichero):
 #   Hoy el procesador DETECTA y GRITA en el ensayo, y guarda la huella en el sello
 #   (`informes_subidos.resumen_json`) para que ese PR tenga con qué empezar.
 # ---------------------------------------------------------------------------
-def inventario_lecturas(sb, xlsxs, pais):
+def inventario_lecturas(sb, xlsxs, pais, cur):
     """Abre TODOS los .xlsx del buzón y, por cada uno, dice qué `leido_at` le tocaría y
     qué huella tienen sus DATOS. No escribe nada: es para MIRAR antes de decidir.
     🔒 Parsea con `analizar()`, el MISMO código que carga. Si el inventario parseara por
@@ -677,15 +721,19 @@ def inventario_lecturas(sb, xlsxs, pais):
         except Exception as e:                   # un fichero ilegible no tumba el inventario
             print(f"        · {nom}: NO se ha podido leer ({type(e).__name__}: {e})", flush=True)
             continue
+        porasin = {d['asin']: d for d in info_i['datos']}
+        uds = {a: (d.get('unidades_pedidas') or 0) for a, d in porasin.items()}
+        etiqueta, tabla_p = etiquetar_pais(cur, info_i['leido_at'], uds)
         leidos.append({'nombre': nom, 'leido_at': info_i['leido_at'],
                        'huella': info_i['huella_datos'], 'n': info_i['n_asin'],
                        'modificado': info_i['modificado'], 'autor': info_i['ultimo_autor'],
-                       'cabecera': info_i['cabecera'],
-                       'porasin': {d['asin']: d for d in info_i['datos']}})
+                       'cabecera': info_i['cabecera'], 'pais': etiqueta, 'porasin': porasin})
         print(f"        · {nom}: leido_at={info_i['leido_at']}  ·  "
               f"datos={info_i['huella_datos'][:12]}…  ·  {info_i['n_asin']} ASIN", flush=True)
         print(f"              modificado={info_i['modificado']}  ·  "
               f"ultimo_autor={info_i['ultimo_autor'] or '(vacío)'}", flush=True)
+        print(f"              país por cuota: {etiqueta or '(no identificable)'}  ({tabla_p})",
+              flush=True)
 
     # 1) MISMA FECHA → misma lectura. El caso inofensivo: se recierra solo.
     por_fecha = defaultdict(list)
@@ -741,27 +789,37 @@ def inventario_lecturas(sb, xlsxs, pais):
     #   legítimamente cada vez que se vende algo. Meterlo daría bajadas falsas todo el rato.
     #   Tampoco entran ratios ni medias (conversión, buy box, estrellas, precio medio): no
     #   acumulan nada. Quedan las NUEVE que sí cuentan hacia arriba.
-    # 🔒 Las lecturas se emparejan por SOLAPE DE ASIN, no por país: el inventario no sabe de
-    #   qué marketplace es cada fichero (eso lo decide la guarda 6.6, que necesita la base).
-    #   El solape se IMPRIME para que se vea si el emparejamiento tiene sentido.
+    # 🔴 LAS LECTURAS SE AGRUPAN POR PAÍS IDENTIFICADO, NO POR SOLAPE DE ASIN.
+    #   La primera versión agrupaba por solape, dando por hecho que cada marketplace tiene
+    #   sus ASIN. Es FALSO: en Amazon EU el mismo ASIN vale para varios países. Medido el
+    #   10-ago-2026: ES contra FR solapaban al 86% y FR contra IT al 97%, así que los tres
+    #   ficheros cayeron en la misma "serie" y la comparación acabó restando España contra
+    #   Francia — 1.129 bajadas que no eran un contador retrocediendo, sino dos países
+    #   distintos. El país se identifica cruzando con transacciones (`etiquetar_pais`),
+    #   que es el método de la guarda 6.6. Un fichero que no se pueda etiquetar NO se
+    #   compara con nadie, y se dice.
     ACUMULADAS = tuple(c for c in COLS_ADITIVAS if c != 'inventario_disponible')
-    series, hay_bajadas = [], 0
-    for r in sorted(leidos, key=lambda x: x['leido_at']):
-        for s in series:
-            ref = s[-1]
-            comun = len(set(r['porasin']) & set(ref['porasin']))
-            if comun >= 0.7 * min(len(r['porasin']), len(ref['porasin'])):
-                s.append(r)
-                break
-        else:
-            series.append([r])
+    hay_bajadas = 0
+    por_pais = defaultdict(list)
+    sin_etiqueta = [r['nombre'] for r in leidos if not r['pais']]
+    for r in leidos:
+        if r['pais']:
+            por_pais[r['pais']].append(r)
+    if sin_etiqueta:
+        print(f"\n    ⚠️  Sin país identificable, NO se comparan con nadie: "
+              f"{', '.join(sorted(sin_etiqueta))}", flush=True)
 
-    for s in series:
+    for pais_s in sorted(por_pais):
+        s = sorted(por_pais[pais_s], key=lambda x: x['leido_at'])
+        if len(s) < 2:
+            print(f"\n    · {pais_s}: una sola lectura ({s[0]['nombre']}), nada que comparar.",
+                  flush=True)
+            continue
         for ant, pos in zip(s, s[1:]):
             a, p = ant['porasin'], pos['porasin']
             comunes, nuevos, faltan = set(a) & set(p), set(p) - set(a), set(a) - set(p)
             solape = 100 * len(comunes) / max(1, min(len(a), len(p)))
-            print(f"\n    ── ¿MISMO CONTADOR?  {ant['nombre']} ({ant['leido_at']})"
+            print(f"\n    ── ¿MISMO CONTADOR? [{pais_s}]  {ant['nombre']} ({ant['leido_at']})"
                   f"  →  {pos['nombre']} ({pos['leido_at']}) ──", flush=True)
             print(f"        ASIN {len(a)} → {len(p)}  ·  comunes {len(comunes)} "
                   f"(solape {solape:.0f}%)  ·  nuevos {len(nuevos)}  ·  "
@@ -862,12 +920,6 @@ def main():
                  f"Analytics de {PAIS} y relanza.")
     xlsxs.sort(key=lambda o: (o.get('updated_at') or o.get('created_at') or ''), reverse=True)
 
-    # En ENSAYO, antes de nada: qué fecha trae cada fichero del buzón (§3 del fichero).
-    # No se hace en `aplicar` a propósito: el botón de Elena dispara aplicar y no tiene
-    # que bajarse el buzón entero cada vez. El ensayo es donde se MIRA y se decide.
-    if MODO == 'ensayo':
-        inventario_lecturas(sb, xlsxs, PAIS)
-
     # Con ES/IT/FR en la misma carpeta "el más reciente" es una lotería: aquí pedir el
     # nombre EXACTO es lo NORMAL. Si se pide y no está → ABORTA (no cae al más reciente).
     if FICHERO:
@@ -960,6 +1012,16 @@ def main():
               "escribir el modelo CONTADOR. Aplica por la escalera la migración "
               "2026-08-07_demanda_asin_contador.sql y relanza.", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
+
+    # --- INVENTARIO DEL BUZÓN (solo ensayo) ---
+    # 🔒 Va AQUÍ, después de conectar, y no antes de elegir el fichero como estaba: para
+    #   etiquetar el país de cada lectura hace falta cruzar con transacciones, y eso pide
+    #   la base. Sin país, las comparaciones de "mismo contador" acaban restando España
+    #   contra Francia (medido el 10-ago-2026).
+    # 🔒 No se hace en `aplicar` a propósito: ese es el modo del botón de Elena y no tiene
+    #   que bajarse el buzón entero en cada carga. El ensayo es donde se MIRA y se decide.
+    if MODO == 'ensayo':
+        inventario_lecturas(sb, xlsxs, PAIS, cur)
 
     # --- Guarda 6.6: EL PAÍS ---
     uds_fichero = {r['asin']: (r.get('unidades_pedidas') or 0) for r in datos}
