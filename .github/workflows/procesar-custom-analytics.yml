@@ -27,12 +27,21 @@ name: Moloka - Procesar CUSTOM ANALYTICS
 #    forma de subir tres en una pasada, ni debe haberla (cada uno declara su país).
 #
 # 🔴 Y SI HAY MÁS DE UNA LECTURA DEL MISMO PAÍS, SIEMPRE DE MÁS ANTIGUA A MÁS
-#    NUEVA. El orden NO es cosmético: la guarda 6.14 compara cada lectura contra la
-#    última ya cargada de ese país, así que si se mete primero la del 7 y luego la
-#    del 30 de julio, la vieja parece un retroceso y se rechaza. La fecha de cada
-#    fichero es su `wb.properties.created`, y el ENSAYO la imprime para todos los
-#    ficheros del buzón antes de tocar nada — lánzalo con `modo=ensayo` si no sabes
-#    en qué orden van.
+#    NUEVA — Y NADIE LO COMPRUEBA POR TI. El orden NO es cosmético.
+#    ⚠️ Aquí ponía que "si se mete primero la del 7 y luego la del 30 de julio, la
+#    vieja parece un retroceso y se rechaza". ERA FALSO, y corregirlo importa porque
+#    es texto que se lee justo antes de lanzar. La guarda 6.14 solo compara HACIA
+#    ADELANTE: si la lectura que subes es ANTERIOR a la última cargada, ni la mira.
+#    De eso avisa la 6.8, que GRITA y SIGUE. Medido el 10-ago-2026 (run 31416925455):
+#    `CA_ES_02ago_DISCONTINUO.xlsx` —246 ASIN contra 321, un retroceso global de
+#    verdad— pasó el ensayo ENTERO sin que nada lo parase.
+#    Consecuencia práctica: meterlas desordenadas NO da error, mete una lectura mala
+#    en medio de la serie y el `lag()` de `v_demanda_asin_ultima` calcula el delta
+#    contra la lectura equivocada. El agujero "VIEJA DETRÁS DE NUEVA" está ABIERTO y
+#    anotado en §2 de CLAUDE.md.
+#    La fecha de cada fichero es su `wb.properties.created`, y el ENSAYO la imprime
+#    para todos los ficheros del buzón antes de tocar nada — lánzalo con
+#    `modo=ensayo` si no sabes en qué orden van. Hoy es tu única red.
 #
 # ⚠️ QUÉ ESPERAR DE LAS GUARDAS, PARA QUE UN ROJO NO PAREZCA UNA AVERÍA. Las tres
 #    abortan sin escribir nada, y ninguna de las tres es un fallo del sistema:
@@ -42,9 +51,18 @@ name: Moloka - Procesar CUSTOM ANALYTICS
 #           → Amazon no ha refrescado su panel. NO es un fallo y no se pierde nada:
 #             el fichero se queda en el buzón. Mira hasta qué fecha dice el Seller
 #             que hay datos y vuelve a intentarlo cuando ese aviso avance.
-#    · 6.14 alguna métrica acumulada BAJA respecto a la lectura anterior
-#           → ese export se generó con OTRO periodo. Vuelve al Seller, pon «Desde
+#    · 6.14 bajan los TOTALES acumulados respecto a la lectura anterior
+#           → ese export se generó con OTRO RANGO. Vuelve al Seller, pon «Desde
 #             el inicio de año» (§2 de CLAUDE.md) y re-exporta.
+#           ⚠️ OJO: esto decía "alguna métrica acumulada BAJA", y con ese criterio la
+#           guarda rechazó una carga BUENA de IT en producción el 10-ago-2026 (run
+#           31416495261) por DOS bajadas sobre 1.008 comparaciones: un solo ASIN,
+#           9→8 unidades y 19,99 € menos, o sea UNA CANCELACIÓN. Desde entonces la
+#           6.14 distingue: si los totales SUBEN y bajan unos pocos ASIN, es Amazon
+#           recalculando (cancelaciones, devoluciones) → GRITA la lista y CARGA. Solo
+#           aborta si el retroceso es GLOBAL. Y el diagnóstico se calcula: el log
+#           imprime la tabla de totales en la que se basa, así que no hace falta
+#           creerse el mensaje — se comprueba.
 #
 # 🔒 Y en `ensayo` NO se escribe nada: corre entero contra la base real y se deshace.
 #    Es gratis, así que ante la duda, ensayo primero.
