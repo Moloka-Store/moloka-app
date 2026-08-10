@@ -1351,6 +1351,23 @@ def main():
                   "rango produce un fichero que NO es una lectura de este contador.\n"
                   "   Vuelve al Seller, pon «Desde el inicio de año», re-exporta y sube ese.",
                   flush=True)
+            # 🔴 …SALVO EN ENERO. A partir del 1-ene-2027 la causa de arriba puede ser la
+            #   equivocada, y mandar a re-exportar con el MISMO periodo no arreglaría nada.
+            #   «Desde el inicio de año» tiene el inicio FIJO en el 1 de enero: el contador
+            #   se reinicia a cero, y la primera lectura del año nuevo es legítimamente
+            #   MENOR que la última del anterior. La guarda hace bien en abortar —esa resta
+            #   sería basura—, pero el diagnóstico es otro. Ver §2 de CLAUDE.md: hasta que
+            #   la tabla guarde el AÑO DE ACUMULACIÓN de cada lectura, esto se resuelve a
+            #   mano y no hay automatismo que lo distinga.
+            # `ref_cual` no puede ser None aquí: lo garantiza el `if` que abre este bloque.
+            if leido_at.year != ref_cual.year:
+                print(f"   ⚠️ OJO, HAY OTRA CAUSA POSIBLE Y AQUÍ ENCAJA: la lectura anterior "
+                      f"es de {ref_cual.year} y esta de {leido_at.year}. El contador se "
+                      f"REINICIA cada 1 de enero, así que esta bajada puede ser el reinicio "
+                      f"y no un fichero mal exportado. NO la fuerces: la resta entre dos "
+                      f"años distintos no significa nada. Es el caso escrito en §2 de "
+                      f"CLAUDE.md, pendiente de que el modelo guarde el año de acumulación.",
+                      flush=True)
             con.rollback(); cur.close(); con.close(); sys.exit(1)
         print(f"\n✅ [Guarda 6.14] El contador no retrocede contra la lectura anterior "
               f"({ref_cual}): 0 bajadas en "
