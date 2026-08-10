@@ -1,5 +1,30 @@
 -- ============================================================================
+-- 🔒 SELLO DE LO APLICADO — leer ESTO antes de contrastar hashes.
+--   Esta migración se aplicó en PRODUCCIÓN el 10-ago-2026, run 31414939816, con:
+--       sha256  a018731b0a7aa862b6f576b038a04b39240ba826f2996d4654783833f2f8a754
+--       commit  b5b333f262771742f9ad63b89c4c10d292ae4692
+--   DESPUÉS se amplió esta cabecera. Solo comentarios: no cambió ni una línea de SQL.
+--   Por eso el sha256 del fichero YA NO CUADRA con el que publicó aquel run. No es una
+--   manipulación: es esto, y por eso está escrito aquí.
+--   🔑 CONVENCIÓN: si hay que ampliar una migración YA APLICADA, se deja este sello con
+--   el hash y el run originales. Un hash que no cuadra sin explicación es exactamente la
+--   alarma que el sello evita — y una alarma que salta sin motivo se deja de mirar.
+--   Si lo que cambia es el SQL, entonces NO es una ampliación: es otra migración.
+-- ============================================================================
 -- moloka_buzones_fase0(): AÑADIR 'custom_analytics'  ·  10-ago-2026
+-- ----------------------------------------------------------------------------
+-- 🔴 LA LECCIÓN QUE DEJA ESTA MIGRACIÓN, por si sirve para la siguiente:
+--   EN UNA BASE DONDE EL BACKUP NO CUBRE TODOS LOS ESQUEMAS, CUALQUIER NÚMERO
+--   ABSOLUTO SOBRE LO QUE NO SE COPIA ES UN FALSO ROJO ESPERANDO. SE COMPARAN
+--   INVARIANTES, NO CIFRAS.
+--   Aquí en concreto: `backup-bd.yml` vuelca con `--schema=public`, así que las
+--   políticas de `storage.objects` no están en la copia y `restaurar-staging.yml` no
+--   las repone. La guarda pedida era "tienen que ser 4 políticas"; habría dado ROJO en
+--   staging por el alcance del backup, no por la migración. Se guarda el recuento ANTES
+--   (paso 1b) y se compara DESPUÉS: el invariante real de un CREATE OR REPLACE es "no
+--   se llevó ninguna por delante", y eso es cierto valgan 4 o valga otra cosa.
+--   Generalizado en §3 de CLAUDE.md: una comprobación que puede saltar por una causa
+--   distinta de la que dice medir no es una guarda, es ruido futuro.
 -- ----------------------------------------------------------------------------
 -- EL BLOQUEO. Al subir un .xlsx al buzón de Custom Analytics desde la app v2:
 --     "No se pudo firmar la subida: new row violates row-level security policy"
