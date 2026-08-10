@@ -175,6 +175,15 @@ COLS_DB = ['pais', 'asin', 'nombre_producto',
 
 RE_ASIN = re.compile(r'/dp/([A-Z0-9]{10})')
 
+# 🔴 Nombres que PARECEN de usar y tirar. No decide nada: sirve para GRITAR cuando uno de
+#   estos se carga como lectura buena, que es exactamente lo que pasó el 10-ago-2026.
+#   `PRUEBA_ES/IT/FR.xlsx` resultaron ser las lecturas VERDADERAS del 30-jul 18:06, y los
+#   `CA_*_01ago.xlsx` —con nombre de formales— eran esos mismos ficheros reescritos.
+#   Lo que decide qué es una lectura son sus DATOS y su `leido_at`, nunca cómo se llame el
+#   fichero. El aviso existe para que nadie los borre del buzón creyendo que son basura.
+RE_NOMBRE_DESECHABLE = re.compile(
+    r'(?:^|[^A-Za-z0-9])(prueba|test|tmp|temp|borrar|copia|copy)(?:[^A-Za-z0-9]|$)', re.I)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -223,16 +232,20 @@ def _ent(v):
 def _bt(s):
     return _clean(s)
 
+def _fecha_utc(v):
+    """Fecha de las propiedades del .xlsx → UTC. openpyxl las devuelve sin zona y Amazon
+    exporta en UTC; sin esto, dos fechas iguales compararían distinto."""
+    if isinstance(v, datetime) and v.tzinfo is None:
+        v = v.replace(tzinfo=timezone.utc)
+    return v
+
 def _created_de_wb(wb):
     """LA FECHA DEL DATO, leída tal como la lee el cargador. UNA sola función para los dos
     sitios que la necesitan —el cargador y el inventario del ensayo— porque si el
     inventario la leyera por su cuenta podría ANUNCIAR una fecha y cargarse otra, y
     entonces el inventario no probaría nada. Es la lección de `sql/huella_acl.sql`: una
     misma cosa medida con dos códigos no es una medida."""
-    v = getattr(wb.properties, 'created', None)
-    if isinstance(v, datetime) and v.tzinfo is None:
-        v = v.replace(tzinfo=timezone.utc)      # Amazon exporta en UTC
-    return v
+    return _fecha_utc(getattr(wb.properties, 'created', None))
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +264,12 @@ def analizar(bytes_xlsx, pais, fichero):
     ws = wb['metric-data'] if 'metric-data' in wb.sheetnames else wb.active
     creator = _clean(getattr(wb.properties, 'creator', '') or '')
     leido_at = _created_de_wb(wb)
+    # Las OTRAS dos propiedades del documento. No se guardan en la tabla: son para el
+    # inventario del ensayo, donde desempatan dos ficheros con los mismos datos y distinta
+    # fecha (§3). Un fichero reescrito trae `modified` posterior a `created` y, casi
+    # siempre, un `lastModifiedBy` que Amazon no pone.
+    modificado = _fecha_utc(getattr(wb.properties, 'modified', None))
+    ultimo_autor = _clean(getattr(wb.properties, 'lastModifiedBy', '') or '')
     filas = list(ws.iter_rows(values_only=True))
     wb.close()
 
@@ -439,7 +458,10 @@ def analizar(bytes_xlsx, pais, fichero):
         'totales_fichero': totales_fichero,
         'creator': creator,
         'leido_at': leido_at,
+        'modificado': modificado,
+        'ultimo_autor': ultimo_autor,
         'huella_datos': _h.hexdigest(),
+        'cabecera': [str(c) for c in cabecera],   # tal cual viene: delata otro panel (§3)
         'avisos': avisos,
         'columnas_ausentes': sorted(ausentes),
         'columnas_desconocidas': desconocidas,
@@ -621,7 +643,7 @@ def inventario_lecturas(sb, xlsxs, pais):
     su cuenta podría anunciar una cosa y cargarse otra, y entonces no probaría nada."""
     print(f"\n--- INVENTARIO DEL BUZÓN: qué trae cada .xlsx ({len(xlsxs)}) ---", flush=True)
     print("    (se abre CADA fichero: ni el tamaño ni el nombre dicen nada)", flush=True)
-    leidos = []                                  # (nombre, leido_at, huella_datos, n_asin)
+    leidos = []                                  # un dict por fichero legible
     for o in xlsxs:
         nom = o.get('name') or '?'
         try:
@@ -632,14 +654,20 @@ def inventario_lecturas(sb, xlsxs, pais):
         except Exception as e:                   # un fichero ilegible no tumba el inventario
             print(f"        · {nom}: NO se ha podido leer ({type(e).__name__}: {e})", flush=True)
             continue
-        leidos.append((nom, info_i['leido_at'], info_i['huella_datos'], info_i['n_asin']))
+        leidos.append({'nombre': nom, 'leido_at': info_i['leido_at'],
+                       'huella': info_i['huella_datos'], 'n': info_i['n_asin'],
+                       'modificado': info_i['modificado'], 'autor': info_i['ultimo_autor'],
+                       'cabecera': info_i['cabecera'],
+                       'porasin': {d['asin']: d for d in info_i['datos']}})
         print(f"        · {nom}: leido_at={info_i['leido_at']}  ·  "
               f"datos={info_i['huella_datos'][:12]}…  ·  {info_i['n_asin']} ASIN", flush=True)
+        print(f"              modificado={info_i['modificado']}  ·  "
+              f"ultimo_autor={info_i['ultimo_autor'] or '(vacío)'}", flush=True)
 
     # 1) MISMA FECHA → misma lectura. El caso inofensivo: se recierra solo.
     por_fecha = defaultdict(list)
-    for nom, la, _hu, _n in leidos:
-        por_fecha[la].append(nom)
+    for r in leidos:
+        por_fecha[r['leido_at']].append(r['nombre'])
     for la, noms in sorted(por_fecha.items()):
         if len(noms) > 1:
             print(f"\n    ⚠️  MISMO leido_at ({la}): {', '.join(sorted(noms))}\n"
@@ -648,24 +676,121 @@ def inventario_lecturas(sb, xlsxs, pais):
 
     # 2) 🔴 MISMOS DATOS Y FECHA DISTINTA → el traicionero. Es lo que sugieren los eTag.
     por_huella = defaultdict(list)
-    for nom, la, hu, _n in leidos:
-        por_huella[hu].append((nom, la))
+    for r in leidos:
+        por_huella[r['huella']].append(r)
     gemelas = 0
-    for hu, pares in sorted(por_huella.items()):
-        if len(pares) > 1 and len({la for _n, la in pares}) > 1:
+    for hu, grupo in sorted(por_huella.items()):
+        if len(grupo) > 1 and len({r['leido_at'] for r in grupo}) > 1:
             gemelas += 1
             print(f"\n    🔴 MISMOS DATOS, FECHAS DISTINTAS (huella de datos {hu[:12]}…):",
                   flush=True)
-            for nom, la in sorted(pares):
-                print(f"        · {nom}  →  leido_at={la}", flush=True)
+            for r in sorted(grupo, key=lambda x: x['leido_at']):
+                print(f"        · {r['nombre']}  →  leido_at={r['leido_at']}  ·  "
+                      f"modificado={r['modificado']}  ·  autor={r['autor'] or '(vacío)'}",
+                      flush=True)
             print("        Es la MISMA exportación con dos fechas. NO se recierran entre sí: "
                   "entrarían como DOS lecturas con cifras idénticas, y la resta entre ellas "
                   "daría CERO movimiento en un tramo donde sí lo hubo. DECIDE CUÁL SE DESCARTA "
                   "antes de aplicar.", flush=True)
+            print("        🔑 CÓMO SE DESEMPATA, por orden: (1) el bueno es el que NO ha sido "
+                  "reescrito — `modificado` pegado a su `leido_at` y `ultimo_autor` vacío; el "
+                  "reescrito trae `modificado` posterior y, casi siempre, un autor. (2) Si eso "
+                  "no decide, GANA LA FECHA MÁS ANTIGUA: un fichero se reescribe DESPUÉS de "
+                  "existir, nunca antes, así que el contenido no puede venir de la fecha "
+                  "posterior.", flush=True)
 
     if leidos and not gemelas:
         print(f"\n    ✅ Ninguna pareja con los mismos datos y distinta fecha: los "
               f"{len(por_huella)} contenidos distintos son lecturas de verdad.", flush=True)
+
+    # 3) 🔴 ¿SON LECTURAS DEL MISMO CONTADOR? La premisa que sostiene el modelo entero.
+    #   El modelo v3 —`leido_at` como única fecha, y la resta entre lecturas como el
+    #   movimiento del periodo— se apoya en que este informe es un ACUMULADO que NUNCA baja.
+    #   Si baja una sola métrica de un solo ASIN entre dos lecturas, esa premisa no se
+    #   sostiene para esos ficheros, y hay que verlo ANTES de cargar, no después.
+    # 🔒 `inventario_disponible` NO entra: es un NIVEL (lo que hay), no un acumulado, y baja
+    #   legítimamente cada vez que se vende algo. Meterlo daría bajadas falsas todo el rato.
+    #   Tampoco entran ratios ni medias (conversión, buy box, estrellas, precio medio): no
+    #   acumulan nada. Quedan las NUEVE que sí cuentan hacia arriba.
+    # 🔒 Las lecturas se emparejan por SOLAPE DE ASIN, no por país: el inventario no sabe de
+    #   qué marketplace es cada fichero (eso lo decide la guarda 6.6, que necesita la base).
+    #   El solape se IMPRIME para que se vea si el emparejamiento tiene sentido.
+    ACUMULADAS = tuple(c for c in COLS_ADITIVAS if c != 'inventario_disponible')
+    series, hay_bajadas = [], 0
+    for r in sorted(leidos, key=lambda x: x['leido_at']):
+        for s in series:
+            ref = s[-1]
+            comun = len(set(r['porasin']) & set(ref['porasin']))
+            if comun >= 0.7 * min(len(r['porasin']), len(ref['porasin'])):
+                s.append(r)
+                break
+        else:
+            series.append([r])
+
+    for s in series:
+        for ant, pos in zip(s, s[1:]):
+            a, p = ant['porasin'], pos['porasin']
+            comunes, nuevos, faltan = set(a) & set(p), set(p) - set(a), set(a) - set(p)
+            solape = 100 * len(comunes) / max(1, min(len(a), len(p)))
+            print(f"\n    ── ¿MISMO CONTADOR?  {ant['nombre']} ({ant['leido_at']})"
+                  f"  →  {pos['nombre']} ({pos['leido_at']}) ──", flush=True)
+            print(f"        ASIN {len(a)} → {len(p)}  ·  comunes {len(comunes)} "
+                  f"(solape {solape:.0f}%)  ·  nuevos {len(nuevos)}  ·  "
+                  f"desaparecidos {len(faltan)}", flush=True)
+            if faltan:
+                print(f"        🔴 {len(faltan)} ASIN del anterior NO están en el posterior. "
+                      f"Un acumulado no PIERDE ASIN: o el panel filtró, o no es la misma "
+                      f"población. Ejemplos: {sorted(faltan)[:5]}", flush=True)
+            if nuevos:
+                print(f"        · {len(nuevos)} ASIN nuevos (esto sí es normal: un ASIN se "
+                      f"estrena y aparece).", flush=True)
+            bajadas = [(asin, m, a[asin][m], p[asin][m])
+                       for asin in sorted(comunes) for m in ACUMULADAS
+                       if a[asin].get(m) is not None and p[asin].get(m) is not None
+                       and p[asin][m] < a[asin][m]]
+            total_comp = len(comunes) * len(ACUMULADAS)
+            if bajadas:
+                hay_bajadas += len(bajadas)
+                print(f"        🔴 EL CONTADOR RETROCEDE: {len(bajadas)} bajadas sobre "
+                      f"{total_comp} comparaciones ASIN×métrica ({len(comunes)} ASIN × "
+                      f"{len(ACUMULADAS)} acumuladas).", flush=True)
+                for asin, m, va, vp in bajadas[:8]:
+                    print(f"            · {asin} · {m}: {va} → {vp}", flush=True)
+                if len(bajadas) > 8:
+                    print(f"            · … y {len(bajadas) - 8} más", flush=True)
+            else:
+                print(f"        ✅ CERO bajadas en {total_comp} comparaciones ASIN×métrica: "
+                      f"consistente con un acumulado.", flush=True)
+
+    if hay_bajadas:
+        print(f"\n    🔴🔴 PARA ANTES DE CARGAR. {hay_bajadas} bajadas en total. El modelo v3 "
+              f"se validó justamente sobre que este contador NUNCA retrocede (medido el "
+              f"7-ago-2026: 1.605 comparaciones, cero bajadas). Si retrocede, o no es "
+              f"acumulado desde fecha fija, o no es la misma métrica — y entonces `leido_at` "
+              f"como única fecha y la resta entre lecturas dejan de sostenerse para estos "
+              f"ficheros. NO es un aviso de trámite.", flush=True)
+
+    # 4) LAS CABECERAS: una columna distinta delata otro panel.
+    por_cab = defaultdict(list)
+    for r in leidos:
+        por_cab[tuple(r['cabecera'])].append(r['nombre'])
+    if len(por_cab) > 1:
+        mayoritaria = max(por_cab, key=lambda k: len(por_cab[k]))
+        print(f"\n    🔴 NO todos los .xlsx traen la misma cabecera ({len(por_cab)} distintas). "
+              f"Una columna distinta delata otro panel o un rango declarado:", flush=True)
+        for cab, noms in sorted(por_cab.items(), key=lambda kv: -len(kv[1])):
+            marca = ' (mayoritaria)' if cab == mayoritaria else ''
+            print(f"        · {len(cab)} col{marca}: {', '.join(sorted(noms))}", flush=True)
+            if cab != mayoritaria:
+                sobran = [c for c in cab if c not in mayoritaria]
+                faltan_c = [c for c in mayoritaria if c not in cab]
+                if sobran:
+                    print(f"            trae de más: {sobran}", flush=True)
+                if faltan_c:
+                    print(f"            le faltan:   {faltan_c}", flush=True)
+    elif leidos:
+        print(f"\n    ✅ Los {len(leidos)} ficheros traen la MISMA cabecera "
+              f"({len(next(iter(por_cab)))} columnas).", flush=True)
     return leidos
 
 
@@ -729,6 +854,21 @@ def main():
     else:
         fichero = xlsxs[0]['name']
         print(f"Fichero elegido (el más reciente de {len(xlsxs)}): {fichero}", flush=True)
+
+    # 🔴 El nombre no decide qué es una lectura; los datos y el leido_at sí. Si el fichero
+    #    que se va a cargar TIENE PINTA de desechable, se dice bien alto — porque se está
+    #    cargando como bueno y alguien podría borrarlo del buzón creyendo que es basura.
+    nombre_enganoso = bool(RE_NOMBRE_DESECHABLE.search(fichero))
+    if nombre_enganoso:
+        print(f"\n🔴 EL NOMBRE DE ESTE FICHERO MIENTE, Y SE CARGA IGUAL.\n"
+              f"   '{fichero}' parece un fichero de usar y tirar, pero se está cargando como "
+              f"una LECTURA BUENA: lo que decide qué es una lectura son sus DATOS y su "
+              f"leido_at, no cómo se llame.\n"
+              f"   Caso real (10-ago-2026): PRUEBA_ES/IT/FR.xlsx eran las lecturas VERDADERAS "
+              f"del 30-jul 18:06, y los CA_*_01ago.xlsx —con nombre de formales— eran esos "
+              f"mismos ficheros reescritos, que es lo que les cambió el created.\n"
+              f"   🔴 NO BORRES ESTE FICHERO DEL BUZÓN pensando que es basura de test.",
+              flush=True)
 
     crudo_bytes = descargar_buzon(sb, BUCKET, f"{CARPETA}/{fichero}")
 
@@ -884,6 +1024,13 @@ def main():
         'asin': len(datos), 'huerfanos': len(huerfanos),
         'totales': info['totales_fichero'],
         'lectura_anterior': ref_cual.isoformat() if ref_cual else None,
+        # 🔴 Que el sello lo diga TAMBIÉN, y no solo el log: el log de un run caduca, la
+        #    fila de informes_subidos se queda. Si el fichero se llama PRUEBA_* y es una
+        #    lectura buena, esto es lo que lo dirá dentro de tres meses.
+        'nombre_enganoso': nombre_enganoso,
+        'aviso_fichero': (f"El fichero '{fichero}' TIENE NOMBRE DE DESECHABLE pero es una "
+                          f"LECTURA BUENA: NO borrar del buzón. Lo que decide es leido_at + "
+                          f"datos, no el nombre.") if nombre_enganoso else None,
         'guarda_pais': detalle, 'columnas_ausentes': info['columnas_ausentes'],
         'columnas_desconocidas': [str(c) for c in info['columnas_desconocidas']],
         'avisos': info['avisos'],
