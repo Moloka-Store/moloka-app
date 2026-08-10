@@ -119,6 +119,24 @@ el histórico y no hay de dónde recuperarlo.
   cualquiera pasaba de 35.400 visitas a 428.* La red que lo caza es la **guarda 6.14** del
   procesador, que ABORTA si el contador retrocede; pero la red no sustituye a la regla, que
   es de quien exporta.
+- 🔴 **EL CONTADOR SE REINICIA EL 1-ENE-2027, Y ESE DÍA FALLA SEGURO.** Es la consecuencia
+  directa de la regla de arriba: «Desde el inicio de año» tiene el **inicio fijo en el 1 de
+  enero**, así que el 1-ene-2027 el acumulado vuelve a cero. Entonces:
+  - la primera lectura de 2027 traerá cifras **muchísimo menores** que la última de 2026;
+  - la **guarda 6.14 lo leerá como un retroceso y ABORTARÁ la carga** — hará bien, es justo
+    lo que se le pidió, pero el informe se queda fuera;
+  - y si alguien la fuerza, la resta entre la última de 2026 y la primera de 2027 da **basura**.
+  🔑 **Hoy la tabla no guarda DESDE CUÁNDO acumula cada lectura**: solo `leido_at`, que es
+  *cuándo se exportó*. (Medido el 10-ago-2026: la única columna de fecha de `demanda_asin` es
+  `leido_at`.) El año se puede **derivar** de ahí mientras se cumpla la regla del periodo,
+  pero **derivarlo no es guardarlo**, y ahora mismo nada obliga a que la comparación se quede
+  dentro del mismo año de acumulación.
+  **LO QUE HAY QUE HACER, y va con el PR del modelo** —el de la columna de huella y el
+  `rn = 1`, porque toca lo mismo—: **la guarda de no retroceso y la comparación entre lecturas
+  deben quedarse dentro del mismo AÑO DE ACUMULACIÓN, y ese año merece estar en la tabla.**
+  ⚠️ Lo que lo hace urgente sin serlo hoy: **no falla hasta el 1 de enero, y entonces falla
+  seguro.** No es un riesgo que pueda o no darse: es una cita con fecha. Lo vio Fernando el
+  10-ago-2026.
 - ⚠️ **Y el panel de Custom Analytics va DÍAS POR DETRÁS.** El 10-ago-2026 avisaba *"datos
   disponibles hasta el 1/8/2026"*: **nueve días**. Consecuencias que no se pueden olvidar:
   dos exportaciones de días distintos pueden traer **cifras idénticas** (el corte no se
