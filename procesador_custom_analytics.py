@@ -249,6 +249,46 @@ def _fecha_utc(v):
         v = v.replace(tzinfo=timezone.utc)
     return v
 
+def huella_serie(filas):
+    """Huella de UNA LECTURA, pensada para comparar FICHERO contra BASE.
+    md5 de `asin:visitas:unidades_pedidas`, unido por '|' y ORDENADO por asin.
+    `filas` = iterable de (asin, visitas, unidades_pedidas).
+
+    🔴 REGLA, NO DESCRIPCIÓN: ESTA HUELLA SOLO USA COLUMNAS ENTERAS.
+    No se le añaden euros (`ventas_enviadas_eur`, `facturacion_pedida_eur`,
+    `reembolsado_eur`) ni ratios, por muy tentador que sea "para que sea más específica".
+    El motivo: esta huella cruza los dos mundos, y un `numeric` vuelve de la base como
+    **Decimal** mientras el .xlsx da **float**. Su texto no coincide, y entonces la huella
+    de la base y la del fichero NO cuadran NUNCA — la guarda dejaría de saltar, o saltaría
+    siempre, y en los dos casos sin dar error. Es la misma trampa que costó el bug de la
+    guarda 6.14 (§2 de CLAUDE.md: `43.98 < Decimal('43.98')` es True).
+    ⚠️ Y conviene decir la verdad de cómo salieron estas tres: se eligieron el 10-ago-2026
+    por ser las que identificaban una lectura con lo que había a mano, NO pensando en el
+    ida y vuelta a la base. Que sean enteras fue SUERTE. Por eso queda escrito como
+    restricción: la próxima vez no puede depender de que alguien acierte sin saberlo.
+    Los tres enteros van y vuelven exactos. La huella ancha de 16 métricas
+    (`huella_datos`) se queda para comparar fichero contra fichero, donde no hay base de
+    por medio y los floats se comparan entre floats.
+
+    🔒 ES REPRODUCIBLE EN SQL, que es como se ancló:
+        md5(string_agg(asin||':'||visitas||':'||unidades_pedidas, '|' order by asin))
+    Contrastada el 10-ago-2026 contra las CUATRO lecturas de producción:
+        ES 30-jul 1873d6d6f35624654f4bcb6b06a52d64 · ES 7-ago 77255419bf48109c5b4dc876e020d9c0
+        FR 30-jul 36fc9021dbfd09b27033ebd8cf981f4e · IT 30-jul 545beb2d25fa595e157982c565acb07a
+    Las cuatro salen iguales por los dos caminos. Si alguien toca esta función, se
+    contrasta otra vez contra esos cuatro números.
+
+    🔒 Una fila con `visitas` o `unidades_pedidas` a NULL NO entra, igual que en SQL: allí
+    la concatenación con NULL da NULL y `string_agg` lo descarta. Si aquí entrara, las dos
+    huellas dejarían de ser la misma huella."""
+    trozos = []
+    for asin, visitas, uds in sorted(filas, key=lambda f: f[0]):
+        if visitas is None or uds is None:
+            continue
+        trozos.append(f"{asin}:{visitas}:{uds}")
+    return hashlib.md5('|'.join(trozos).encode('utf-8')).hexdigest()
+
+
 def _created_de_wb(wb):
     """LA FECHA DEL DATO, leída tal como la lee el cargador. UNA sola función para los dos
     sitios que la necesitan —el cargador y el inventario del ensayo— porque si el
@@ -1200,6 +1240,58 @@ def main():
               f"esta trae {len(datos)}: menos del 50%. Un informe a medias no da información "
               f"incompleta, da información FALSA. No se borra ni se escribe nada.", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
+
+    # --- Guarda 6.15: EL PANEL NO HA REFRESCADO --------------------------------
+    # 🔴 EL CASO QUE LA 6.14 NO VE, PORQUE NO BAJA: ES IGUAL.
+    #   El panel de Custom Analytics publica con días de retraso — el 10-ago-2026 avisaba
+    #   "datos disponibles hasta el 1/8/2026", NUEVE días — y hasta que su corte no avanza,
+    #   dos exportaciones de días distintos devuelven EXACTAMENTE el mismo contador. No es
+    #   un fichero duplicado: son dos descargas legítimas de un dato que no se ha movido.
+    #   Medido el 10-ago-2026 contra Drive: las del 30-jul 18:06 y las del 1-ago 08:06
+    #   salieron de dos sesiones distintas, en carpetas distintas, con cifras idénticas.
+    # 🔴 SI ENTRARA, la serie tendría un tramo PLANO que no ocurrió: la resta entre las dos
+    #   diría "cero visitas en dos días". Cierto del panel de Amazon y FALSO del mercado.
+    #   Y la guarda 6.14 no lo caza por construcción: no baja nada, está todo igual.
+    # 🔒 ABORTA, y aquí abortar no pierde nada: el fichero se queda en el buzón y se carga
+    #   cuando el aviso del panel avance. No hay dato que rescatar — el dato ya está
+    #   cargado, con su fecha buena, en la lectura anterior.
+    #
+    # 🔴 POR QUÉ CONTRA LA ÚLTIMA LECTURA Y NO CONTRA TODAS, que parece un hueco y no lo es.
+    #   Son DOS casos distintos con DOS mecanismos distintos, y ninguno sobra:
+    #     · MISMO FICHERO cargado dos veces → mismo `created` → mismo `leido_at` → la clave
+    #       única (pais, leido_at, asin) lo convierte en una recarga IDEMPOTENTE. Ni
+    #       siquiera llega aquí: no hay nada que comparar, se recierra y ya.
+    #     · FICHERO NUEVO con datos idénticos (el panel no refrescó) → `leido_at` distinto,
+    #       la clave única no lo ve, y ES ESTA GUARDA la que lo para. Y siempre es contra la
+    #       ÚLTIMA: un panel que no avanza repite lo último, no algo de hace un mes.
+    #   🔒 Si alguien "simplifica" quitando uno de los dos, se abre justo el agujero que el
+    #   otro no cubre. Comparar contra TODAS las lecturas no añade nada y costaría una
+    #   pasada por toda la serie en cada carga.
+    # 📌 Esta es la versión de HOY. La fina —que la lectura entre MARCADA y quede fuera del
+    #   `rn = 1` de v_demanda_asin_ultima, para no tirar una descarga real— pide columna
+    #   nueva y tocar los cuatro pisos de la cadena: va en su PR y con su escalera.
+    if ref_cual is not None:
+        cur.execute("SELECT asin, visitas, unidades_pedidas FROM demanda_asin "
+                    " WHERE pais=%s AND leido_at=%s;", (PAIS, ref_cual))
+        h_previa = huella_serie(cur.fetchall())
+        h_nueva = huella_serie([(r['asin'], r.get('visitas'), r.get('unidades_pedidas'))
+                                for r in datos])
+        if h_previa == h_nueva:
+            print(f"\n❌ ABORTA (no se ha escrito nada):\n"
+                  f"[Guarda 6.15 · EL PANEL NO HA REFRESCADO] Esta exportación trae los "
+                  f"MISMOS datos que la lectura del {ref_cual}: Amazon no ha refrescado el "
+                  f"panel.\n"
+                  f"   · huella de serie de las dos: {h_nueva}\n"
+                  f"   · asin+visitas+unidades_pedidas, idénticos ASIN por ASIN.\n"
+                  f"   NO se carga. Si entrara, la serie tendría un tramo plano entre "
+                  f"{ref_cual} y {leido_at} que no ocurrió: la resta diría 'cero movimiento' "
+                  f"donde solo pasa que Amazon aún no lo ha contado.\n"
+                  f"   🔑 QUÉ HACER: nada, y no se pierde nada. El fichero se queda en el "
+                  f"buzón. Mira en el panel del Seller hasta qué fecha dice que hay datos y "
+                  f"vuelve a intentarlo cuando ese aviso avance.", flush=True)
+            con.rollback(); cur.close(); con.close(); sys.exit(1)
+        print(f"\n✅ [Guarda 6.15] El panel SÍ ha refrescado desde la lectura anterior "
+              f"({ref_cual}): huella de serie {h_previa[:12]}… → {h_nueva[:12]}…", flush=True)
 
     # --- Guarda 6.14: EL CONTADOR NO RETROCEDE ---------------------------------
     # 🔴 ESTA ES LA GUARDA QUE SOSTIENE EL MODELO ENTERO, y nació de un fichero real.
