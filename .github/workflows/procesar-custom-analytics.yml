@@ -80,7 +80,17 @@ on:
         # pedir el nombre EXACTO es lo NORMAL. Vacío = el más reciente. Si el nombre
         # no está en el buzón, ABORTA (no cae al más reciente). El catálogo v2 pasa
         # el nombre exacto (inputFichero: 'fichero').
-        description: 'Nombre EXACTO del .xlsx del buzón. UNA ejecución por fichero. Si hay varias lecturas del mismo país, cárgalas de MÁS ANTIGUA a MÁS NUEVA (la guarda 6.14 rechaza una vieja detrás de una nueva). Vacío = el más reciente.'
+        # 🔴 Esta frase prometía hasta el 10-ago-2026 que "la guarda 6.14 rechaza una vieja
+        #   detrás de una nueva". ERA FALSO, y es la clase de mentira que más daño hace:
+        #   la promesa está en la pantalla desde la que se lanza, así que quien la lee se
+        #   confía. La 6.14 solo compara HACIA ADELANTE (`leido_at > ref_cual`); una lectura
+        #   anterior a la última la ve la guarda 6.8, que GRITA y sigue. Medido: el fichero
+        #   `CA_ES_02ago_DISCONTINUO.xlsx` —un retroceso global de verdad, 246 ASIN contra
+        #   321— pasó el ensayo entero sin que nada lo parase (run 31416925455).
+        #   El agujero "VIEJA DETRÁS DE NUEVA" sigue ABIERTO y no lo cierra este PR. Aquí
+        #   solo se quita la promesa falsa: el orden de carga es responsabilidad de quien
+        #   lanza, y hoy nadie lo comprueba por él.
+        description: 'Nombre EXACTO del .xlsx del buzón. UNA ejecución por fichero. 🔴 Si hay varias lecturas del mismo país, cárgalas TÚ de MÁS ANTIGUA a MÁS NUEVA: NADIE lo comprueba. La guarda 6.14 solo mira hacia adelante, y una lectura anterior a la última solo la AVISA la 6.8, que no aborta. Vacío = el más reciente.'
         type: string
         required: false
         default: ''

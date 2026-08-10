@@ -117,8 +117,17 @@ el histórico y no hay de dónde recuperarlo.
   *Medido el 10-ago-2026: un export con rango corto (`metric-data (14)`) traía 246 ASIN
   contra los 321 de la lectura anterior y 1.583 bajadas sobre 2.214 comparaciones — un ASIN
   cualquiera pasaba de 35.400 visitas a 428.* La red que lo caza es la **guarda 6.14** del
-  procesador, que ABORTA si el contador retrocede; pero la red no sustituye a la regla, que
-  es de quien exporta.
+  procesador, que ABORTA si el contador retrocede **en bloque**; pero la red no sustituye a
+  la regla, que es de quien exporta.
+- ⚠️ **PENDIENTE — el agujero «VIEJA DETRÁS DE NUEVA».** La guarda 6.14 solo compara **hacia
+  adelante** (`leido_at > ref_cual`). Una lectura ANTERIOR a la última cargada solo la ve la
+  guarda 6.8, que **grita y sigue**. *Medido el 10-ago-2026 (run 31416925455):
+  `CA_ES_02ago_DISCONTINUO.xlsx` —un retroceso global de verdad, 246 ASIN contra 321 y 1.583
+  bajadas— pasó el ensayo ENTERO sin que nada lo parase.* Si entrara, quedaría intercalada
+  entre el 1-ago y el 7-ago, y el `lag()` de `v_demanda_asin_ultima` calcularía **7-ago menos
+  2-ago**: un delta falso enorme. Hasta que se cierre, **el orden de carga es responsabilidad
+  de quien lanza y nadie lo comprueba por él** (la descripción del input del workflow
+  prometía lo contrario y se corrigió el 10-ago-2026).
 - 🔴 **EL CONTADOR SE REINICIA EL 1-ENE-2027, Y ESE DÍA FALLA SEGURO.** Es la consecuencia
   directa de la regla de arriba: «Desde el inicio de año» tiene el **inicio fijo en el 1 de
   enero**, así que el 1-ene-2027 el acumulado vuelve a cero. Entonces:

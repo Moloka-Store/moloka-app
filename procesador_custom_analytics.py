@@ -1370,8 +1370,21 @@ def main():
             totales_abajo = [c for c in COLS_ACUMULADAS
                              if tot_ahora[c] < tot_antes[c] - 0.005]
             pct_faltan = (len(faltan_asin) / len(previo) * 100.0) if previo else 0.0
-            # El 5% viene del encargo v3 §4.1: por debajo de ahí no es un cambio de rango.
-            es_global = bool(totales_abajo) or pct_faltan > 5.0
+            # 🔴 EL CRITERIO ES SOLO LOS TOTALES, y la decisión de quitar la otra mitad
+            #   queda dicha aquí porque el encargo pedía dejarla dicha.
+            #   La primera versión también abortaba si desaparecía más del 5% de los ASIN
+            #   (umbral heredado del encargo v3 §4.1, de cuando NO existía la prueba de
+            #   totales). Se ha quitado, por dos motivos:
+            #   1) Es redundante. Un export de otro rango baja los totales sobre los ASIN
+            #      comunes SIEMPRE — es lo que significa cubrir menos tiempo. El caso real
+            #      medido (246 ASIN contra 321) baja las nueve métricas: lo caza el total.
+            #   2) Es un generador de falsos rojos, que es justo el patrón que llevamos dos
+            #      días persiguiendo. Un país con 112 ASIN donde Amazon retira 8 listings
+            #      (7,1%) y todo lo demás crece abortaría la carga sin que pase nada malo.
+            #   Los ASIN que desaparecen se siguen GRITANDO abajo, y son inofensivos para
+            #   la serie: `v_demanda_asin_ultima` va por (pais, asin) con rn=1, así que su
+            #   última lectura conocida se queda donde está y no se inventa ningún delta.
+            es_global = bool(totales_abajo)
 
             print(f"\n[Guarda 6.14] La lectura de {PAIS} ({leido_at}) trae retrocesos "
                   f"contra la anterior ({ref_cual}). Mirando qué clase de retroceso es:",
@@ -1381,12 +1394,14 @@ def main():
                       f"ésta ({pct_faltan:.1f}% de {len(previo)}). "
                       f"Ejemplos: {faltan_asin[:5]}", flush=True)
             if bajadas:
+                # 🔒 LA LISTA VA ENTERA, no truncada a 8. Antes decía "… y N más" y eso es
+                #   media prueba: si la carga se acepta con bajadas, el log es el ÚNICO
+                #   sitio donde queda constancia de CUÁLES eran. Un aviso incompleto sobre
+                #   un dato que entra en la base no sirve para auditarlo después.
                 print(f"   · {len(bajadas)} bajadas sobre {comparadas} comparaciones "
-                      f"ASIN×métrica acumulada:", flush=True)
-                for asin, col, va, vn in bajadas[:8]:
+                      f"ASIN×métrica acumulada (lista COMPLETA):", flush=True)
+                for asin, col, va, vn in bajadas:
                     print(f"        · {asin} · {col}: {va} → {vn}", flush=True)
-                if len(bajadas) > 8:
-                    print(f"        · … y {len(bajadas) - 8} más", flush=True)
             # LA MEDICIÓN que decide, impresa siempre: que se vea en qué se basa el fallo.
             print(f"   · TOTALES acumulados sobre los {len(comunes)} ASIN comunes "
                   f"(esto es lo que distingue un caso del otro):", flush=True)
