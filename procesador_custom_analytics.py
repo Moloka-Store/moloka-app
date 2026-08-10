@@ -10,26 +10,36 @@
 #   trae— LA BUY BOX (ratio de oferta destacada). Hasta hoy el sistema sabía qué
 #   stock hay y qué se vendió; NO sabía cuánta gente llegó ni quién se llevó la caja.
 #
-# 🔴 EL CAJÓN: FOTO POR VENTANA (ni FOTO ni PELÍCULA) — §5 del encargo
-#   Este informe no dice "cómo está esto AHORA", dice "del día X al día Y pasó esto".
-#   Se carga por IGUALDAD de (pais, periodo_desde, periodo_hasta), NUNCA por BETWEEN:
-#     1) el país y el periodo los da el SELECTOR (el fichero no los trae),
+# 🔴 EL CAJÓN: PELÍCULA DE LECTURAS (cambió el 10-ago-2026) — §1.6 de CLAUDE.md
+#   🔴 ESTO ERA "FOTO POR VENTANA" Y DEJÓ DE SERLO. La migración
+#   `2026-08-07_demanda_asin_contador.sql` demostró que el informe NO cubre una ventana:
+#   es un CONTADOR ACUMULADO desde un punto de partida fijo y desconocido. Medido el
+#   7-ago-2026: 1.605 comparaciones ASIN×métrica entre las lecturas del 30-jul y del
+#   7-ago, CERO bajadas. Un acumulado que nunca baja no es "lo que pasó del día X al Y":
+#   la ventana era una etiqueta inventada por quien subía el fichero.
+#
+#   Así que cada carga apila UNA LECTURA del contador, fechada con `leido_at`:
+#     1) el país lo da el SELECTOR; la FECHA la da el FICHERO (no se declara),
 #     2) en UNA transacción:
 #          DELETE FROM demanda_asin
-#           WHERE pais=<sel> AND periodo_desde=<sel> AND periodo_hasta=<sel>;  -- IGUALDAD
+#           WHERE pais=<sel> AND leido_at=<del fichero>;      -- IGUALDAD
 #          INSERT de todas las filas;
 #     3) commit si aplicar, rollback si ensayo.
-#   Con igualdad: recargar la MISMA ventana la recierra (idempotente) y ventanas
-#   distintas del mismo país CONVIVEN → la tabla ES el histórico, sin `_hist`. Con
-#   BETWEEN (como el ledger) cargar 1-ene→30-jul borraría la ventana 1-jul→27-jul,
-#   que es OTRA medición y también es verdad.
+#   El DELETE por IGUALDAD no es "borrar el histórico": recierra LA MISMA lectura si se
+#   recarga (idempotente) y deja intactas las demás lecturas y países. Es lo que dice el
+#   COMMENT de la tabla. Con BETWEEN se cargaría el mundo por delante.
 #
-# 🔴 EL PAÍS Y EL PERIODO LOS MANDA EL SELECTOR (§3.5, §6.6)
+#   🔴 Y LAS CIFRAS DE UN PERIODO NO SE LEEN DE UNA FILA: salen de RESTAR dos lecturas.
+#   Eso vive en `v_demanda_asin_ultima`, no aquí. El cargador no interpreta.
+#
+# 🔴 EL PAÍS LO MANDA EL SELECTOR; LA FECHA, EL FICHERO (§3.5, §6.6)
 #   El fichero no dice de qué marketplace es (cabeceras en español los tres, URLs a
-#   amazon.com los tres) ni de qué periodo (ni dentro, ni en el nombre, ni deducible).
-#   El país entra por el input PAIS y se VERIFICA cruzando las unidades por ASIN con
-#   transacciones_movimientos (guarda 6.6): si el declarado no es el de menor error,
-#   ABORTA. El periodo entra por PERIODO_DESDE/PERIODO_HASTA y sin él se ABORTA.
+#   amazon.com los tres). El país entra por el input PAIS y se VERIFICA cruzando las
+#   unidades por ASIN con transacciones_movimientos (guarda 6.6): si el declarado no es
+#   el de menor error, ABORTA.
+#   La fecha del dato NO se declara: es `wb.properties.created` (cuándo lo generó
+#   Amazon) → `leido_at`. Sin ella se ABORTA (guarda 6.5): es el eje del dato y no se
+#   puede inventar.
 #
 # 🔒 EL CARGADOR NO INTERPRETA (§3.2)
 #   Los tres RATIOS (conversión, ratio de oferta destacada = buy box, ratio de
@@ -48,7 +58,10 @@
 # 🔒 SELLO DE FRESCURA: al aplicar escribe una fila en informes_subidos
 #   (tipo='custom_analytics') con los 10 totales del cuadre en resumen_json — donde
 #   vive lo que no es una fila. Ojo: la RPC frescura_informes() lee la fecha del dato
-#   de demanda_asin.periodo_hasta, NO de aquí (el sello es registro/auditoría).
+#   de `max(demanda_asin.leido_at)::date`, NO de aquí (el sello es registro/auditoría).
+#   `fecha_dato_desde` y `fecha_dato_hasta` de informes_subidos van las DOS a la fecha
+#   de la lectura: una lectura es un INSTANTE, no un rango, y poner un rango inventado
+#   ahí sería volver a contar el cuento de la ventana por la puerta de atrás.
 # ============================================================================
 
 import os, sys, io, re, unicodedata
@@ -75,15 +88,33 @@ MODO          = os.environ.get('MODO', 'ensayo').strip().lower()       # ensayo 
 ENTORNO       = os.environ.get('ENTORNO', 'staging').strip().lower()   # staging | produccion
 PAIS          = os.environ.get('PAIS', '').strip().upper()             # ES | IT | FR (selector)
 FICHERO       = os.environ.get('FICHERO', '').strip()                  # nombre EXACTO; vacío = más reciente
-PERIODO_DESDE = os.environ.get('PERIODO_DESDE', '').strip()            # YYYY-MM-DD (selector)
-PERIODO_HASTA = os.environ.get('PERIODO_HASTA', '').strip()            # YYYY-MM-DD (selector)
+# ⚠️ OBSOLETOS desde el modelo contador (10-ago-2026): SE ACEPTAN Y SE IGNORAN.
+#   No se borran todavía a propósito. La pantalla de Buzones de la v2 sigue mandando los
+#   dos inputs, y el `workflow_dispatch` de GitHub rechaza el disparo entero si le llega
+#   un input que el .yml no declara. Quitarlos aquí y en el .yml ANTES de que la v2 deje
+#   de mandarlos le rompería el botón a Elena. Se amplía antes de contraer:
+#     1) este PR: el .yml los acepta como opcionales y el procesador los IGNORA (y lo dice),
+#     2) moloka-app-v2: la ficha del catálogo deja de mandarlos,
+#     3) y entonces se borran de los dos sitios.
+#   Se leen SOLO para poder avisar de que llegaron y no se usaron: un dato que entra y se
+#   tira sin decirlo es exactamente lo que no se hace en esta casa.
+PERIODO_DESDE = os.environ.get('PERIODO_DESDE', '').strip()            # OBSOLETO — ignorado
+PERIODO_HASTA = os.environ.get('PERIODO_HASTA', '').strip()            # OBSOLETO — ignorado
 
 BUCKET, CARPETA = 'informes', 'custom_analytics'
 # 🔒 Escalabilidad (§8): la lista de países vive en UN solo sitio por lado. Añadir DE
 # o PL es tocar esto + el choice del .yml + las opciones de la ficha v2. Nada más.
 PAISES_VALIDOS = ('ES', 'IT', 'FR')
 
-VENTANA_MAX_DIAS = 400   # guarda 6.5: una ventana mayor huele a error de tecleo
+# Guarda 6.6: días mínimos de transacciones con los que fiarse del cruce de país.
+# ⚠️ NÚMERO NUEVO, Y HAY QUE DECIRLO. El modelo de ventana pedía que la intersección
+#   cubriera el 40% de la ventana DECLARADA; sin ventana declarada ese porcentaje no
+#   tiene contra qué medirse. Se sustituye por un suelo ABSOLUTO en días. 30 se elige
+#   por ser un mes natural completo — suficiente para una mediana de cuotas sobre los 12
+#   ASIN más vendidos — y NO está medido contra el caso real, porque la primera carga del
+#   modelo contador todavía no ha ocurrido. Es la duda de diseño de este PR: se anota
+#   aquí y se decide en frío cuando haya dos lecturas reales que mirar.
+DIAS_MIN_CRUCE_PAIS = 30
 
 # ---------------------------------------------------------------------------
 # Las 18 columnas medidas (§3.1). canon → cabecera NORMALIZada (sin acentos, minúsculas,
@@ -120,13 +151,17 @@ COLS_ADITIVAS = ('visitas', 'unidades_enviadas', 'ventas_enviadas_eur', 'inventa
                  'buybox_visiones', 'reembolsado_eur', 'unidades_reembolsadas', 'sesiones',
                  'unidades_pedidas', 'facturacion_pedida_eur')
 
-# Columnas de la tabla en el orden del INSERT (id/dias/procesado_at aparte).
-COLS_DB = ['pais', 'periodo_desde', 'periodo_hasta', 'asin', 'nombre_producto',
+# Columnas de la tabla en el orden del INSERT (id/procesado_at aparte).
+# 🔒 Son 22, y con `id` y `procesado_at` dan las 24 que tiene la tabla tras la migración
+#   del 10-ago-2026. Fuera `periodo_desde`/`periodo_hasta` (la ventana inventada) y fuera
+#   `dias` (era GENERATED sobre las dos). `exportado_at` no se ha ido: se llama `leido_at`,
+#   que es lo que siempre fue — el instante en que Amazon generó la lectura.
+COLS_DB = ['pais', 'asin', 'nombre_producto',
            'resenas', 'estrellas', 'visitas', 'sesiones', 'conversion',
            'unidades_pedidas', 'unidades_enviadas', 'precio_venta_medio',
            'ventas_enviadas_eur', 'facturacion_pedida_eur', 'buybox_ratio',
            'buybox_visiones', 'reembolsado_eur', 'unidades_reembolsadas',
-           'reembolsos_ratio', 'inventario_disponible', 'fichero', 'exportado_at', 'crudo']
+           'reembolsos_ratio', 'inventario_disponible', 'fichero', 'leido_at', 'crudo']
 
 RE_ASIN = re.compile(r'/dp/([A-Z0-9]{10})')
 
@@ -175,13 +210,6 @@ def _ent(v):
     f, fallo = _num(v)
     return (int(round(f)) if f is not None else None), fallo
 
-def _fecha_iso(s, etiqueta):
-    try:
-        return date.fromisoformat(s)
-    except (ValueError, TypeError):
-        raise Aborta(f"[Guarda 6.5] {etiqueta} {s!r} no es una fecha YYYY-MM-DD válida. "
-                     f"El periodo lo declara el selector y sin él bien escrito no se carga.")
-
 def _bt(s):
     return _clean(s)
 
@@ -190,7 +218,7 @@ def _bt(s):
 # 1) PARSEO — recibe BYTES, devuelve filas + totales. NO toca Storage ni la base.
 #    Así se ejecuta contra los 3 ficheros locales las veces que haga falta (§2.1).
 # ---------------------------------------------------------------------------
-def analizar(bytes_xlsx, pais, periodo_desde, periodo_hasta, fichero):
+def analizar(bytes_xlsx, pais, fichero):
     if pais not in PAISES_VALIDOS:
         raise Aborta(f"[PAIS] {pais!r} no es ES/IT/FR. El país lo manda el selector y no se "
                      f"asume: sin país determinado, se ABORTA (§3.5).")
@@ -201,11 +229,27 @@ def analizar(bytes_xlsx, pais, periodo_desde, periodo_hasta, fichero):
     wb = openpyxl.load_workbook(io.BytesIO(bytes_xlsx), read_only=True)
     ws = wb['metric-data'] if 'metric-data' in wb.sheetnames else wb.active
     creator = _clean(getattr(wb.properties, 'creator', '') or '')
-    exportado_at = getattr(wb.properties, 'created', None)
-    if isinstance(exportado_at, datetime) and exportado_at.tzinfo is None:
-        exportado_at = exportado_at.replace(tzinfo=timezone.utc)   # Amazon exporta en UTC
+    leido_at = getattr(wb.properties, 'created', None)
+    if isinstance(leido_at, datetime) and leido_at.tzinfo is None:
+        leido_at = leido_at.replace(tzinfo=timezone.utc)   # Amazon exporta en UTC
     filas = list(ws.iter_rows(values_only=True))
     wb.close()
+
+    # 🔴 Guarda 6.5 · LA LECTURA — ocupa el hueco que dejó la guarda del PERIODO.
+    #   Antes, sin periodo se abortaba porque el periodo era el eje del dato. Ahora el eje
+    #   es CUÁNDO se leyó el contador, y esa fecha no la declara nadie: la trae el fichero
+    #   en `wb.properties.created`. Si no viene, no hay lectura que apilar.
+    # 🔒 Y no es una guarda decorativa: `leido_at` es NOT NULL en la tabla desde la
+    #   migración del 10-ago-2026. Sin este aborto, un .xlsx sin `created` reventaría
+    #   dentro del INSERT por lotes, a mitad de transacción y con un error de Postgres que
+    #   no dice de qué fichero se trata. Mejor parar aquí y decir qué pasa.
+    if not isinstance(leido_at, datetime):
+        raise Aborta(
+            f"[Guarda 6.5 · LECTURA] El .xlsx no trae fecha de creación "
+            f"(wb.properties.created = {leido_at!r}), y esa fecha ES el dato: identifica la "
+            f"lectura del contador y es la llave junto con el país y el ASIN. NO se inventa "
+            f"ni se sustituye por 'ahora' (dos lecturas distintas quedarían fechadas igual). "
+            f"Vuelve a descargar el export del Seller y súbelo otra vez.")
 
     avisos = []
 
@@ -275,8 +319,7 @@ def analizar(bytes_xlsx, pais, periodo_desde, periodo_hasta, fichero):
                 f"=HYPERLINK(\"…/dp/B0…\") o la fila 'Total'.)")
         asin = m.group(1)
 
-        registro = {'pais': pais, 'periodo_desde': periodo_desde, 'periodo_hasta': periodo_hasta,
-                    'asin': asin, 'fichero': fichero, 'exportado_at': exportado_at}
+        registro = {'pais': pais, 'asin': asin, 'fichero': fichero, 'leido_at': leido_at}
         crudo = {}
         for i, h in enumerate(cabecera):     # crudo = fila ENTERA (despensa, §5): todo, tal cual
             crudo[str(h)] = fila[i] if i < len(fila) else None
@@ -356,7 +399,7 @@ def analizar(bytes_xlsx, pais, periodo_desde, periodo_hasta, fichero):
         'n_asin': len(datos),
         'totales_fichero': totales_fichero,
         'creator': creator,
-        'exportado_at': exportado_at,
+        'leido_at': leido_at,
         'avisos': avisos,
         'columnas_ausentes': sorted(ausentes),
         'columnas_desconocidas': desconocidas,
@@ -369,22 +412,30 @@ def analizar(bytes_xlsx, pais, periodo_desde, periodo_hasta, fichero):
 #    marcar ES. Se identifica por CUÁL de ES/IT/FR tiene menor error mediano.
 #
 #    🔴 SE COMPARAN CUOTAS, NO UNIDADES ABSOLUTAS (corrección de Fernando, 31-jul).
-#    transacciones NO cubre la ventana declarada (acaba unos días antes; IT/FR
-#    empiezan tarde), así que exigir cobertura total saltaba la guarda SIEMPRE en el
-#    caso real. En su lugar se cruza sobre la INTERSECCIÓN de la ventana con lo que
-#    cubre transacciones del país declarado, y se compara la CUOTA de cada ASIN
-#    (uds_asin / total del conjunto): robusta al desfase de ventana. Se SALTA la
-#    guarda (y se dice) si el fichero no trae 'Unidades pedidas' o la intersección es
-#    < 40% de la ventana. NO caza una MEZCLA (un marketplace por fichero; eso lo para
-#    el procedimiento).
+#    transacciones no cubre el mismo tramo que el fichero (empieza tarde en IT/FR y
+#    acaba unos días antes), así que exigir cobertura total saltaba la guarda SIEMPRE
+#    en el caso real. En su lugar se compara la CUOTA de cada ASIN (uds_asin / total
+#    del conjunto), que es robusta a que los dos tramos no coincidan.
 #
-#    Medido contra PROD (ventana año→30-jul): correcto ES 1,2% · FR 11% · IT 11%;
-#    el incorrecto SIEMPRE >75%. El error del correcto es MAYOR en FR/IT que en ES
-#    porque su intersección es más corta (transacciones arranca en abr/ene) y se
-#    comparan cuotas de periodos con mix de producto distinto — NO es un fallo,
-#    discrimina de sobra. 🔑 Si algún día salta el aviso del 25%, mira la VENTANA
-#    antes que el país. (Con la 1ª carga real —julio natural, transacciones cubre el
-#    mes entero para los tres— la intersección es total y el error del correcto baja.)
+#    🔴 QUÉ CAMBIÓ CON EL MODELO CONTADOR (10-ago-2026). Antes el tramo de comparación
+#    era la INTERSECCIÓN de la ventana DECLARADA con lo que cubre transacciones. Ya no
+#    hay ventana declarada: el fichero es un acumulado desde un punto de partida fijo y
+#    desconocido hasta `leido_at`. El análogo honesto es cruzar contra TODO lo que
+#    transacciones tiene del país declarado hasta la fecha de la lectura:
+#        [ min(fecha) del país declarado  →  min( max(fecha), leido_at ) ]
+#    El extremo derecho se corta en `leido_at` porque el fichero no puede saber nada de
+#    lo que pasó después de generarse.
+#    Se SALTA la guarda (y se dice) si el fichero no trae 'Unidades pedidas' o si ese
+#    tramo tiene menos de DIAS_MIN_CRUCE_PAIS días. NO caza una MEZCLA (un marketplace
+#    por fichero; eso lo para el procedimiento).
+#
+#    ⚠️ LA MEDICIÓN DE ABAJO ES DEL MODELO VIEJO Y NO SE REHACE SOLA. Medido contra PROD
+#    con ventana declarada año→30-jul: correcto ES 1,2% · FR 11% · IT 11%; el incorrecto
+#    SIEMPRE >75%. Discriminaba de sobra. Con el tramo nuevo —más largo, porque ya no lo
+#    recorta una ventana— los errores del correcto deberían BAJAR y separarse aún más del
+#    incorrecto, pero eso es una expectativa, NO una medición: la primera carga real del
+#    modelo contador todavía no ha ocurrido. 🔑 Cuando ocurra, mírense los tres números
+#    del log y actualícese esta nota con los de verdad.
 # ---------------------------------------------------------------------------
 def _puente_sku_asin(cur):
     """SKU→ASIN: listings_amazon ∪ productos(es_chase=false). El chase nace SIN ASIN,
@@ -405,11 +456,11 @@ def _puente_sku_asin(cur):
     return sku2asin
 
 
-def guarda_pais(cur, pais_declarado, desde, hasta, uds_fichero):
+def guarda_pais(cur, pais_declarado, leido_at, uds_fichero):
     """Devuelve (veredicto, detalle). veredicto ∈ {'ok','grita','salta'}; si el país
     declarado NO gana, lanza Aborta. `uds_fichero` = {asin: unidades_pedidas} del fichero.
-    Compara CUOTAS (no unidades) sobre la INTERSECCIÓN de la ventana con lo que cubre
-    transacciones del país declarado — robusto al desfase de ventana."""
+    Compara CUOTAS (no unidades) sobre todo lo que transacciones cubre del país declarado
+    hasta la fecha de la lectura — robusto a que los dos tramos no coincidan."""
     # 0) Sin 'Unidades pedidas' en el fichero (el panel puede no traerla: el export del
     #    28-jul tenía 8 columnas) → uds_fichero todo a cero: no hay con qué cruzar.
     total_fichero = sum(uds_fichero.values())
@@ -417,20 +468,20 @@ def guarda_pais(cur, pais_declarado, desde, hasta, uds_fichero):
         return ('salta', "el fichero no trae 'Unidades pedidas' (columna ausente o suman 0): "
                          "no hay con qué cruzar el país. Guarda SALTADA.")
 
-    # 1) Intersección de la ventana declarada con lo que cubre transacciones del declarado.
+    # 1) Tramo de comparación: lo que transacciones cubre del declarado, hasta la lectura.
     cur.execute("SELECT min(fecha), max(fecha) FROM transacciones_movimientos WHERE pais=%s;",
                 (pais_declarado,))
     fmin, fmax = cur.fetchone()
     if fmin is None:
         return ('salta', f"transacciones no tiene datos de {pais_declarado}: no hay con qué "
                          f"cruzar. Guarda SALTADA.")
-    ini, fin = max(desde, fmin), min(hasta, fmax)
-    dias_ventana = (hasta - desde).days + 1
+    leido_dia = leido_at.date()
+    ini, fin = fmin, min(fmax, leido_dia)
     dias_inter = (fin - ini).days + 1 if fin >= ini else 0
-    if dias_inter < 0.40 * dias_ventana:
-        return ('salta', f"transacciones de {pais_declarado} solo cruza {dias_inter} de los "
-                         f"{dias_ventana} días de la ventana ({fmin}→{fmax} ∩ {desde}→{hasta}): "
-                         f"menos del 40%, demasiado corta para fiarse. Guarda SALTADA.")
+    if dias_inter < DIAS_MIN_CRUCE_PAIS:
+        return ('salta', f"transacciones de {pais_declarado} solo cubre {dias_inter} días hasta "
+                         f"la lectura ({fmin}→{fmax}, cortado en {leido_dia}): menos de "
+                         f"{DIAS_MIN_CRUCE_PAIS}, demasiado poco para fiarse. Guarda SALTADA.")
 
     sku2asin = _puente_sku_asin(cur)
 
@@ -446,8 +497,8 @@ def guarda_pais(cur, pais_declarado, desde, hasta, uds_fichero):
         if asin:
             trans[p][asin] += float(uds)
 
-    # 3) CUOTAS: cuota de cada ASIN en el fichero (sobre la ventana) y en cada candidato
-    #    (sobre la intersección). Comparar cuotas neutraliza que las ventanas no coincidan.
+    # 3) CUOTAS: cuota de cada ASIN en el fichero (sobre el acumulado) y en cada candidato
+    #    (sobre el tramo). Comparar cuotas neutraliza que los dos tramos no coincidan.
     cuota_fichero = {a: u / total_fichero for a, u in uds_fichero.items()}
     errores = {}
     for cand in PAISES_VALIDOS:
@@ -483,19 +534,20 @@ def guarda_pais(cur, pais_declarado, desde, hasta, uds_fichero):
 
     if errores[pais_declarado] > 0.25:
         return ('grita',
-                f"{pais_declarado} GANA (cuota por país: {tabla}) pero su error pasa del 25%: "
-                f"puede ser la VENTANA mal declarada. Revísala. (Entra igual.)")
+                f"{pais_declarado} GANA (cuota por país: {tabla}) pero su error pasa del 25%. "
+                f"Ya no puede ser 'la ventana mal declarada' (no hay ventana): mira si el .xlsx "
+                f"MEZCLA marketplaces, que es lo único que esta guarda no caza. (Entra igual.)")
     return ('ok', f"{pais_declarado} identificado por CUOTA (error mediano: {tabla}; "
-                  f"intersección {ini}→{fin} = {dias_inter}/{dias_ventana} días).")
+                  f"tramo {ini}→{fin} = {dias_inter} días, cortado en la lectura {leido_dia}).")
 
 
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 def main():
-    print("=== PROCESADOR CUSTOM ANALYTICS (DEMANDA · FOTO POR VENTANA) ===", flush=True)
+    print("=== PROCESADOR CUSTOM ANALYTICS (DEMANDA · PELÍCULA DE LECTURAS) ===", flush=True)
     print(f"MODO: {MODO}  ·  ENTORNO: {ENTORNO}  ·  PAIS: {PAIS or '(sin selector)'}  ·  "
-          f"periodo: {PERIODO_DESDE or '?'} → {PERIODO_HASTA or '?'}", flush=True)
+          f"fecha del dato: la trae el fichero (leido_at)", flush=True)
     print("=" * 60, flush=True)
 
     if MODO not in ('ensayo', 'aplicar'):
@@ -508,24 +560,15 @@ def main():
     if not SUPABASE_KEY or not DB_URL:
         sys.exit("Faltan credenciales (SUPABASE_KEY / DB_URL). Revisa los secrets del workflow.")
 
-    # --- Guarda 6.5: el periodo (lo declara el selector; sin él se ABORTA) ---
-    if not PERIODO_DESDE or not PERIODO_HASTA:
-        sys.exit("[Guarda 6.5] Falta PERIODO_DESDE y/o PERIODO_HASTA. El fichero no trae el "
-                 "periodo: lo declara quien sube (YYYY-MM-DD). Sin periodo no se carga (§3.5).")
-    try:
-        desde = _fecha_iso(PERIODO_DESDE, 'PERIODO_DESDE')
-        hasta = _fecha_iso(PERIODO_HASTA, 'PERIODO_HASTA')
-    except Aborta as e:
-        print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
-        sys.exit(1)
-    if desde > hasta:
-        sys.exit(f"[Guarda 6.5] PERIODO_DESDE ({desde}) es posterior a PERIODO_HASTA ({hasta}).")
-    if (hasta - desde).days + 1 > VENTANA_MAX_DIAS:
-        sys.exit(f"[Guarda 6.5] La ventana {desde}→{hasta} son {(hasta-desde).days+1} días "
-                 f"(> {VENTANA_MAX_DIAS}). Huele a error de tecleo. Revísala.")
-    if hasta > date.today():
-        sys.exit(f"[Guarda 6.5] PERIODO_HASTA ({hasta}) es futuro (hoy {date.today()}). "
-                 f"No se declara una ventana que aún no ha terminado.")
+    # --- Inputs OBSOLETOS: si llegan con valor, se dice. No se usan para nada. ---
+    # 🔒 Una obsolescencia DECLARADA no es una mentira; una silenciosa sí. Si la pantalla
+    #   sigue mandando un periodo, que quede en el log que llegó y que no se usó — así el
+    #   día que alguien lea este run sabe que el dato entró y murió aquí, y por qué.
+    for _nombre, _valor in (('periodo_desde', PERIODO_DESDE), ('periodo_hasta', PERIODO_HASTA)):
+        if _valor:
+            print(f"⚠️  recibido {_nombre}={_valor} — IGNORADO, el modelo es de contador: la "
+                  f"fecha del dato la trae el fichero (leido_at), no el selector. Este input "
+                  f"desaparece en cuanto el catálogo de la v2 deje de mandarlo.", flush=True)
 
     # --- Bajar el fichero del buzón (Storage de PRODUCCIÓN) ---
     from supabase import create_client
@@ -557,28 +600,28 @@ def main():
 
     # --- Parseo + guardas estructurales (antes de tocar la base) ---
     try:
-        info = analizar(crudo_bytes, PAIS, desde, hasta, fichero)
+        info = analizar(crudo_bytes, PAIS, fichero)
     except Aborta as e:
         print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
         sys.exit(1)
 
     datos = info['datos']
-    exportado_at = info['exportado_at']
-    print(f"\nASIN leídos: {info['n_asin']}  ·  país {PAIS}  ·  ventana {desde}→{hasta}  "
-          f"({(hasta-desde).days+1} días)", flush=True)
-    print(f"   exportado_at (properties.created): {exportado_at}", flush=True)
+    leido_at = info['leido_at']
+    print(f"\nASIN leídos: {info['n_asin']}  ·  país {PAIS}  ·  lectura {leido_at}", flush=True)
+    print("   leido_at = wb.properties.created (cuándo generó Amazon el fichero)", flush=True)
     print(f"   totales del fichero: " + " · ".join(
         f"{k}={v}" for k, v in info['totales_fichero'].items()), flush=True)
     for a in info['avisos']:
         print(f"⚠️  {a}", flush=True)
 
-    # Guarda 6.5 (cont.): la ventana no puede acabar DESPUÉS de cuándo se exportó.
-    if isinstance(exportado_at, datetime) and hasta > exportado_at.date():
-        print(f"\n❌ ABORTA (no se ha escrito nada):\n"
-              f"[Guarda 6.5] PERIODO_HASTA ({hasta}) es posterior a cuándo se exportó el "
-              f"fichero ({exportado_at.date()}). El fichero no puede cubrir una ventana que "
-              f"aún no había pasado cuando se generó.", flush=True)
-        sys.exit(1)
+    # Una lectura fechada en el FUTURO no la puede haber generado Amazon: o hay desajuste
+    # de reloj o el fichero no es lo que parece. GRITA (no aborta): la fecha no la teclea
+    # nadie, viene del propio .xlsx, y una lectura adelantada se colaría como "la última"
+    # de la serie sin que nadie lo note.
+    if leido_at.date() > date.today():
+        print(f"\n⚠️  [lectura futura] leido_at ({leido_at.date()}) es posterior a hoy "
+              f"({date.today()}). Se cargaría como la lectura MÁS RECIENTE de {PAIS} y taparía "
+              f"a la de verdad en v_demanda_asin_ultima. Míralo. (Entra igual.)", flush=True)
 
     # --- Conectar al ENTORNO ---
     con = conectar_bd(DB_URL)
@@ -600,10 +643,25 @@ def main():
               "Aplica la migración y relanza.", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
 
+    # Guarda 6.13 (cont.): y la tabla tiene que estar en el MODELO CONTADOR.
+    # 🔴 Sin esto, apuntar a una base donde la migración del 10-ago no esté aplicada
+    #   revienta DENTRO del INSERT por lotes, con un 'column "leido_at" does not exist' a
+    #   mitad de transacción y después de haber hecho ya todo el trabajo. Es un aborto
+    #   barato que convierte un error críptico en una instrucción.
+    cur.execute("SELECT count(*) FROM information_schema.columns "
+                " WHERE table_schema='public' AND table_name='demanda_asin' "
+                "   AND column_name='leido_at';")
+    if not cur.fetchone()[0]:
+        print("\n❌ ABORTA: demanda_asin NO tiene la columna `leido_at`, o sea que esta base "
+              "sigue en el modelo VIEJO (ventana declarada). Este procesador ya solo sabe "
+              "escribir el modelo CONTADOR. Aplica por la escalera la migración "
+              "2026-08-07_demanda_asin_contador.sql y relanza.", flush=True)
+        con.rollback(); cur.close(); con.close(); sys.exit(1)
+
     # --- Guarda 6.6: EL PAÍS ---
     uds_fichero = {r['asin']: (r.get('unidades_pedidas') or 0) for r in datos}
     try:
-        veredicto, detalle = guarda_pais(cur, PAIS, desde, hasta, uds_fichero)
+        veredicto, detalle = guarda_pais(cur, PAIS, leido_at, uds_fichero)
     except Aborta as e:
         print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
@@ -627,44 +685,55 @@ def main():
         print(f"\n🆕 PAÍS NUEVO en demanda_asin: {PAIS}. Posible NUEVA OBLIGACIÓN DE IVA — "
               f"revisar. (Entra igual.)", flush=True)
 
-    # --- Guarda 6.8: solapamiento de ventanas del mismo país (grita, no borra) ---
+    # --- Guarda 6.8: LA SERIE de lecturas de ese país (grita, no borra) ---
+    # Sustituye al viejo "solapamiento de ventanas": sin ventanas no hay solape que mirar.
+    # Lo que sí puede pasar en una serie es apilar una lectura ANTERIOR a la última que ya
+    # hay. Es legal —la tabla las admite en cualquier orden— pero casi siempre es un
+    # despiste, y lo peligroso es que no se nota: v_demanda_asin_ultima seguiría enseñando
+    # la de antes, así que la carga parecería no haber servido de nada.
     cur.execute(
-        "SELECT periodo_desde, periodo_hasta, dias, count(*), coalesce(sum(unidades_pedidas),0) "
-        "  FROM demanda_asin "
-        " WHERE pais=%s AND NOT (periodo_desde=%s AND periodo_hasta=%s) "
-        "   AND periodo_desde <= %s AND periodo_hasta >= %s "
-        " GROUP BY periodo_desde, periodo_hasta, dias "
-        " ORDER BY periodo_hasta DESC;", (PAIS, desde, hasta, hasta, desde))
-    solapes = cur.fetchall()
-    if solapes:
-        total_nuevo = int(info['totales_fichero'].get('unidades_pedidas', 0))
-        print(f"\n⚠️  [Guarda 6.8] La ventana {desde}→{hasta} SOLAPA con otras de {PAIS} ya "
-              f"presentes (no se borran; conviven):", flush=True)
-        for pd, ph, dd, n, su in solapes:
-            inter = (min(ph, hasta) - max(pd, desde)).days + 1
-            menor = min((ph - pd).days + 1, (hasta - desde).days + 1)
-            pct = 100 * inter / menor if menor else 0
-            aviso_extra = ""
-            if pct > 90 and int(su) == total_nuevo:
-                aviso_extra = ("  🔴 solapa >90% y el total de unidades COINCIDE: "
-                               "¿te has equivocado al escribir el periodo?")
-            print(f"        · {pd}→{ph} ({dd} días): {n} filas, {int(su)} uds pedidas."
-                  f"{aviso_extra}", flush=True)
+        "SELECT leido_at, count(*), coalesce(sum(unidades_pedidas),0) "
+        "  FROM demanda_asin WHERE pais=%s "
+        " GROUP BY leido_at ORDER BY leido_at DESC;", (PAIS,))
+    serie = cur.fetchall()
+    if serie:
+        print(f"\n   Lecturas de {PAIS} ya en la base: {len(serie)}", flush=True)
+        for la, n, su in serie[:5]:
+            cual = "   ← ESTA MISMA (se recierra)" if la == leido_at else ""
+            print(f"        · {la}: {n} filas, {int(su)} uds pedidas acumuladas{cual}", flush=True)
+        if len(serie) > 5:
+            print(f"        · … y {len(serie) - 5} lectura(s) más", flush=True)
+        ultima = serie[0][0]
+        if leido_at < ultima:
+            print(f"\n⚠️  [Guarda 6.8] Esta lectura ({leido_at}) es ANTERIOR a la última que ya "
+                  f"tienes de {PAIS} ({ultima}). Se apila igual y no borra nada, pero "
+                  f"v_demanda_asin_ultima seguirá mostrando la de {ultima}: para la pantalla, "
+                  f"esta carga no cambiaría nada. ¿Es el fichero que querías subir?", flush=True)
 
-    # --- Guarda 6.10: anti-encogimiento POR VENTANA ---
-    cur.execute("SELECT count(*) FROM demanda_asin "
-                " WHERE pais=%s AND periodo_desde=%s AND periodo_hasta=%s;", (PAIS, desde, hasta))
+    # --- Guarda 6.10: anti-encogimiento CONTRA LA LECTURA ANTERIOR ---
+    # 🔴 El listón NO puede ser "lo que ya había de ESTA lectura": en una serie, una lectura
+    #   nueva empieza SIEMPRE en 0 filas, así que la guarda no saltaría jamás y sería
+    #   decorativa. El listón con sentido es la lectura ANTERIOR del mismo país: si el
+    #   contador traía 195 ASIN y ahora trae 80, el export vino a medias.
+    cur.execute("SELECT count(*) FROM demanda_asin WHERE pais=%s AND leido_at=%s;",
+                (PAIS, leido_at))
     previas = cur.fetchone()[0]
-    if previas and len(datos) < previas * 0.5:
+    ref_n, ref_cual = 0, None
+    for la, n, _su in serie:
+        if la != leido_at:
+            ref_n, ref_cual = n, la      # la más reciente que no es esta misma
+            break
+    if ref_n and len(datos) < ref_n * 0.5:
         print(f"\n❌ ABORTA (no se ha escrito nada):\n"
-              f"[Guarda 6.10] En {PAIS} [{desde}→{hasta}] ya había {previas} filas y el fichero "
-              f"trae {len(datos)}: menos del 50%. Un informe a medias no da información "
+              f"[Guarda 6.10] La lectura anterior de {PAIS} ({ref_cual}) traía {ref_n} ASIN y "
+              f"esta trae {len(datos)}: menos del 50%. Un informe a medias no da información "
               f"incompleta, da información FALSA. No se borra ni se escribe nada.", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
 
-    # --- Carga FOTO POR VENTANA: DELETE por IGUALDAD + INSERT (misma transacción) ---
-    cur.execute("DELETE FROM demanda_asin "
-                " WHERE pais=%s AND periodo_desde=%s AND periodo_hasta=%s;", (PAIS, desde, hasta))
+    # --- Carga PELÍCULA: DELETE de ESTA lectura por IGUALDAD + INSERT (misma transacción) ---
+    # 🔒 El DELETE no contradice el cajón PELÍCULA (§1.6): no borra el histórico, recierra
+    #   la MISMA lectura si se recarga. En una carga normal borra 0 filas.
+    cur.execute("DELETE FROM demanda_asin WHERE pais=%s AND leido_at=%s;", (PAIS, leido_at))
     borradas = cur.rowcount
 
     plantilla = "(" + ", ".join(['%s'] * len(COLS_DB)) + ")"
@@ -674,49 +743,53 @@ def main():
     insertadas = len(valores)
 
     # --- SELLO DE FRESCURA en informes_subidos (los 10 totales del cuadre) ---
+    leido_dia = leido_at.date()
     resumen = {
         'pais': PAIS, 'tipo': 'custom_analytics', 'archivo': fichero,
-        'periodo_desde': desde.isoformat(), 'periodo_hasta': hasta.isoformat(),
-        'dias': (hasta - desde).days + 1,
+        'leido_at': leido_at.isoformat(),
         'asin': len(datos), 'huerfanos': len(huerfanos),
         'totales': info['totales_fichero'],
-        'exportado_at': exportado_at.isoformat() if isinstance(exportado_at, datetime) else None,
+        'lectura_anterior': ref_cual.isoformat() if ref_cual else None,
         'guarda_pais': detalle, 'columnas_ausentes': info['columnas_ausentes'],
         'columnas_desconocidas': [str(c) for c in info['columnas_desconocidas']],
         'avisos': info['avisos'],
         'fuente': 'procesador_custom_analytics (Fase 0)',
     }
+    # 🔒 Las dos fechas del sello van a la MISMA: una lectura es un instante, no un rango.
     cur.execute(
         "INSERT INTO informes_subidos "
         "(tipo, archivo_nombre, filas_procesadas, filas_validas, filas_descartadas, "
         " fecha_dato_desde, fecha_dato_hasta, resumen_json, procesado_at, notas) "
         "VALUES ('custom_analytics', %s, %s, %s, 0, %s, %s, %s, now(), %s);",
-        (fichero, len(datos), insertadas, desde, hasta, Json(resumen),
-         f'procesador_custom_analytics Fase 0 · {PAIS} · {desde}→{hasta}'))
+        (fichero, len(datos), insertadas, leido_dia, leido_dia, Json(resumen),
+         f'procesador_custom_analytics Fase 0 · {PAIS} · lectura {leido_at.isoformat()}'))
 
     # --- Resumen ---
     verbo = 'se han' if MODO == 'aplicar' else 'se habrían'
-    print(f"\n--- DEMANDA {PAIS} [{desde}→{hasta}] (FOTO POR VENTANA) ---")
-    print(f"   · ASIN del fichero:            {len(datos)}")
-    print(f"   · ya había en esa ventana:     {previas}")
-    print(f"   · BORRADOS de la ventana ({verbo}): {borradas}")
-    print(f"   · INSERTADOS ({verbo}):        {insertadas}")
-    print(f"   · otras ventanas y países:     intactos (borrado por IGUALDAD, no BETWEEN)")
+    print(f"\n--- DEMANDA {PAIS} · lectura {leido_at} (PELÍCULA DE LECTURAS) ---")
+    print(f"   · ASIN del fichero:              {len(datos)}")
+    print(f"   · lectura anterior de {PAIS}:        "
+          f"{ref_cual if ref_cual else '(ninguna: es la primera)'}"
+          f"{f' con {ref_n} ASIN' if ref_n else ''}")
+    print(f"   · ya había de ESTA lectura:      {previas}")
+    print(f"   · BORRADOS de esta lectura ({verbo}): {borradas}")
+    print(f"   · INSERTADOS ({verbo}):          {insertadas}")
+    print(f"   · otras lecturas y países:       intactos (borrado por IGUALDAD de leido_at)")
     print(f"   · sello en informes_subidos ({verbo}): 1 fila (tipo='custom_analytics')")
 
     if MODO == 'aplicar':
         con.commit()
-        print(f"\n✅ APLICADO en {ENTORNO}: {insertadas} filas de {PAIS} [{desde}→{hasta}] en "
-              f"demanda_asin (ventana recerrada por igualdad; RLS activo sin políticas; sello "
-              f"escrito).")
+        print(f"\n✅ APLICADO en {ENTORNO}: {insertadas} filas de {PAIS} · lectura {leido_at} en "
+              f"demanda_asin (lectura recerrada por igualdad; el resto de la serie intacto; RLS "
+              f"activo sin políticas; sello escrito).")
     else:
         con.rollback()
-        print(f"\n🔎 ENSAYO: TODAS las guardas pasaron, NO se ha escrito nada. (El borrado por "
-              f"ventana, el volcado y el sello se han probado dentro de una transacción revertida.)")
+        print(f"\n🔎 ENSAYO: TODAS las guardas pasaron, NO se ha escrito nada. (El borrado de la "
+              f"lectura, el volcado y el sello se han probado dentro de una transacción revertida.)")
 
     cur.close(); con.close()
     print(f"\n=== FIN · entorno={ENTORNO} · modo={MODO} · pais={PAIS} · "
-          f"ventana={desde}→{hasta} · asin={len(datos)} · borrados={borradas} · "
+          f"lectura={leido_at.isoformat()} · asin={len(datos)} · borrados={borradas} · "
           f"insertados={insertadas} · huerfanos={len(huerfanos)} ===", flush=True)
 
 

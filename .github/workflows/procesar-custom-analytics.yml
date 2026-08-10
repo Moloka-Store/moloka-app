@@ -2,11 +2,19 @@ name: Moloka - Procesar CUSTOM ANALYTICS
 
 # Procesador propio de Fase 0 para el export "Custom Analytics" del Seller (el eje
 # de la DEMANDA: visitas, sesiones, conversión y LA BUY BOX, por ASIN). A DEMANDA,
-# sin reloj. Espejo de procesar-transacciones.yml + inputs de PERIODO (el fichero no
-# trae ni país ni periodo: los manda el selector). Cajón FOTO POR VENTANA: recierra
-# la ventana (pais, periodo_desde, periodo_hasta) por IGUALDAD y deja intactas las
-# demás ventanas y países. Escalera: staging ensayo → staging aplicar → verificación
-# SQL → producción ensayo → producción aplicar → SQL.
+# sin reloj. Espejo de procesar-transacciones.yml. El fichero no trae el país: lo
+# manda el selector. La FECHA sí la trae (wb.properties.created → leido_at).
+# Cajón PELÍCULA DE LECTURAS desde el 10-ago-2026: cada carga apila UNA lectura del
+# contador y recierra por IGUALDAD de (pais, leido_at), dejando intactas las demás
+# lecturas y países. Escalera: staging ensayo → staging aplicar → verificación SQL →
+# producción ensayo → producción aplicar → SQL.
+#
+# ⚠️ ESTE WORKFLOW LO DISPARA LA APP DE ELENA, no solo una persona desde aquí. La ficha
+#   `custom_analytics` de `lib/buzones/catalogo.ts` (repo moloka-app-v2) lo lanza desde
+#   la pantalla de Buzones con `entorno: produccion` y `modo: aplicar` FIJOS. Por eso los
+#   inputs de este fichero no se tocan a la ligera: quitar uno que la app todavía manda
+#   hace que GitHub rechace el disparo entero y Elena se come el error sin saber por qué.
+#   Se amplía antes de contraer (ver los dos inputs OBSOLETOS de abajo).
 on:
   workflow_dispatch:
     inputs:
@@ -25,14 +33,19 @@ on:
         type: choice
         options: [ES, IT, FR]
         default: ES
+      # ⚠️ LOS DOS SIGUIENTES ESTÁN MUERTOS. Se declaran solo para que el disparo de la
+      #   app v2 siga siendo válido mientras su catálogo los mande. Paso 3 de la
+      #   secuencia: se borran de aquí en cuanto moloka-app-v2 deje de enviarlos.
       periodo_desde:
-        description: 'Inicio de la ventana (YYYY-MM-DD). El fichero NO trae el periodo: lo declaras tú.'
+        description: 'OBSOLETO desde el modelo contador (10-ago-2026): se acepta pero SE IGNORA. Se borra cuando el catálogo v2 deje de mandarlo.'
         type: string
-        required: true
+        required: false
+        default: ''
       periodo_hasta:
-        description: 'Fin de la ventana (YYYY-MM-DD). Lo valida el procesador (no futuro, no posterior a la exportación).'
+        description: 'OBSOLETO desde el modelo contador (10-ago-2026): se acepta pero SE IGNORA. Se borra cuando el catálogo v2 deje de mandarlo.'
         type: string
-        required: true
+        required: false
+        default: ''
       fichero:
         # Con ES/IT/FR en la misma carpeta, "el más reciente" es una lotería: aquí
         # pedir el nombre EXACTO es lo NORMAL. Vacío = el más reciente. Si el nombre
