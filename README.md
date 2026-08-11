@@ -122,9 +122,25 @@ verificada por otra sesión, que siguió trabajando sobre un ensayo que ya no ex
 - **Quien esté midiendo, re-verifica al terminar** en vez de fiarse de un ensayo de hace
   media hora. Un `count(*)` de comprobación cuesta segundos.
 
-*(Pendiente de decidir: dejar rastro en la propia base —una tabla `staging_restauraciones`
-que escriba el workflow con quién y cuándo— para no depender de un acuerdo verbal entre
-sesiones que no se leen entre sí.)*
+### El rastro está en la propia base
+
+`restaurar-staging.yml` deja constancia en **`public.staging_restauraciones`** (quién,
+cuándo, para qué, y el enlace al run). No depende de que dos sesiones se lean entre sí:
+
+```sql
+select restaurado_en, quien, motivo from public.staging_restauraciones
+ order by restaurado_en desc limit 5;
+```
+
+- **Antes** de restaurar, el workflow enseña las últimas cinco y **avisa** si hubo una
+  hace menos de una hora: es cuando lo más probable es que alguien esté midiendo.
+- **Después** lo apunta, con `if: always()` — una restauración que falla a medias también
+  deja staging distinto de como estaba, así que hay que enterarse igual.
+- La tabla vive **solo en staging** y no viene en el backup de producción, así que
+  sobrevive a la propia restauración.
+
+⚠️ El `concurrency` del workflow impide que dos restauraciones se pisen **entre sí**, pero
+no protege a quien está midiendo. Para eso es este rastro.
 
 ---
 
