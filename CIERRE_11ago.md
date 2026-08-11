@@ -174,6 +174,62 @@ un número cualquiera — que es exactamente cómo nació el 0,1550.**
 
 ---
 
+## 3-bis. 🔴 D2 SOLO HIZO LA MITAD, Y NO DA ERROR — medido
+
+**Lo aplicado el 11-ago cierra el `pg_default_acl` de `postgres`, no el de `supabase_admin`.**
+En `public` hay **dos** entradas y la migración solo pudo tocar una:
+
+| Concedente | Estado tras aplicar D2 |
+|---|---|
+| `postgres` | ✅ `anon` fuera de tablas, secuencias y funciones |
+| **`supabase_admin`** | 🔴 **intacta** — `anon` sigue con `arwdDxtm` |
+
+### ¿Se puede cerrar la segunda desde una migración? **NO.** Probado, no supuesto
+
+```sql
+alter default privileges for role supabase_admin in schema public
+  revoke all on tables from anon, authenticated;
+```
+```
+ERROR: 42501: permission denied to change default privileges
+```
+
+El motivo, medido: `postgres` **no es superusuario** (`rolsuper = false`) y **no es miembro de
+`supabase_admin`** (`pg_has_role(...,'MEMBER') = false`). `ALTER DEFAULT PRIVILEGES FOR ROLE x`
+exige una de las dos cosas. **No hay forma de hacerlo desde `aplicar-migracion.yml`.**
+
+### 🔬 Pero esa entrada está DORMIDA, y también está medido
+
+La duda era si el SQL Editor del panel crea como `supabase_admin`, en cuyo caso las tablas hechas
+por ahí seguirían naciendo abiertas. **No es el caso:**
+
+- **Los 113 objetos de `public` —60 tablas, 30 vistas, 23 secuencias— tienen como dueño a
+  `postgres`. Ni uno solo a `supabase_admin`.**
+- Y el testigo que lo cierra: `v_analisis_auditable` y `v_scoreboard_reglas` **no están en ninguna
+  migración** — se crearon a mano, casi con seguridad desde el SQL Editor — y **su dueño es
+  `postgres`**.
+
+O sea que **la entrada de `supabase_admin` nunca ha llegado a aplicarse en esta base.** El default
+ACL que gobierna lo que se crea aquí es el de `postgres`, y ése está cerrado.
+
+### Qué queda, entonces
+
+🟡 **Riesgo latente, no activo.** Si algún día algo creara un objeto como `supabase_admin` (una
+función de plataforma, una extensión, una acción de soporte de Supabase), nacería abierto a `anon`.
+Para esa vía **la única defensa es `ensure_rls`** — y con dos límites ya medidos: no cubre
+`CREATE VIEW`, y **no sobrevive a un restore** (comprobado el 11-ago: staging, recién restaurado,
+**no tiene `ensure_rls`**; tiene los 6 event triggers de Supabase y le falta el propio).
+
+**Se deja escrito y sin cerrar.** Cerrarlo exigiría que Supabase ejecute el `ALTER` con un rol que
+sí pueda, y no es algo que se pueda hacer desde este repo.
+
+> 🔑 **Y esto es la norma 119 mordiendo el mismo día que se escribió.** La migración corrió en verde
+> las cuatro veces —staging ensayo, staging aplicar, producción ensayo, producción aplicar— y en
+> ningún momento dijo que solo estaba haciendo la mitad, **porque no hay ningún error que dar**:
+> revocar el default de `postgres` es una operación perfectamente válida. *La ausencia de error se
+> leyó como «hecho».* Solo se ve mirando `pg_default_acl` después, que es donde estaba la respuesta.
+> Lo cazó Fernando.
+
 ## 4. LO QUE QUEDA ABIERTO
 
 ### Listo para ejecutar → [`EJECUTAR_11ago.md`](EJECUTAR_11ago.md)
@@ -197,7 +253,9 @@ un número cualquiera — que es exactamente cómo nació el 0,1550.**
 - **Versionar `ensure_rls`** a `migraciones/`.
 - **Jubilar `salud_fba_hist`** — depende de lo anterior.
 - **`gap_dias`** dondequiera que se sirva un delta.
-- **Migración D2** (default ACL) — la más delicada: cambia cómo nace todo objeto futuro.
+- 🟡 **La mitad de D2 que no se pudo cerrar**: el `pg_default_acl` de **`supabase_admin`** sigue con
+  `anon`. **No es tocable desde una migración** (probado: `42501`), y hoy está **dormido** — los 113
+  objetos de `public` los creó `postgres`. Ver el apartado 3-bis.
 
 ### Decisiones que dependen de Fernando
 
