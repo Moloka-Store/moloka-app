@@ -1,1 +1,81 @@
 # moloka-app
+
+## 🔴 DESPUÉS DE CUALQUIER RESTAURACIÓN: correr el canario RLS
+
+**Paso obligatorio, no opcional.** Después de restaurar cualquier base —staging o
+producción— hay que ejecutar entero:
+
+```
+sql/canario_rls.sql
+```
+
+### Por qué
+
+Una tabla con **RLS activa y cero políticas** es invisible para la app y **no avisa**: no
+da error, da vacío. Y una vista que la lea con `security_invoker` devuelve 0 filas con la
+misma cara de normalidad. Si una política no vuelve tras un restore, lo normal es que
+nadie se entere hasta que falte un dato en pantalla — y para entonces ya no se sabe desde
+cuándo.
+
+🔬 Medido el 11-ago-2026 en producción: **21 tablas** están así, **20 con datos dentro**,
+**13.781 filas invisibles**. Y **10 de las 18 vistas definer** funcionan hoy *sólo porque
+son definer*: leen una de esas tablas tapadas.
+
+### Qué comprueba
+
+Grita en **los dos sentidos** contra un censo fijado:
+
+- 🔴 **Tapada nueva** — una tabla tapada que no estaba en el censo. Casi siempre es una
+  política que no ha vuelto. Es el fallo que mata en silencio.
+- 🟡 **Ya no está tapada** — una del censo que ahora tiene política. Puede ser bueno, pero
+  hay que enterarse y actualizar el censo, o el censo empieza a mentir.
+- 🟡 **Desaparecida** — una del censo que ya no existe.
+
+Probado haciéndolo saltar a propósito: quitando la política del ledger en staging, sale
+`🔴🔴 TAPADA NUEVA · 18.461 filas`.
+
+### ⚠️ No vale medirlo con el conector
+
+El conector corre como `postgres`, que tiene `BYPASSRLS`: cuenta todo y no se entera de
+nada. Al pasar `v_presencia_pais` a `security_invoker`, el conector decía **508 filas**
+mientras la app habría visto **0**. Para comprobar lo que ve la app de verdad:
+
+```sql
+begin;
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-000000000001","role":"authenticated"}';
+select count(*) from public.la_tabla;
+rollback;
+```
+
+### Si sale una tapada nueva
+
+La política vive en su migración. Las que ya son reaplicables:
+
+| Tabla | Migración |
+|---|---|
+| `ledger_movimientos` | `migraciones/2026-08-11_ledger_politica_idempotente.sql` |
+
+Si la que falta no está en esa lista, **no la inventes**: mira de qué migración salió y
+hazla reaplicable antes de nada, o el problema vuelve en el siguiente restore.
+
+---
+
+## ⚠️ Staging es COMPARTIDO
+
+Varias sesiones trabajan sobre esta base a la vez. 🔬 El 11-ago-2026 staging se restauró
+**tres veces en una hora**, y una de ellas se llevó por delante una vista ya aplicada y
+verificada por otra sesión, que siguió trabajando sobre un ensayo que ya no existía.
+
+- **Quien vaya a restaurar staging, lo anuncia antes.**
+- **Quien esté midiendo, re-verifica al terminar** en vez de fiarse de un ensayo de hace
+  media hora. Un `count(*)` de comprobación cuesta segundos.
+
+*(Pendiente de decidir: dejar rastro en la propia base —una tabla `staging_restauraciones`
+que escriba el workflow con quién y cuándo— para no depender de un acuerdo verbal entre
+sesiones que no se leen entre sí.)*
+
+---
+
+Lo demás —las reglas de la casa, las trampas medidas y cómo se trabaja aquí— está en
+[`CLAUDE.md`](CLAUDE.md).
