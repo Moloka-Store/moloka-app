@@ -38,10 +38,31 @@
 --    La vista vieja podía devolver la segunda. Precio de caja y «no lo tiene» en una fila
 --    que va de unidades.
 --
--- ⚠️ Y OJO A LO QUE `pa` NO ES: en las filas de caja **no es el precio de la caja**, es el
---    precio POR UNIDAD comprando caja (por eso 8,50 < 10,00). Medido en las 34 filas con
---    `es_case = true`. Así que no hay que dividir nada por el tamaño de la caja — pero
---    tampoco se pueden mezclar, porque comprar caja obliga a llevarse la caja entera.
+-- 🔴 Y QUÉ ES `pa` EN UNA FILA DE CAJA: **DEPENDE DEL PROVEEDOR**, y no se puede adivinar.
+--    (Corrección del 11-ago: aquí decía que era siempre el precio por unidad. Lo saqué de
+--    mirar sólo ejemplos de MOLOKA y es FALSO para TCG. Lo cazó Fernando.)
+--
+--    Está decidido en el escáner, en `PERFILES[…]['precio_caja6']` de
+--    `moloka_escaner_nube.py`, y el propio fichero explica en rojo por qué no se adivina:
+--
+--      «Solo se divide donde el proveedor da el precio de la CAJA COMPLETA. OcioStock lo
+--       da POR UNIDAD (11,99 €/ud, 71,94 € la caja): dividir allí convertía un Funko de
+--       9,99 € en uno de 1,66 € y sacaba 18 COMPRAR falsos. Default: NO dividir.
+--       Adivinarlo es lo que rompió esto.»
+--
+--    🔬 Y se ve en el dato — ratio precio-de-caja ÷ precio-suelto del MISMO producto y
+--       proveedor, medida el 11-ago-2026:
+--         · MOLOKA ....  ×0,98   ← ya es unitario
+--         · OCIOSTOCK .  ×1,11   ← ya es unitario
+--         · TCG .......  ×5,31   ← es la caja de 6
+--
+--    🔒 LA VISTA NO DIVIDE NADA, y es deliberado: da el dato crudo con `es_case` al lado,
+--       y quien consuma decide — con el perfil copiado del escáner, no inventado. Meter
+--       aquí un `case when proveedor='TCG'` sería enterrar una regla de negocio en SQL y
+--       obligar a una migración el día que TCG cambie de formato de feed.
+--
+--    Lo que sí es cierto en todos: **comprar caja obliga a llevarse la caja entera**, así
+--    que suelto y caja no son la misma compra aunque el unitario se parezca.
 --
 -- QUÉ HACE ESTA MIGRACIÓN. Dos cosas y ninguna más:
 --   1. `distinct on (m.ean, m.proveedor, m.es_case)` — la clave real, las dos filas viven.
