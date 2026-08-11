@@ -527,11 +527,10 @@ Medido el 11-ago: **siete fotos en veinte días**, con estos saltos:
 |---|---|---|---|---|---|---|---|
 | Días desde la anterior | — | 3 | 3 | 2 | **8** | 2 | 1 |
 
-**¿Se puede automatizar a diario? No, hoy no.** El informe se descarga a mano del Seller y
-`procesar-salud-fba.yml` es `workflow_dispatch` sin reloj. Para que hubiera una carga diaria haría
-falta bajar el informe solo, y eso hoy solo lo da **SP-API** (Reports API) — que es exactamente la
-puerta cerrada por decisión tuya (C3). No hay una tercera vía limpia: Amazon no deja un fichero en
-ningún sitio que se pueda recoger sin SP-API.
+**¿Se puede automatizar a diario? No.** El informe se descarga a mano del Seller y
+`procesar-salud-fba.yml` es `workflow_dispatch` sin reloj. Bajarlo solo requeriría SP-API, que está
+**descartado y no se plantea**. Así que la cadencia la marca la mano de Fernando, y eso no va a
+cambiar: **el diseño tiene que asumir la serie irregular como permanente, no como algo a arreglar.**
 
 **Así que sí: hay que exponer los huecos explícitamente.** Y no como adorno — 🔑 **el hueco no rompe
 lo mismo en todas partes, y ésa es la distinción que el analista necesita:**
@@ -576,7 +575,7 @@ las altas.** O sea que la fecha de la foto no es la fecha del mundo. Las dos cos
 irregular y desfase de origen— son la razón por la que este informe **no sirve para decir «en tal
 semana pasó X»**, solo para tendencia y comparación entre ASIN.
 
-### C3 · Tarifas reales — **VEREDICTO: sí existe vía automática, y está cerrada por decisión tuya**
+### C3 · Tarifas reales — **VEREDICTO: el dato duro ya estaba en casa; nadie lo leía**
 
 Revalidado hoy contra producción, y la auditoría clava los números:
 
@@ -592,25 +591,29 @@ productos que no se van a repreciar** (sin stock, inactivos o sin ASIN). El esfu
 hecho es seis veces mayor de lo que parece — **está apuntando al sitio equivocado**. Antes de
 planificar más capturas, la lista de objetivos debe salir del universo, no del catálogo.
 
-**¿Existe vía automatizada?** Sí: la **Product Fees API** de SP-API
-(`getMyFeesEstimateForASIN`) devuelve comisión y tarifa FBA reales por ASIN y precio — que es
-exactamente el hueco. Y hay una segunda vía sin SP-API: el informe **Fee Preview** de Seller
-Central (`Informes → Pagos → Vista previa de tarifas de Amazon FBA`), que es un fichero descargable
-con la tarifa por SKU y encajaría en el patrón de buzón que ya usan los ocho procesadores.
+### 🔴 CORRECCIÓN (misma tarde) — este apartado partía de un dato FALSO
 
-🔴 **Pero la primera está cerrada por una decisión tuya, no por un problema técnico.** CLAUDE.md §4:
-*«SP-API: jamás con credenciales de Moloka SL. Decidido y cerrado.»* Y medido: **cero código de
-SP-API en el repo** — no hay nada empezado.
+**El «94 % sin tarifa real» es falso y lo retiro.** El error fue fiarme del comentario de
+`seller_observaciones` (*«la única fuente de verdad de tarifas»*) en vez de ir a buscar el dato.
+Es la misma clase de error que cometió la auditoría con `n_tup_del`: **un comentario describe una
+intención, no un censo.**
 
-**Veredicto:** *no es cierto que la captura manual sea insustituible.* Lo es **mientras la decisión
-sobre SP-API siga como está**. Las opciones, por coste de arranque:
+**La verdad, medida:** `transacciones_movimientos` trae `tarifa_venta` y `tarifa_fba` **reales, de
+factura** — 13.146 movimientos de tipo `pedido` en ES, del 1-ene al 9-ago-2026. **160 de los 176
+del universo (90,9 %) tienen tarifa facturada en los últimos 3 meses.** Lo no vendido aún lo cubre
+`keepa_escaparate` con su estimación.
 
-1. **Fee Preview por buzón** — no toca SP-API, no roza la decisión cerrada, reutiliza el patrón de
-   procesador que ya existe ocho veces. **Es la que recomiendo mirar primero.**
-2. **SP-API Product Fees** — la buena de verdad (por ASIN y por precio, que es lo que hace falta
-   para el acantilado), pero exige reabrir una decisión cerrada.
-3. **Seguir a mano** — viable, pero entonces hay que planificarla contra los **176 del universo**,
-   empezando por los 66 de la banda 17–23 €.
+Así que **la captura manual nunca fue insustituible: el dato duro ya estaba en casa y nadie lo
+leía.** Lo que falla es que `productos` no bebe de ahí.
+
+📄 **El análisis completo —prelación, impacto producto a producto y el acantilado reconstruido desde
+las facturas— está en [`PRELACION_TARIFAS_11ago.md`](PRELACION_TARIFAS_11ago.md).** El titular:
+el problema **no es la comisión** (solo 6 de 176 cambian), es el **fee**: cambia en **152 de 176**,
+sube **+0,63 €** de media y deja el margen **3,54 puntos más bajo**, con **10 productos que parecen
+rentables y venden a pérdida**.
+
+> 🔴 **SP-API queda descartado y fuera de todo diseño.** Ni Moloka ni la app v2 se conectan a
+> SP-API bajo ningún concepto. No es una vía a valorar y no se vuelve a plantear.
 
 ### C4 · Comisiones de relleno — **VEREDICTO: el 0,1550 es un valor por defecto de un formulario**
 
@@ -632,14 +635,19 @@ un segundo `15.5` en [`index.html:7563`](index.html), pero ése solo pinta, no g
 valor por defecto de una caja de texto que se ha quedado grabado 307 veces.** Y es
 indistinguible de una medición real, porque en la base es un número como cualquier otro.
 
-**¿Hay vía para la comisión real por categoría?** Las mismas dos de C3 (la comisión sale del mismo
-sitio que la tarifa). Además, `keepa_escaparate.comision_pct` ya la trae para los ASIN con ficha
-Keepa — pero **en porcentaje**, no en fracción (doctrina 13). Es la trampa de escala del factor 100.
+**¿Hay vía para la comisión real?** Sí, y es la misma que la de la tarifa: **la factura**. La
+comisión nominal se despeja de `transacciones_movimientos` con la fórmula de la doctrina 44 y da
+picos limpios en 15,0 / 13,0 / 8,0 / 5,0. Ver [`PRELACION_TARIFAS_11ago.md`](PRELACION_TARIFAS_11ago.md).
 
-📌 **Arreglo barato e independiente, mientras se decide lo demás:** quitar el `'15.5'` de esa línea
-y dejar el campo **vacío**. Un hueco visible es infinitamente mejor que un número inventado que
-parece medido. No lo he tocado: es la v1, que está congelada (CLAUDE.md §0), y aunque es un cambio
-de un carácter, toca la operativa de Elena y hay que avisar antes.
+🔬 **Y ahí sale el matiz que salva y condena al relleno a la vez:** de los 160 con factura, **142
+están de verdad en el tramo del 15 %**. Como `15,0 × 1,03 = 15,45` y el relleno dice `15,50`, **se
+desvía 5 centésimas: acierta por casualidad en 142 de 160.** Pero en los 8 del tramo del 8 % y los
+3 del 5 % se desvía 7 y 10 puntos. **Es la peor forma de estar mal: acierta lo bastante para que
+nadie lo mire y falla justo donde duele.**
+
+✅ **ARREGLADO** en su propio PR ([#149](https://github.com/Moloka-Store/moloka-app/pull/149)): la
+caja nace **vacía** y obligatoria. Toca la v1 congelada, así que va aparte y **Elena tiene que estar
+avisada antes de desplegar** — el bloqueo muerde en las 99 fichas activas que hoy no tienen comisión.
 
 ### C5 · Dónde vive la fórmula, y si divergen — **SÍ DIVERGEN, y ya está documentado**
 
