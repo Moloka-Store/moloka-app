@@ -128,15 +128,32 @@ el histórico y no hay de dónde recuperarlo.
   **zona gris** de la 6.14: cuando la comparación no puede probar nada, para y pide un
   `forzar` en vez de dar un verde que no ha medido. 🔑 La regla de la que esto es un caso:
   **restar dos lecturas solo prueba algo si están cerca.**
-- ⚠️ **PENDIENTE — el criterio «una bajada de más de la mitad ABORTA» tiene un falso rojo
-  medido, y es una cancelación normal.** Un ASIN con **1 unidad** pedida que se cancela va de
-  1 a 0: **−100%**, y tira una carga buena. Medido el 11-ago-2026 sobre la última lectura de
-  cada país: en **FR el 9,7%** de las unidades vive en ASIN de una sola unidad (23 ASIN sobre
-  238 uds), en **IT el 6,1%**, en **ES el 0,2%**. O sea que en los países chicos **una de cada
-  diez cancelaciones** rechazaría un fichero bien exportado — el mismo falso rojo que ya
-  costó las dos versiones anteriores del criterio. El procesador lo GRITA cuando ocurre (dice
-  que puede ser falso rojo y enseña la cifra), pero **ponerle suelo o no es decisión de
-  Fernando y está sin cerrar.**
+- 🔴 **AMAZON RECALCULA PEDIDOS, NO TRÁFICO.** Es la regla que decide qué bajada significa
+  algo: una cancelación o una devolución mueve unidades y euros —es la vida normal de un
+  marketplace—, pero **nadie devuelve una visita**. Por eso el criterio de «desplome» de la
+  guarda 6.14 mira **solo visitas, sesiones y buybox_visiones**, y las seis de pedido quedan
+  fuera. *Medido el 11-ago-2026 sobre cuatro pares: en los tres buenos, CERO desplomes de
+  tráfico (el falso rojo de IT eran 2 bajadas, las DOS de pedido); en el malo, 610.*
+  🔒 **Y el suelo numérico se descartó CON DATOS, que es lo que lo hace una decisión y no un
+  gusto:** exigir 50 uds / 500 € para mirar una bajada dejaría exentas el **89,3%** de las
+  celdas de FR y el **78,4%** de las de IT (sobre las nueve columnas de la última lectura: FR
+  1.764 celdas, IT 1.008). Eso no es afinar un criterio, es **apagarlo con un número
+  inventado**. 🔑 La regla de la que esto es un caso: **un criterio se parte por la
+  NATURALEZA del dato, no por un umbral que valga para todo.**
+  ⚠️ **EL LÍMITE, que no está cerrado: no está probado que el tráfico no pueda bajar
+  legítimamente.** Una fusión de fichas o una depuración de tráfico inválido por parte de
+  Amazon lo harían. La evidencia son **3 pares buenos con cero y 1 malo con 610** — suficiente
+  para elegir, no para dar el asunto por zanjado. **Si un día salta un desplome de tráfico con
+  todo lo demás en orden, ÉSE es el caso a estudiar**, y lo que habría que cambiar entonces es
+  el criterio, no el fichero. El procesador lo dice así en el aborto.
+  📏 **Y hay que saber a CUÁNTO llega ese criterio, que no es a todo el catálogo.** Solo vigila
+  al ASIN que tenga alguna métrica de tráfico ≥100 en la lectura anterior. *Medido el
+  11-ago-2026 sobre la última lectura de cada país:* **ES 86,4%** de los ASIN (299/346),
+  **IT 71,1%** (91/128), **FR 37,2%** (73/196). O sea que **en FR el criterio 3 solo mira a 4
+  de cada 10 ASIN**: allí quien protege son el 2 y el 4. No es un fallo —por debajo de 100
+  visitas un porcentaje no significa nada—, pero sí algo que **hay que volver a mirar cuando
+  FR crezca**: la cobertura sube sola con el tráfico, y conviene saber cuándo deja de ser un
+  país a medio vigilar.
 - ⚠️ **PENDIENTE — el agujero «VIEJA DETRÁS DE NUEVA».** Los criterios que comparan con la
   lectura anterior solo miran **hacia adelante** (`leido_at > ref_cual`). Una lectura ANTERIOR
   a la última cargada solo la ve la guarda 6.8, que **grita y sigue**. *Medido el 10-ago-2026
@@ -550,6 +567,21 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   los mensajes de commit si las usas en Bash. Comandos de una línea, sintaxis Bash.
 - **`workflow_dispatch` exige que el `.yml` esté en la rama por defecto.** Orden forzoso:
   fichero → merge → ensayo.
+- 🔴 **EL ID DE UN RUN SE TOMA DE LA URL QUE IMPRIME EL DISPATCH, JAMÁS DE
+  `gh run list --limit 1`.** El run recién creado tarda unos segundos en registrarse, así que
+  "el último de la lista" puede ser **el ANTERIOR** — y como ése suele estar en `success`,
+  `gh run watch` vuelve al instante y da por bueno un trabajo que **todavía no ha empezado**.
+  Es un verde prestado, hermano de los dos de §3.
+  *Medido el 11-ago-2026: di por aplicado un andamio de staging leyendo el run de 25 minutos
+  antes. Se cazó porque la comprobación por SQL no cuadraba con lo que decía el log.*
+  `gh workflow run` (v2.96.0, la de esta máquina) **sí imprime la URL del run creado**, y de
+  ahí sale el id:
+  ```bash
+  URL=$(gh workflow run X.yml -f entorno=staging 2>&1 | head -1); ID=${URL##*/}
+  ```
+  Si algún día no la imprimiera, la salida es acotar por `--branch` o `--created`, **nunca**
+  "el último". Y la regla de fondo es la de siempre: la verificación es SQL contra la base, no
+  el log — y menos aún el log de otro run.
 - **En un `.yml`, un `no` suelto es el BOOLEANO `false`, no la cadena "no"** (el "problema de
   Noruega": `NO` = Norway). *Medido el 11-ago-2026 sobre
   `procesar-custom-analytics.yml`: `options: [no, si]` de un input se lee `[False, 'si']`.*
