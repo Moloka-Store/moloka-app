@@ -117,17 +117,37 @@ el histórico y no hay de dónde recuperarlo.
   *Medido el 10-ago-2026: un export con rango corto (`metric-data (14)`) traía 246 ASIN
   contra los 321 de la lectura anterior y 1.583 bajadas sobre 2.214 comparaciones — un ASIN
   cualquiera pasaba de 35.400 visitas a 428.* La red que lo caza es la **guarda 6.14** del
-  procesador, que ABORTA si el contador retrocede **en bloque**; pero la red no sustituye a
-  la regla, que es de quien exporta.
-- ⚠️ **PENDIENTE — el agujero «VIEJA DETRÁS DE NUEVA».** La guarda 6.14 solo compara **hacia
-  adelante** (`leido_at > ref_cual`). Una lectura ANTERIOR a la última cargada solo la ve la
-  guarda 6.8, que **grita y sigue**. *Medido el 10-ago-2026 (run 31416925455):
-  `CA_ES_02ago_DISCONTINUO.xlsx` —un retroceso global de verdad, 246 ASIN contra 321 y 1.583
-  bajadas— pasó el ensayo ENTERO sin que nada lo parase.* Si entrara, quedaría intercalada
-  entre el 1-ago y el 7-ago, y el `lag()` de `v_demanda_asin_ultima` calcularía **7-ago menos
-  2-ago**: un delta falso enorme. Hasta que se cierre, **el orden de carga es responsabilidad
-  de quien lanza y nadie lo comprueba por él** (la descripción del input del workflow
-  prometía lo contrario y se corrigió el 10-ago-2026).
+  procesador, que ABORTA cuando el retroceso tiene la firma de otro rango; pero la red no
+  sustituye a la regla, que es de quien exporta. *(Los criterios exactos viven en el código
+  y en el `.yml` —van por la tercera versión en dos días—, no aquí: una nota con el criterio
+  dentro se queda mintiendo en una semana.)*
+- 🔬 **Y la red tiene un punto ciego MEDIDO: si la lectura de referencia se queda muy por
+  detrás, un fichero de otro rango SUBE EN TODO y pasa por bueno.** No es una hipótesis: la
+  pareja `2-ago DISCONTINUO → 7-ago` da **0 bajadas sobre 2.214 y las nueve métricas
+  subiendo** — la misma firma exacta que una carga limpia (medido el 11-ago-2026). De ahí la
+  **zona gris** de la 6.14: cuando la comparación no puede probar nada, para y pide un
+  `forzar` en vez de dar un verde que no ha medido. 🔑 La regla de la que esto es un caso:
+  **restar dos lecturas solo prueba algo si están cerca.**
+- ⚠️ **PENDIENTE — el criterio «una bajada de más de la mitad ABORTA» tiene un falso rojo
+  medido, y es una cancelación normal.** Un ASIN con **1 unidad** pedida que se cancela va de
+  1 a 0: **−100%**, y tira una carga buena. Medido el 11-ago-2026 sobre la última lectura de
+  cada país: en **FR el 9,7%** de las unidades vive en ASIN de una sola unidad (23 ASIN sobre
+  238 uds), en **IT el 6,1%**, en **ES el 0,2%**. O sea que en los países chicos **una de cada
+  diez cancelaciones** rechazaría un fichero bien exportado — el mismo falso rojo que ya
+  costó las dos versiones anteriores del criterio. El procesador lo GRITA cuando ocurre (dice
+  que puede ser falso rojo y enseña la cifra), pero **ponerle suelo o no es decisión de
+  Fernando y está sin cerrar.**
+- ⚠️ **PENDIENTE — el agujero «VIEJA DETRÁS DE NUEVA».** Los criterios que comparan con la
+  lectura anterior solo miran **hacia adelante** (`leido_at > ref_cual`). Una lectura ANTERIOR
+  a la última cargada solo la ve la guarda 6.8, que **grita y sigue**. *Medido el 10-ago-2026
+  (run 31416925455): `CA_ES_02ago_DISCONTINUO.xlsx` —246 ASIN contra 321 y 1.583 bajadas—
+  pasó el ensayo ENTERO sin que nada lo parase.* Si entrara, quedaría intercalada entre el
+  1-ago y el 7-ago, y el `lag()` de `v_demanda_asin_ultima` calcularía **7-ago menos 2-ago**:
+  un delta falso enorme. El 11-ago-2026 se le quitó **una esquina, no el agujero**: el
+  criterio de los acumulados negativos mide el FICHERO y no la comparación, así que corre en
+  cualquier orden y ese DISCONTINUO ya no pasaría (trae dos negativos). Un export de otro
+  rango **sin** negativos sigue colándose: **el orden de carga es responsabilidad de quien
+  lanza y nadie lo comprueba del todo por él.**
 - 🔴 **EL CONTADOR SE REINICIA EL 1-ENE-2027, Y ESE DÍA FALLA SEGURO.** Es la consecuencia
   directa de la regla de arriba: «Desde el inicio de año» tiene el **inicio fijo en el 1 de
   enero**, así que el 1-ene-2027 el acumulado vuelve a cero. Entonces:
@@ -530,6 +550,11 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   los mensajes de commit si las usas en Bash. Comandos de una línea, sintaxis Bash.
 - **`workflow_dispatch` exige que el `.yml` esté en la rama por defecto.** Orden forzoso:
   fichero → merge → ensayo.
+- **En un `.yml`, un `no` suelto es el BOOLEANO `false`, no la cadena "no"** (el "problema de
+  Noruega": `NO` = Norway). *Medido el 11-ago-2026 sobre
+  `procesar-custom-analytics.yml`: `options: [no, si]` de un input se lee `[False, 'si']`.*
+  Las opciones y los defaults de texto van **entrecomillados**. Vale para `on`, `off`, `yes`,
+  `y`, `n` y las variantes en mayúsculas.
 - **Los commits de este repo se firman con la dirección noreply de GitHub.** El repo es PÚBLICO:
   no publiques correos reales en la historia. La identidad está en `git config --local`, nunca
   `--global`.

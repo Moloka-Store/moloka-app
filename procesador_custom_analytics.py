@@ -98,6 +98,18 @@ MODO          = os.environ.get('MODO', 'ensayo').strip().lower()       # ensayo 
 ENTORNO       = os.environ.get('ENTORNO', 'staging').strip().lower()   # staging | produccion
 PAIS          = os.environ.get('PAIS', '').strip().upper()             # ES | IT | FR (selector)
 FICHERO       = os.environ.get('FICHERO', '').strip()                  # nombre EXACTO; vacío = más reciente
+# 🔴 FORZAR: la salida de la ZONA GRIS de la guarda 6.14, y NADA MÁS. Zona gris = la
+#   comparación contra la lectura anterior no puede probar nada (quedan cuatro ASIN
+#   comunes, o la referencia es de hace meses). Entonces la guarda no dice "esto está
+#   mal": dice "no lo sé", aborta, y pide que un humano lo mire y relance.
+# 🔒 LO QUE **NO** LEVANTA, y por eso es seguro que exista: los cuatro criterios de
+#   aborto duro (negativos, ≥5% de bajadas, un desplome de más de la mitad, las nueve
+#   métricas a la vez). Esos son EVIDENCIA de que el fichero es de otra cosa, y un
+#   interruptor que apague la evidencia convierte la guarda en una sugerencia.
+#   Un `forzar` que valga para todo es un `ON_ERROR_STOP=0` con otro nombre (§3).
+# Vacío = 'no'. Lo manda el .yml; la app de Elena no lo manda y no le hace falta:
+#   `workflow_dispatch` aplica el default del propio fichero.
+FORZAR        = os.environ.get('FORZAR', 'no').strip().lower() in ('si', 'sí', 'yes', 'true', '1')
 # (Aquí se leían PERIODO_DESDE y PERIODO_HASTA, obsoletos desde el modelo contador y
 #  borrados el 10-ago-2026 al cerrarse la secuencia de tres pasos: primero el procesador
 #  dejó de usarlos y lo dijo en el log, luego la ficha de moloka-app-v2 dejó de mandarlos,
@@ -119,6 +131,41 @@ PAISES_VALIDOS = ('ES', 'IT', 'FR')
 #   modelo contador todavía no ha ocurrido. Es la duda de diseño de este PR: se anota
 #   aquí y se decide en frío cuando haya dos lecturas reales que mirar.
 DIAS_MIN_CRUCE_PAIS = 30
+
+# ---------------------------------------------------------------------------
+# Guarda 6.14 · los tres números de la ZONA GRIS. No son umbrales de aborto: son la
+# línea a partir de la cual la comparación DEJA DE PROBAR NADA y hay que llamar a un
+# humano. Los tres se explican enteros aquí para que nadie tenga que adivinar de dónde
+# salieron — que es la mitad de §3 de CLAUDE.md.
+# ---------------------------------------------------------------------------
+# 🔴 EL CORTE DE DÍAS, Y DE DÓNDE SALE (11-ago-2026). Es el único de los tres que no es
+#   una cuenta redonda del encargo, así que va con su derivación completa. La banda está
+#   MEDIDA por los dos extremos; el número de dentro es una línea convencional, y decirlo
+#   es parte del trabajo:
+#     · SUELO 1 — la cadencia real de la serie: **8 días**. Es el único hueco que existe
+#       hoy en `demanda_asin` de producción (ES: 30-jul 18:06 → 7-ago 18:03 = 7 d 23 h
+#       57 m). FR e IT tienen una sola lectura, así que no aportan hueco.
+#     · SUELO 2 — el retraso del panel: **9 días** (medido el 10-ago-2026: "datos
+#       disponibles hasta el 1/8/2026"). Por debajo de eso dos lecturas pueden traer
+#       cifras IDÉNTICAS sin que pase nada raro — de eso ya se ocupa la guarda 6.15.
+#       El corte tiene que quedar MUY por encima de 9 o gritaría en la operativa normal.
+#     · TECHO — los **92 días** del «Custom date range» del panel (§2 de CLAUDE.md). Es
+#       el único límite duro de lo que puede contener un fichero exportado con otro rango.
+#       Con un hueco de ese orden, una ventana pirata acumula tanto como la referencia y
+#       las cuatro pruebas de abajo dejan de distinguir una cosa de la otra.
+#       🔬 Y esto NO es teoría, está medido: `2-ago_DISCONTINUO → 7-ago` da **0 bajadas
+#       sobre 2.214 y las 9 métricas subiendo** — o sea, la misma firma exacta que una
+#       carga buena. Cuando la referencia se queda muy por detrás en acumulado, cualquier
+#       fichero pasa por bueno. Ése es el agujero que este corte tapa a medias.
+#     · 31 = un mes natural, dentro de la banda 9…92. Casi 4× la cadencia observada (cabe
+#       una avería o unas vacaciones sin molestar a nadie) y un tercio del techo.
+# 🔒 Lo que hace barato equivocarse por lo bajo: NO tira la carga. Pide un `forzar`, o
+#   sea un clic y un humano mirando. Por eso se elige el lado prudente de la banda.
+CORTE_REF_DIAS = 31
+# Los otros dos son del encargo del 11-ago-2026, tal cual: con menos ASIN comunes que
+# esto, los totales se calculan sobre cuatro filas y "suben" no significa nada.
+MIN_ASIN_COMUNES     = 20      # absoluto: por debajo, no hay muestra
+MIN_FRACCION_COMUNES = 0.30    # relativo a la lectura anterior
 
 # ---------------------------------------------------------------------------
 # Las 18 columnas medidas (§3.1). canon → cabecera NORMALIZada (sin acentos, minúsculas,
@@ -1027,6 +1074,7 @@ def inventario_lecturas(sb, xlsxs, pais, cur):
 def main():
     print("=== PROCESADOR CUSTOM ANALYTICS (DEMANDA · PELÍCULA DE LECTURAS) ===", flush=True)
     print(f"MODO: {MODO}  ·  ENTORNO: {ENTORNO}  ·  PAIS: {PAIS or '(sin selector)'}  ·  "
+          f"FORZAR: {'SÍ' if FORZAR else 'no'}  ·  "
           f"fecha del dato: la trae el fichero (leido_at)", flush=True)
     print("=" * 60, flush=True)
 
@@ -1297,23 +1345,105 @@ def main():
     # 🔒 ABORTA, no grita. Un acumulado que baja no es un dato incompleto: es un dato de
     #   OTRA cosa, y mezclado con la serie la envenena en silencio — que es justo lo que §1.4
     #   de CLAUDE.md dice de un informe caducado.
-    # 🔒 Solo se aplica hacia ADELANTE (leido_at posterior a la referencia). Cargar una
-    #   lectura anterior a la última ya la avisa la guarda 6.8, y compararlas al revés daría
-    #   bajadas falsas por construcción.
-    if ref_cual is not None and leido_at > ref_cual:
+    #
+    # 🔴 EL CRITERIO ES DE FERNANDO (11-ago-2026) Y ES EL TERCERO QUE SE ESCRIBE. Los dos
+    #   anteriores fallaron por el MISMO sitio —confundir "ha bajado algo" con "este
+    #   fichero es de otra cosa"—, y dejarlo escrito es lo que evita que vuelva el cuarto:
+    #     · v1 «CUALQUIER bajada aborta» → rechazó una carga BUENA de IT en producción
+    #       (run 31416495261) por DOS bajadas sobre 1.008: un solo ASIN, 9→8 unidades y
+    #       19,99 € menos. O sea UNA CANCELACIÓN, la vida normal de un marketplace.
+    #     · v2 «cualquier TOTAL acumulado que baje aborta» → el mismo falso rojo un piso
+    #       más arriba: en un país pequeño, tres cancelaciones de 24,99 € hunden el total
+    #       de facturación mientras las otras ocho métricas suben. Fue el fallo 3 de la
+    #       revisión adversarial del 10-ago, y por eso este PR no se fusionó esa noche.
+    #   v3 = CUATRO criterios de aborto DURO + una ZONA GRIS. ABORTA si CUALQUIERA:
+    #     1. algún acumulado viene NEGATIVO            (mide el FICHERO: no usa referencia)
+    #     2. ≥5% de las comparaciones ASIN×métrica bajan
+    #     3. alguna bajada se lleva MÁS DE LA MITAD del valor anterior
+    #     4. bajan las NUEVE métricas acumuladas a la vez
+    #   🔒 Ninguno de los cuatro es "algún total baja". Ése se ha ido A PROPÓSITO: era el
+    #   fallo 3, y volver a meterlo "por si acaso" reabre el falso rojo de los países
+    #   chicos. Si alguien lo echa de menos, el criterio 4 es su versión que sí distingue.
+    #
+    # 🔬 CALIBRADO CONTRA LOS FICHEROS REALES, no a ojo (§3 de CLAUDE.md). Las cuatro
+    #   parejas que se pueden medir hoy, medidas el 11-ago-2026:
+    #     pareja                                   bajadas       %    totales    neg → veredicto
+    #     ES 30-jul → 7-ago             (buena)      0/2.889   0,0%  9/9 suben   0    CARGA
+    #     IT 30-jul → metric-data (1)   (buena)      2/1.008   0,2%  9/9 suben   0    CARGA
+    #     ES 30-jul → 2-ago DISCONTINUO (MALA)   1.583/2.214  71,5%  9/9 BAJAN   2    ABORTA
+    #     ES 2-ago DISCONTINUO → 7-ago               0/2.214   0,0%  9/9 suben   0    ZONA GRIS
+    #   Entre la peor carga BUENA (0,2%) y el fichero MALO (71,5%) hay dos órdenes de
+    #   magnitud: el 5% cae en medio y no hay nada cerca por ninguno de los dos lados.
+    #   La primera fila está contrastada por la OTRA VÍA, en SQL contra la base y no por
+    #   el log: 2.889 comparaciones, 321 ASIN comunes, 0 bajadas, 0 desplomes, 0 totales
+    #   que bajen. Los dos negativos del fichero malo son `facturacion_pedida_eur`:
+    #   B0D19B54F2 = −12,90 y B07N5XFFS3 = −22,99. Y el mínimo de las NUEVE columnas en
+    #   las CUATRO lecturas buenas de producción es 0 — nunca negativo. Por eso el
+    #   criterio 1 vale y por eso NO necesita referencia: un acumulado desde el 1-ene no
+    #   puede ser negativo, pero una ventana que empieza tarde sí (recoge la devolución de
+    #   un pedido anterior a su propio inicio). El negativo no es un error de Amazon: es
+    #   LA FIRMA de que el fichero empieza a contar en otra fecha.
+    #
+    # ⚠️ EL COSTE MEDIDO DEL CRITERIO 3, dicho aquí porque nadie va a ir a buscarlo.
+    #   "Más de la mitad" sobre un valor de 1 es una cancelación cualquiera: 1 → 0 es un
+    #   −100%. Medido el 11-ago-2026 sobre la última lectura de cada país:
+    #     · FR: 23 ASIN con exactamente 1 unidad pedida = 9,7% de sus 238 unidades
+    #     · IT: 23 ASIN con 1 unidad = 6,1% de sus 380 unidades
+    #     · ES: 21 ASIN con 1 unidad = 0,2% de sus 13.768 unidades
+    #   O sea: en FR, alrededor de UNA de cada DIEZ cancelaciones cae sobre un ASIN de una
+    #   sola unidad y ABORTA una carga buena. Es el mismo falso rojo que costó las dos
+    #   versiones anteriores, ahora acotado a los países chicos y a los ASIN de calderilla.
+    #   Está implementado TAL COMO SE PIDIÓ —el criterio es de Fernando, no se calibra de
+    #   madrugada— y el log GRITA cuando el aborto sale de una cifra así, para que la
+    #   decisión de ponerle un suelo se tome con el caso delante y no de memoria.
+    #
+    # 🔒 LA ZONA GRIS: cuando la comparación NO PUEDE PROBAR NADA, la guarda no dice "esto
+    #   está mal", dice "no lo sé". Aborta y pide relanzar con `forzar`. Tres motivos, los
+    #   tres con su número derivado arriba (CORTE_REF_DIAS, MIN_ASIN_COMUNES,
+    #   MIN_FRACCION_COMUNES). Es la respuesta a los fallos 1 y 2 de la revisión: con
+    #   cuatro ASIN comunes los totales se calculan sobre cuatro filas y "suben" no
+    #   significa nada, y con una referencia de hace meses un export de otro rango puede
+    #   SUBIR en todo (medido: 2-ago DISCONTINUO → 7-ago da 0 bajadas y 9/9 subiendo).
+    # 🔒 `forzar` NO levanta los cuatro criterios duros. Sería un `ON_ERROR_STOP=0` con
+    #   otro nombre: apagar la evidencia en vez de mirarla.
+    # 🔒 Los criterios 2, 3 y 4 solo se aplican hacia ADELANTE (leido_at posterior a la
+    #   referencia). Cargar una lectura anterior a la última ya la avisa la guarda 6.8, y
+    #   compararlas al revés daría bajadas falsas por construcción. El criterio 1 NO
+    #   depende de eso —mide el fichero—, así que también caza un DISCONTINUO metido por
+    #   detrás: es la única parte del agujero «vieja detrás de nueva» que este PR tapa.
+    #
+    # 🔒 Y SE MIDE TODO ANTES DE DECIDIR NADA, aunque el criterio 1 por sí solo ya baste
+    #   para abortar. Si el primer criterio que salta cortase la ejecución, el log del día
+    #   malo enseñaría UNA línea y las otras tres sin medir — y entonces el veredicto no
+    #   se puede comprobar, que es exactamente el defecto que este PR viene a quitar.
+    #   Medir es barato: dos diccionarios en memoria sobre un fichero ya leído entero.
+
+    # ── LA MEDICIÓN ────────────────────────────────────────────────────────────
+    # CRITERIO 1 · NINGÚN ACUMULADO NEGATIVO. Mide el FICHERO: corre siempre.
+    negativos = [(r['asin'], col, r.get(col))
+                 for r in datos for col in COLS_ACUMULADAS
+                 if r.get(col) is not None and float(r.get(col)) < 0]
+
+    # CRITERIOS 2, 3 y 4 · CONTRA LA LECTURA ANTERIOR. Solo hacia adelante.
+    hay_ref = ref_cual is not None and leido_at > ref_cual
+    bajadas, desplomes, faltan_asin, gris = [], [], [], []
+    if hay_ref:
         cur.execute(
             "SELECT asin, " + ", ".join(COLS_ACUMULADAS) + " FROM demanda_asin "
             " WHERE pais=%s AND leido_at=%s;", (PAIS, ref_cual))
         previo = {r[0]: r[1:] for r in cur.fetchall()}
         nuevo = {r['asin']: r for r in datos}
+        comunes = set(previo) & set(nuevo)
         faltan_asin = sorted(set(previo) - set(nuevo))
-        bajadas = []
-        for asin, vals in previo.items():
-            fila_nueva = nuevo.get(asin)
-            if fila_nueva is None:
-                continue
+        comparadas = len(comunes) * len(COLS_ACUMULADAS)
+        hueco_dias = (leido_at - ref_cual).total_seconds() / 86400.0
+
+        for asin in sorted(comunes):
+            vals, fila_nueva = previo[asin], nuevo[asin]
             for i, col in enumerate(COLS_ACUMULADAS):
                 va, vn = vals[i], fila_nueva.get(col)
+                if va is None or vn is None:
+                    continue
                 # 🔴 float(...) EN LOS DOS LADOS, Y NO ES UNA COMPARACIÓN INOCENTE.
                 #   La base devuelve `numeric` como Decimal EXACTO y el .xlsx da float
                 #   BINARIO. En Python `43.98 < Decimal('43.98')` es True, porque el float
@@ -1326,139 +1456,238 @@ def main():
                 #   🔒 Se descubrió porque el inventario contó 1.583 bajadas y la guarda
                 #   1.605 sobre la MISMA pareja. Veintidós de diferencia, y explicarlas al
                 #   dígito (§1.3) es lo que destapó el bug.
-                if va is not None and vn is not None and float(vn) < float(va):
-                    bajadas.append((asin, col, va, vn))
-        comunes = set(previo) & set(nuevo)
-        comparadas = len(comunes) * len(COLS_ACUMULADAS)
+                fa, fn = float(va), float(vn)
+                if fn >= fa:
+                    continue
+                # CRITERIO 3: qué PARTE del valor anterior se lleva la bajada. Con el
+                # anterior en 0 no hay proporción que calcular —bajar de 0 es irse a
+                # negativo— y de eso ya se ocupa el criterio 1: cuenta como desplome.
+                frac = (fa - fn) / fa if fa > 0 else 1.0
+                bajadas.append((asin, col, va, vn, frac))
 
-        if faltan_asin or bajadas:
-            # 🔴 EL DIAGNÓSTICO SE CALCULA, NO SE SUPONE. Hasta el 10-ago-2026 esta guarda
-            #   abortaba por CUALQUIER bajada y culpaba siempre al periodo del export:
-            #   "LA CAUSA CASI SEGURA: este .xlsx se exportó con OTRO PERIODO". Ese día
-            #   rechazó una carga BUENA de IT por DOS bajadas sobre 1.008 comparaciones
-            #   —un solo ASIN, unidades_pedidas 9→8 y facturacion 188,14→168,15, o sea
-            #   19,99 € con una unidad menos: UNA CANCELACIÓN— y mandó a Fernando a repetir
-            #   una descarga que estaba bien hecha.
-            #   Lo que lo hace evitable: la hipótesis era comprobable EN EL MISMO SITIO. El
-            #   propio procesador había impreso los totales cinco segundos antes y TODOS
-            #   subían (visitas 53.586→61.241, sesiones 42.153→48.243, uds 380→493). Con
-            #   otro rango habrían bajado todos. Un mensaje que da por segura una causa sin
-            #   medirla hace perder el mismo tiempo que un verde falso.
-            #
-            # LOS DOS CASOS, que son distintos y ya no se tratan igual:
-            #   · RETROCESO GLOBAL  → los TOTALES acumulados bajan (o desaparece un montón
-            #     de ASIN). Eso sí huele a otro rango: la serie se rompería. ABORTA.
-            #   · RETROCESO PUNTUAL → los totales SUBEN y bajan unos pocos ASIN. Eso es
-            #     Amazon recalculando por cancelaciones o devoluciones: la vida normal de
-            #     un marketplace. GRITA con la lista, y CARGA.
-            # 🔒 Y lo que cierra el argumento para cargar: `v_demanda_asin_ultima` YA
-            #   protege aguas abajo. Su `CASE WHEN visitas >= visitas_ant … ELSE NULL`
-            #   devuelve NULL en vez de un delta negativo (verificado el 10-ago-2026 leyendo
-            #   la definición en producción). Cargar una lectura con bajadas puntuales NO
-            #   puede producir una resta negativa: la vista ya sabe qué hacer con ellas.
-            #   La guarda estaba abortando por algo que ya estaba resuelto más abajo.
-            tot_antes, tot_ahora = {}, {}
-            for i, col in enumerate(COLS_ACUMULADAS):
-                # 🔴 float() en los DOS lados, por lo mismo que en la comparación de arriba:
-                #   la base da Decimal y el .xlsx float binario (§2 de CLAUDE.md).
-                tot_antes[col] = sum(float(previo[a][i])
-                                     for a in comunes if previo[a][i] is not None)
-                tot_ahora[col] = sum(float(nuevo[a].get(col))
-                                     for a in comunes if nuevo[a].get(col) is not None)
-            # Medio céntimo de holgura: sumar floats no da exacto, y un 1e-10 de ruido no
-            # es un retroceso. Sin esto, la guarda nueva heredaría el bug de la vieja.
-            totales_abajo = [c for c in COLS_ACUMULADAS
-                             if tot_ahora[c] < tot_antes[c] - 0.005]
-            pct_faltan = (len(faltan_asin) / len(previo) * 100.0) if previo else 0.0
-            # 🔴 EL CRITERIO ES SOLO LOS TOTALES, y la decisión de quitar la otra mitad
-            #   queda dicha aquí porque el encargo pedía dejarla dicha.
-            #   La primera versión también abortaba si desaparecía más del 5% de los ASIN
-            #   (umbral heredado del encargo v3 §4.1, de cuando NO existía la prueba de
-            #   totales). Se ha quitado, por dos motivos:
-            #   1) Es redundante. Un export de otro rango baja los totales sobre los ASIN
-            #      comunes SIEMPRE — es lo que significa cubrir menos tiempo. El caso real
-            #      medido (246 ASIN contra 321) baja las nueve métricas: lo caza el total.
-            #   2) Es un generador de falsos rojos, que es justo el patrón que llevamos dos
-            #      días persiguiendo. Un país con 112 ASIN donde Amazon retira 8 listings
-            #      (7,1%) y todo lo demás crece abortaría la carga sin que pase nada malo.
-            #   Los ASIN que desaparecen se siguen GRITANDO abajo, y son inofensivos para
-            #   la serie: `v_demanda_asin_ultima` va por (pais, asin) con rn=1, así que su
-            #   última lectura conocida se queda donde está y no se inventa ningún delta.
-            es_global = bool(totales_abajo)
+        desplomes = [b for b in bajadas if b[4] > 0.50]
+        pct_bajadas = (100.0 * len(bajadas) / comparadas) if comparadas else 0.0
+        peor = max((b[4] for b in bajadas), default=0.0)
+        pct_comunes = (100.0 * len(comunes) / len(previo)) if previo else 0.0
 
-            print(f"\n[Guarda 6.14] La lectura de {PAIS} ({leido_at}) trae retrocesos "
-                  f"contra la anterior ({ref_cual}). Mirando qué clase de retroceso es:",
+        tot_antes, tot_ahora = {}, {}
+        for i, col in enumerate(COLS_ACUMULADAS):
+            # 🔴 float() en los DOS lados, por lo mismo que en la comparación de arriba:
+            #   la base da Decimal y el .xlsx float binario (§2 de CLAUDE.md).
+            tot_antes[col] = sum(float(previo[a][i])
+                                 for a in comunes if previo[a][i] is not None)
+            tot_ahora[col] = sum(float(nuevo[a].get(col))
+                                 for a in comunes if nuevo[a].get(col) is not None)
+        # Medio céntimo de holgura: sumar floats no da exacto, y un 1e-10 de ruido no
+        # es un retroceso. Sin esto, el criterio 4 heredaría el bug de la guarda vieja.
+        totales_abajo = [c for c in COLS_ACUMULADAS
+                         if tot_ahora[c] < tot_antes[c] - 0.005]
+        todas_abajo = len(totales_abajo) == len(COLS_ACUMULADAS)
+
+        # ZONA GRIS: ¿puede esta comparación probar algo?
+        if len(comunes) < MIN_ASIN_COMUNES:
+            gris.append(f"solo hay {len(comunes)} ASIN comunes con la lectura anterior "
+                        f"(el mínimo para que la comparación signifique algo es "
+                        f"{MIN_ASIN_COMUNES})")
+        if previo and len(comunes) < MIN_FRACCION_COMUNES * len(previo):
+            gris.append(f"los {len(comunes)} ASIN comunes son solo el {pct_comunes:.1f}% "
+                        f"de los {len(previo)} de la lectura anterior (mínimo "
+                        f"{MIN_FRACCION_COMUNES * 100:.0f}%)")
+        if hueco_dias > CORTE_REF_DIAS:
+            gris.append(f"la lectura de referencia es de hace {hueco_dias:.0f} días "
+                        f"(el corte son {CORTE_REF_DIAS}, un mes)")
+
+    # ── LA MEDICIÓN, IMPRESA SIEMPRE ───────────────────────────────────────────
+    # 🔒 Se imprime CARGUE O NO CARGUE, y aunque no haya una sola bajada. El motivo no es
+    #   adorno: hasta el 10-ago-2026 esta guarda afirmaba una causa ("se exportó con OTRO
+    #   PERIODO") que NO había medido, y era falsa — el propio procesador había impreso
+    #   cinco segundos antes unos totales que subían todos. Un mensaje que da por segura
+    #   una causa sin medirla hace perder el mismo tiempo que un verde falso. Con la tabla
+    #   delante, el veredicto se COMPRUEBA en vez de creerse.
+    if hay_ref:
+        print(f"\n[Guarda 6.14] Comparación de {PAIS} contra la lectura anterior "
+              f"({ref_cual}): hueco de {hueco_dias:.1f} días.", flush=True)
+        print(f"   · TOTALES acumulados sobre los {len(comunes)} ASIN comunes:", flush=True)
+        for col in COLS_ACUMULADAS:
+            flecha = "BAJA" if col in totales_abajo else "sube/igual"
+            print(f"        · {col}: {tot_antes[col]:g} → {tot_ahora[col]:g}  [{flecha}]",
                   flush=True)
-            if faltan_asin:
-                print(f"   · {len(faltan_asin)} ASIN de la lectura anterior NO vienen en "
-                      f"ésta ({pct_faltan:.1f}% de {len(previo)}). "
-                      f"Ejemplos: {faltan_asin[:5]}", flush=True)
-            if bajadas:
-                # 🔒 LA LISTA VA ENTERA, no truncada a 8. Antes decía "… y N más" y eso es
-                #   media prueba: si la carga se acepta con bajadas, el log es el ÚNICO
-                #   sitio donde queda constancia de CUÁLES eran. Un aviso incompleto sobre
-                #   un dato que entra en la base no sirve para auditarlo después.
-                print(f"   · {len(bajadas)} bajadas sobre {comparadas} comparaciones "
-                      f"ASIN×métrica acumulada (lista COMPLETA):", flush=True)
-                for asin, col, va, vn in bajadas:
-                    print(f"        · {asin} · {col}: {va} → {vn}", flush=True)
-            # LA MEDICIÓN que decide, impresa siempre: que se vea en qué se basa el fallo.
-            print(f"   · TOTALES acumulados sobre los {len(comunes)} ASIN comunes "
-                  f"(esto es lo que distingue un caso del otro):", flush=True)
-            for col in COLS_ACUMULADAS:
-                flecha = "BAJA" if col in totales_abajo else "sube/igual"
-                print(f"        · {col}: {tot_antes[col]:g} → {tot_ahora[col]:g}  [{flecha}]",
-                      flush=True)
+    else:
+        motivo_sin_ref = ("es la primera lectura de este país"
+                          if ref_cual is None else
+                          f"esta lectura NO es posterior a la última de {PAIS} "
+                          f"({ref_cual}); de eso avisa la guarda 6.8, que grita y sigue")
+        print(f"\n[Guarda 6.14] Sin comparación: {motivo_sin_ref}. Los criterios 2, 3 y 4 "
+              f"no se pueden medir; el 1 sí, porque mide el fichero.", flush=True)
 
-            if es_global:
-                # El motivo se arma aparte y no dentro del f-string: esta rama solo corre
-                # el día que haya un retroceso global de verdad, y un condicional anidado
-                # en una f-string es justo donde se esconde un bug que nadie ve hasta
-                # entonces. Legible > compacto cuando el código tarda meses en ejecutarse.
-                motivos = []
-                if totales_abajo:
-                    motivos.append("bajan los totales de " + ", ".join(totales_abajo))
-                if pct_faltan > 5.0:
-                    motivos.append(f"falta el {pct_faltan:.1f}% de los ASIN")
-                print(f"\n❌ ABORTA (no se ha escrito nada):\n"
-                      f"[Guarda 6.14 · RETROCESO GLOBAL] No es un recálculo puntual: "
-                      f"{' y '.join(motivos)}. Un contador acumulado no mengua en bloque.",
-                      flush=True)
-                print("   🔑 CAUSA MÁS PROBABLE, y ahora sí está medida: este .xlsx se "
-                      "exportó con OTRO RANGO. El panel deja elegir (hay un 'Custom date "
-                      "range' con tope de 92 días) y esta cañería SOLO admite «Desde el "
-                      "inicio de año» — inicio 1-ene fijo, fin móvil.\n"
-                      "   Vuelve al Seller, pon «Desde el inicio de año», re-exporta y "
-                      "sube ese.", flush=True)
-                # 🔴 …SALVO EN ENERO. A partir del 1-ene-2027 la causa de arriba puede ser
-                #   la equivocada, y mandar a re-exportar con el MISMO periodo no arreglaría
-                #   nada. «Desde el inicio de año» tiene el inicio FIJO en el 1 de enero: el
-                #   contador se reinicia a cero, y la primera lectura del año nuevo es
-                #   legítimamente MENOR que la última del anterior. Abortar está bien —esa
-                #   resta sería basura—, pero el diagnóstico es otro. Ver §2 de CLAUDE.md.
-                # `ref_cual` no puede ser None aquí: lo garantiza el `if` que abre el bloque.
-                if leido_at.year != ref_cual.year:
-                    print(f"   ⚠️ OJO, HAY OTRA CAUSA POSIBLE Y AQUÍ ENCAJA: la lectura "
-                          f"anterior es de {ref_cual.year} y esta de {leido_at.year}. El "
-                          f"contador se REINICIA cada 1 de enero, así que esto puede ser el "
-                          f"reinicio y no un fichero mal exportado. NO la fuerces: la resta "
-                          f"entre dos años distintos no significa nada. Es el caso escrito "
-                          f"en §2 de CLAUDE.md, pendiente de que el modelo guarde el año de "
-                          f"acumulación.", flush=True)
-                con.rollback(); cur.close(); con.close(); sys.exit(1)
+    print(f"   · LOS CUATRO CRITERIOS, con la cifra en que se basa cada uno:", flush=True)
+    print(f"        1 · valores negativos en el fichero ... {len(negativos)}/"
+          f"{len(datos) * len(COLS_ACUMULADAS)}   (aborta con ≥1)", flush=True)
+    if hay_ref:
+        print(f"        2 · bajadas ASIN×métrica ............. {len(bajadas)}/{comparadas}"
+              f" = {pct_bajadas:.1f}%   (aborta con ≥5,0%)\n"
+              f"        3 · bajada más grande ............... {peor * 100:.1f}% del valor "
+              f"anterior   (aborta con >50%)\n"
+              f"        4 · métricas cuyo TOTAL baja ........ {len(totales_abajo)}/"
+              f"{len(COLS_ACUMULADAS)}   (aborta con las nueve)", flush=True)
+        print(f"   · ¿PUEDE ESTA COMPARACIÓN PROBAR ALGO? (la zona gris):\n"
+              f"        · ASIN comunes ...................... {len(comunes)} = "
+              f"{pct_comunes:.1f}% de los {len(previo)} de la lectura anterior   "
+              f"(mínimos: {MIN_ASIN_COMUNES} y {MIN_FRACCION_COMUNES * 100:.0f}%)\n"
+              f"        · antigüedad de la referencia ....... {hueco_dias:.1f} días   "
+              f"(corte: {CORTE_REF_DIAS})", flush=True)
+        if faltan_asin:
+            print(f"   · {len(faltan_asin)} ASIN de la lectura anterior NO vienen en ésta "
+                  f"({100.0 - pct_comunes:.1f}%). Ejemplos: {faltan_asin[:5]}", flush=True)
+    else:
+        print(f"        2, 3 y 4 · no medibles sin lectura anterior.", flush=True)
 
-            print(f"\n⚠️  [Guarda 6.14 · RETROCESO PUNTUAL] Los totales acumulados SUBEN y "
-                  f"solo bajan {len(bajadas)} valores sobre {comparadas}. Eso NO es otro "
-                  f"rango: es Amazon recalculando (cancelaciones, devoluciones), que es la "
-                  f"vida normal de un marketplace.", flush=True)
-            print(f"    SE CARGA. La lista de arriba queda GRITADA en el log a propósito, y "
-                  f"`v_demanda_asin_ultima` devuelve NULL —no un negativo— en el delta de "
-                  f"esos ASIN. Si la lista crece mucho de una lectura a otra, míralo: eso ya "
-                  f"no sería recálculo.", flush=True)
-        else:
-            print(f"\n✅ [Guarda 6.14] El contador no retrocede contra la lectura anterior "
-                  f"({ref_cual}): 0 bajadas en {comparadas} comparaciones "
-                  f"ASIN×métrica acumulada, y no falta ningún ASIN.", flush=True)
+    # ── EL VEREDICTO ───────────────────────────────────────────────────────────
+    # Los motivos se arman FUERA del f-string a propósito: estas ramas corren el día que
+    # haya un fichero malo de verdad, y un condicional anidado en una f-string es justo
+    # donde se esconde el bug que nadie ve hasta entonces (§3: legible > compacto cuando
+    # el código tarda meses en ejecutarse).
+    alarmas = []
+    if negativos:
+        alarmas.append(f"criterio 1: {len(negativos)} valor(es) acumulado(s) por debajo "
+                       f"de cero")
+    if hay_ref:
+        if pct_bajadas >= 5.0:
+            alarmas.append(f"criterio 2: bajan {len(bajadas)} de {comparadas} "
+                           f"comparaciones ({pct_bajadas:.1f}%, el listón es 5%)")
+        if desplomes:
+            alarmas.append(f"criterio 3: {len(desplomes)} bajada(s) se llevan más de la "
+                           f"mitad del valor anterior (la peor, {peor * 100:.1f}%)")
+        if todas_abajo:
+            alarmas.append(f"criterio 4: bajan las {len(COLS_ACUMULADAS)} métricas "
+                           f"acumuladas a la vez")
+
+    if alarmas:
+        if negativos:
+            print(f"\n   Los {len(negativos)} negativos (criterio 1):", flush=True)
+            for asin, col, v in negativos[:20]:
+                print(f"        · {asin} · {col}: {v}", flush=True)
+            if len(negativos) > 20:
+                print(f"        · … y {len(negativos) - 20} más.", flush=True)
+        if bajadas:
+            print(f"\n   Las bajadas (criterios 2 y 3), las 20 primeras de "
+                  f"{len(bajadas)}:", flush=True)
+            for asin, col, va, vn, frac in bajadas[:20]:
+                print(f"        · {asin} · {col}: {va} → {vn}  (−{frac * 100:.1f}%)",
+                      flush=True)
+            if len(bajadas) > 20:
+                # 🔒 AQUÍ la lista se corta, y en la carga aceptada NO. No es incoherencia:
+                #   esta carga no entra en la base, así que no hay nada que auditar después
+                #   y con veinte se ve la forma. Cuando la carga SÍ entra, el log es el
+                #   único sitio donde queda constancia y va entera.
+                print(f"        · … y {len(bajadas) - 20} bajadas más. Se corta a "
+                      f"propósito: esta carga NO entra en la base, así que no hay nada "
+                      f"que auditar después.", flush=True)
+        print(f"\n❌ ABORTA (no se ha escrito nada):\n"
+              f"[Guarda 6.14 · RETROCESO] Este fichero no es la siguiente lectura del "
+              f"mismo contador. {' · '.join(alarmas)}.", flush=True)
+        print("   🔑 CAUSA MÁS PROBABLE, y está medida arriba, no supuesta: este .xlsx se "
+              "exportó con OTRO RANGO. El panel deja elegir (hay un 'Custom date range' "
+              "con tope de 92 días) y esta cañería SOLO admite «Desde el inicio de año» "
+              "— inicio 1-ene fijo, fin móvil.\n"
+              "   Vuelve al Seller, pon «Desde el inicio de año», re-exporta y sube ese.\n"
+              "   ⚠️ `forzar` NO levanta esto. Solo sirve para la zona gris, que es otra "
+              "cosa: allí la guarda no sabe, y aquí ha medido.", flush=True)
+        # ⚠️ EL FALSO ROJO QUE YA SABEMOS QUE ESTE CRITERIO PUEDE DAR. Se avisa en el
+        #   propio aborto, con la cifra delante, para que la decisión de ponerle suelo al
+        #   criterio 3 se tome sobre un caso real y no de memoria (medido el 11-ago-2026:
+        #   en FR el 9,7% de las unidades vive en ASIN de UNA unidad).
+        calderilla = [b for b in desplomes
+                      if float(b[2]) <= (3 if b[1] in COLS_ENTERAS else 50.0)]
+        if desplomes and len(calderilla) == len(desplomes) and len(alarmas) == 1:
+            print(f"   ⚠️ OJO, ESTO PUEDE SER UN FALSO ROJO Y HAY QUE MIRARLO: el criterio "
+                  f"3 es el ÚNICO que ha saltado, y sus {len(desplomes)} bajada(s) salen "
+                  f"TODAS de cifras de calderilla (por ejemplo {calderilla[0][0]} · "
+                  f"{calderilla[0][1]}: {calderilla[0][2]} → {calderilla[0][3]}). Una "
+                  f"cancelación sobre un ASIN de 1 unidad es un −100% y dispara este "
+                  f"criterio sin que pase nada malo. Si el resto de la tabla sube, NO "
+                  f"re-exportes: enséñale esto a Fernando — el criterio 3 está pendiente "
+                  f"de decidir si lleva suelo.", flush=True)
+        # 🔴 …SALVO EN ENERO. A partir del 1-ene-2027 la causa de arriba puede ser la
+        #   equivocada, y mandar a re-exportar con el MISMO periodo no arreglaría nada.
+        #   «Desde el inicio de año» tiene el inicio FIJO en el 1 de enero: el contador se
+        #   reinicia a cero, y la primera lectura del año nuevo es legítimamente MENOR que
+        #   la última del anterior. Abortar está bien —esa resta sería basura—, pero el
+        #   diagnóstico es otro. Ver §2 de CLAUDE.md.
+        if hay_ref and leido_at.year != ref_cual.year:
+            print(f"   ⚠️ OJO, HAY OTRA CAUSA POSIBLE Y AQUÍ ENCAJA: la lectura anterior "
+                  f"es de {ref_cual.year} y esta de {leido_at.year}. El contador se "
+                  f"REINICIA cada 1 de enero, así que esto puede ser el reinicio y no un "
+                  f"fichero mal exportado. NO la fuerces: la resta entre dos años "
+                  f"distintos no significa nada. Es el caso escrito en §2 de CLAUDE.md, "
+                  f"pendiente de que el modelo guarde el año de acumulación.", flush=True)
+        con.rollback(); cur.close(); con.close(); sys.exit(1)
+
+    if gris and not FORZAR:
+        print(f"\n❌ ABORTA (no se ha escrito nada):\n"
+              f"[Guarda 6.14 · ZONA GRIS] Esta comparación NO PUEDE PROBAR NADA, así que "
+              f"la guarda no dice que el fichero esté mal: dice que no lo sabe.",
+              flush=True)
+        for g in gris:
+            print(f"        · {g}", flush=True)
+        print(f"   🔑 POR QUÉ IMPORTA, y está medido (11-ago-2026): con la referencia muy "
+              f"por detrás, un fichero exportado con OTRO RANGO sube en TODO y pasa por "
+              f"bueno — la pareja `2-ago DISCONTINUO → 7-ago` da 0 bajadas sobre 2.214 y "
+              f"las nueve métricas subiendo, la misma firma exacta que una carga limpia. Y "
+              f"con cuatro ASIN comunes, los totales se calculan sobre cuatro filas: que "
+              f"'suban' no dice nada de los otros 300.\n"
+              f"   🔑 QUÉ HACER, por este orden:\n"
+              f"      1) Mira la tabla de arriba y el nombre del fichero. ¿Es de verdad la "
+              f"siguiente lectura de {PAIS}, exportada con «Desde el inicio de año»?\n"
+              f"      2) Si falta alguna lectura intermedia por cargar, cárgala ANTES: el "
+              f"hueco se cierra solo y la comparación vuelve a valer.\n"
+              f"      3) Si estás seguro, relanza este mismo workflow con `forzar = si`. "
+              f"Queda en el log que entró forzada y contra qué medición.\n"
+              f"   ⚠️ `forzar` levanta SOLO esta zona gris. Los cuatro criterios de aborto "
+              f"duro siguen puestos y se vuelven a medir igual.", flush=True)
+        con.rollback(); cur.close(); con.close(); sys.exit(1)
+
+    if gris:
+        print(f"\n⚠️  [Guarda 6.14 · ZONA GRIS · FORZADA] Se ha lanzado con `forzar = si`, "
+              f"así que ENTRA pese a que la comparación no prueba nada:", flush=True)
+        for g in gris:
+            print(f"        · {g}", flush=True)
+        print(f"    Queda escrito aquí a propósito: si mañana la serie de {PAIS} no cuadra, "
+              f"esta lectura ({leido_at}, fichero {fichero}) entró FORZADA y es la primera "
+              f"a la que hay que mirar.", flush=True)
+
+    if bajadas:
+        # 🔒 AQUÍ LA LISTA VA ENTERA, no truncada. Y la diferencia con el aborto de arriba
+        #   no es capricho: esta carga SÍ entra en la base, y el log es el ÚNICO sitio
+        #   donde queda constancia de CUÁLES eran las bajadas. Un aviso incompleto sobre
+        #   un dato que entra no sirve para auditarlo después.
+        print(f"\n⚠️  [Guarda 6.14 · RETROCESO PUNTUAL] {len(bajadas)} bajadas sobre "
+              f"{comparadas} comparaciones ({pct_bajadas:.1f}%), ninguna se lleva más de "
+              f"la mitad, y no bajan las nueve a la vez. Eso NO es otro rango: es Amazon "
+              f"recalculando (cancelaciones, devoluciones), que es la vida normal de un "
+              f"marketplace. SE CARGA. Lista COMPLETA:", flush=True)
+        for asin, col, va, vn, frac in bajadas:
+            print(f"        · {asin} · {col}: {va} → {vn}  (−{frac * 100:.1f}%)",
+                  flush=True)
+        print(f"    🔒 Y lo que cierra el argumento para cargar: `v_demanda_asin_ultima` YA "
+              f"protege aguas abajo. Su `CASE WHEN visitas >= visitas_ant … ELSE NULL` "
+              f"devuelve NULL en vez de un delta negativo (verificado el 10-ago-2026 "
+              f"leyendo la definición en producción). Si la lista crece mucho de una "
+              f"lectura a otra, míralo: eso ya no sería recálculo.", flush=True)
+    elif faltan_asin:
+        print(f"\n⚠️  [Guarda 6.14] Ni una sola bajada en {comparadas} comparaciones, pero "
+              f"faltan {len(faltan_asin)} ASIN de la lectura anterior. Se carga: "
+              f"`v_demanda_asin_ultima` va por (pais, asin) con rn=1, así que la última "
+              f"lectura conocida de esos ASIN se queda donde está y no se inventa ningún "
+              f"delta.", flush=True)
+    elif hay_ref:
+        print(f"\n✅ [Guarda 6.14] El contador no retrocede contra la lectura anterior "
+              f"({ref_cual}): 0 bajadas en {comparadas} comparaciones ASIN×métrica "
+              f"acumulada, ningún negativo, y no falta ningún ASIN.", flush=True)
+    else:
+        print(f"\n✅ [Guarda 6.14] Sin lectura anterior con la que comparar, pero el "
+              f"criterio 1 se ha medido y ha pasado: ni un acumulado negativo en las "
+              f"{len(datos) * len(COLS_ACUMULADAS)} celdas del fichero.", flush=True)
 
     # --- Carga PELÍCULA: DELETE de ESTA lectura por IGUALDAD + INSERT (misma transacción) ---
     # 🔒 El DELETE no contradice el cajón PELÍCULA (§1.6): no borra el histórico, recierra
