@@ -57,8 +57,18 @@ name: Moloka - Procesar CUSTOM ANALYTICS
 #           Aborta si CUALQUIERA de estos CUATRO (criterio de Fernando, 11-ago-2026):
 #             1. algún acumulado viene NEGATIVO
 #             2. ≥5% de las comparaciones ASIN×métrica bajan
-#             3. alguna bajada se lleva MÁS DE LA MITAD del valor anterior
+#             3. un desplome de TRÁFICO (visitas, sesiones o buybox_visiones), con el
+#                valor anterior ≥100, se lleva MÁS DE LA MITAD
 #             4. bajan las NUEVE métricas acumuladas a la vez
+#           🔴 EL CRITERIO 3 SOLO MIRA TRÁFICO, y no es un descuido: **Amazon recalcula
+#           PEDIDOS, no TRÁFICO.** Una cancelación mueve unidades y euros —un ASIN con
+#           UNA unidad que se cancela es un −100%—, pero nadie devuelve una visita. Las
+#           seis de pedido quedan fuera del 3 y las cubre el 2, que es el que coge el
+#           caso masivo. Medido el 11-ago-2026 sobre cuatro pares: en los tres buenos,
+#           CERO desplomes de tráfico; en el malo, 610.
+#           ⚠️ Si el 3 salta SOLO, no re-exportes: no está probado que el tráfico no
+#           pueda bajar legítimamente (una fusión de fichas, una depuración de tráfico
+#           inválido). Ése es el caso a estudiar, y el log lo dice con esas palabras.
 #           Si baja algo pero ninguno de los cuatro salta, es Amazon recalculando
 #           (cancelaciones, devoluciones) → GRITA la lista entera y CARGA.
 #           ⚠️ OJO CON LOS DOS CRITERIOS QUE YA SE PROBARON Y NO VALÍAN, porque el

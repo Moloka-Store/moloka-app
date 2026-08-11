@@ -168,6 +168,39 @@ MIN_ASIN_COMUNES     = 20      # absoluto: por debajo, no hay muestra
 MIN_FRACCION_COMUNES = 0.30    # relativo a la lectura anterior
 
 # ---------------------------------------------------------------------------
+# Guarda 6.14 · criterio 3: QUÉ MÉTRICAS PUEDEN DESPLOMARSE Y CUÁLES NO.
+# 🔴 EL CRITERIO SE PARTE POR LA NATURALEZA DEL DATO, NO POR UN SUELO NUMÉRICO.
+#   Decisión de Fernando, 11-ago-2026, y el porqué en una frase: **Amazon recalcula
+#   PEDIDOS, no TRÁFICO.** Una cancelación o una devolución mueve unidades y euros —es la
+#   vida normal de un marketplace—, pero nadie devuelve una visita. Así que una caída de
+#   más de la mitad en unidades o en euros NO dice nada por sí sola, y en tráfico sí.
+# 🔒 LAS SEIS DE PEDIDO QUEDAN FUERA del criterio 3 (unidades y euros de enviadas,
+#   pedidas y reembolsadas). No quedan sin vigilar: el criterio 2 (≥5% de las
+#   comparaciones) ya coge el caso masivo, que es el que delata otro rango.
+# 🔬 MEDIDO SOBRE CUATRO PARES, y es lo que hace que esto no sea una opinión:
+#     · ES 30-jul → 7-ago (producción, por SQL): 321 ASIN comunes, 0 bajadas en las nueve
+#     · ES 1-ago → 7-ago (el fichero contra la base): 0 de 2.889
+#     · IT, el del falso rojo: 2 bajadas, LAS DOS de pedido, 0 de tráfico
+#     · ES 1-ago → 2-ago DISCONTINUO (el malo): de sus 1.465 desplomes, 610 son de
+#       tráfico y 855 de pedido
+#   Con el criterio de abajo: caso malo 527 desplomes, casos buenos 0.
+# 🔴 Y EL SUELO NUMÉRICO SE DESCARTÓ CON DATOS, no por gusto: exigir 50 uds / 500 € para
+#   mirar una bajada dejaría exentas el **89,3%** de las celdas de FR y el **78,4%** de las
+#   de IT (medido el 11-ago-2026 sobre las nueve columnas de la última lectura de cada
+#   país: FR 1.764 celdas, IT 1.008). Eso no es afinar un criterio: es apagarlo con un
+#   número inventado.
+# ⚠️ EL LÍMITE, dicho aquí y en §2 de CLAUDE.md: **no está probado que el tráfico no pueda
+#   bajar legítimamente.** Una fusión de fichas o una depuración de tráfico inválido por
+#   parte de Amazon lo haría. La evidencia es 3 pares buenos con CERO desplomes de tráfico
+#   y 1 malo con 610 — suficiente para elegir, no para dar el asunto por cerrado. Si un día
+#   salta un desplome de tráfico con todo lo demás en orden, ÉSE es el caso a estudiar, y
+#   el aborto lo dice con esas palabras.
+COLS_TRAFICO = ('visitas', 'sesiones', 'buybox_visiones')
+# El 100 no es un suelo de importancia, es un suelo de RUIDO: por debajo, un porcentaje
+# sobre un puñado de visitas no es un porcentaje. Va solo sobre tráfico.
+MIN_TRAFICO_DESPLOME = 100
+
+# ---------------------------------------------------------------------------
 # Las 18 columnas medidas (§3.1). canon → cabecera NORMALIZada (sin acentos, minúsculas,
 # espacios colapsados: la col 18 trae DOS espacios antes del paréntesis). Resolución por
 # NOMBRE, jamás por posición (§4.4): el panel del 28-jul traía 8 columnas y estos 18.
@@ -1359,7 +1392,9 @@ def main():
     #   v3 = CUATRO criterios de aborto DURO + una ZONA GRIS. ABORTA si CUALQUIERA:
     #     1. algún acumulado viene NEGATIVO            (mide el FICHERO: no usa referencia)
     #     2. ≥5% de las comparaciones ASIN×métrica bajan
-    #     3. alguna bajada se lleva MÁS DE LA MITAD del valor anterior
+    #     3. algún desplome de TRÁFICO: visitas, sesiones o buybox_visiones, con el valor
+    #        anterior ≥100, se lleva MÁS DE LA MITAD (ver COLS_TRAFICO arriba: las seis de
+    #        pedido quedan fuera, y el porqué está medido allí)
     #     4. bajan las NUEVE métricas acumuladas a la vez
     #   🔒 Ninguno de los cuatro es "algún total baja". Ése se ha ido A PROPÓSITO: era el
     #   fallo 3, y volver a meterlo "por si acaso" reabre el falso rojo de los países
@@ -1384,18 +1419,17 @@ def main():
     #   un pedido anterior a su propio inicio). El negativo no es un error de Amazon: es
     #   LA FIRMA de que el fichero empieza a contar en otra fecha.
     #
-    # ⚠️ EL COSTE MEDIDO DEL CRITERIO 3, dicho aquí porque nadie va a ir a buscarlo.
-    #   "Más de la mitad" sobre un valor de 1 es una cancelación cualquiera: 1 → 0 es un
-    #   −100%. Medido el 11-ago-2026 sobre la última lectura de cada país:
+    # ⚠️ EL FALSO ROJO QUE TUVO EL CRITERIO 3 DURANTE MEDIA MAÑANA, y cómo se cerró. La
+    #   primera versión miraba las nueve métricas, y "más de la mitad" sobre un valor de 1
+    #   es una cancelación cualquiera: 1 → 0 es un −100%. Medido el 11-ago-2026:
     #     · FR: 23 ASIN con exactamente 1 unidad pedida = 9,7% de sus 238 unidades
     #     · IT: 23 ASIN con 1 unidad = 6,1% de sus 380 unidades
     #     · ES: 21 ASIN con 1 unidad = 0,2% de sus 13.768 unidades
-    #   O sea: en FR, alrededor de UNA de cada DIEZ cancelaciones cae sobre un ASIN de una
-    #   sola unidad y ABORTA una carga buena. Es el mismo falso rojo que costó las dos
-    #   versiones anteriores, ahora acotado a los países chicos y a los ASIN de calderilla.
-    #   Está implementado TAL COMO SE PIDIÓ —el criterio es de Fernando, no se calibra de
-    #   madrugada— y el log GRITA cuando el aborto sale de una cifra así, para que la
-    #   decisión de ponerle un suelo se tome con el caso delante y no de memoria.
+    #   O sea: en FR, una de cada diez cancelaciones habría tirado una carga buena.
+    # 🔒 NO SE ARREGLÓ CON UN SUELO, que era lo cómodo y lo equivocado: 50 uds / 500 €
+    #   dejaba exentas el 89,3% de las celdas de FR y el 78,4% de las de IT, o sea apagar
+    #   el criterio con un número inventado. Se arregló partiendo por la NATURALEZA del
+    #   dato — Amazon recalcula pedidos, no tráfico — y eso es COLS_TRAFICO.
     #
     # 🔒 LA ZONA GRIS: cuando la comparación NO PUEDE PROBAR NADA, la guarda no dice "esto
     #   está mal", dice "no lo sé". Aborta y pide relanzar con `forzar`. Tres motivos, los
@@ -1465,9 +1499,20 @@ def main():
                 frac = (fa - fn) / fa if fa > 0 else 1.0
                 bajadas.append((asin, col, va, vn, frac))
 
-        desplomes = [b for b in bajadas if b[4] > 0.50]
+        # CRITERIO 3 · SOLO TRÁFICO, y solo por encima del suelo de ruido. El porqué está
+        # entero arriba, en COLS_TRAFICO: Amazon recalcula pedidos, no tráfico.
+        desplomes = [b for b in bajadas
+                     if b[1] in COLS_TRAFICO
+                     and float(b[2]) >= MIN_TRAFICO_DESPLOME
+                     and b[4] > 0.50]
         pct_bajadas = (100.0 * len(bajadas) / comparadas) if comparadas else 0.0
-        peor = max((b[4] for b in bajadas), default=0.0)
+        # Las dos "peores" se separan a propósito: la de tráfico es la que DECIDE, y la de
+        # pedido se imprime para que se vea que se ha mirado y que NO cuenta. Un número que
+        # no se enseña es un número del que luego nadie se acuerda.
+        peor_trafico = max((b[4] for b in bajadas
+                            if b[1] in COLS_TRAFICO
+                            and float(b[2]) >= MIN_TRAFICO_DESPLOME), default=0.0)
+        peor_pedido = max((b[4] for b in bajadas if b[1] not in COLS_TRAFICO), default=0.0)
         pct_comunes = (100.0 * len(comunes) / len(previo)) if previo else 0.0
 
         tot_antes, tot_ahora = {}, {}
@@ -1526,8 +1571,13 @@ def main():
     if hay_ref:
         print(f"        2 · bajadas ASIN×métrica ............. {len(bajadas)}/{comparadas}"
               f" = {pct_bajadas:.1f}%   (aborta con ≥5,0%)\n"
-              f"        3 · bajada más grande ............... {peor * 100:.1f}% del valor "
-              f"anterior   (aborta con >50%)\n"
+              f"        3 · desplomes de TRÁFICO ............ {len(desplomes)}   "
+              f"(aborta con ≥1)\n"
+              f"              · qué cuenta: {', '.join(COLS_TRAFICO)}, con el valor "
+              f"anterior ≥{MIN_TRAFICO_DESPLOME} y una bajada de más de la mitad.\n"
+              f"              · peor bajada de tráfico: {peor_trafico * 100:.1f}%   ·   "
+              f"peor bajada de pedido: {peor_pedido * 100:.1f}% (NO cuenta aquí: Amazon "
+              f"recalcula pedidos, no tráfico)\n"
               f"        4 · métricas cuyo TOTAL baja ........ {len(totales_abajo)}/"
               f"{len(COLS_ACUMULADAS)}   (aborta con las nueve)", flush=True)
         print(f"   · ¿PUEDE ESTA COMPARACIÓN PROBAR ALGO? (la zona gris):\n"
@@ -1556,8 +1606,9 @@ def main():
             alarmas.append(f"criterio 2: bajan {len(bajadas)} de {comparadas} "
                            f"comparaciones ({pct_bajadas:.1f}%, el listón es 5%)")
         if desplomes:
-            alarmas.append(f"criterio 3: {len(desplomes)} bajada(s) se llevan más de la "
-                           f"mitad del valor anterior (la peor, {peor * 100:.1f}%)")
+            alarmas.append(f"criterio 3: {len(desplomes)} desplome(s) de TRÁFICO se llevan "
+                           f"más de la mitad del valor anterior (el peor, "
+                           f"{peor_trafico * 100:.1f}%)")
         if todas_abajo:
             alarmas.append(f"criterio 4: bajan las {len(COLS_ACUMULADAS)} métricas "
                            f"acumuladas a la vez")
@@ -1593,21 +1644,30 @@ def main():
               "   Vuelve al Seller, pon «Desde el inicio de año», re-exporta y sube ese.\n"
               "   ⚠️ `forzar` NO levanta esto. Solo sirve para la zona gris, que es otra "
               "cosa: allí la guarda no sabe, y aquí ha medido.", flush=True)
-        # ⚠️ EL FALSO ROJO QUE YA SABEMOS QUE ESTE CRITERIO PUEDE DAR. Se avisa en el
-        #   propio aborto, con la cifra delante, para que la decisión de ponerle suelo al
-        #   criterio 3 se tome sobre un caso real y no de memoria (medido el 11-ago-2026:
-        #   en FR el 9,7% de las unidades vive en ASIN de UNA unidad).
-        calderilla = [b for b in desplomes
-                      if float(b[2]) <= (3 if b[1] in COLS_ENTERAS else 50.0)]
-        if desplomes and len(calderilla) == len(desplomes) and len(alarmas) == 1:
-            print(f"   ⚠️ OJO, ESTO PUEDE SER UN FALSO ROJO Y HAY QUE MIRARLO: el criterio "
-                  f"3 es el ÚNICO que ha saltado, y sus {len(desplomes)} bajada(s) salen "
-                  f"TODAS de cifras de calderilla (por ejemplo {calderilla[0][0]} · "
-                  f"{calderilla[0][1]}: {calderilla[0][2]} → {calderilla[0][3]}). Una "
-                  f"cancelación sobre un ASIN de 1 unidad es un −100% y dispara este "
-                  f"criterio sin que pase nada malo. Si el resto de la tabla sube, NO "
-                  f"re-exportes: enséñale esto a Fernando — el criterio 3 está pendiente "
-                  f"de decidir si lleva suelo.", flush=True)
+        # ⚠️ EL CASO A ESTUDIAR, y por eso se dice en el propio aborto.
+        #   (Aquí vivía un aviso de "puede ser un falso rojo" para cuando el criterio 3
+        #   saltaba por una cancelación de 1 → 0 unidades. Se fue el 11-ago-2026 con el
+        #   criterio nuevo: las seis de pedido ya no entran en el criterio 3, así que ese
+        #   falso rojo no puede ocurrir. Lo que queda es el hueco de conocimiento del otro
+        #   lado, y no es lo mismo.)
+        # 🔴 Lo que NO está probado: que el tráfico no pueda bajar legítimamente. Una
+        #   fusión de fichas o una depuración de tráfico inválido por parte de Amazon lo
+        #   haría. La evidencia son 3 pares buenos con CERO desplomes de tráfico y 1 malo
+        #   con 610 — suficiente para elegir el criterio, no para dar el asunto por
+        #   cerrado. Por eso: si el 3 salta SOLO, esto no se resuelve re-exportando.
+        if desplomes and len(alarmas) == 1:
+            peor_b = max((b for b in desplomes), key=lambda b: b[4])
+            print(f"   ⚠️ OJO: el criterio 3 es el ÚNICO que ha saltado, y ÉSE es el caso "
+                  f"que hay que ESTUDIAR, no despachar. {len(desplomes)} desplome(s) de "
+                  f"tráfico con todo lo demás en orden — el peor, {peor_b[0]} · "
+                  f"{peor_b[1]}: {peor_b[2]} → {peor_b[3]}.\n"
+                  f"   Que el tráfico no pueda bajar legítimamente NO está probado: una "
+                  f"fusión de fichas o una depuración de tráfico inválido de Amazon lo "
+                  f"harían. La evidencia del criterio son 3 pares buenos con cero y 1 malo "
+                  f"con 610 desplomes de tráfico (11-ago-2026).\n"
+                  f"   🔑 Antes de re-exportar nada, enséñale esto a Fernando: puede ser el "
+                  f"primer caso legítimo, y entonces lo que hay que cambiar es el criterio, "
+                  f"no el fichero.", flush=True)
         # 🔴 …SALVO EN ENERO. A partir del 1-ene-2027 la causa de arriba puede ser la
         #   equivocada, y mandar a re-exportar con el MISMO periodo no arreglaría nada.
         #   «Desde el inicio de año» tiene el inicio FIJO en el 1 de enero: el contador se
@@ -1662,10 +1722,11 @@ def main():
         #   donde queda constancia de CUÁLES eran las bajadas. Un aviso incompleto sobre
         #   un dato que entra no sirve para auditarlo después.
         print(f"\n⚠️  [Guarda 6.14 · RETROCESO PUNTUAL] {len(bajadas)} bajadas sobre "
-              f"{comparadas} comparaciones ({pct_bajadas:.1f}%), ninguna se lleva más de "
-              f"la mitad, y no bajan las nueve a la vez. Eso NO es otro rango: es Amazon "
+              f"{comparadas} comparaciones ({pct_bajadas:.1f}%), ningún desplome de "
+              f"TRÁFICO, y no bajan las nueve a la vez. Eso NO es otro rango: es Amazon "
               f"recalculando (cancelaciones, devoluciones), que es la vida normal de un "
-              f"marketplace. SE CARGA. Lista COMPLETA:", flush=True)
+              f"marketplace — y lo que recalcula son PEDIDOS, no visitas. SE CARGA. Lista "
+              f"COMPLETA:", flush=True)
         for asin, col, va, vn, frac in bajadas:
             print(f"        · {asin} · {col}: {va} → {vn}  (−{frac * 100:.1f}%)",
                   flush=True)

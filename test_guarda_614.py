@@ -2,7 +2,7 @@
 """MESA DE PRUEBAS de la guarda 6.14 — NO es el procesador, y no prueba sus cifras.
 
 Qué prueba y qué NO:
-  · SÍ: que las SIETE ramas del bloque se ejecutan sin reventar y dicen lo que dicen.
+  · SÍ: que las DIEZ ramas del bloque se ejecutan sin reventar y dicen lo que dicen.
         Ejecuta el TEXTO REAL del bloque, extraído del .py por anclas — no una copia
         retecleada, que es la trampa clásica de este tipo de banco.
   · NO: los números. Esos salen de correr el procesador contra los ficheros REALES en
@@ -128,20 +128,45 @@ nue[4]['reembolsado_eur'] = -3.50
 res['G primera+neg'] = corre("G · PRIMERA LECTURA con un negativo (criterio 1 sin referencia)",
                              nue, [], None)
 
-# H · Calderilla: única alarma el criterio 3, con 1 → 0 unidades.
+# H · La cancelación de calderilla: 1 → 0 unidades. 🔴 ESTE ESCENARIO CAMBIÓ DE VEREDICTO
+#   el 11-ago-2026 y por eso se queda: hasta esa mañana ABORTABA (el criterio 3 miraba las
+#   nueve métricas), y una cancelación sobre un ASIN de una unidad tiraba una carga buena.
+#   Con el criterio partido por naturaleza del dato, las seis de pedido no entran en el 3 y
+#   esto CARGA. Si algún día vuelve a abortar, alguien ha devuelto el criterio viejo.
 ant = [fila(f"H{i:08d}", 100 + i) for i in range(112)]
 ant[5]['unidades_pedidas'] = 1
 nue = [fila(f"H{i:08d}", 100 + i, factor=1.10) for i in range(112)]
 nue[5]['unidades_pedidas'] = 0
-res['H calderilla'] = corre("H · CRITERIO 3 sobre calderilla (1 → 0 unidades)",
+res['H calderilla'] = corre("H · cancelación de calderilla, 1 → 0 uds (YA NO es criterio 3)",
                             nue, previo_de(ant), AHORA - timedelta(days=8))
+
+# I · DESPLOME DE TRÁFICO por encima del suelo de ruido: 4.000 → 100 visitas (−97,5%),
+#   con todo lo demás subiendo. Única alarma el criterio 3 → aborta Y dice que ÉSE es el
+#   caso a estudiar, no uno que se resuelva re-exportando.
+ant = [fila(f"I{i:08d}", 100 + i) for i in range(112)]
+ant[9]['visitas'] = 4000
+nue = [fila(f"I{i:08d}", 100 + i, factor=1.10) for i in range(112)]
+nue[9]['visitas'] = 100
+res['I desplome traf'] = corre("I · DESPLOME DE TRÁFICO (visitas 4.000 → 100, anterior ≥100)",
+                               nue, previo_de(ant), AHORA - timedelta(days=8))
+
+# J · El MISMO desplome de tráfico pero por debajo del suelo de ruido: 80 → 1 visitas.
+#   80 < 100, así que NO cuenta: un porcentaje sobre un puñado de visitas no es un
+#   porcentaje. Carga, gritando la bajada en la lista.
+ant = [fila(f"J{i:08d}", 100 + i) for i in range(112)]
+ant[9]['visitas'] = 80
+nue = [fila(f"J{i:08d}", 100 + i, factor=1.10) for i in range(112)]
+nue[9]['visitas'] = 1
+res['J traf bajo suelo'] = corre("J · tráfico por DEBAJO del suelo de ruido (80 → 1 visitas)",
+                                 nue, previo_de(ant), AHORA - timedelta(days=8))
 
 print("=" * 78)
 print("RESUMEN (esperado → obtenido)")
 print("=" * 78)
 esperado = {'A limpia': 'CARGA', 'B puntual': 'CARGA', 'C global': 'ABORTA',
             'D gris': 'ABORTA', 'E gris forzada': 'CARGA', 'F gris pocos': 'ABORTA',
-            'G primera+neg': 'ABORTA', 'H calderilla': 'ABORTA'}
+            'G primera+neg': 'ABORTA', 'H calderilla': 'CARGA',
+            'I desplome traf': 'ABORTA', 'J traf bajo suelo': 'CARGA'}
 mal = 0
 for k, v in res.items():
     ok = 'OK ' if esperado[k] == v else 'MAL'
