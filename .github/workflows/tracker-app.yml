@@ -35,4 +35,12 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          # El trackeador escribía como `anon`: SUPABASE_KEY es la clave PUBLICABLE
+          # (`sb_publishable_…`, rol anon — medido el 11-ago-2026). Con esta línea pasa a
+          # escribir con la clave de servicio, que salta la RLS por `rolbypassrls`.
+          # No hace falta tocar el código: moloka_tracker_snapshot_nube.py ya hace
+          # `os.environ.get('SUPABASE_SERVICE_KEY') or os.environ['SUPABASE_KEY']`.
+          # 🔑 Es el paso PREVIO y obligatorio para poder cerrar a `anon`
+          # monitor_snapshots / monitor_recomendaciones / monitor_reglas (bloque D3).
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python -u moloka_tracker_snapshot_nube.py

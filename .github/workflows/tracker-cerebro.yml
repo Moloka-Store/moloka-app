@@ -47,4 +47,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          # Ver la nota en tracker-app.yml: SUPABASE_KEY es la clave PUBLICABLE (rol anon).
+          # `moloka_tracker_cerebro.py` ya prefiere la de servicio si existe, así que basta
+          # con inyectarla. Paso previo obligatorio del bloque D3.
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python -u moloka_tracker_cerebro.py --pais "${{ github.event.inputs.pais || 'ES' }}"
