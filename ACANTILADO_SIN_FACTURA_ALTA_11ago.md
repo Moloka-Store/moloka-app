@@ -197,16 +197,26 @@ el precio de su ficha.
 equivale a partir por **24,20 €** — un umbral que no existe.
 
 ✅ **Las mediciones de este documento NO tienen ese error:** todas usan
-`(ventas_producto + impuesto_producto) / cantidad`, es decir el precio con IVA. Comprobado con los
-tres cortes sobre los mismos datos (ventana desde 1-abr, n≥2 por lado):
+`(ventas_producto + impuesto_producto) / cantidad`, es decir el precio con IVA.
 
-| Corte | SKU | Suben | Salto medio | Máximo |
-|---|---|---|---|---|
-| **A · umbral 20 sobre precio CON IVA** *(el usado aquí)* | **21** | **18** | **+0,55** | **+0,79** |
-| **B · umbral 16,53 sobre `ventas_producto`** *(equivalente a A)* | 20 | 18 | +0,55 | +0,79 |
-| C · umbral 20 sobre `ventas_producto` *(escala cruzada)* | 7 | 2 | +0,35 | +0,63 |
-
-**A ≡ B** — la diferencia de un SKU es un caso justo en el borde. **C es otra cosa.**
+> ### 🔒 EL ESCALÓN AGUANTA CON EL UMBRAL CORREGIDO — las dos cifras, para no volver a preguntar
+>
+> Rehecho el corte con las dos escalas sobre los mismos datos (ventana desde 1-abr, n≥2 a cada lado):
+>
+> | | SKU | Suben | **Salto medio** | **Máximo** |
+> |---|---|---|---|---|
+> | **CIFRA VIEJA** — umbral 20 sobre precio **con IVA** | **21** | **18** | **+0,55 €** | **+0,79 €** |
+> | **CIFRA NUEVA** — umbral **16,53** sobre `ventas_producto` | **20** | **18** | **+0,55 €** | **+0,79 €** |
+> | *(escala cruzada: umbral 20 sobre `ventas_producto`)* | *7* | *2* | *+0,35 €* | *+0,63 €* |
+>
+> **La vieja y la nueva son la misma medición.** 16,53 × 1,21 = 20,00: es el mismo corte expresado
+> en la otra escala. La diferencia de un SKU es un caso justo en el borde. La tercera fila es otra
+> población, y por eso da otra conclusión.
+>
+> 🔒 **Reverificadas también, e idénticas:** grupo de control **55 SKU** (3,63 → 3,69), censo
+> **72 / 104**, **35** que cruzan en una pasada, **19** clavados en 19,99 €.
+>
+> **No hubo que rehacer nada, y no hace falta volver a comprobarlo.**
 
 🔒 **Reverificadas después de la duda, y salen idénticas:** grupo de control **55 SKU** (3,63 →
 3,69), censo **72 / 104**, **35** que cruzan en una pasada, **19** clavados en 19,99 €. **No hay
