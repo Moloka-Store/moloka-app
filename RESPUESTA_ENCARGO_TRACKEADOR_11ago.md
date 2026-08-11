@@ -29,6 +29,18 @@ No hay repositorio que localizar y no hay código sin auditar en otra parte. **A
 así**: rama por defecto `main`, último commit que los toca `2cc8839` («Tracker: un solo botón con
 encadenado + auto-refresco, y marca sin-caja»).
 
+🔴 **Y con esto se cae también la explicación que se venía dando del falso positivo de las 1.746
+filas** (el del 29-jul y el de esta mañana). Se decía que *«el auditor no podía ver ese código,
+estaba en otro repositorio»*. **Falso: estaba en `moloka-app`, dentro del alcance de aquella
+auditoría, en la raíz y junto a los procesadores que sí se revisaron.**
+
+**El trackeador no se auditó — pero no por falta de acceso.** Se leyeron los contadores de una tabla
+sin abrir el código que la escribe, teniéndolo delante.
+
+⚠️ La distinción no es un matiz: mientras el motivo sea «no se podía ver», quien lo lea concluirá
+que hay que ampliar el acceso del auditor, y el error se repetirá igual — porque el acceso nunca
+fue el problema. **Falló el método, no el alcance.**
+
 ### 0.2 🔴 «`monitor_snapshots` y `monitor_recomendaciones` borran su histórico»
 
 **Es falso, y es el hallazgo más importante de este informe.** Ninguna de las dos ha perdido nunca

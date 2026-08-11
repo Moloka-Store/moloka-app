@@ -37,6 +37,27 @@ de pruebas del 8-jul (ocho ejecuciones en una mañana). Y la columna que nadie m
 > 🔑 **Lección:** `n_tup_del` no prueba un patrón de borrado. Sin huecos en el rango de ids, es una
 > purga única, no una sobrescritura recurrente.
 
+#### 🔴 Y una corrección al MOTIVO, porque la explicación cómoda también era falsa
+
+Durante meses se explicó el falso positivo de las 1.746 filas —el mismo que cometió la auditoría del
+29-jul— diciendo que **«el auditor no podía ver ese código, vivía en otro repositorio»**.
+
+**Eso es falso.** El trackeador está en `moloka-app`, tres ficheros en la raíz, **dentro del alcance
+de aquella auditoría**. No había ninguna barrera técnica: el código estaba a la vista, junto a los
+procesadores que sí se auditaron.
+
+**Lo cierto es que el trackeador no se auditó. Lo falso era el motivo.**
+
+⚠️ **Esta distinción importa más que el dato**, y por eso ocupa su propio apartado: mientras la
+explicación sea «no se podía ver», la conclusión que saca quien lo lee es *«hay que darle acceso al
+auditor»* — y con eso el mismo error se repite, porque el acceso nunca fue el problema. La
+conclusión correcta es otra: **se leyeron los contadores de una tabla sin abrir el código que la
+escribe, teniéndolo delante.** Lo que falló fue el método, no el alcance.
+
+🔑 La regla que sale de ahí: **una explicación que exculpa es sospechosa por serlo.** «No se podía
+ver» cierra la investigación; «no se miró» la abre. Antes de aceptar la primera, hay que comprobar
+que el acceso era realmente imposible — aquí bastaba un `ls`.
+
 ### 1.2 La clave del trackeador es `anon`
 
 `SUPABASE_KEY` es `sb_publishable_…` (46 caracteres), rol **`anon`**. Se resolvió **sin ver el
