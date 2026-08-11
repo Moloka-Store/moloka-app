@@ -45,12 +45,29 @@
 --       de alguien mirando la vista a mano. `v_decisiones_estado` no tiene ni una.
 --
 -- ─────────────────────────────────────────────────────────────────────────────
--- 🔴 LO QUE HAY QUE DECIDIR ANTES DE APLICAR ESTO
---    La instrucción era: «si aparece una sola llamada, para y cuéntamelo». Han aparecido
---    —aunque con forma de exploración y no de consumo—, así que esta migración queda
---    ESCRITA Y PROBADA pero NO aplicada. La lectura de arriba es un juicio sobre un
---    patrón, no una medición limpia, y la decisión es de Fernando.
+-- ✅ Y EL FILTRO QUE DISUELVE LA DUDA, que no es cuántas llamadas hubo sino CON QUÉ ROL.
+--    Este revoke sólo toca `anon`: una consulta hecha con otro rol no se ve afectada, así
+--    que da igual cuántas haya. `pg_stat_statements` guarda el `userid`, y cruzándolo con
+--    `pg_roles` sobre esos 105 días:
+--
+--        postgres ................. 56 llamadas   ← el conector
+--        supabase_read_only_user ...  3 llamadas   ← el panel de Supabase
+--        authenticated .............  1 llamada
+--        🔑 anon ...................  **0**
+--
+--    Ni una sola con `anon`. No hay juicio que hacer: el patrón de exploración de arriba
+--    era la pista, pero esto es la prueba.
 -- ─────────────────────────────────────────────────────────────────────────────
+--
+-- 🕐 CUÁNDO APLICARLO. Por principio no se toca producción mientras Elena opera, aunque
+--    aquí el riesgo sea nulo. 🔬 Su ventana real, medida sobre los movimientos de 30 días:
+--    **de 10:00 a 20:00 peninsular**, y fuera de eso ni un movimiento en todo el mes.
+--    → Aplicar **antes de las 10:00 o después de las 21:00**.
+--    (El 11-ago a las 13:17 no se aplicó por esto: había un movimiento suyo de hacía 67
+--     segundos.)
+--
+-- 👁️ VIGILANCIA 24 h tras aplicar: cualquier error nuevo en los logs que mencione una de
+--    las diez → rollback inmediato (está al final) y contarlo.
 --
 -- 🔒 EL ROLLBACK, ESCRITO Y PROBADO **ANTES** DEL REVOKE (condición de Fernando). Se
 --    ensayó el ciclo entero en staging dentro de una transacción deshecha:
