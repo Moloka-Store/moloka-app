@@ -343,6 +343,20 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   ⚠️ Y el corolario, que es el que se olvida: **si desactivas la feature a mano y el suite
   sigue verde, el suite no la está probando.** Es la versión de «haz saltar las guardas a
   propósito» aplicada a las funcionalidades, no solo a las guardas.
+- 🔴 **UNA VISTA QUE NO PUEDE VER SU FUENTE DEBE CONFESARLO, NO RELLENAR CON UN FALSO.**
+  El caso general de «0 filas por RLS ≠ 0 filas porque no hay»: si una vista se apoya en
+  una tabla que puede estar tapada, tiene que **distinguir los dos ceros dentro del propio
+  dato** —columna a `null` y un veredicto que diga *«no puedo leerla»*— en vez de devolver
+  el valor que sale por defecto.
+  *Medido el 11-ago-2026: `v_salud_escaner` cruza con `reglas_director` para decir si un
+  proveedor tiene director. Esa tabla es una de las 20 con RLS y cero políticas, así que
+  con `security_invoker` el join no devolvía nada y la vista decía «sin director» de los
+  CUATRO que sí lo tienen. La vista construida para evitar una trampa se metió dentro.*
+  🔑 Y de ahí lo que hay que hacer: la comprobación va **en el dato, no en un script
+  aparte**. Un canario externo hay que acordarse de mirarlo; una columna a `null` con su
+  motivo la ve quien consulta, cuando consulta, sin saber nada de esto.
+  ⚠️ Corolario, porque es el que se olvida: **las 20 tablas tapadas contaminan todo lo que
+  se apoye en ellas.** Antes de cruzar con una tabla, mírala en `sql/canario_rls.sql`.
 - **Los datos sintéticos no prueban nada.** Una vista se prueba con la tabla **poblada**.
 - **Escribe los números esperados ANTES de correr.** Si no salen, di lo que sale — no ajustes la
   expectativa al resultado.
