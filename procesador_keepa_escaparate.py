@@ -120,6 +120,19 @@ TIPADAS = [
     ('Caja de Compra: Stock', 'bb_stock', 'i'),
     ('Caja de Compra: % Amazon 30 días', 'bb_pct_amazon_30d', 'n'),
     ('Caja de Compra: Disponibilidad de la Caja de Compra', 'bb_disponibilidad', 't'),
+    # 🔴 LOS TRES QUE VIVÍAN SÓLO EN `crudo` Y EL ARCHIVADO TIRABA (11-ago-2026).
+    #    `keepa_escaparate_hist` no guarda `crudo` —a propósito: el CSV está en Storage—,
+    #    así que estos tres campos no tenían serie histórica y no podían tenerla. Cada
+    #    archivado los perdía para siempre. Promovidos a columna, el archivado se los
+    #    lleva solo (copia todo menos `crudo`).
+    #    🔬 Hoy: 22 fichas con envío, 102 con plazo, 75 con país.
+    ('Caja de Compra: Gastos de envío', 'bb_envio', 'n'),
+    ('Caja de Compra: País de envío', 'bb_pais_envio', 't'),
+    # ⚠️ El plazo va como TEXTO tal cual lo da Keepa ("1 dia", "13 - 24 días", "190 días"):
+    #    no se parsea a número aquí. Convertir "13 - 24 días" en un entero obliga a elegir
+    #    13 o 24, y esa elección es de quien lo use, no del procesador. Además hay 31
+    #    fichas con plazo y sin precio que nadie ha explicado todavía.
+    ('Caja de Compra: Tiempo de envío', 'bb_plazo_txt', 't'),
     ('Vendedor FBA más barato', 'fba_mas_barato', 't'),
     ('Vendedor FBM más barato', 'fbm_mas_barato', 't'),
     ('Nuevo, de Vendedor Externo FBA: Actual', 'p3_fba_precio', 'n'),
