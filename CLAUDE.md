@@ -383,6 +383,24 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   se relanzan a propósito. Pero que un verde mudo no pueda hacerse pasar por una
   verificación. Va **detrás** del registro de migraciones de §4.
 - **"Lo ha revisado un agente" NO es prueba.** Un revisor lee código, no lo ejecuta.
+- 🔴 **EL CENSO POR CÓDIGO NO BASTA: HAY QUE CRUZARLO CON EL CENSO POR USO.** El grep dice
+  qué está **escrito**; `pg_stat_statements` dice qué se **ejecuta**. No responden a la
+  misma pregunta y ninguno de los dos sustituye al otro.
+  *Medido el 11-ago-2026: el censo de qué lee la v1 se hizo con un grep de `.from('…')`
+  sobre `index.html` y dio 17 tablas. Parseando el FROM de las 511 consultas que el rol
+  `anon` ha ejecutado de verdad salen **19**, y **seis no estaban** — entre ellas
+  `escaner_memoria`, con **5.767 llamadas**. Un grep de literales no ve lo que no está
+  escrito como literal, y sobre todo no ve a los consumidores que están FUERA del fichero
+  que estás mirando.*
+  🔑 Las dos consultas que lo hacen, y conviene tenerlas a mano:
+    · **quién ejecuta** — `pg_stat_statements` cruzado con `pg_roles` por `userid`: dice
+      CON QUÉ ROL, que es lo que suele decidir (un `revoke` a `anon` no toca lo que hizo
+      `authenticated`).
+    · **cuánto histórico** — mucho mayor que los logs de la API: 🔬 105 días contra una
+      hora, y además cubre conector, `psql` y cron, no sólo PostgREST.
+  ⚠️ Y al revés también: que algo se ejecute **no** significa que esté en el repo. Ahí es
+  donde aparecen los consumidores no versionados, que es justo lo que un censo de
+  jubilación tiene que encontrar.
 - **Greps parciales no son lectura.** Si te preguntan "¿seguro que el código hace X?", lee el
   fichero entero.
 - 🔴 **"Es idéntico en efecto" es una hipótesis. Para demostrar que un cambio en la CAÑERÍA no
