@@ -61,6 +61,27 @@ hazla reaplicable antes de nada, o el problema vuelve en el siguiente restore.
 
 ---
 
+## ⏳ Las nueve vistas cerradas a `anon` — revisar a los 30 días
+
+El **11-ago-2026** se cerraron a `anon` nueve vistas `definer` que leen tablas tapadas
+(`v_amazon_se_despierta`, `v_analisis_auditable`, `v_auditoria_tarifas`,
+`v_decisiones_estado`, `v_incidencias_movimientos`, `v_incidencias_resumen`,
+`v_incidencias_ultima`, `v_scoreboard_reglas`, `v_sondas_pendientes`).
+
+🔴 **Es un experimento, no un final.** Si al llegar a **~10-sep-2026** nadie ha reportado
+nada roto, **las nueve se borran** — junto con `v_estado_asin`, que ya estaba cerrada.
+
+Una vista que no llama nadie **no es inocente**: aparece en cada censo de seguridad,
+confunde a quien audita y ya costó medio día de trabajo. Pero el borrado va **después** de
+que el revoke demuestre que nadie las usa, no antes.
+
+**Si algo se rompe**, el rollback está al final de
+`migraciones/2026-08-11_revoke_anon_9_vistas.sql`, probado (9 → 0 → 9). Y si hace falta
+usarlo, **eso es el hallazgo**: hay un consumidor no versionado. Encontrarlo y anotarlo
+antes de volver a cerrarlas.
+
+---
+
 ## 😴 Cuando BEMS despierte
 
 BEMS está **en pausa** (su API no responde). Los dos workflows tienen el `schedule:`
