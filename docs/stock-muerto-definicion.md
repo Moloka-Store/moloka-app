@@ -192,6 +192,84 @@ MARCA o de una lista de Fernando, no de `keepa_escaparate.categoria`.
 
 ---
 
+## El TERCER EJE: `recommended_action`, la prescripción de Amazon
+
+Vive en la misma fila que `alert`, `sales_rank` y las unidades, así que no hay problema de
+fuentes cruzadas. Las 223 fichas traen una, con este vocabulario:
+
+`Create Outlet deal` (42) · `NoRestockExcessActionRequired` (39) · `NoExcessInventory` (35) ·
+`Lower price` (33) · `CreateShippingPlan` (29) · `Advertise listing` (24) · `GoToRestock` (14)
+· `Edit listing` (6) · `Improve keywords` (1)
+
+🔑 **Son DOS familias y no se mezclan:** unas hablan de exceso (*Outlet, Lower price,
+Advertise, Edit listing, Improve keywords*) y otras de **reposición** (*GoToRestock,
+CreateShippingPlan* = «manda más»), que es lo contrario de stock muerto.
+
+🔬 **`estimated_excess_quantity` sólo se rellena con `Create Outlet deal`**: las 23 fichas y
+393 uds marcadas como exceso son exactamente esas. Amazon únicamente cuantifica el exceso
+cuando prescribe liquidarlo.
+
+### ¿Confirma nuestra lectura? Ni la confirma ni la contradice: NO ES UNA SEGUNDA OPINIÓN
+
+| alerta | fichas | Outlet | Lower price | **Advertise** | manda más | sin acción |
+|---|---|---|---|---|---|---|
+| Low traffic | 147 | 29 | 22 | **24** | 21 | 50 |
+| (sin alerta) | 53 | 5 | 0 | **0** | **22** | 20 |
+| Low conversion | 23 | 8 | **11** | **0** | **0** | 4 |
+
+🔴 **`Advertise listing` sale 24 de 24 veces con *Low traffic*, y nunca con otra cosa.** Ahí
+la recomendación **es la alerta redicha**. Usarla como corroboración independiente de que
+algo tiene poco tráfico sería **circular**: es la misma señal contada dos veces (§1.3).
+
+✅ **Pero no todo es redundante, y esto sí aporta:** `Create Outlet deal` cruza los tres
+estados —29, 8 y **5 fichas sin alerta ninguna**—, y **`manda más` no aparece JAMÁS con
+*Low conversion*** (0 de 23) mientras sale 22 veces en las fichas sin alerta. O sea que la
+prescripción **separa dentro del grupo «sin alerta»** lo que hay que reponer de lo que hay
+que liquidar, cosa que la alerta por sí sola no hace.
+
+### Cruzada contra los tramos de rank: Amazon liquida los de rank BUENO
+
+| tramo | fichas | coste | Lower price | Outlet | Advertise | ficha | **manda más** | **uds exceso** |
+|---|---|---|---|---|---|---|---|---|
+| A · rank ≤5.000 | 7 | 2.174,96 € | 1 | **3** | 0 | 0 | **1** | **136** |
+| B · 5.000-20.000 | 14 | 2.206,55 € | 1 | 7 | 0 | 3 | 1 | 64 |
+| C · rank >20.000 | 18 | 2.216,75 € | 3 | 3 | **5** | 1 | 0 | 33 |
+| sin rank | 2 | 159,76 € | 1 | 0 | 0 | 1 | 0 | 0 |
+
+🔴 **El 58 % del exceso que Amazon cuantifica (136 de 233 uds) está en el tramo de rank
+MEJOR**, no en el peor. Y en los tres casos marca **el 100 % del stock** como excedente:
+
+| producto | uds | coste | rank | alerta | exceso que marca Amazon |
+|---|---|---|---|---|---|
+| Starter Kit Final Fantasy (Magic) | 79 | 893,49 € | **726** | Low conversion | **79 = todas** |
+| Elephant Vanilla Chai | 38 | 341,62 € | 2.150 | Low conversion | **38 = todas** |
+| Llavero Funko Stitch | 19 | 69,35 € | 2.203 | Low conversion | **19 = todas** |
+
+**Es el argumento más fuerte de todo el diagnóstico y no es nuestro: es de Amazon.** Un
+producto en el puesto 726 de su categoría, con el 100 % del stock declarado excedente por
+el propio marketplace y cero ventas en el extracto.
+
+⚠️ Y en el otro extremo, los 5 `Advertise listing` del tramo C son **todos *Low traffic***,
+con rangos de 29.478 a **89.343**. Pagar publicidad por un producto en el puesto 89.343 es
+una prescripción que merece mirarse antes de obedecerla.
+
+### 🔴 Dos fichas donde Amazon se contradice a sí misma
+
+Nuestro filtro las llama muertas —más de 10 uds, ≤2 ventas en 30 días, cero en el extracto—
+y `recommended_action` dice **repón**:
+
+| producto | uds | rank | alerta | acción |
+|---|---|---|---|---|
+| Fragmentario POP! Disney Cinderella | 30 | 3.433 | (sin alerta) | **CreateShippingPlan** |
+| Funko POP! 50th Vito El Padrino | 11 | 5.962 | (sin alerta) | **GoToRestock** |
+
+No se obedecen ni se descartan: **se miran**. Las dos están en el grupo «sin alerta», que es
+justo donde la prescripción aporta información propia — puede que Amazon vea demanda que
+nuestras 30 días no capturan, o puede que sea el mismo desfase de ~10 días que ya tiene
+documentado `salud_fba` (§1.3). Es un caso a estudiar, no un número a sumar.
+
+---
+
 ## Cómo se recalcula (no se copia)
 
 ```sql
