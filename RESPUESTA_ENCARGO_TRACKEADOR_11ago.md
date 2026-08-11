@@ -240,19 +240,50 @@ Va en el mismo PR que el comentario de `monitor_recomendaciones` (apartado 3).
 
 ### B4 · Los dos históricos de salud FBA
 
-| Tabla | Quién la escribe | Quién la lee |
+| Tabla | Columnas | Quién la escribe | Quién la lee |
+|---|---|---|---|
+| `salud_fba_historico` (1.549 filas, viva) | 34, **LEAN** | [`procesador_salud_fba.py:745`](procesador_salud_fba.py), explícita como *«PELÍCULA: apila, NUNCA borra»* | el procesador y las vistas |
+| `salud_fba_hist` (227 filas, muerta) | **62**, con `crudo` | **nadie** — ver abajo | **nadie** |
+
+**Qué la lee: nadie.** Barrido de los dos repos (`.py`, `.html`, `.sql`, `.ts`, `.tsx`):
+`salud_fba_hist` aparece **únicamente** en [`sql/canario_rls.sql`](sql/canario_rls.sql), y ahí solo
+como entrada de un censo de tablas.
+
+**Qué la escribía — esto es lo que faltaba, y no es lo que parecía.** No la escribía ningún
+procesador: 🔬 **las 227 filas tienen UN ÚNICO `archivado_en`, el 26-jul-2026 a las 07:16:30.**
+Es una sola operación de relleno, hecha a mano, que no se repitió nunca. Sale de **tres ficheros**:
+
+| Fichero de origen | Filas | `snapshot_date` |
 |---|---|---|
-| `salud_fba_historico` (1.549 filas, viva) | [`procesador_salud_fba.py:745`](procesador_salud_fba.py), explícita como *«PELÍCULA: apila, NUNCA borra»* | el procesador y las vistas |
-| `salud_fba_hist` (227 filas, muerta desde el 25-jul) | **nadie** | **nadie** |
+| `50438020648.txt` | 6 | 14-jul |
+| `50489020656.txt` | 3 | 22-jul |
+| `50497020659 (1).txt` | 218 | 25-jul |
 
-Barrido de los dos repos (`.py`, `.html`, `.sql`, `.ts`, `.tsx`): `salud_fba_hist` aparece
-**únicamente** en [`sql/canario_rls.sql`](sql/canario_rls.sql), y ahí solo como entrada de un censo
-de tablas, no como lectura ni escritura. **Es huérfana en código: ningún procesador la escribe y
-ningún consumidor la lee.**
+📌 Y la propia forma delata que **quedó a medias**: esos `.txt` pesan ~100 KB y traen unas 220
+filas cada uno, pero de los dos primeros solo entraron **6 y 3**. No es un archivo: es un relleno
+que se abandonó a mitad. Encaja con la cronología del repo — `procesador_salud_fba.py` nació el
+**24-jul** (`8a158e8`) escribiendo `salud_fba_historico` **directamente**, o sea que la tabla LEAN
+ya existía dos días antes de que alguien rellenara la gorda. Nunca fue la titular.
 
-Se puede jubilar. **No la he tocado**, como pide el encargo. Cuando se haga, que sea con un
-`ALTER TABLE … RENAME TO _zz_salud_fba_hist_jubilada` primero y el `DROP` semanas después — no
-porque haya duda, sino porque es lo barato.
+**¿Se puede jubilar? Sí, y ahora con la prueba en la mano.** Lo que me preocupaba al abrirla era
+que fuese la única copia de algo: tiene **26 columnas que la viva no tiene** (`crudo`, `fnsku`,
+`product_name`, `storage_volume`, `item_volume`, los `season_*`, los `recommended_*`,
+`healthy_inventory_level`…) y el **14-jul no existe en `salud_fba_historico`**. Pero:
+
+🔒 **Los tres ficheros de origen siguen en Storage** (`informes/salud_fba/`, comprobado uno a uno:
+`50438020648.txt` del 16-jul, `50489020656.txt` del 23-jul, `50497020659 (1).txt` del 25-jul). El
+procesador **no limpia su buzón** — no hay `remove` ni `limpiar_buzon` en él. **Todo lo que hay en
+esa tabla se puede reconstruir del `.txt`, columna a columna, incluido el `crudo`.** No se pierde
+nada.
+
+Y el `crudo` que le falta a la viva no es un olvido, es el diseño, escrito en el propio procesador
+(`:170-172`): *«LEAN: solo las columnas que dibujan una curva. NADA de `crudo jsonb` … la completa
+del día de hoy sigue entera en `salud_fba.crudo`»*. Es la misma regla que el `DROP COLUMN crudo` de
+Keepa (CLAUDE.md §2): el crudo sale de la base **porque el fichero se conserva**.
+
+**No la he tocado.** Cuando se jubile, en su propio PR y en dos tiempos: primero
+`ALTER TABLE … RENAME TO _zz_salud_fba_hist_jubilada`, el `DROP` semanas después. No por duda —
+está medido— sino porque renombrar es gratis y revela cualquier lector que el barrido no viera.
 
 ### B5 · La respuesta en una línea
 
@@ -511,9 +542,34 @@ escrito a mano no se parece a eso — se parece a la cuarta, que lleva su `revok
 `CREATE TABLE` / `CREATE TABLE AS` / `SELECT INTO`. **`CREATE VIEW` no está en su lista**, y una
 vista no tiene RLS propia: para ella el ACL es la única defensa, y el ACL nace abierto.
 
-**¿La usa alguien?** No. Barrido de los dos repos y de la base: 0 menciones en `index.html`, 0 en
-`app/` y `lib/` de la v2, 0 en los tres ficheros del trackeador, y **0 dependencias en `pg_depend`**.
-Como dice el encargo: *si nadie la lee, la respuesta es revocar y punto.*
+**¿La usa alguien? ¿Rompe el gate alguna pantalla de la v1?** 🔒 **No, y esta vez con la cuenta
+cerrada**, que es más fuerte que un grep negativo. En `index.html` hay **164 llamadas `.from(`** y
+se reparten así, sin que sobre ni una:
+
+| | |
+|---|---|
+| Con nombre literal entrecomillado | **158** |
+| `Array.from(…)` — JavaScript, no Supabase | 2 |
+| `db.storage.from('fotos-fabrica' / 'facturas-pdfs')` — buckets, no tablas | 4 |
+| | **164** ✅ |
+
+**Ninguna usa una variable**, así que la lista de lo que la v1 puede tocar es cerrada y completa —
+**16 objetos de base de datos**, éstos y no otros:
+
+> `ajustes_stock` · `alertas_silenciadas` · `app_datos` · `canales_producto` · `codigos_proveedor` ·
+> `compras` · `devoluciones` · `envios_fba` · `escaner_resultados` · `fabrica_fichas` · `facturas` ·
+> `monitor_recomendaciones` · `movimientos` · `productos` · `tareas` · `web_productos`
+
+**Ni `v_analisis_auditable` ni `v_scoreboard_reglas` están.** Y tampoco hay puerta trasera: cero
+`fetch` a `/rest/v1/`, cero `.rpc(`, y cero apariciones de las cadenas `v_analisis`, `v_scoreboard`,
+`auditable` o `scoreboard` en todo el fichero. Lo mismo en `api/disparar.js`.
+
+Sumado a los otros dos barridos (0 en `app/` y `lib/` de la v2, 0 en los tres ficheros del
+trackeador) y a **0 dependencias en `pg_depend`**: el gate no puede romper ninguna pantalla, porque
+ninguna pantalla las abre. Como dice el encargo: *si nadie la lee, la respuesta es revocar y punto.*
+
+⚠️ El límite honesto sigue siendo el mismo: esto cubre los dos repos y la base. Un Colab o un
+script suelto fuera de ahí no lo puedo ver, y la ausencia no se demuestra.
 
 **⚠️ Lo que la migración NO hace, a propósito:** no les pone `security_invoker`. Medido —
 `monitor_analisis` tiene RLS con **cero políticas** (la vista quedaría a 0 filas) y `monitor_reglas`
@@ -707,13 +763,17 @@ Dicho como preguntas abiertas, no como suposiciones:
   Settings → Secrets. **Bloquea el paso 1 de D3** para las dos tablas que toca el trackeador.
 - **Quién ejecutó el borrado de los 1.746 + 970 registros y cuándo.** Postgres no guarda esa traza.
   Lo que sí está probado: no fue el código, y no se ha repetido.
-- **Si algo fuera de los dos repos lee `v_analisis_auditable`** (un Colab, un script suelto). No
-  consta, pero la ausencia no se puede demostrar desde aquí.
+- **Si algo fuera de los dos repos lee `v_analisis_auditable`** (un Colab, un script suelto). Dentro
+  de los dos repos y de la base está descartado con cuenta cerrada (apartado D1); fuera, la ausencia
+  no se puede demostrar desde aquí.
+- **Por qué el relleno de `salud_fba_hist` se quedó en 6 y 3 filas** de dos ficheros que traen ~220
+  cada uno. Que fue una única operación del 26-jul está medido; el criterio que dejó fuera al resto
+  no, y como no la escribe nadie desde entonces, tampoco cambia ninguna decisión.
 - **Si el Fee Preview de Seller Central trae la tarifa al detalle que hace falta.** Sé que el
   informe existe; no he visto un fichero real de esta cuenta. Antes de diseñar el procesador hay que
   descargar uno y medirlo — como manda §2: *las guardas se miden contra el fichero real*.
-- **Si `salud_fba_hist` tuvo alguna vez un escritor.** No aparece en la historia de git del repo.
-  Pudo crearse a mano, igual que las dos vistas.
+*(Lo de `salud_fba_hist` ya no está aquí: contestado en B4 — un único relleno manual del 26-jul,
+reconstruible entero desde Storage.)*
 
 ---
 
@@ -731,6 +791,7 @@ Ninguno de estos pasos está dado. Los tres primeros son independientes entre s�
 | 6 | **`concurrency: escritores-productos`** en los tres workflows reales | Barato, aunque no cierre la carrera de la v1 |
 | 7 | **D3 paso 2** (quitar solo `DELETE` a `anon`) | Quita lo irreversible sin romper una sola llamada del frontend |
 | 8 | **Versionar `ensure_rls`** a `migraciones/` | Cinco minutos, y hoy es una defensa que un restore se lleva |
+| 9 | **Jubilar `salud_fba_hist`** (RENAME primero, DROP semanas después) | Sin prisa: no molesta. Medido que no se pierde nada — sus 3 ficheros siguen en Storage |
 
 **Todo por la escalera de CLAUDE.md §5** — restaurar staging → ensayo → aplicar → verificación SQL →
 producción ensayo → aplicar → verificación SQL, con Elena avisada antes de tocar producción. Y el
