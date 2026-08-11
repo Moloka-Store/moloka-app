@@ -88,6 +88,10 @@ on:
         description: "Nombre del backup (vacio = el mas reciente)"
         required: false
         default: ""
+      motivo:
+        description: "Para que restauras (lo veran las otras sesiones)"
+        required: false
+        default: ""
 
 concurrency:
   group: restaurar-staging
@@ -121,6 +125,38 @@ jobs:
           sudo apt-get install -y -qq postgresql-common >/dev/null
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null
           sudo apt-get install -y -qq postgresql-client-17 >/dev/null
+
+      # 🔴 STAGING ES COMPARTIDO. El 11-ago-2026 se restauró TRES VECES en una hora, y una
+      #    de ellas se llevó por delante una vista que otra sesión ya había aplicado y
+      #    verificado; esa sesión siguió midiendo sobre un ensayo que ya no existía.
+      #    🔒 El `concurrency` de arriba impide que dos restauraciones se pisen entre sí,
+      #       pero NO protege a quien está midiendo: para eso hace falta que se vea quién
+      #       ha restaurado y cuándo. Este paso avisa; no impide nada, porque a veces hay
+      #       que restaurar igual.
+      - name: 2b) Quien restauro antes (staging es compartido)
+        env:
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+        run: |
+          psql "$STAGING_DB_URL" -q -c "
+            create table if not exists public.staging_restauraciones (
+              id            bigserial primary key,
+              restaurado_en timestamptz not null default now(),
+              quien         text,
+              motivo        text,
+              fichero       text,
+              run_url       text
+            );" 2>/dev/null || echo "(no se pudo asegurar la tabla; se continua)"
+          echo "--- Ultimas restauraciones de staging ---"
+          psql "$STAGING_DB_URL" -c "
+            select restaurado_en, quien, coalesce(motivo,'-') as motivo
+              from public.staging_restauraciones
+             order by restaurado_en desc limit 5;" 2>/dev/null || true
+          ULT=$(psql "$STAGING_DB_URL" -tAc "
+            select coalesce(extract(epoch from (now() - max(restaurado_en)))::int, 999999)
+              from public.staging_restauraciones;" 2>/dev/null || echo "999999")
+          if [ "$ULT" -lt 3600 ] 2>/dev/null; then
+            echo "::warning::Staging se restauro hace $((ULT/60)) minutos. Si alguien esta midiendo, le estas tirando el ensayo."
+          fi
 
       - name: 3) Bajar el backup de R2
         env:
@@ -952,3 +988,45 @@ jobs:
             echo "**resultado: VERIFICADO -- el backup reconstruye lo que contiene ($DTOT objetos, $TOTD filas),"
             echo "con $NPOL_FUERA politicas de storage CONSERVADAS de staging, NO restauradas del backup**"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # 🔒 El rastro se deja AL FINAL y con `if: always()`: si la restauración falla a
+      #    medias, lo que hay en staging tampoco es lo que había antes, así que la otra
+      #    sesión necesita enterarse igual.
+      #    La tabla se recrea aquí porque el dump acaba de pasar por encima. No viene en el
+      #    backup —es de staging, no de producción—, así que normalmente sobrevive; el
+      #    `if not exists` cubre el día que el restore limpie el esquema entero.
+      - name: 9) Dejar rastro de quien ha restaurado
+        if: always()
+        env:
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+          QUIEN:   ${{ github.actor }}
+          MOTIVO:  ${{ github.event.inputs.motivo }}
+          FICHERO: ${{ github.event.inputs.fichero }}
+          RESULTADO: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          psql "$STAGING_DB_URL" -q -c "
+            create table if not exists public.staging_restauraciones (
+              id            bigserial primary key,
+              restaurado_en timestamptz not null default now(),
+              quien         text,
+              motivo        text,
+              fichero       text,
+              run_url       text
+            );
+            comment on table public.staging_restauraciones is
+              'Quien ha restaurado staging y cuando. Vive SOLO en staging y NO viene en el
+               backup de produccion, asi que sobrevive a la propia restauracion. Existe
+               porque varias sesiones trabajan a la vez y una restauracion le tira el
+               ensayo a quien este midiendo: al menos que se vea quien fue.';
+            revoke all on public.staging_restauraciones from public, anon, authenticated;
+            grant select on public.staging_restauraciones to authenticated;"
+          psql "$STAGING_DB_URL" -q -c "
+            insert into public.staging_restauraciones (quien, motivo, fichero, run_url)
+            values (nullif('$QUIEN',''),
+                    nullif(trim(concat('$MOTIVO', ' [', '$RESULTADO', ']')),''),
+                    nullif('$FICHERO',''), '$RUN_URL');"
+          echo "--- Rastro dejado ---"
+          psql "$STAGING_DB_URL" -c "
+            select restaurado_en, quien, coalesce(motivo,'-') as motivo
+              from public.staging_restauraciones order by restaurado_en desc limit 3;"
