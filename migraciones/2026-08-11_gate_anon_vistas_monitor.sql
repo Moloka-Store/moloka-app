@@ -1,0 +1,96 @@
+-- ============================================================================
+-- MIGRACIÓN 2026-08-11 · GATE DE SEGURIDAD (2ª tanda) — cerrar a `anon` las DOS
+--   vistas escribibles sobre las tablas de criterio  ·  Bloque D1 del encargo
+--
+-- 🔴 PROPUESTA. NO APLICADA. Se revisa ANTES de ejecutar (lo pide el encargo).
+-- ----------------------------------------------------------------------------
+-- EL AGUJERO, medido en producción el 11-ago-2026:
+--
+--   vista                   modo      escribible   `anon` tiene
+--   v_analisis_auditable    DEFINER   SÍ           arwdDxtm  (incl. DELETE y TRUNCATE)
+--   v_scoreboard_reglas     DEFINER   SÍ           arwdDxtm  (incl. DELETE y TRUNCATE)
+--
+-- Las dos son `SELECT` planos, así que PostgreSQL las marca auto-actualizables
+-- (`is_updatable = YES`). Corren como su dueño (`postgres`), que es también el
+-- dueño de las tablas de debajo, y **un dueño ignora la RLS de su propia tabla**.
+-- Sumado al GRANT: un DELETE contra /rest/v1/v_analisis_auditable con la clave
+-- publicable borra `monitor_analisis` — las 284 filas de criterio de Fernando,
+-- que es lo único de esta base que no se reconstruye.
+--
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 🔬 FUE ARRASTRE DEL DEFAULT ACL, NO UN GRANT DELIBERADO
+-- ══════════════════════════════════════════════════════════════════════════════
+-- El ACL de las dos vistas es, carácter a carácter, el mismo que el de las tablas:
+--     postgres=arwdDxtm/postgres | anon=arwdDxtm/postgres |
+--     authenticated=arwdDxtm/postgres | service_role=arwdDxtm/postgres
+-- Ésa es EXACTAMENTE la huella de `pg_default_acl` de `public` (ver la migración
+-- hermana `2026-08-11_default_acl_public.sql`). Una vista con un GRANT escrito a
+-- mano no se parece a eso: compárese con `v_presencia_pais`, que sí lleva su
+-- `revoke` en la migración y hoy dice `authenticated=r/postgres` y nada de `anon`.
+-- 🔑 Nadie concedió esto: nacieron abiertas y nadie las cerró.
+--
+-- Y hay un motivo por el que el event trigger `ensure_rls` no las salvó: solo
+-- dispara con `CREATE TABLE` / `CREATE TABLE AS` / `SELECT INTO`. **`CREATE VIEW`
+-- no está en su lista.** Las vistas no tienen RLS propia, así que para ellas la
+-- ÚNICA defensa es el ACL — y el ACL es justo lo que nace abierto.
+--
+-- ⚠️ NINGUNA DE LAS DOS ESTÁ EN NINGUNA MIGRACIÓN DEL REPO. Se crearon a mano.
+--    Esta migración es también la primera vez que quedan escritas en algún sitio.
+--
+-- QUIÉN LAS CONSUME (barrido de los dos repos + la base, 11-ago-2026):
+--   · v1 de Elena (`index.html`, 10.342 líneas)           → 0 menciones
+--   · Cockpit v2 (`app/`, `lib/`)                          → 0 menciones
+--   · Trackeador (`moloka_tracker_*.py`, los tres)         → 0 menciones
+--   · Dependencias en la BASE (`pg_depend` sobre las dos)  → 0 filas
+--   ⚠️ Lo que el barrido NO cubre: un Colab o un script suelto fuera de los dos
+--      repos. No consta, pero no se puede demostrar que no exista.
+--   → Nadie las lee. Por eso aquí se revoca y punto: no hay nada que reafirmar.
+--
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 🔴 POR QUÉ **NO** SE LES PONE `security_invoker` (medido, no supuesto)
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Es el mismo caso que `v_estado_asin` en el gate del 10-ago. Estado real de las
+-- tablas de debajo, medido hoy:
+--     monitor_analisis  → RLS activa y CERO políticas   → 0 filas para TODO el mundo
+--     monitor_reglas    → RLS activa, 1 política: `anon_all_regla` ALL → **anon**, using(true)
+--                         (no hay ninguna política para `authenticated`)
+-- Con `security_invoker` la vista pasaría a correr con los permisos de quien
+-- consulta: `v_analisis_auditable` daría 0 filas siempre, y `v_scoreboard_reglas`
+-- daría 0 filas a `authenticated` (su única política es para `anon`, y a `anon`
+-- se lo estamos quitando). Se arreglaría la fuga y se rompería la vista.
+-- 🔑 Aquí se cierra lo que URGE (el permiso). La defensa en profundidad depende de
+--    qué se decida con `monitor_analisis` y `monitor_reglas`, y eso es otro PR.
+--
+-- DESPLIEGUE: `REVOKE` es un cambio de catálogo, instantáneo, sin reescritura de
+--   datos. Reversible con `grant select on <vista> to anon`.
+--   Por la escalera: restaurar staging → ensayo → aplicar → prod ensayo → aplicar.
+--
+-- 🔒 LA VERIFICACIÓN VA EN PRODUCCIÓN, NO EN STAGING. El backup se vuelca con
+--    `--no-privileges`, así que staging viene del restore con los ACL por defecto
+--    de Supabase y sus permisos NO son los de producción (CLAUDE.md §4). Para
+--    objetos PREEXISTENTES como estos dos, un test de ACL en staging no prueba
+--    nada. En staging se ensaya que el DDL corre; el ACL se mide en prod.
+-- ============================================================================
+
+set local lock_timeout = '3s';
+
+-- ── Lo que cierra el agujero ────────────────────────────────────────────────
+-- `public` va incluido porque un grant a PUBLIC alcanzaría también a anon,
+-- aunque hoy no lo haya. `authenticated` NO se toca aquí: hoy nadie lee estas
+-- vistas, pero quitárselo a la vez mezclaría dos decisiones en un PR.
+revoke all on public.v_analisis_auditable from anon, public;
+revoke all on public.v_scoreboard_reglas  from anon, public;
+
+-- ── Verificación (se ejecuta en PRODUCCIÓN, después de aplicar) ─────────────
+-- Debe devolver `false` en las seis celdas:
+--
+--   select relname,
+--          has_table_privilege('anon', c.oid, 'SELECT') as anon_lee,
+--          has_table_privilege('anon', c.oid, 'DELETE') as anon_borra,
+--          has_table_privilege('anon', c.oid, 'INSERT') as anon_inserta
+--   from pg_class c join pg_namespace n on n.oid = c.relnamespace
+--   where n.nspname = 'public'
+--     and c.relname in ('v_analisis_auditable', 'v_scoreboard_reglas');
+--
+-- Y el censo de criterio debe seguir intacto (284 filas el 11-ago-2026):
+--   select count(*) from public.monitor_analisis;
