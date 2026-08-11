@@ -37,7 +37,7 @@
 # (ya en producción). Misma escalera (ENTORNO staging|produccion,
 # MODO ensayo|aplicar), misma disciplina de guardas.
 #
-# 🔒 LA REGLA QUE MATÓ AL PR #26: ningún encabezado se conjetura. Los 61
+# 🔒 LA REGLA QUE MATÓ AL PR #26: ningún encabezado se conjetura. Los
 #   encabezados tipados están copiados LITERALMENTE del fichero real. Si al
 #   ejecutar un encabezado tipado no aparece EXACTO en la cabecera → ABORTA sin
 #   escribir. Nada se "resuelve por aproximación".
@@ -176,7 +176,102 @@ TIPADAS = [
     ('Descripción & Características: Característica 4', 'bullet_4', 't'),
     ('Descripción & Características: Característica 5', 'bullet_5', 't'),
 ]
-assert len(TIPADAS) == 61, f"Se esperaban 61 columnas tipadas, hay {len(TIPADAS)}"
+# ---------------------------------------------------------------------------
+# EL INVENTARIO: las columnas que TIPADAS tiene que declarar, POR NOMBRE.
+#
+# 🔴 POR QUÉ NO ES UN CONTADOR — y esto no lo pagó un test, lo pagó una carga real.
+#    Hasta el 11-ago-2026 aquí ponía `assert len(TIPADAS) == 61`. Ese día se
+#    promovieron a columna bb_envio, bb_pais_envio y bb_plazo_txt, nadie subió el
+#    61 a 64, y la guarda tumbó los CUATRO exports de Keepa seguidos. El fallo era
+#    de un minuto; verlo costó diez entre dos personas, porque el mensaje
+#    —«Se esperaban 61 columnas tipadas, hay 64»— decía CUÁNTAS había, no CUÁLES.
+#
+#    Un contador tiene dos defectos que NO se arreglan subiendo el número:
+#      · No nombra. Con 64 columnas, «sobra una» es un acertijo.
+#      · Y el peor: **da por bueno un renombrado**. Quita una y añade otra y la
+#        cuenta sigue cuadrando, mientras el dato se escribe en otra columna. Ese
+#        es el error caro de verdad, y el contador es ciego justo a ése.
+#
+# 🔒 SÍ, ES UNA SEGUNDA COPIA DE LOS NOMBRES, Y ESE ES EL PUNTO. Generarla a
+#    partir de TIPADAS no comprobaría nada: cuadraría siempre. Es el «sí, quiero»
+#    explícito de quien toca TIPADAS. Mantenerla cuesta una línea; no tenerla
+#    costó cuatro ficheros rebotados.
+#
+# ⚠️ Se compara como CONJUNTO, no en orden: mover una columna de sitio no rompe
+#    nada (`cols` y las tuplas del volcado salen las dos de TIPADAS, así que van
+#    siempre en el mismo orden ENTRE SÍ). El orden de aquí abajo es el de TIPADAS
+#    sólo para que un diff se lea de un vistazo.
+# ---------------------------------------------------------------------------
+COLUMNAS_ESPERADAS = (
+    'asin', 'dominio', 'ean_keepa_crudo', 'upc_keepa',
+    'titulo', 'marca', 'fabricante', 'tipo_producto',
+    'imagenes', 'n_imagenes', 'tarifa_fba', 'comision_pct',
+    'comision_eur_bb', 'bb_precio', 'bb_vendedor', 'bb_es_fba',
+    'bb_stock', 'bb_pct_amazon_30d', 'bb_disponibilidad', 'bb_envio',
+    'bb_pais_envio', 'bb_plazo_txt', 'fba_mas_barato', 'fbm_mas_barato',
+    'p3_fba_precio', 'p3_fba_stock', 'p3_fbm_stock', 'ofertas_nuevas',
+    'ofertas_nuevas_fba', 'ofertas_nuevas_fbm', 'ofertas_total', 'umbral_competitivo',
+    'amazon_precio', 'amazon_disponibilidad', 'rank', 'rank_30d',
+    'rank_90d', 'rank_drops_30d', 'rank_drops_90d', 'categoria',
+    'subcategoria', 'monthly_sold_ultimo', 'monthly_sold_ultimo_fecha', 'comprados_mes_pasado',
+    'asin_padre', 'asins_variacion', 'n_variaciones', 'atributos_variacion',
+    'paq_peso_g', 'paq_largo_cm', 'paq_ancho_cm', 'paq_alto_cm',
+    'fecha_lanzamiento', 'keepa_actualizado', 'listado_desde', 'rating',
+    'n_valoraciones', 'comprados_juntos', 'slug_amazon', 'bullet_1',
+    'bullet_2', 'bullet_3', 'bullet_4', 'bullet_5',
+)
+
+
+def _comprobar_inventario_tipadas():
+    """TIPADAS contra el inventario. NO cuenta: NOMBRA lo que sobra y lo que falta.
+
+    🔑 Y dice DE QUIÉN es el problema, que es la otra mitad del arreglo. Esto salta
+       ANTES de hablar con Storage — o sea, sin haber abierto siquiera el CSV—, así
+       que un fallo aquí NUNCA es culpa del fichero. Si el log no lo dice, la
+       reacción natural de quien lo mira es volver a exportar de Keepa: gasta
+       tokens, tarda, y no arregla nada porque el fichero ya estaba bien.
+    """
+    declaradas = [c for _, c, _ in TIPADAS]
+    vistas, duplicadas = set(), []
+    for c in declaradas:
+        if c in vistas and c not in duplicadas:
+            duplicadas.append(c)
+        vistas.add(c)
+    # dict.fromkeys = únicas conservando el orden de aparición.
+    sobran = [c for c in dict.fromkeys(declaradas) if c not in COLUMNAS_ESPERADAS]
+    faltan = [c for c in COLUMNAS_ESPERADAS if c not in vistas]
+    if not (duplicadas or sobran or faltan):
+        return
+
+    def bloque(titulo, cols):
+        if not cols:
+            return ''
+        return '\n   ' + titulo + '\n' + '\n'.join('     · ' + c for c in cols)
+
+    print(
+        '\n' + '=' * 72
+        + '\n❌ EL PROCESADOR NO CUADRA CONSIGO MISMO. No se ha escrito NADA.'
+        + '\n' + '-' * 72
+        + '\n🟢 EL FICHERO DE KEEPA ESTÁ BIEN. Ni siquiera se ha llegado a abrir.'
+        + '\n   NO vuelvas a exportarlo de Keepa: gastarías tokens para nada. El que'
+        + '\n   ya tienes descargado sirve tal cual — cuando esto se arregle, sueltas'
+        + '\n   EL MISMO fichero y entra.'
+        + '\n   El que no está listo es el PROCESADOR. Lo arregla quien programa.'
+        + bloque('Columnas DECLARADAS en TIPADAS que NO están en el inventario:', sobran)
+        + bloque('Columnas del INVENTARIO que TIPADAS ya no declara:', faltan)
+        + bloque('Columnas DUPLICADAS dentro de TIPADAS:', duplicadas)
+        + '\n\n🔧 Arreglo: cuadrar COLUMNAS_ESPERADAS con TIPADAS en este mismo fichero.'
+        + '\n   Y si las columnas son NUEVAS, comprobar además que la migración que las'
+        + '\n   añade a keepa_escaparate Y a keepa_escaparate_hist está APLICADA: si no,'
+        + '\n   el volcado fallaría más tarde, ya con el fichero abierto.'
+        + '\n' + '=' * 72 + '\n',
+        flush=True)
+    # SystemExit y no assert: `python -O` borra los assert, y una guarda que se apaga
+    # con una bandera no es una guarda. Además sale limpio, sin traceback encima.
+    raise SystemExit(1)
+
+
+_comprobar_inventario_tipadas()
 
 TIPO_SQL = {
     't': 'text', 'i': 'integer', 'n': 'numeric', 'b': 'boolean',
@@ -346,7 +441,10 @@ def analizar(texto, fichero, meta):
     for i, h in enumerate(cabecera):
         idx.setdefault(h, i)   # primera aparición
 
-    # Guarda 1: los 61 encabezados tipados existen EXACTOS (§0: no se conjetura)
+    # Guarda 1: los encabezados tipados existen EXACTOS (§0: no se conjetura).
+    # ⚠️ Sin el número a mano: el «61» que ponía aquí se quedó mintiendo el día que
+    #    fueron 64, igual que el contador de arriba. Una cifra escrita en prosa
+    #    envejece sola; la lista es la que manda.
     faltan = [h for h, _, _ in TIPADAS if h not in idx]
     if faltan:
         raise Aborta(

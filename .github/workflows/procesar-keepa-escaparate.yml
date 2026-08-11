@@ -43,6 +43,14 @@ jobs:
       - name: Instalar dependencias
         run: pip install --quiet supabase psycopg2-binary
 
+      # 🔒 La mesa de pruebas de la guarda de columnas, ANTES del procesador. Va aquí y
+      #    no en un workflow suyo porque en este repo NADA corre en push ni en PR: un
+      #    test que no se lanza es decoración, y la casa ya se comió un falso verde por
+      #    eso. Tarda menos de un segundo, no toca red ni base, y sólo ejercita la
+      #    guarda — si esto se pone rojo, es que la guarda está rota de verdad.
+      - name: Mesa de pruebas del inventario de columnas
+        run: python -u test_inventario_tipadas.py
+
       - name: Ejecutar procesador
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
