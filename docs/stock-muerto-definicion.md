@@ -270,6 +270,69 @@ documentado `salud_fba` (§1.3). Es un caso a estudiar, no un número a sumar.
 
 ---
 
+## 🔴 La narrativa que NO se sostiene (mía), y la que sí
+
+Escribí que el tramo de rank bueno era «demanda demostrada, el problema es nuestro → precio
+y ficha» y el de rank malo «no interesa a nadie → outlet». **Los datos no la sostienen.**
+
+**El criterio de Amazon no es el rank: es la CONVERSIÓN.** Por eso liquida cosas de rank
+bueno. 🔬 Los tres `Create Outlet deal` del tramo A son los tres *Low conversion*, y en los
+tres marca **el 100 % del stock** como excedente. Y el 58 % del exceso que cuantifica (136 de
+233 uds) está en el tramo de rank MEJOR, no en el peor.
+
+⚠️ Una narrativa ordenada que encaja con dos ejemplos no es un hallazgo. Esta duró hasta que
+se cruzó con la tercera columna.
+
+### Y la explicación real del tramo A resultó ser mucho más simple
+
+🔬 **En los 7 la caja de compra es de OTRO, y en 5 de los 7 ese otro es Amazon.** Y en los 7
+nuestro precio está por encima de la caja, entre +0,21 € y +7,54 €.
+
+No hace falta ninguna teoría sobre demanda: **no venden porque no tenemos la caja.** Y la
+casa ya tiene escrito que *contra Amazon, bajar no gana* — así que los 5 de Amazon son
+candidatos a outlet aunque el rank sea excelente, y los 2 donde la caja la tiene un tercero
+(Intertrade Spa, HopeBrand) son los únicos donde competir en precio tiene sentido.
+
+---
+
+## Las dos clases de prescripción, y sólo una cuenta como señal
+
+| | vale como señal independiente | por qué |
+|---|---|---|
+| `Advertise listing` | 🔴 **NO** | 24 de 24 veces con *Low traffic*, nunca con otra cosa. **Es la alerta redicha.** Contarla como corroboración sería contar la misma señal dos veces (§1.3). Se pinta, pero no cuenta. |
+| `Create Outlet deal` | ✅ **SÍ** | Cruza los tres estados de alerta —29 *Low traffic*, 8 *Low conversion* y **5 sin alerta ninguna**— y trae su propia medida (`estimated_excess_quantity`). Aporta lo que la alerta no tiene. |
+| `GoToRestock` / `CreateShippingPlan` | ✅ **SÍ, y es la más útil** | **0 de 23 con *Low conversion*** contra 22 en fichas sin alerta. Ver abajo: es el marcador de que nuestro propio filtro se equivoca. |
+
+---
+
+## 🔑 `GoToRestock` = «tu filtro de 30 días se está equivocando con esta ficha»
+
+Tres fichas del cubo traían una prescripción de REPONER. No era Amazon equivocándose:
+
+| producto | t30 | **t90** | extracto 30d | última venta | caja |
+|---|---|---|---|---|---|
+| Tiger Spice Chai | 2 | 68 | **20** ⚠️ | 6-ago | perdida |
+| POP! Cinderella | 1 | **65** | 2 | **23-jul** | perdida · HopeBrand |
+| Funko Vito El Padrino | 1 | **29** | 1 | **25-jul** | perdida · Amazon |
+
+- **Tiger Spice Chai ya lo había cazado el paso 4**: `salud_fba` decía t30 = 2 y el extracto
+  dice **20**. Una discrepancia de 10× en la misma ventana. El cruce con el extracto se
+  justifica solo otra vez.
+- **Cinderella y Vito sobrevivieron al paso 4** porque el extracto SÍ coincide en los 30 días
+  (2 y 1). No son un agujero de datos: **vendieron 65 y 29 unidades en 90 días y pararon en
+  seco a finales de julio, las dos justo después de perder la caja.**
+
+🔴 **No son stock muerto: son PÉRDIDAS DE BUY BOX**, y el tratamiento es el contrario de
+liquidar. Un filtro de 30 días no puede distinguir «nunca vendió» de «vendía y paró hace tres
+semanas» — y esa diferencia lo es todo.
+
+**Regla que sale de aquí:** toda ficha del cubo con `recommended_action` de la familia
+reposición se saca a un cubo propio y se mira una a una. Es la señal más barata que tenemos
+de que el corte de 30 días se está dejando fuera algo vivo, y es información que la alerta no
+da: las tres están **sin alerta**.
+
+---
+
 ## Cómo se recalcula (no se copia)
 
 ```sql
