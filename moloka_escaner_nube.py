@@ -859,7 +859,19 @@ def _stock_osma(x):
 problematicos = []
 chase_sueltos = []   # chase suelto descartado por la regla de negocio (va a la hoja Descartados)
 filas = []
-fuera_disp = 0
+# Las descartadas, POR CAUSA. Antes era un solo `fuera_disp` para las tres, y el log
+# decia "fuera por estado/stock" — una etiqueta que ni siquiera nombraba la marca.
+# 🔴 Eso es lo que tapo el "solo Funko" durante semanas: en escaner_memoria parecia que
+#    solo se escaneaba Funko, y para saber si era un problema de ESCANEO o de ETIQUETADO
+#    habia que leerse el codigo. Con el numero partido se veia en el primer log: si las
+#    descartadas por marca son 2.900 de 5.945, el filtro esta mordiendo; si son 12, no.
+#    Un contador que suma dos causas no informa de ninguna.
+# ⚠️ Van en CASCADA: los tres `if` estan en orden y cada fila cuenta en el PRIMERO que la
+#    descarta, no en todos los que cumpliria. Sumarlos da el total de descartadas, pero
+#    "por estado: 40" no significa que esas 40 tuvieran stock.
+fuera_estado = 0    # el estado de la fila no esta en los estados_ok del perfil
+fuera_marca = 0     # no pasa el filtro de marca/idioma del director
+fuera_stock = 0     # stock nulo o <= 0
 # Defaults para que el cotejo (mas abajo, punto comun) no reviente en la rama MOLOKA:
 # la rama de ficheros los reasigna; MOLOKA los deja asi (tiene nombre real -> cotejo activo).
 det = {}
@@ -973,9 +985,9 @@ else:
     for _, row in sel.iterrows():
         if PERFIL.get('estados_ok'):
             if str(row.get(PERFIL['col_estado'], '')).strip() not in PERFIL['estados_ok']:
-                fuera_disp += 1; continue
+                fuera_estado += 1; continue
         if FILTROS and not _pasa_filtros(row):
-            fuera_disp += 1; continue
+            fuera_marca += 1; continue
         if PERFIL.get('sin_columna_stock') or (_tolerante and cS is None):
             stock = 1.0     # sin columna de stock -> se asume disponible
         elif PERFIL.get('stock_especial') == 'osma':
@@ -983,7 +995,7 @@ else:
         else:
             stock = _num(row.get(cS, ''))
         if stock is None or stock <= 0:
-            fuera_disp += 1; continue
+            fuera_stock += 1; continue
         ean_in = str(row[cE]).strip()
         # Regla del chase: el SUELTO se descarta (solo se compra en caja de 6).
         _es_case, _es_caja6, _descartar = clasificar_chase(row.get(cN, ''), ean_in)
@@ -1024,7 +1036,26 @@ else:
                       # feeds de proveedor no traen esa columna -> '' -> None. Se escribe tal cual en
                       # escaner_detalle.producto_id (camino de la factura): NO se cruza EAN->ficha.
                       'producto_id': (str(row.get('producto_id','')).strip() or None)})
-    print(f"Disponibles a escanear: {len(filas)} | fuera por estado/stock: {fuera_disp} | "
+    # Las descartadas, cada una con SU causa (ver el porque arriba, donde se inicializan).
+    # La de marca va primero a proposito: es la que contesta "que marcas se estan
+    # escaneando de verdad", que es la pregunta que costo dias responder.
+    #
+    # 🔒 EL PORCENTAJE DE MARCA VA SIEMPRE, SIN UMBRAL, y esto se decidio midiendo.
+    #    Primero puse un aviso que solo saltaba pasada la mitad del catalogo. Con los
+    #    totales del run real de las 12:00 (5.940 evaluadas, 2.909 descartadas), aunque
+    #    TODAS fueran por marca serian el 48% — o sea que el aviso se habria quedado
+    #    callado EN EL CASO EXACTO que lo motivo. Un umbral que no dispara donde tiene que
+    #    disparar es peor que no tenerlo: da sensacion de vigilancia. Sin umbral no hay
+    #    nada que calibrar mal.
+    # 🔒 Y el denominador es `sel`, lo que ENTRO al bucle — no la suma de las tres causas:
+    #    entre medias se caen filas por chase suelto y por EAN invalido, y sumar solo las
+    #    que conozco inflaria el porcentaje. Un porcentaje con el denominador mal miente
+    #    con autoridad.
+    _evaluadas = len(sel)
+    _pct = f" ({100 * fuera_marca // _evaluadas}% del catalogo)" if _evaluadas else ""
+    print(f"Disponibles a escanear: {len(filas)} | descartadas -> "
+          f"por marca/idioma: {fuera_marca}{_pct} · por estado: {fuera_estado} · "
+          f"por stock: {fuera_stock} (total {fuera_marca + fuera_estado + fuera_stock}) | "
           f"EAN problematicos: {len(problematicos)} | CHASE: {sum(f['es_chase'] for f in filas)}")
     if chase_sueltos:
         print(f"Chase SUELTO descartado (solo se compra en caja de 6): {len(chase_sueltos)} "
