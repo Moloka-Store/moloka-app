@@ -184,6 +184,39 @@ tarifa que no aplicaba.
 
 ---
 
+## 4-bis. 🔴 LA TRAMPA DE ESCALA DE `ventas_producto` — verificada, y por qué las cifras aguantan
+
+**`transacciones_movimientos.ventas_producto` viene SIN IVA.** `impuesto_producto` es el IVA aparte.
+🔬 Medido sobre los 13.146 movimientos de ES: el ratio `(ventas+impuesto)/ventas` es **1,21 clavado
+en 12.997**; los otros 142 son IVA reducido del 10 % (alimentación). Caso testigo,
+`J9-W3W1-31V3`: `ventas_producto` 16,52 + `impuesto_producto` 3,47 = **19,99**, que es exactamente
+el precio de su ficha.
+
+**Consecuencia:** el escalón de los 20 € está definido sobre el precio **CON IVA**, así que sobre
+`ventas_producto` habría que partir por **16,53**, no por 20. Partir por 20 sobre el campo pelado
+equivale a partir por **24,20 €** — un umbral que no existe.
+
+✅ **Las mediciones de este documento NO tienen ese error:** todas usan
+`(ventas_producto + impuesto_producto) / cantidad`, es decir el precio con IVA. Comprobado con los
+tres cortes sobre los mismos datos (ventana desde 1-abr, n≥2 por lado):
+
+| Corte | SKU | Suben | Salto medio | Máximo |
+|---|---|---|---|---|
+| **A · umbral 20 sobre precio CON IVA** *(el usado aquí)* | **21** | **18** | **+0,55** | **+0,79** |
+| **B · umbral 16,53 sobre `ventas_producto`** *(equivalente a A)* | 20 | 18 | +0,55 | +0,79 |
+| C · umbral 20 sobre `ventas_producto` *(escala cruzada)* | 7 | 2 | +0,35 | +0,63 |
+
+**A ≡ B** — la diferencia de un SKU es un caso justo en el borde. **C es otra cosa.**
+
+🔒 **Reverificadas después de la duda, y salen idénticas:** grupo de control **55 SKU** (3,63 →
+3,69), censo **72 / 104**, **35** que cruzan en una pasada, **19** clavados en 19,99 €. **No hay
+que rehacer nada.**
+
+🔑 **Pero la trampa es real y merece quedar escrita**, porque el campo se llama `ventas_producto` y
+no `ventas_producto_sin_iva`: **cualquier consulta futura que divida por `ventas_producto` y compare
+con un precio de escaparate está mezclando dos escalas.** Es hermana de la trampa de la comisión
+(doctrina 13): el nombre no dice la escala, y el error no da error — da un número plausible.
+
 ## 5. MÉTODO QUE DEBE QUEDAR EN LA DOCTRINA
 
 > 🔒 **Para separar un escalón de precio de una subida general de tarifas: el grupo de control son

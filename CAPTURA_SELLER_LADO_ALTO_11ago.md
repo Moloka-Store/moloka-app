@@ -110,28 +110,48 @@ como los devolvió el popup del Seller. NO es necesariamente el precio del listi
 NULL solo en las filas anteriores al 11-ago-2026, que son todas lecturas al precio vigente.';
 ```
 
-**Por qué UNA y no dos** (una para el precio y otra para un `es_simulacion boolean`): el booleano
-sería **derivable de la misma fila** (`precio_tarifado <> precio`), y dos columnas que dicen lo
-mismo es exactamente donde empiezan las divergencias — dos códigos que hoy coinciden es una
-coincidencia, no una garantía. Con una columna no hay nada que pueda desincronizarse.
+**Por qué UNA y no dos** — pero **NO por el motivo que escribí primero, que era falso.**
 
-### El relleno de lo que ya hay
+🔴 Mi argumento inicial era: *«un `es_simulacion` sería derivable de `precio_tarifado <> precio`»*.
+**Lo refuta una fila real.** La id 62 (`J9-W3W1-31V3`, 2-ago) tiene **`precio = 20,49`** cuando la
+ficha estaba a 19,99: en esa captura `precio` guarda el precio **consultado**, no el del listing.
+Con mi regla, esa simulación se habría clasificado como observación real — al revés de lo que es.
 
-```sql
-update public.seller_observaciones
-   set precio_tarifado = precio
- where precio_tarifado is null;
-```
+🔑 **El booleano no se añade por otra razón, y es mejor: operativamente no hace falta saberlo.** Lo
+que el cálculo de margen pregunta es *«¿tengo una tarifa del Seller para este SKU a un precio
+≥ 20 €?»*, y eso lo contesta `precio_tarifado` solo. Una estimación del popup a 20,49 € vale igual
+tanto si el listing estaba a 20,49 como si estaba a 19,99: en los dos casos es lo que Amazon dice
+que cobraría a ese precio. Y la procedencia —estimación, no factura— ya viaja **a nivel de tabla**:
+todo lo de `seller_observaciones` es `seller_estimado`.
 
-⚠️ **Esto lleva un supuesto y hay que confirmarlo antes de aplicarlo: que las 65 observaciones
-existentes se capturaron con el popup al precio vigente**, sin tocar el campo de precio. Lo sabe
-Fernando, que las hizo. **Si alguna fue una simulación, este `update` la convierte en una
-observación real y miente.** Si hay duda, el relleno se deja sin hacer y el NULL se lee como
-«no consta» — que es más honesto y no rompe nada: la vista puede tratar NULL como «= precio» sin
-escribirlo.
+Si algún día hiciera falta la distinción, se resuelve **sin columna nueva**: comparando
+`precio_tarifado` con el precio de ficha de ese día en `listings_amazon_hist`. Que es exactamente
+como se auditaron estas 65 filas.
 
-📌 **No propongo un `NOT NULL` ni un `CHECK`**: el día que alguien capture sin anotar el precio, es
-mejor una fila con NULL visible que un `insert` que falla y se pierde la captura.
+### El relleno — auditado fila a fila, no supuesto
+
+📄 Migración propuesta: [`migraciones/2026-08-11_seller_obs_precio_tarifado.sql`](migraciones/2026-08-11_seller_obs_precio_tarifado.sql)
+
+Contrastadas las 65 contra `listings_amazon_hist` del mismo SKU en la fecha más cercana anterior:
+
+| | Filas | Qué se hace |
+|---|---|---|
+| Coinciden al céntimo con la ficha | **63** | `precio_tarifado = precio` |
+| **id 62** — 20,49 con ficha a 19,99, `tarifa_fba` **3,80** | 1 | `precio_tarifado = 20,49`, marcada como simulación en el comentario |
+| **id 5** — 4,78 con ficha a 4,60 | 1 | **se deja NULL** hasta revisarla |
+
+📌 **La id 62 no es solo una excepción: es la primera captura del método que este documento
+generaliza.** Se preguntó al popup por 20,49 € teniendo la ficha a 19,99 y devolvió **3,80 €** — la
+mitad **alta** del par `3,28 ↔ 3,80` de la doctrina 7. **El escalón ya estaba medido ahí desde el
+2-ago y nadie lo había leído como tal.**
+
+🔒 **La id 5 se queda en NULL a propósito.** NULL significa «no consta a qué precio», que es la
+verdad, y no rompe nada: la vista lo trata como desconocido y esa fila no aporta tarifa.
+**Rellenarla con `precio` sería inventar justo el dato que esta columna existe para dejar de
+inventar.**
+
+📌 **No propongo `NOT NULL` ni `CHECK`**: el día que alguien capture sin anotar el precio, es mejor
+una fila con NULL visible que un `insert` que falla y se pierde la captura.
 
 ---
 
@@ -154,11 +174,12 @@ de `seller_estimado` **no puede presentarse junto a una de factura como si fuera
 concreto:
 
 1. **En la fila**, el semáforo ya lo distingue — basta con que `seller_estimado` pinte en ámbar y no
-   en verde. El verde queda reservado a `factura`.
-2. **En los totales, no se suman en el mismo número.** Hoy la pestaña acumula
-   `impacto_eur_mes` de todo lo accionable en un solo total. Un total que mezcla euros medidos con
-   euros estimados **es un número que no se puede auditar**. Deben ir en dos subtotales, o el total
-   debe llevar al lado cuánto de él es estimado.
+   en verde. **El verde queda reservado a `factura`.**
+2. 🔴 **En los totales: DOS SUBTOTALES, no un total con nota.** Hoy la pestaña acumula
+   `impacto_eur_mes` de todo lo accionable en un solo número. Un total que mezcla euros medidos con
+   euros estimados **no se puede auditar**, y una nota al lado se lee una vez y se deja de leer.
+   **Euros medidos y euros estimados van separados, cada uno con su cifra.** *(Decidido así, frente
+   a la alternativa de un total anotado.)*
 3. **La vista canónica lleva `fuente` y `medido_en`**, así que el dato viaja con su procedencia y
    nadie tiene que acordarse.
 
