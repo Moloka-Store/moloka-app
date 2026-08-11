@@ -61,6 +61,36 @@ hazla reaplicable antes de nada, o el problema vuelve en el siguiente restore.
 
 ---
 
+## 😴 Cuando BEMS despierte
+
+BEMS está **en pausa** (su API no responde). Los dos workflows tienen el `schedule:`
+**comentado a propósito**. El día que vuelva, hay que descomentar **los dos**:
+
+| Fichero | Cron que hay que descomentar |
+|---|---|
+| `.github/workflows/detector-bems.yml` | `0,30 7-12 * * 1-5` + los repasos de 13:00 y 15:00 |
+| `.github/workflows/semanal-bems.yml` | `0 0 * * 4` (jueves) |
+
+🔴 **Si solo se descomenta uno, el otro se queda dormido en silencio.** Por eso están
+en la misma tabla y cada fichero cita al otro.
+
+⚠️ **Y antes de darlo por vivo, comprobar que ESCRIBE**, no que corre. Hasta el
+11-ago-2026 el semanal corría los jueves, salía en **verde** y no hacía nada: su propio
+resumen decía «Funko: no lanzado» tres veces. Desde entonces lleva una guarda que avisa
+en amarillo si no lanza ninguna marca, pero la prueba buena es el dato:
+
+```sql
+-- 🔑 LOS PRESENTES, no `max(fecha)` a secas: una fila ya marcada agotada NUNCA se vuelve
+--    a tocar, así que su fecha queda congelada y arrastra el máximo hacia atrás.
+select max(fecha) filter (where presente)::date
+  from public.escaner_memoria where proveedor = 'BEMS';
+```
+
+Si eso no avanza tras un run, BEMS no está vivo aunque el workflow salga verde.
+🔬 El 11-ago-2026 estaba en **26-jun**: 46 días.
+
+---
+
 ## ⚠️ Staging es COMPARTIDO
 
 Varias sesiones trabajan sobre esta base a la vez. 🔬 El 11-ago-2026 staging se restauró

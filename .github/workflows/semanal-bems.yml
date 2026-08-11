@@ -17,10 +17,22 @@
 # ============================================================
 name: Moloka - Repaso semanal BEMS
 
+# 🔴 BEMS ESTA EN PAUSA: el 'schedule' esta COMENTADO a proposito, igual que el de
+#    detector-bems.yml. Hasta el 11-ago-2026 este corria los jueves, salia en VERDE y no
+#    hacia nada: su propio resumen decia «Funko: no lanzado · Bandai Model Kit: no lanzado
+#    · Pyramid Int.: no lanzado». Un run verde que no ejecuta nada es peor que uno rojo,
+#    porque nadie lo mira — y ademas era incoherente que el detector estuviera apagado y
+#    este no, siendo del mismo proveedor y por la misma causa.
+#
+# 🔑 CUANDO BEMS DESPIERTE HAY QUE DESCOMENTAR **DOS** SCHEDULES:
+#      · este fichero
+#      · .github/workflows/detector-bems.yml
+#    Y el recordatorio vive en el README, en «Cuando BEMS despierte», que es el sitio
+#    unico donde mirar. Si solo se descomenta uno, el otro se queda dormido en silencio.
 on:
-  schedule:
-    - cron: '0 0 * * 4'      # jueves 00:00 UTC = 02:00 peninsular (verano)
-  workflow_dispatch:          # disparo manual para probar
+  # schedule:
+  #   - cron: '0 0 * * 4'      # jueves 00:00 UTC = 02:00 peninsular (verano)
+  workflow_dispatch:          # disparo manual (unica via mientras BEMS este en pausa)
 
 concurrency:
   group: semanal-bems
@@ -47,4 +59,31 @@ jobs:
           SUPABASE_URL:    ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY:    ${{ secrets.SUPABASE_KEY }}
           DISPARO_SECRET:  ${{ secrets.DISPARO_SECRET }}
-        run: python -u moloka_semanal_bems.py
+        run: |
+          set -o pipefail
+          python -u moloka_semanal_bems.py | tee /tmp/semanal.log
+
+      # 🔴 LA GUARDA DEL VERDE VACIO, escrita AHORA para que este puesta el dia que se
+      #    reactive el schedule. Sin ella, el workflow puede volver a correr en vacio y
+      #    salir en verde, que es exactamente como estuvo desde el 26-jun sin que nadie lo
+      #    viera. Un run que no lanza NADA no es un exito: es un aviso.
+      #    🔒 `::warning::` y no `exit 1` a proposito: que BEMS no tenga nada que repasar
+      #       una semana concreta es posible y no es un fallo. Lo que no puede es pasar
+      #       desapercibido.
+      - name: Guarda - avisar si no se lanzo nada
+        if: always()
+        run: |
+          if [ ! -s /tmp/semanal.log ]; then
+            echo "::warning::El repaso no dejo salida: no se puede comprobar si lanzo algo."
+            exit 0
+          fi
+          LANZADO=$(grep -c ': lanzado' /tmp/semanal.log || true)
+          NO_LANZADO=$(grep -c ': no lanzado' /tmp/semanal.log || true)
+          echo "marcas lanzadas=$LANZADO · no lanzadas=$NO_LANZADO"
+          if [ "$LANZADO" -eq 0 ] && [ "$NO_LANZADO" -gt 0 ]; then
+            echo "::warning::REPASO EN VACIO: $NO_LANZADO marcas y NINGUNA lanzada. El run sale verde pero no ha hecho nada. Si BEMS sigue en pausa es lo esperado; si no, hay algo roto."
+            {
+              echo ""
+              echo "⚠️ **Repaso en vacio**: $NO_LANZADO marcas, ninguna lanzada."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
