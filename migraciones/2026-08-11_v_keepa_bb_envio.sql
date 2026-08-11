@@ -24,6 +24,28 @@
 -- un FBM es comparar peras con manzanas. El número bueno para decidir a cuánto listar es
 -- el precio «puesto en casa»: bb_precio + envío.
 --
+-- 🔬 CUÁNTO VALE ESTO, con la cifra CORREGIDA (Fernando, 11-ago). La primera estimación
+--    —1.223 €— era falsa: valoraba los 22 casos con `productos.stock_fba`, que es el
+--    total EUROPEO, sobre casos que son de UN país. El mismo doble conteo que ya mordió
+--    en `build.ts:347`. Cruzado como toca, con `inventario_internacional` por
+--    (asin, country):
+--
+--      ES ...  6 casos · 107 uds · **467,97 €**
+--      IT ...  5 casos ·  17 uds · **106,24 €**
+--      FR ...  1 caso  ·   0 uds ·       0 €
+--      DE ... 10 casos ·   0 uds ·       0 €   ← los diez alemanes no valen nada
+--      ────────────────────────────────────────
+--      TOTAL  22 casos · 124 uds · **574,21 €**
+--
+--    🔑 Y ojo a lo que eso enseña: **más de la mitad de los casos (10 de 22) son de
+--       Alemania, donde no hay una sola unidad**. El agujero de precio está casi todo en
+--       España. Contarlos por «casos» sugiere que Alemania es el problema; contarlos por
+--       unidades dice que Alemania no existe.
+--
+-- 🔒 Y ESO NO CAMBIA QUE MEREZCA LA PENA, porque lo que se arregla no es un importe
+--    puntual sino una comparación que estaba mal SIEMPRE: 18-38 cajas FBM ajenas por
+--    foto, todos los días. El importe se mueve con el stock; el error, no.
+--
 -- 🎁 DE REGALO, dos campos más del `crudo` que tampoco lee nadie y que esta vista expone
 --    para que dejen de perderse: 🔬 102 fichas traen `Tiempo de envío` y 75 `País de
 --    envío`. Ahí dentro hay rivales con **190 días** de plazo, que no son rivales: son un
