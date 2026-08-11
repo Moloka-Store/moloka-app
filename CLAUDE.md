@@ -269,6 +269,21 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   🔑 Y de ahí, lo que hay que hacer cuando pasa: **integrar `origin/main` EN CUANTO se detecta**, no
   al final. Cuanto más tarde, más código escrito sobre la base equivocada. Ojo también con `gh pr
   merge`: fusiona en GitHub y **no actualiza tu `origin/main` local** — hace falta el `fetch`.
+- 🔴 **HAY VARIAS SESIONES SOBRE ESTE REPO A LA VEZ, y el accidente típico se lleva trabajo
+  ajeno por delante.** El worktree que vas a crear puede tener el nombre ya cogido por otra
+  sesión; entonces `git worktree add` falla, y si lo encadenaste con `&&`, **el `cd` no se
+  ejecuta y todo lo que venga después corre en el repo principal** — que está en LA RAMA DE
+  OTRO. Un `git add -A && git commit` ahí se lleva sus ficheros sin tocar dentro de tu commit.
+  *Medido el 11-ago-2026: pasó exactamente eso, y el commit cayó en `claude/buzon-keepa-url`.
+  Se salvó porque el `push` falló solo (la rama no tenía remoto) y se deshizo con `git reset
+  --mixed HEAD~1`, que quita el commit SIN tocar los ficheros — el `--hard` habría borrado el
+  trabajo de la otra sesión.*
+  🔑 Las tres cosas que lo evitan, por orden de utilidad:
+  1. **Nombre de worktree único por encargo** (`moloka-v2-<tema>`), y si `add` falla, PARAR —
+     no seguir con los comandos encadenados.
+  2. **`git add <fichero>`, no `git add -A`**, cuando el cambio son uno o dos ficheros. Es lo
+     único que habría hecho inofensivo el accidente.
+  3. Antes de commitear en un sitio del que no vienes: `git branch --show-current`.
 - **Los datos sintéticos no prueban nada.** Una vista se prueba con la tabla **poblada**.
 - **Escribe los números esperados ANTES de correr.** Si no salen, di lo que sale — no ajustes la
   expectativa al resultado.
