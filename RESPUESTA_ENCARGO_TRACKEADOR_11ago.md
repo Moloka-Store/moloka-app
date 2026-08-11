@@ -370,14 +370,56 @@ where not exists (
   where v.sku = h.sku and v.snapshot_date = h.snapshot_date);
 ```
 
-⚠️ **No lo he lanzado, por dos motivos que prefiero que decidas tú:**
-1. La escalera exige **restaurar staging antes** de cualquier ensayo (§5), y eso **vacía staging**,
-   que es un recurso compartido — hay varias sesiones sobre este repo a la vez (§3) y una podría
-   estar a mitad de un ensayo suyo.
-2. El listón había que corregirlo antes de lanzarlo, o la prueba habría dado un rojo falso.
+#### 🔬 LANZADO el 11-ago — y el resultado cambia la conclusión
 
-**Se lanza en cuanto digas**, y son cuatro despachos: `restaurar-staging.yml`, y luego
-`procesar-salud-fba.yml` con `entorno=staging`, `modo=aplicar` y `fichero=` cada uno de los tres.
+Ejecutado `procesar-salud-fba.yml` con `entorno=staging`, `modo=ensayo`,
+`fichero=50438020648.txt` (el del 14-jul, el único día que solo vive en la tabla muerta).
+**Run [31485223052](https://github.com/Moloka-Store/moloka-app/actions/runs/31485223052):**
+
+```
+Informe elegido (pedido a dedo por FICHERO): 50438020648.txt
+Filas leídas y cuadradas: 195 · snapshot 2026-07-14 · marketplaces ['ES']
+❌ ABORTA (no se ha escrito nada):
+[Guarda no-retroceder] La foto que entra es del 2026-07-14 y en salud_fba
+(marketplace ∈ ['ES']) ya hay dato del 2026-08-10: sería retroceder en el tiempo.
+No se escribe nada. (Si de verdad quieres recargar una foto vieja: PERMITIR_RETROCESO=1.)
+```
+
+**Dos cosas, y son de signo contrario:**
+
+✅ **El fichero se lee perfectamente y el procesador de hoy lo entiende.** Pasó las ocho guardas
+estructurales y dio **195 filas cuadradas**, con el `snapshot_date` **bien derivado a 14-jul** (que
+era la duda de fondo: que un `.txt` de hace un mes siguiera siendo interpretable). El contenido no
+está podrido.
+
+📌 Y de paso mide lo incompleto que fue el relleno: ese fichero da **195 filas** para el 14-jul y en
+`salud_fba_hist` solo hay **6**. Se quedó con el **3 %**.
+
+🔴 **Pero NO se puede reproducir por la vía normal**, y no por el fichero: por la **Guarda 10
+(no-retroceder)**. Cualquier recarga histórica es, por definición, un retroceso. Hay válvula de
+escape —`PERMITIR_RETROCESO=1`— **pero `procesar-salud-fba.yml` no la expone como input**: solo
+inyecta `ENTORNO`, `MODO` y `FICHERO`. Comprobado en los dos sitios; en el repo la cadena
+`PERMITIR_RETROCESO` solo aparece **en un comentario**.
+
+**Paré tras el primer despacho en vez de lanzar los cuatro**, porque los otros tres abortarían
+igual —los tres ficheros son de julio y staging está en 10-ago— y `restaurar-staging.yml` habría
+**empeorado** el intento: es justo lo que vuelve a poner el 10-ago. Cuatro despachos habrían dado
+cuatro veces el mismo rojo.
+
+> ### 🔑 Lo que esto significa, que vale más que la tabla
+> **El buzón sí es reconstruible —los ficheros están y se parsean— pero HOY NO HAY UNA VÍA
+> SOPORTADA PARA REPRODUCIRLOS.** La guarda que protege de cargar un informe caducado bloquea
+> también la recarga histórica deliberada, y la válvula que existe para eso no llega al workflow.
+> Es un agujero de *recuperación*, no de *conservación*: el día que haya que reconstruir una serie
+> —o comprobar una copia, que es el caso de hoy— hay que tocar el `.yml` primero.
+
+**Por eso NO se hace el RENAME todavía.** La contención no ha salido limpia: no ha podido correr.
+El orden correcto es:
+1. PR pequeño que añada `permitir_retroceso` como input a `procesar-salud-fba.yml` (y, por la
+   misma razón, a los demás procesadores-Foto que tengan la Guarda 10). Por §5 tiene que estar en
+   `main` para poder despacharse.
+2. Con eso, los 3 despachos + la consulta de contención de arriba.
+3. Y **solo si sale 0**, el RENAME.
 
 ### B5 · La respuesta en una línea
 
@@ -507,11 +549,27 @@ cuándo se subió y cuándo se procesó. Contesta *«¿cómo de fresco es lo úl
 contesta *«¿es continuo lo que hay detrás?»*. Un analista que vea «salud_fba: dato del 10-ago» da
 por buena una serie que tiene ocho días de vacío dentro.
 
-**Propuesta para el diseño de la v2** (no la he escrito, es decisión de modelo): junto a la frescura,
-una vista de **continuidad** por informe — cada foto con los días transcurridos desde la anterior —
-para que cualquier consumidor pueda ver el hueco sin tener que ir a buscarlo. Con eso, interpolar
-sobre un vacío de una semana deja de ser un accidente silencioso y pasa a ser una decisión visible.
-Encaja con §1.4: *una cifra sin la fecha del dato que la sostiene es una cifra que miente.*
+#### 🔑 La regla, concretada — el gap viaja EN LA FILA, no en una nota al pie
+
+Una vista de continuidad aparte no basta: nadie la mira. **La regla para el diseño de la v2 es que
+cualquier vista o función que sirva un DELTA devuelva también, como COLUMNA, el hueco en días entre
+las dos fotos que ha usado.** Si se pregunta *«¿cómo ha evolucionado esto?»* y el gap es 8, el 8
+tiene que verse en la misma fila que el dato.
+
+Concretamente: al lado de `delta_stock` (o lo que sea que se sirva), una columna
+`gap_dias` — y las fechas de las dos fotos que se han restado, no solo la última. Eso convierte
+*«ha bajado 40 unidades»* en *«ha bajado 40 unidades entre el 30-jul y el 7-ago, 8 días»*, que es
+una frase que ya no engaña a nadie. Un consumidor puede decidir ignorar el gap; lo que no puede es
+no verlo.
+
+🔑 Es la misma regla que §1.4 (*una cifra sin la fecha del dato que la sostiene es una cifra que
+miente*) llevada a las restas: **una diferencia sin el intervalo que la sostiene es una diferencia
+que miente.** Y es hermana de la de Custom Analytics: *restar dos lecturas solo prueba algo si
+están cerca* — con la ventaja de que aquí, si el gap viaja en la fila, «cerca» deja de ser una
+suposición y pasa a ser un dato que el consumidor puede comprobar.
+
+`frescura_informes()` se queda como está: contesta otra pregunta (*qué tan fresco es lo último*) y
+la contesta bien. Esto es la otra media pieza, y va donde se sirve el delta.
 
 ⚠️ Y un recordatorio que agrava el asunto y ya está en §1.3: **`salud_fba` llega ~10 días tarde con
 las altas.** O sea que la fecha de la foto no es la fecha del mundo. Las dos cosas juntas —serie
@@ -675,11 +733,30 @@ recalcular el objetivo con la tarifa que de verdad tocaría por encima del escal
 | A 20,37 € | Tarifa | Beneficio/ud | Margen |
 |---|---|---|---|
 | Lo que dice la reco | 3,28 € | 2,32 € | **11,40 %** |
-| Lo que sería de verdad | 3,80 € | 1,80 € | **8,85 %** |
+| Lo que sería de verdad | 3,80 € *(estimado)* | 1,80 € | **≈ 8,85 %** *(estimado)* |
 
-🔴 **La recomendación promete pasar de 10,35 % a 11,40 % (+1,05 puntos). En realidad lleva de
-10,35 % a 8,85 %: −1,50 puntos.** No es que el número esté un poco mal — **es que le cambia el
-signo a la decisión.** Subir 38 céntimos parece ganar margen y lo pierde.
+🔴 **La recomendación promete pasar de 10,35 % a 11,40 % (+1,05 puntos). En realidad el margen
+BAJA.** No es que el número esté un poco mal — **es que le cambia el signo a la decisión.** Subir
+38 céntimos parece ganar margen y lo pierde.
+
+⚠️ **Distinción de rigor, para que nadie cite esto como una medición:**
+
+- **La DIRECCIÓN es un hecho.** Al cruzar el escalón la tarifa FBA sube, y el cerebro la mantiene
+  fija; por tanto el margen real es **menor** que el prometido, siempre, en las 23 que cruzan. Eso
+  no depende de ningún supuesto: se deduce de que `margen_en()` no recalcula `fee`.
+- **El `8,85 %` es una ESTIMACIÓN**, y depende de que `3,80 €` sea el tramo correcto de la tabla
+  para este producto. Sale del par `3,28 ↔ 3,80` de la doctrina 7, que es doctrina de la casa, no
+  una tarifa leída del Seller para este ASIN. Si el tramo real fuese otro, la cifra cambia; la
+  dirección, no.
+
+🔴 **Y hay una ironía que refuerza el caso: el ejemplo está construido sobre DOS estimaciones, no
+sobre medidas.** Su `comision_pct` es **0,1550** —el relleno del formulario de C4— y su
+`tarifa_fba` real en `seller_observaciones` es **NULL**: es uno de los 166 de 176 sin tarifa medida
+(C3). O sea que el caso que le cambia el signo a la decisión **no tiene ni un solo dato duro de
+tarifa detrás**. C3, C4 y C6 no son tres problemas separados: se acumulan sobre el mismo producto.
+
+💰 **Y el tamaño de lo que el cockpit enseñaría en verde:** las **8 recomendaciones pendientes que
+cruzan** suman **172,77 €/mes de impacto prometido**.
 
 > ### 🔴 CONDICIÓN DE REACTIVACIÓN
 > **El trackeador no se enciende hasta que el cerebro recalcule la tarifa FBA al cruzar los 20 €.**
@@ -917,30 +994,37 @@ Por orden de lo que más duele:
    clave de servicio primero, cerrar las tablas después. Al revés se rompe el trackeador, y como
    está parado, no se vería hasta el día que arranque.
 
-3. 🔴 **La serie de `salud_fba_historico` tiene un agujero de ocho días** (C2-bis) y nada lo
+3. 🔴 **No hay vía soportada para reproducir un informe histórico** (B4, medido en el run
+   [31485223052](https://github.com/Moloka-Store/moloka-app/actions/runs/31485223052)). El fichero
+   del 14-jul se lee perfecto —195 filas cuadradas, `snapshot_date` bien derivado— pero la Guarda
+   10 aborta cualquier recarga vieja y su válvula `PERMITIR_RETROCESO` **no llega al workflow**. Es
+   un agujero de **recuperación**, no de conservación, y solo se descubre el día que se intenta —
+   que es el peor día. Salió al ir a *probar* la copia en vez de dar por buena su existencia.
+
+4. 🔴 **La serie de `salud_fba_historico` tiene un agujero de ocho días** (C2-bis) y nada lo
    señala. `frescura_informes()` dice cómo de fresco es lo último, no si lo de detrás es continuo.
    Las ventanas T7/T30 de Amazon aguantan; lo que se rompe es **restar dos fotos**.
 
-4. 🔴 **El trackeador y el cockpit v2 dan márgenes distintos hoy** (C5). El bug del `×1.03` está
+5. 🔴 **El trackeador y el cockpit v2 dan márgenes distintos hoy** (C5). El bug del `×1.03` está
    documentado y diferido desde el 3-ago. Si el analista se conecta al cockpit antes de que se
    arregle, citará márgenes optimistas en ~0,45 puntos con la autoridad de un número calculado.
 
-5. 🟠 **50 de las 60 capturas manuales de tarifa están fuera del universo repreciable.** El trabajo
+6. 🟠 **50 de las 60 capturas manuales de tarifa están fuera del universo repreciable.** El trabajo
    manual ya hecho es seis veces mayor de lo que la auditoría veía, pero apuntando al sitio
    equivocado. Antes de capturar más, la lista de objetivos tiene que salir del universo.
 
-6. 🟠 **El `15,5` de la caja de texto** (C4). No es una estimación mala: es un valor por defecto de
+7. 🟠 **El `15,5` de la caja de texto** (C4). No es una estimación mala: es un valor por defecto de
    formulario grabado 307 veces, indistinguible de una medición. Se arregla borrando cuatro
    caracteres de `index.html:5710`.
 
-7. 🟡 **`ensure_rls` no cubre `CREATE VIEW`** (D1/D4). Es la explicación mecánica de por qué las dos
+8. 🟡 **`ensure_rls` no cubre `CREATE VIEW`** (D1/D4). Es la explicación mecánica de por qué las dos
    vistas nacieron abiertas, y significa que **cualquier vista futura nacerá igual**. Las dos
    migraciones propuestas juntas lo tapan; ninguna de las dos por separado.
 
-8. 🟡 **Ni `v_analisis_auditable` ni `v_scoreboard_reglas` están en ninguna migración.** Se crearon
+9. 🟡 **Ni `v_analisis_auditable` ni `v_scoreboard_reglas` están en ninguna migración.** Se crearon
    a mano y no hay rastro versionado de su definición. Si se pierden, se pierden.
 
-9. 🟡 **La guarda anti-recarga del snapshot depende del nombre del fichero.** Las dos cargas del
+10. 🟡 **La guarda anti-recarga del snapshot depende del nombre del fichero.** Las dos cargas del
    11-jul solo convivieron porque el segundo CSV se llamaba `… (1).csv.gz`. Si un día descargas dos
    veces el mismo día y el navegador no renombra, la segunda carga se salta en silencio con un
    `[STOP]` en el log. **Un aviso que solo vive en el log no es un aviso** (CLAUDE.md §2).
@@ -984,8 +1068,9 @@ Ninguno de estos pasos está dado. Los tres primeros son independientes entre s�
 | 6 | **`concurrency: escritores-productos`** en los tres workflows reales | Barato, aunque no cierre la carrera de la v1 |
 | 7 | **D3 paso 2** (quitar solo `DELETE` a `anon`) | Quita lo irreversible sin romper una sola llamada del frontend |
 | 8 | **Versionar `ensure_rls`** a `migraciones/` | Cinco minutos, y hoy es una defensa que un restore se lleva |
-| 9 | **Jubilar `salud_fba_hist`** — antes, el reprocesado de los 3 ficheros en staging con el criterio de contención (B4) | Sin prisa: no molesta. Medido que no se pierde nada, falta *probarlo* reprocesando |
-| 10 | **Vista de continuidad** junto a `frescura_informes()` | Para que el analista no interpole sobre el agujero de 8 días sin verlo (C2-bis) |
+| 9 | 🔴 **Exponer `permitir_retroceso` como input** en `procesar-salud-fba.yml` (y demás Foto con Guarda 10) | **Medido el 11-ago: hoy NO hay vía soportada para reproducir un informe histórico.** Es un agujero de recuperación, y se ve el día que haga falta |
+| 10 | **Contención + jubilar `salud_fba_hist`** — *depende del 9* | El RENAME espera: la prueba no ha podido correr todavía |
+| 11 | **El `gap_dias` en la fila** dondequiera que se sirva un delta | Para que el analista no reste sobre un agujero de 8 días sin verlo (C2-bis) |
 
 **Todo por la escalera de CLAUDE.md §5** — restaurar staging → ensayo → aplicar → verificación SQL →
 producción ensayo → aplicar → verificación SQL, con Elena avisada antes de tocar producción. Y el
