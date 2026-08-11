@@ -23,6 +23,10 @@ name: Moloka - Detector BEMS
 on:
   # RELOJ EN PAUSA (2-jul-2026): BEMS lleva ~1 mes sin acceso a la API (sin compra
   # que lo reactive), asi que el detector saltaba y no hacia nada. Se deja SOLO el
+  # 🔑 CUANDO BEMS DESPIERTE HAY QUE DESCOMENTAR **DOS** SCHEDULES: este y el de
+  #    .github/workflows/semanal-bems.yml. El recordatorio vive en el README, seccion
+  #    «Cuando BEMS despierte» — si solo se descomenta uno, el otro se queda dormido en
+  #    silencio y nadie se entera.
   # disparo manual. Cuando se reactive la API de BEMS, descomentar el 'schedule:'
   # de abajo y volver a desplegar.
   # schedule:
