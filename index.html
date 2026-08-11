@@ -5707,7 +5707,7 @@ function renderInvDetalle(productoId) {
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
         <div><div class="inv-field-label">IVA (%)</div><input class="input" id="ed-iva-${p.id}" type="number" step="0.1" value="${p.iva_pct!=null?(p.iva_pct*100).toFixed(1):'21'}" style="font-size:13px"></div>
-        <div><div class="inv-field-label">Comisión Amazon (%)</div><input class="input" id="ed-com-${p.id}" type="number" step="0.1" value="${p.comision_pct!=null?(p.comision_pct*100).toFixed(1):'15.5'}" style="font-size:13px"></div>
+        <div><div class="inv-field-label">Comisión Amazon (%) *</div><input class="input" id="ed-com-${p.id}" type="number" step="0.1" required value="${p.comision_pct!=null?(p.comision_pct*100).toFixed(1):''}" placeholder="sin medir" title="Obligatoria. No se rellena sola: un valor inventado es indistinguible de uno medido." style="font-size:13px"></div>
         <div><div class="inv-field-label">Coste almacén (€)</div><input class="input" id="ed-almacen-${p.id}" type="number" step="0.01" value="${p.coste_almacen!=null?p.coste_almacen:''}" placeholder="0.15" style="font-family:'DM Mono',monospace;font-size:12px"></div>
       </div>
       <div style="grid-column:1 / -1;border-top:1px dashed var(--gray-200);padding-top:12px">
@@ -5752,6 +5752,16 @@ async function guardarEdicionProducto(productoId) {
     const sumaFinal = contHuecos ? sumaMoloka : (p.stock_moloka || 0);
     const ivaRaw = parseFloat(document.getElementById('ed-iva-' + productoId).value);
     const comRaw = parseFloat(document.getElementById('ed-com-' + productoId).value);
+    // La comisión es OBLIGATORIA y ya no se rellena sola. Antes la caja aparecía con
+    // 15,5 puesto: si se guardaba sin tocarla se escribía 0,155 en el maestro, y en la
+    // base un valor inventado es indistinguible de uno medido (doctrina 39). Medido el
+    // 11-ago-2026: 307 fichas activas lo llevaban clavado. Ahora nace vacía, y guardar
+    // sin ponerla se para aquí en vez de inventar el dato.
+    if (isNaN(comRaw)) {
+      showToast('Falta la comisión de Amazon (%). Es obligatoria: míralas en el Seller, no la inventes.', 'warning');
+      document.getElementById('ed-com-' + productoId).focus();
+      return;
+    }
     const updates = {
       nombre: document.getElementById('ed-nombre-' + productoId).value.trim(),
       ean: document.getElementById('ed-ean-' + productoId).value.trim() || null,
