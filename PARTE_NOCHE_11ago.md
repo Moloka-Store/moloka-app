@@ -1,5 +1,7 @@
 # PARTE DE NOCHE — 10-ago-2026 (para leer el 11)
 
+> ✅ **CERRADO el 11-ago-2026.** Los tres fallos que se cuentan aquí abajo están corregidos y medidos: los arregló el PR #135, con el criterio que fijó Fernando esa mañana (cuatro criterios de aborto + una zona gris que pide `forzar`). Esto queda como **parte de una noche concreta**, no como estado de hoy — el estado vive en el repo, no en las notas (§3 de `CLAUDE.md`).
+
 *Escrito por la sesión que trabajó sola desde las ~18:00 UTC. Fernando se fue dejando el
 portátil encendido y un encargo con límites. **Paré a mitad, a propósito**, y esto explica
 por qué.*
