@@ -240,6 +240,19 @@ de 2,50 € no lo es.** El rango honesto es **+0,27 a +0,79 €**, centrado en ~
 
 ### 3.2 ¿Tramo por producto o por familia de tamaño?
 
+> 🔴 **ESTE APARTADO ESTÁ SUPERADO. La hipótesis de la familia era FALSA y quedó refutada el mismo
+> día.** `item_volume` no predice el tramo: los tramos 4,0 / 4,2 / 4,3 / 4,6 / 4,9 se solapan
+> enteros entre 0,0012 y 0,0036, y un volumen de 0,0018 cae en cinco a la vez. Con `paq_peso_g`
+> igual. **El diseño se queda en DOS niveles: factura o desconocido**, y de ahí sale una regla más
+> simple que el modelo — *si cruza y no hay factura del lado alto, no se emite margen: se emite
+> NO CALCULABLE*.
+>
+> 📄 **Ver [`ACANTILADO_SIN_FACTURA_ALTA_11ago.md`](ACANTILADO_SIN_FACTURA_ALTA_11ago.md)**, que lo
+> sustituye y trae el censo (72 con factura alta / 104 sin) y la lista de los 76.
+>
+> *Se deja lo de abajo como estaba, sin retocar, porque explica por qué se llegó a proponer la
+> familia y cuál fue la medición que la tumbó. Borrarlo escondería el error.*
+
 **Ninguna de las dos sola. Hacen falta las dos, y en este orden.**
 
 🔬 **Los fees se agrupan en pocos escalones** (movimientos desde el 1-jun): `2,64 · 2,71 · 2,73 ·
@@ -279,8 +292,8 @@ justo lo que el cerebro no hace hoy.
 
 | # | Qué | Por qué |
 |---|---|---|
-| 1 | 🔴 **Cruzar `item_volume` × par conocido** en los 21 SKU | Decide si la familia es derivable. **Va antes de diseñar la vista** |
-| 2 | **La vista canónica**, en NOMINAL, con `fuente`, `medido_en` y el par del acantilado | Es la pieza de la que cuelgan las otras tres |
+| ~~1~~ | ~~Cruzar `item_volume` × par conocido~~ | ✅ **HECHO — y salió que NO.** La familia no es derivable |
+| 2 | **La vista canónica**, en NOMINAL, con `fuente`, `medido_en` y `fee_bajo_20`/`fee_alto_20` **que pueden ser NULL** | Es la pieza de la que cuelgan las otras tres. El NULL **es** la respuesta cuando no hay factura de ese lado |
 | 3 | **Arreglar el 3 % duplicado** de la rama `'real'` del trackeador | Bug medido, 42 recos |
 | 4 | **Que los tres consumidores lean la vista** | Hasta entonces siguen los ~3,5 puntos de inflación |
 | 5 | **Revisar los 10 que venden a pérdida** | No es deuda técnica: es dinero saliendo hoy |
