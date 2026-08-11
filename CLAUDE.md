@@ -343,6 +343,20 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   ⚠️ Y el corolario, que es el que se olvida: **si desactivas la feature a mano y el suite
   sigue verde, el suite no la está probando.** Es la versión de «haz saltar las guardas a
   propósito» aplicada a las funcionalidades, no solo a las guardas.
+  🔴 **Y NO BASTA CON QUE EL TEST PASE: HAY QUE ROMPER LA COSA A MANO Y VERLO PONERSE ROJO.**
+  Las DOS direcciones, siempre, y la segunda es la que prueba algo — un test que sólo se ha
+  visto en verde no se ha probado, se ha ejecutado.
+  *Medido el 11-ago-2026, y el ejemplo es el test que venía a cazar justo esto: se escribió
+  un test para que ninguna alerta se quedara sin filtro en el Cockpit; pasó a la primera.
+  Al comentar la línea `// tipo: 'BB_DISCREPA_FUENTES',` para verlo morir, **siguió en
+  verde**: buscaba el patrón sobre el fichero crudo y el regex casa igual dentro de un
+  comentario, así que daba por vivo el código comentado. El vicio que el test perseguía
+  estaba dentro del test.*
+  ⚠️ Ojo al patrón, porque se repite: **lo que se lee como texto (grep, regex, anclas) no
+  distingue código de comentario.** Si un test mira el fichero como cadena, quita los
+  comentarios antes de mirar — o comprobará que algo está escrito, no que se ejecuta.
+  🔑 Vale para todo, no sólo para tests: una guarda nueva se hace saltar, un aviso nuevo se
+  provoca, y una feature nueva se desactiva. Si al romperla no pasa nada, no estaba puesta.
 - 🔴 **UNA VISTA QUE NO PUEDE VER SU FUENTE DEBE CONFESARLO, NO RELLENAR CON UN FALSO.**
   El caso general de «0 filas por RLS ≠ 0 filas porque no hay»: si una vista se apoya en
   una tabla que puede estar tapada, tiene que **distinguir los dos ceros dentro del propio
