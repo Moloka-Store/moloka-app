@@ -111,12 +111,66 @@ SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
 subes tú («CERO tokens de Keepa», lo dice la cabecera de `moloka_tracker_snapshot_nube.py`). Así
 que **no hay nada que pueda caducar** salvo la clave de Supabase.
 
-⚠️ **Matiz que sigue abierto y que ya estaba en CLAUDE.md §4:** el código pide
-`os.environ.get('SUPABASE_SERVICE_KEY') or os.environ['SUPABASE_KEY']`, pero los workflows solo
-inyectan `SUPABASE_KEY` — o sea que el `or` cae siempre al mismo lado. **Qué contiene ese secret
-sigue sin comprobarse** (lo miras tú en GitHub → Settings → Secrets). Si fuera la publicable
-(`anon`), cerrar las políticas de las `monitor_*` rompería el trackeador el día que vuelva a
-arrancar. No he podido verlo desde aquí y no lo supongo.
+### 🔴 A4-bis · RESUELTO: el trackeador corre con `anon`
+
+Esto estaba abierto en CLAUDE.md §4 desde hace días («*lo mira Fernando*»). **Ya no hace falta:
+se puede contestar sin ver el secreto, porque las claves de Supabase declaran su rol dentro del
+propio valor.** Medido el 11-ago-2026 con una sonda temporal en la rama (`on: push`, borrada en el
+commit siguiente), que imprime **longitud, formato y rol — nunca el valor**:
+
+```
+longitud de la clave: 46 caracteres
+formato: sb_publishable_  ->  ROL DECLARADO -> "role":"anon" (clave PUBLICABLE)
+```
+
+🔴 **`SUPABASE_KEY` es la clave PUBLICABLE. El trackeador escribe en la base como `anon`.**
+
+Y el código no tiene escapatoria: pide
+`os.environ.get('SUPABASE_SERVICE_KEY') or os.environ['SUPABASE_KEY']`, pero los dos workflows
+**solo inyectan `SUPABASE_KEY`**, así que el `or` cae siempre al mismo lado.
+(`moloka_tracker_snapshot.py` ni siquiera tiene alternativa: usa `os.environ['SUPABASE_KEY']` a
+secas.)
+
+**Lo que esto decide, de golpe:**
+
+- 🔴 **`monitor_snapshots`, `monitor_recomendaciones` y `monitor_reglas` NO se pueden cerrar
+  todavía.** Son las tres que el trackeador toca, y hoy pasa por las políticas permisivas de `anon`
+  (`anon_all_regla` y compañía). Cerrarlas ahora **lo rompe el día que arranque** — y como está
+  parado, el fallo no se vería hasta entonces. Cambia el orden del bloque D3 (apartado 5).
+- ✅ **El gate D1 sigue siendo seguro**, y ahora está demostrado por dos vías: el trackeador no lee
+  ninguna de las dos vistas (cuenta cerrada abajo), así que revocarle `anon` no le afecta.
+- 🔑 **El orden correcto, y no admite inversión:** primero se le da al trackeador una clave de
+  servicio (`service_role`, que salta la RLS por `rolbypassrls`) — o sea, añadir
+  `SUPABASE_SERVICE_KEY` a los dos workflows, que el código ya sabe preferir — y **solo después**
+  se cierran las tres tablas. Nunca al revés.
+
+⚠️ **Y un efecto secundario que hay que mirar antes de dar el paso:** el `or` está en los tres
+ficheros del trackeador, pero **también** en otros procesadores. Añadir el secret
+`SUPABASE_SERVICE_KEY` a un workflow cambia con qué rol escribe *todo* lo que corra en él. Se hace
+workflow a workflow, no de una vez.
+
+### 🔒 CUENTA CERRADA DEL TRACKEADOR — qué toca y con qué cliente
+
+Mismo método que el de la v1 (apartado 5, D1): enumerar y cuadrar, no buscar y no encontrar.
+En los tres ficheros hay **15 llamadas `.table(`** y **las 15 usan nombre literal** — ninguna
+variable, así que la lista es cerrada:
+
+| Objeto | `snapshot.py` | `snapshot_nube.py` | `cerebro.py` | Qué hace |
+|---|---|---|---|---|
+| `productos` | 1 | — | 1 | **solo lee** (PVD, IVA, comisiones) |
+| `app_datos` | 1 | — | 2 | lee `rentabilidad`; escribe `tracker_estado` |
+| `monitor_snapshots` | 2 | 2 | 2 | guarda anti-recarga + `insert` |
+| `monitor_recomendaciones` | — | — | 3 | anti-recarga + `update` a OBSOLETA + `insert` |
+| `monitor_reglas` | — | — | 1 | **solo lee** (el umbral de margen) |
+
+Más **un bucket de Storage**: `informes`, buzón `tracker/` (`storage.from_`), que además **vacía**
+al terminar (`limpiar_buzon()`).
+
+**Cliente: uno solo, `create_client(SUPABASE_URL, SUPABASE_KEY)` → `anon`.** No hay `psycopg2` ni
+`DB_URL` en el trackeador: a diferencia de los procesadores, **no tiene una vía que salte la RLS**.
+
+✅ **Ni `v_analisis_auditable` ni `v_scoreboard_reglas` están en esa lista** — ni ninguna vista, de
+hecho: el trackeador no lee una sola vista. **El gate D1 no puede romperlo.**
 
 ---
 
@@ -285,6 +339,46 @@ Keepa (CLAUDE.md §2): el crudo sale de la base **porque el fichero se conserva*
 `ALTER TABLE … RENAME TO _zz_salud_fba_hist_jubilada`, el `DROP` semanas después. No por duda —
 está medido— sino porque renombrar es gratis y revela cualquier lector que el barrido no viera.
 
+#### 🔬 La prueba que falta antes del RENAME — y por qué su criterio no puede ser «227 filas»
+
+**Que los ficheros existan no demuestra que el procesador de hoy los reprocese bien.** Es cierto y
+es la diferencia entre una copia y una copia *probada* — el mismo agujero que motivó el simulacro
+de restauración (CLAUDE.md §4). Así que antes del RENAME hay que reprocesar los tres en staging.
+
+Es viable sin tocar nada: `procesar-salud-fba.yml` ya tiene los tres mandos que hacen falta —
+`entorno` (staging), `modo` (aplicar) y **`fichero`** (nombre exacto del `.txt`), que además nació
+justo para recargas dirigidas como ésta. Y el reparto de credenciales encaja: `SUPABASE_URL`/`KEY`
+—o sea el Storage— son siempre los de **producción**, mientras lo que se escribe va a `DB_URL`, que
+conmuta a `STAGING_DB_URL`. **Lee los ficheros buenos y escribe en staging.**
+
+🔴 **Pero el criterio de aprobado NO puede ser «que salgan las 227 filas», y conviene verlo antes
+de lanzarlo:** las 227 son el resultado de aquel relleno a medias, no el contenido de los ficheros.
+Los tres `.txt` pesan ~100 KB y traen unas 220 filas **cada uno**, así que reprocesarlos producirá
+del orden de **660**, no 227. Si se toma «227» como listón, la prueba sale en rojo **haciendo el
+procesador exactamente lo correcto**, y se acaba dudando de una cañería sana.
+
+**El criterio correcto es de contención, no de recuento:** que las **227 parejas
+`(sku, snapshot_date)`** de la tabla muerta estén **todas** dentro de lo que produce el reprocesado.
+Eso es justo lo que hay que demostrar —que nada de lo que hoy solo vive ahí es irrecuperable— y no
+depende de cuántas filas traigan de más los ficheros:
+
+```sql
+-- en STAGING, tras reprocesar los tres. Debe dar 0.
+select count(*) from public.salud_fba_hist h
+where not exists (
+  select 1 from public.salud_fba_historico v
+  where v.sku = h.sku and v.snapshot_date = h.snapshot_date);
+```
+
+⚠️ **No lo he lanzado, por dos motivos que prefiero que decidas tú:**
+1. La escalera exige **restaurar staging antes** de cualquier ensayo (§5), y eso **vacía staging**,
+   que es un recurso compartido — hay varias sesiones sobre este repo a la vez (§3) y una podría
+   estar a mitad de un ensayo suyo.
+2. El listón había que corregirlo antes de lanzarlo, o la prueba habría dado un rojo falso.
+
+**Se lanza en cuanto digas**, y son cuatro despachos: `restaurar-staging.yml`, y luego
+`procesar-salud-fba.yml` con `entorno=staging`, `modo=aplicar` y `fichero=` cada uno de los tres.
+
 ### B5 · La respuesta en una línea
 
 > **Se reactiva.** El archivado no está roto: `monitor_snapshots` y `monitor_recomendaciones` ya
@@ -382,6 +476,47 @@ que `keepa_escaparate_hist` dejó de guardar `crudo`. Se rescatan por
 
 **Consecuencia para el analista:** la serie temporal es corta y lo seguirá siendo *hasta que algo
 tenga reloj*. Hoy la profundidad la marca la mano de Fernando, no la máquina.
+
+### 🔴 C2-bis · La serie de `salud_fba_historico` no es diaria ni regular — y hay que EXPONER los huecos
+
+Medido el 11-ago: **siete fotos en veinte días**, con estos saltos:
+
+| Foto | 22-jul | 25-jul | 28-jul | 30-jul | **7-ago** | 9-ago | 10-ago |
+|---|---|---|---|---|---|---|---|
+| Días desde la anterior | — | 3 | 3 | 2 | **8** | 2 | 1 |
+
+**¿Se puede automatizar a diario? No, hoy no.** El informe se descarga a mano del Seller y
+`procesar-salud-fba.yml` es `workflow_dispatch` sin reloj. Para que hubiera una carga diaria haría
+falta bajar el informe solo, y eso hoy solo lo da **SP-API** (Reports API) — que es exactamente la
+puerta cerrada por decisión tuya (C3). No hay una tercera vía limpia: Amazon no deja un fichero en
+ningún sitio que se pueda recoger sin SP-API.
+
+**Así que sí: hay que exponer los huecos explícitamente.** Y no como adorno — 🔑 **el hueco no rompe
+lo mismo en todas partes, y ésa es la distinción que el analista necesita:**
+
+- ✅ **Las ventanas T7/T30/T60/T90 aguantan.** Vienen **precalculadas por Amazon dentro del propio
+  informe**, así que una foto del 7-ago trae el T30 correcto del 7-ago aunque la anterior fuera del
+  30-jul. Para las reglas que comparan T7 contra T30, el agujero es indiferente.
+- 🔴 **Lo que el hueco rompe es la RESTA entre dos fotos.** Un delta entre el 30-jul y el 7-ago no
+  es «lo que pasó en una semana»: son dos puntos lejanos, y en medio no hay nada. Es la misma regla
+  que ya está escrita para Custom Analytics: **restar dos lecturas solo prueba algo si están cerca.**
+
+**La casa ya tiene media pieza y le falta la otra media.** `frescura_informes()` (migración
+`2026-07-31_frescura_custom_analytics.sql`) ya publica, para los ocho informes, la fecha del dato,
+cuándo se subió y cuándo se procesó. Contesta *«¿cómo de fresco es lo último?»* — pero **no**
+contesta *«¿es continuo lo que hay detrás?»*. Un analista que vea «salud_fba: dato del 10-ago» da
+por buena una serie que tiene ocho días de vacío dentro.
+
+**Propuesta para el diseño de la v2** (no la he escrito, es decisión de modelo): junto a la frescura,
+una vista de **continuidad** por informe — cada foto con los días transcurridos desde la anterior —
+para que cualquier consumidor pueda ver el hueco sin tener que ir a buscarlo. Con eso, interpolar
+sobre un vacío de una semana deja de ser un accidente silencioso y pasa a ser una decisión visible.
+Encaja con §1.4: *una cifra sin la fecha del dato que la sostiene es una cifra que miente.*
+
+⚠️ Y un recordatorio que agrava el asunto y ya está en §1.3: **`salud_fba` llega ~10 días tarde con
+las altas.** O sea que la fecha de la foto no es la fecha del mundo. Las dos cosas juntas —serie
+irregular y desfase de origen— son la razón por la que este informe **no sirve para decir «en tal
+semana pasó X»**, solo para tendencia y comparación entre ASIN.
 
 ### C3 · Tarifas reales — **VEREDICTO: sí existe vía automática, y está cerrada por decisión tuya**
 
@@ -512,6 +647,48 @@ que el margen prometido está **inflado**.
 **8 de las 19 recomendaciones que proponen un precio (42 %) cruzan el acantilado**, y las 8 lo
 cruzan hacia arriba. Sus márgenes objetivo están calculados con la tarifa de más abajo.
 
+**Contando también las obsoletas —o sea, todo lo que el motor ha producido en su vida—:**
+
+| | Con precio objetivo | Cruzan los 20 € | Objetivo entre 19 y 21 € |
+|---|---|---|---|
+| PENDIENTE | 19 | **8** | 7 |
+| OBSOLETA | 122 | **15** | 32 |
+| **TOTAL** | **141** | **23** | **39** |
+
+#### 🔬 El caso que lo resume, al céntimo: `B08HH5V55W`
+
+**FUNKO POP Astro Bot 1089** — o sea, exactamente la categoría a la que la doctrina 7 dice que
+aplica el acantilado. Lo que la recomendación viva dice hoy:
+
+| Dato | Valor |
+|---|---|
+| `precio_actual` | 19,99 € |
+| `precio_objetivo` | **20,37 €** (+38 céntimos) |
+| `fee_logistica` | **3,28 €** ← la mitad BAJA del par `3,28 ↔ 3,80` de la doctrina 7 |
+| `comision_pct` | 15,5 % ← y encima es el relleno de C4 |
+| `margen_actual_pct` → `margen_objetivo_pct` | 10,35 % → **11,40 %** |
+| `pvd` (de `productos`) | 7,83 € |
+
+Con esos números la fórmula reproduce el margen actual **exacto** (10,35 %), así que se puede
+recalcular el objetivo con la tarifa que de verdad tocaría por encima del escalón:
+
+| A 20,37 € | Tarifa | Beneficio/ud | Margen |
+|---|---|---|---|
+| Lo que dice la reco | 3,28 € | 2,32 € | **11,40 %** |
+| Lo que sería de verdad | 3,80 € | 1,80 € | **8,85 %** |
+
+🔴 **La recomendación promete pasar de 10,35 % a 11,40 % (+1,05 puntos). En realidad lleva de
+10,35 % a 8,85 %: −1,50 puntos.** No es que el número esté un poco mal — **es que le cambia el
+signo a la decisión.** Subir 38 céntimos parece ganar margen y lo pierde.
+
+> ### 🔴 CONDICIÓN DE REACTIVACIÓN
+> **El trackeador no se enciende hasta que el cerebro recalcule la tarifa FBA al cruzar los 20 €.**
+> No es una mejora pendiente: mientras no esté, el motor recomienda subidas prometiendo un margen
+> que no se va a cumplir, y en al menos un caso medido la recomendación es exactamente la contraria
+> a la correcta.
+
+**No lo he arreglado**, como pediste: toca la aritmética y eso lo apruebas tú. Va en su propio PR.
+
 No es teórico y no es marginal: es casi la mitad de lo accionable. **Encender el trackeador sin
 arreglar esto es reactivar un motor que recomienda subir precios prometiendo un margen que no se
 va a cumplir** — justo el tipo de error contra el que existe la regla de «ningún precio sin margen
@@ -619,13 +796,18 @@ La v1 escribe **con la clave `anon`** en estas tablas (barrido de `index.html`):
 **Orden propuesto, de fuera hacia dentro** — el criterio es *empezar por lo que la v1 no toca, para
 que los primeros pasos sean gratis*:
 
-1. 🟢 **Gratis, sin riesgo — la v1 no las escribe nunca.** `monitor_reglas`, `monitor_resultados`,
-   `monitor_snapshots`, `competidor_evento`, `competidor_perfil`, `devoluciones`,
-   `informes_subidos`, `sincronizaciones`, `ventas`, `factura_lineas`, `canales_producto`.
+0. 🔴 **PASO PREVIO OBLIGATORIO, y ya no es condicional: dar al trackeador una clave de servicio.**
+   Medido (A4-bis): **`SUPABASE_KEY` es `sb_publishable_…`, rol `anon`**, y el trackeador escribe
+   con ella sin tener otra vía (ni `psycopg2` ni `DB_URL`). Hasta que `tracker-app.yml` y
+   `tracker-cerebro.yml` inyecten `SUPABASE_SERVICE_KEY` —que el código ya prefiere si existe—
+   **las tres tablas que toca se quedan como están**: `monitor_snapshots`,
+   `monitor_recomendaciones` y `monitor_reglas`.
+1. 🟢 **Gratis, sin riesgo — no las tocan ni la v1 ni el trackeador.** `monitor_resultados`,
+   `competidor_evento`, `competidor_perfil`, `devoluciones`, `informes_subidos`,
+   `sincronizaciones`, `ventas`, `factura_lineas`, `canales_producto`.
    Las escriben los procesadores con `DB_URL`, que no pasa por RLS.
-   ⚠️ **Salvo `monitor_reglas` y `monitor_snapshots`, que las lee o escribe el trackeador** — y ahí
-   vuelve el A4 sin resolver: *hasta que no se sepa qué contiene `SUPABASE_KEY`, no se cierran*. Si
-   es la publicable, primero se le da la clave de servicio al trackeador y **solo después** se cierra.
+   *(`monitor_reglas` y `monitor_snapshots` estaban aquí en la primera versión y se han ido al
+   paso 0: la cuenta cerrada del trackeador demuestra que sí las toca.)*
 2. 🟡 **Quitar solo el `DELETE`, dejando lectura y escritura.** Éste es el paso que más riesgo quita
    por menos rotura, y se puede medir al dedo: 🔬 **en las 10.342 líneas de `index.html` hay
    exactamente CINCO llamadas a `.delete()`, sobre CUATRO tablas** — `fabrica_fichas` (:1712),
@@ -729,26 +911,36 @@ Por orden de lo que más duele:
    Afecta al 42 % de las recomendaciones que proponen precio. **Es lo que bloquea la reactivación**,
    no el archivado.
 
-2. 🔴 **El trackeador y el cockpit v2 dan márgenes distintos hoy** (C5). El bug del `×1.03` está
+2. 🔴 **El trackeador corre con la clave publicable** (A4-bis). Lo daba por «pendiente de que lo
+   mire Fernando» hasta CLAUDE.md §4; se resuelve **sin ver el secreto**, porque las claves de
+   Supabase declaran su rol dentro del valor. Es `anon`, y eso **fija el orden** del bloque D3: la
+   clave de servicio primero, cerrar las tablas después. Al revés se rompe el trackeador, y como
+   está parado, no se vería hasta el día que arranque.
+
+3. 🔴 **La serie de `salud_fba_historico` tiene un agujero de ocho días** (C2-bis) y nada lo
+   señala. `frescura_informes()` dice cómo de fresco es lo último, no si lo de detrás es continuo.
+   Las ventanas T7/T30 de Amazon aguantan; lo que se rompe es **restar dos fotos**.
+
+4. 🔴 **El trackeador y el cockpit v2 dan márgenes distintos hoy** (C5). El bug del `×1.03` está
    documentado y diferido desde el 3-ago. Si el analista se conecta al cockpit antes de que se
    arregle, citará márgenes optimistas en ~0,45 puntos con la autoridad de un número calculado.
 
-3. 🟠 **50 de las 60 capturas manuales de tarifa están fuera del universo repreciable.** El trabajo
+5. 🟠 **50 de las 60 capturas manuales de tarifa están fuera del universo repreciable.** El trabajo
    manual ya hecho es seis veces mayor de lo que la auditoría veía, pero apuntando al sitio
    equivocado. Antes de capturar más, la lista de objetivos tiene que salir del universo.
 
-4. 🟠 **El `15,5` de la caja de texto** (C4). No es una estimación mala: es un valor por defecto de
+6. 🟠 **El `15,5` de la caja de texto** (C4). No es una estimación mala: es un valor por defecto de
    formulario grabado 307 veces, indistinguible de una medición. Se arregla borrando cuatro
    caracteres de `index.html:5710`.
 
-5. 🟡 **`ensure_rls` no cubre `CREATE VIEW`** (D1/D4). Es la explicación mecánica de por qué las dos
+7. 🟡 **`ensure_rls` no cubre `CREATE VIEW`** (D1/D4). Es la explicación mecánica de por qué las dos
    vistas nacieron abiertas, y significa que **cualquier vista futura nacerá igual**. Las dos
    migraciones propuestas juntas lo tapan; ninguna de las dos por separado.
 
-6. 🟡 **Ni `v_analisis_auditable` ni `v_scoreboard_reglas` están en ninguna migración.** Se crearon
+8. 🟡 **Ni `v_analisis_auditable` ni `v_scoreboard_reglas` están en ninguna migración.** Se crearon
    a mano y no hay rastro versionado de su definición. Si se pierden, se pierden.
 
-7. 🟡 **La guarda anti-recarga del snapshot depende del nombre del fichero.** Las dos cargas del
+9. 🟡 **La guarda anti-recarga del snapshot depende del nombre del fichero.** Las dos cargas del
    11-jul solo convivieron porque el segundo CSV se llamaba `… (1).csv.gz`. Si un día descargas dos
    veces el mismo día y el navegador no renombra, la segunda carga se salta en silencio con un
    `[STOP]` en el log. **Un aviso que solo vive en el log no es un aviso** (CLAUDE.md §2).
@@ -759,8 +951,8 @@ Por orden de lo que más duele:
 
 Dicho como preguntas abiertas, no como suposiciones:
 
-- **Qué contiene `SUPABASE_KEY`** (¿la publicable o la de servicio?). Lo miras tú en GitHub →
-  Settings → Secrets. **Bloquea el paso 1 de D3** para las dos tablas que toca el trackeador.
+*(Lo de `SUPABASE_KEY` ya no está aquí: resuelto en A4-bis — es `sb_publishable_…`, rol `anon`, y
+no hizo falta ver el secreto porque la clave declara su rol dentro del propio valor.)*
 - **Quién ejecutó el borrado de los 1.746 + 970 registros y cuándo.** Postgres no guarda esa traza.
   Lo que sí está probado: no fue el código, y no se ha repetido.
 - **Si algo fuera de los dos repos lee `v_analisis_auditable`** (un Colab, un script suelto). Dentro
@@ -783,15 +975,17 @@ Ninguno de estos pasos está dado. Los tres primeros son independientes entre s�
 
 | # | Qué | Por qué ahora |
 |---|---|---|
-| 1 | **Aplicar D1** (revocar `anon` en las dos vistas) | Es el agujero crítico y no rompe nada: nadie las lee |
-| 2 | **PR del acantilado** en el cerebro | Sin esto, reactivar el trackeador da márgenes falsos en el 42 % de lo accionable |
+| 1 | **Aplicar D1** (revocar `anon` en las dos vistas) | Es el agujero crítico y no rompe nada: demostrado por cuenta cerrada en los dos repos **y** en el trackeador |
+| 2 | 🔴 **PR del acantilado** en el cerebro | **Condición de reactivación.** Sin esto el motor invierte el signo de la decisión (caso `B08HH5V55W`) |
+| 2b | **`SUPABASE_SERVICE_KEY` en los dos workflows del trackeador** | Desbloquea el paso 0 de D3. Va **antes** de cerrar ninguna `monitor_*` |
 | 3 | **PR de comentarios**: `monitor_recomendaciones` (el contrato) y corregir «Foto» → Película en `monitor_snapshots` | Es lo que causó este malentendido. Barato |
 | 4 | **PR del `×1.03`** en el cockpit v2 (ya decidido el 3-ago, sin hacer) | Debe ir **antes** que el analista |
 | 5 | **Aplicar D2** (default ACL), el mismo día que se revisen los grants de las tablas que crean los procesadores | Cierra el nacimiento; no toca lo existente |
 | 6 | **`concurrency: escritores-productos`** en los tres workflows reales | Barato, aunque no cierre la carrera de la v1 |
 | 7 | **D3 paso 2** (quitar solo `DELETE` a `anon`) | Quita lo irreversible sin romper una sola llamada del frontend |
 | 8 | **Versionar `ensure_rls`** a `migraciones/` | Cinco minutos, y hoy es una defensa que un restore se lleva |
-| 9 | **Jubilar `salud_fba_hist`** (RENAME primero, DROP semanas después) | Sin prisa: no molesta. Medido que no se pierde nada — sus 3 ficheros siguen en Storage |
+| 9 | **Jubilar `salud_fba_hist`** — antes, el reprocesado de los 3 ficheros en staging con el criterio de contención (B4) | Sin prisa: no molesta. Medido que no se pierde nada, falta *probarlo* reprocesando |
+| 10 | **Vista de continuidad** junto a `frescura_informes()` | Para que el analista no interpole sobre el agujero de 8 días sin verlo (C2-bis) |
 
 **Todo por la escalera de CLAUDE.md §5** — restaurar staging → ensayo → aplicar → verificación SQL →
 producción ensayo → aplicar → verificación SQL, con Elena avisada antes de tocar producción. Y el
