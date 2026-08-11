@@ -31,10 +31,14 @@ antes de construir sobre ella — y menos mal, porque era falsa.
 
 ---
 
-## 1. EL DISEÑO QUE QUEDA: DOS NIVELES
+## 1. EL DISEÑO QUE QUEDA: DOS NIVELES… Y UN TERCERO QUE NO EXTRAPOLA
 
 1. **FACTURA** — donde la haya para ese SKU **a ese lado del escalón**.
-2. **DESCONOCIDO** — todo lo demás. **Explícito, nunca rellenado.**
+2. **`SELLER_ESTIMADO_A_PRECIO`** — el popup del Seller consultado **al precio del lado alto**.
+   *(Añadido el mismo día. No rompe la regla de «nada inventado»: el popup es la estimación de
+   Amazon para tu cuenta, no una extrapolación nuestra. Ver
+   [`CAPTURA_SELLER_LADO_ALTO_11ago.md`](CAPTURA_SELLER_LADO_ALTO_11ago.md).)*
+3. **DESCONOCIDO** — todo lo demás. **Explícito, nunca rellenado.**
 
 Y de ahí sale la regla operativa, que es **más simple que el modelo que estábamos construyendo**:
 
