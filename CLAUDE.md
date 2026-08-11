@@ -330,6 +330,19 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   2. **`git add <fichero>`, no `git add -A`**, cuando el cambio son uno o dos ficheros. Es lo
      único que habría hecho inofensivo el accidente.
   3. Antes de commitear en un sitio del que no vienes: `git branch --show-current`.
+- 🔴 **EL CI EN VERDE NO PRUEBA QUE UNA FEATURE ESTÉ VIVA.** Prueba que compila y que lo
+  que hay escrito pasa; no que lo que escribiste llegue a ejecutarse.
+  *Medido el 11-ago-2026: al fusionar dos ramas que tocaban la misma función, el merge dejó
+  **dos `return construirInventario(...)` seguidos**. El primero ganaba, el segundo era
+  código muerto, y con él se anulaba una feature entera —el envío de la buy box no llegaba
+  al builder—. TypeScript no dice nada de eso, el lint tampoco, y el CI salió verde.*
+  🔑 **Toda feature nueva necesita al menos UN assert que falle si se desactiva.** No basta
+  con que haya tests del cálculo: tiene que haber uno que compruebe que el dato **llega**.
+  Los que cazaron aquello fueron los del suite, que sí miran el resultado con el dato
+  puesto — el mismo día había 1.887 y por eso saltó a la primera.
+  ⚠️ Y el corolario, que es el que se olvida: **si desactivas la feature a mano y el suite
+  sigue verde, el suite no la está probando.** Es la versión de «haz saltar las guardas a
+  propósito» aplicada a las funcionalidades, no solo a las guardas.
 - **Los datos sintéticos no prueban nada.** Una vista se prueba con la tabla **poblada**.
 - **Escribe los números esperados ANTES de correr.** Si no salen, di lo que sale — no ajustes la
   expectativa al resultado.
