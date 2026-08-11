@@ -135,13 +135,15 @@ definer as (
   where v.relnamespace='public'::regnamespace and v.relkind='v'
     and coalesce(v.reloptions::text,'') not like '%security_invoker=true%')
 select d.relname as vista,
+       -- 🔴 LA SEGUNDA CARA: ¿además la sirve `anon`, o sea SIN SESIÓN?
+       has_table_privilege('anon', 'public.' || d.relname, 'select') as anon_lee,
        (select string_agg(distinct t.relname, ', ') from pg_depend dp
           join pg_rewrite rw on rw.oid = dp.objid
           join pg_class t on t.oid = dp.refobjid
          where rw.ev_class = d.oid and dp.classid = 'pg_rewrite'::regclass
            and t.relkind = 'r' and t.relname in (select relname from tapadas)) as bases_tapadas
 from definer d
-order by 2 nulls last, 1;
+order by bases_tapadas nulls last, anon_lee desc, 1;
 -- 🔬 REFERENCIA del 11-ago-2026: **18 vistas definer, 10 de ellas sobre tabla tapada**:
 --      v_estado_asin, v_scoreboard_reglas, v_decisiones_estado, v_sondas_pendientes,
 --      v_analisis_auditable  → monitor_analisis
@@ -151,3 +153,18 @@ order by 2 nulls last, 1;
 --      v_amazon_se_despierta → keepa_escaparate_hist
 --    Las otras 8 son definer sobre tablas que sí tienen políticas: cambiarlas sería
 --    inocuo, pero tampoco urge.
+--
+-- 🔴🔴 Y LA CAPA QUE CIERRA EL CÍRCULO: **9 de esas 10 están abiertas a `anon`** — todas
+--    menos `v_estado_asin`. O sea que la RLS de `monitor_analisis`, `incidencias_*`,
+--    `seller_observaciones` y `keepa_escaparate_hist` **no protege nada**: sus datos se
+--    sirven SIN SESIÓN a través de vistas definer que se saltan esa misma RLS.
+--
+--    Son las dos caras del mismo patrón, y por eso se miran juntas: **lo único que hace
+--    que esas vistas funcionen es exactamente lo que las abre.** Poner invoker las deja a
+--    cero; quitar el grant a `anon` puede romper la v1, que es quien probablemente las
+--    lee.
+--
+--    🔒 POR ESO ESTO ES CENSO Y NO UNA LISTA DE TAREAS. No se toca ninguna. Para poder
+--       cerrarlas hace falta antes saber QUIÉN las lee — y eso es el censo de lectura de
+--       la app v1, que es otro trabajo. Sin ese censo, cerrar una es apagar una luz sin
+--       saber qué habitación deja a oscuras.
