@@ -146,6 +146,14 @@ el histórico y no hay de dónde recuperarlo.
   para elegir, no para dar el asunto por zanjado. **Si un día salta un desplome de tráfico con
   todo lo demás en orden, ÉSE es el caso a estudiar**, y lo que habría que cambiar entonces es
   el criterio, no el fichero. El procesador lo dice así en el aborto.
+  📏 **Y hay que saber a CUÁNTO llega ese criterio, que no es a todo el catálogo.** Solo vigila
+  al ASIN que tenga alguna métrica de tráfico ≥100 en la lectura anterior. *Medido el
+  11-ago-2026 sobre la última lectura de cada país:* **ES 86,4%** de los ASIN (299/346),
+  **IT 71,1%** (91/128), **FR 37,2%** (73/196). O sea que **en FR el criterio 3 solo mira a 4
+  de cada 10 ASIN**: allí quien protege son el 2 y el 4. No es un fallo —por debajo de 100
+  visitas un porcentaje no significa nada—, pero sí algo que **hay que volver a mirar cuando
+  FR crezca**: la cobertura sube sola con el tráfico, y conviene saber cuándo deja de ser un
+  país a medio vigilar.
 - ⚠️ **PENDIENTE — el agujero «VIEJA DETRÁS DE NUEVA».** Los criterios que comparan con la
   lectura anterior solo miran **hacia adelante** (`leido_at > ref_cual`). Una lectura ANTERIOR
   a la última cargada solo la ve la guarda 6.8, que **grita y sigue**. *Medido el 10-ago-2026
@@ -559,6 +567,21 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   los mensajes de commit si las usas en Bash. Comandos de una línea, sintaxis Bash.
 - **`workflow_dispatch` exige que el `.yml` esté en la rama por defecto.** Orden forzoso:
   fichero → merge → ensayo.
+- 🔴 **EL ID DE UN RUN SE TOMA DE LA URL QUE IMPRIME EL DISPATCH, JAMÁS DE
+  `gh run list --limit 1`.** El run recién creado tarda unos segundos en registrarse, así que
+  "el último de la lista" puede ser **el ANTERIOR** — y como ése suele estar en `success`,
+  `gh run watch` vuelve al instante y da por bueno un trabajo que **todavía no ha empezado**.
+  Es un verde prestado, hermano de los dos de §3.
+  *Medido el 11-ago-2026: di por aplicado un andamio de staging leyendo el run de 25 minutos
+  antes. Se cazó porque la comprobación por SQL no cuadraba con lo que decía el log.*
+  `gh workflow run` (v2.96.0, la de esta máquina) **sí imprime la URL del run creado**, y de
+  ahí sale el id:
+  ```bash
+  URL=$(gh workflow run X.yml -f entorno=staging 2>&1 | head -1); ID=${URL##*/}
+  ```
+  Si algún día no la imprimiera, la salida es acotar por `--branch` o `--created`, **nunca**
+  "el último". Y la regla de fondo es la de siempre: la verificación es SQL contra la base, no
+  el log — y menos aún el log de otro run.
 - **En un `.yml`, un `no` suelto es el BOOLEANO `false`, no la cadena "no"** (el "problema de
   Noruega": `NO` = Norway). *Medido el 11-ago-2026 sobre
   `procesar-custom-analytics.yml`: `options: [no, si]` de un input se lee `[False, 'si']`.*
