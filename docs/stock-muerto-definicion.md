@@ -133,6 +133,65 @@ Antes de creerse un extremo —0 % o 100 %—, se comprueba que el cruce cruza.
 
 ---
 
+## El SEGUNDO EJE: el `sales_rank`, al lado de la alerta
+
+🔑 **Un producto con rank 726 y cero ventas no es lo mismo que uno con rank 82.000 y cero
+ventas.** El primero tiene demanda demostrada y el problema es NUESTRO; el segundo
+sencillamente no le interesa a nadie. Sin el rank al lado, los dos parecen el mismo caso.
+
+🔬 Sobre las **41 confirmadas** (11-ago-2026), el rank las parte en tres montones **casi
+iguales de dinero** y de diagnóstico opuesto:
+
+| tramo (`salud_fba.sales_rank`) | fichas | uds | coste | Low **conversion** | Low **traffic** | sin alerta |
+|---|---|---|---|---|---|---|
+| **≤ 5.000** · demanda demostrada, el problema es nuestro | 7 | 281 | **2.174,96 €** | **4** | 1 | 2 |
+| 5.000 – 20.000 · intermedio | 14 | 410 | 2.206,55 € | 4 | 6 | 4 |
+| **> 20.000** · no interesa a nadie | 18 | 361 | **2.216,75 €** | 1 | **16** | 1 |
+| sin rank | 2 | 26 | 159,76 € | 0 | 1 | 1 |
+
+🔒 **Y aquí hay una confirmación que nadie puso a mano:** *Low conversion* se concentra donde
+el rank es BUENO (4 de 7 en el tramo fuerte) y *Low traffic* donde es MALO (16 de 18 en el
+flojo). La alerta de Amazon y el rank son dos señales independientes y dicen lo mismo. Eso
+es lo que convierte la separación de los dos cubos de §alerta en un hecho, no en doctrina.
+
+⚠️ **DOS FUENTES DE RANK, Y NO SE PROMEDIAN** (§1.3). `salud_fba.sales_rank` y
+`keepa_escaparate.rank` son informes distintos tomados en momentos distintos, y discrepan
+bastante: Lenor **18.343 vs 9.346**, Coco Miguel **29.245 vs 16.284**, Salah 45.338 vs
+56.755. **La vista usa `salud_fba.sales_rank`**, porque vive en la misma fila que `alert` y
+que las unidades — la comparación con la alerta sería tramposa si viniera de otra foto.
+Citar «rank 726» sin decir de cuál de los dos es, es citar a medias.
+
+---
+
+## Lo NO-COLECCIONABLE: el patrón NO aguanta
+
+Fernando pidió marcar lo no-coleccionable, con la hipótesis de que si el patrón se sostenía
+al mirar el cubo entero no sería un problema de fichas sueltas sino de **línea de negocio**.
+🔬 Medido sobre las 41: **no se sostiene.**
+
+| categoría (Keepa ES) | fichas | coste | marcas |
+|---|---|---|---|
+| **Juguetes y juegos** | **34** | **5.297,59 €** | Funko, Hasbro, Hot Wheels, Magic |
+| Hogar y cocina | 1 | 472,38 € | **BANDAI SPIRITS** |
+| Alimentación y bebidas | 3 | 464,13 € | David Rio, HARIBO, Ricola |
+| Salud y cuidado personal | 1 | 413,82 € | LENOR |
+| (sin ficha Keepa ES) | 1 | 93,96 € | — |
+| Videojuegos | 1 | 16,14 € | AMBROSIANA |
+
+**83 % de las fichas y 78 % del dinero está en el núcleo coleccionable.** Lo no-coleccionable
+son ~5 fichas y ~894 € — el **13 %**. Y de los tres de más coste, el mayor —Starter Kit de
+Magic, 893 €, el 53 % de esos 1.649 €— **es** coleccionable: son dos de tres, no tres.
+
+🔑 Y el rank lo remata: los coleccionables están en **los dos extremos** (6 de 7 en el tramo
+de demanda fuerte, 17 de 18 en el de nadie los quiere). La categoría no separa nada.
+
+⚠️ **Y la categoría de Amazon no vale como marcador tal cual:** la única ficha de «Hogar y
+cocina» es un **BANDAI SPIRITS**, un model kit que Amazon clasifica ahí. Marcar por categoría
+llamaría «no coleccionable» a un Bandai. Si algún día hace falta el marcador, sale de la
+MARCA o de una lista de Fernando, no de `keepa_escaparate.categoria`.
+
+---
+
 ## Cómo se recalcula (no se copia)
 
 ```sql
