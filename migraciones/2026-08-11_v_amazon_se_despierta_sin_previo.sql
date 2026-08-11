@@ -41,9 +41,10 @@
 --
 --      · **Cada `archivado_en` enseña UN SOLO dominio.** No es que archive fichero a
 --        fichero: es que los otros tres YA estaban archivados y el `NOT EXISTS` los salta.
---      · **El último archivado de un dominio ES la foto viva**, no la anterior. 🔬 ES:
---        221 filas, mismos 221 ASIN, misma fecha que la viva. Quien tome «el último
---        archivado» como el «antes» estaría comparando la foto contra sí misma.
+--      · **El último archivado de un dominio ES la foto viva**, no la anterior. 🔬 Y no
+--        «parecida»: IDÉNTICA. Las 404 parejas del 10-ago (de, es, it) coinciden en todas
+--        las columnas contrastadas y traen el mismo nombre de fichero. Quien tome «el
+--        último archivado» como el «antes» compara la foto contra sí misma.
 --      · Y una misma `fecha_foto` aparece repartida en varios `archivado_en`.
 --
 --    🔒 LA UNIDAD BUENA ES `(dominio, fecha_foto)`: eso, y sólo eso, es UN FICHERO.
@@ -72,11 +73,16 @@
 --    sabe. Lo que hace honesto a (b) NO es el criterio: es `dias_desde_foto_anterior`, que
 --    pone el hueco a la vista. Sin esa columna, (b) sería un collage disfrazado de foto.
 --
--- ⚠️ Y OJO AL FILTRO `fecha_foto < la viva`, que no es cosmético: el 10-ago se cargó ES
---    DOS VECES, así que el histórico tiene un es/10-ago (el primer fichero) y la viva es
---    el segundo. Con `<` se compara **día contra día** (10-ago vs 09-ago) en vez de dos
---    ficheros del mismo día, que sólo daría ruido. Además `(asin,dominio,fecha_foto)` no
---    sabe distinguir dos ficheros de la misma fecha: ordenarlos no es posible.
+-- 🔴 Y EL FILTRO `fecha_foto < la viva` ES LO QUE SOSTIENE TODO. No es cosmético: **el
+--    histórico contiene la foto VIVA**, no sólo las pasadas. 🔬 Comprobado fila a fila
+--    sobre las 404 parejas del 10-ago (de, es, it): **cero diferencias** en `bb_precio`,
+--    `rank`, `amazon_precio`, `bb_stock` y `keepa_actualizado`, y **el mismo `fichero`**.
+--    Es el mismo CSV, no dos exports parecidos.
+--    Pasa porque `archivar_foto` archiva la foto viva ENTERA antes de cada carga: la
+--    carga de un dominio archiva de paso los otros tres, que siguen vivos.
+--    ⇒ **Sin ese `<`, la vista compararía la foto contra sí misma** y no vería jamás un
+--      cambio: `amazon_antes` = `amazon_ahora` en todas las filas. Un verde perfecto y
+--      completamente inútil, del tipo que no se nota porque no falla.
 --
 -- QUÉ CAMBIA, en concreto:
 --   1. `alerta` pasa a **NULL** cuando no hay NINGUNA observación anterior de ese ASIN, en
