@@ -5707,7 +5707,7 @@ function renderInvDetalle(productoId) {
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
         <div><div class="inv-field-label">IVA (%)</div><input class="input" id="ed-iva-${p.id}" type="number" step="0.1" value="${p.iva_pct!=null?(p.iva_pct*100).toFixed(1):'21'}" style="font-size:13px"></div>
-        <div><div class="inv-field-label">Comisión Amazon (%) *</div><input class="input" id="ed-com-${p.id}" type="number" step="0.1" required value="${p.comision_pct!=null?(p.comision_pct*100).toFixed(1):''}" placeholder="sin medir" title="Obligatoria. No se rellena sola: un valor inventado es indistinguible de uno medido." style="font-size:13px"></div>
+        <div><div class="inv-field-label">Comisión Amazon (%)</div><input class="input" id="ed-com-${p.id}" type="number" step="0.1" value="${p.comision_pct!=null?(p.comision_pct*100).toFixed(1):''}" placeholder="sin medir" title="No se rellena sola: un valor inventado es indistinguible de uno medido. Sin ella, el margen sale como «no calculable»." style="font-size:13px"></div>
         <div><div class="inv-field-label">Coste almacén (€)</div><input class="input" id="ed-almacen-${p.id}" type="number" step="0.01" value="${p.coste_almacen!=null?p.coste_almacen:''}" placeholder="0.15" style="font-family:'DM Mono',monospace;font-size:12px"></div>
       </div>
       <div style="grid-column:1 / -1;border-top:1px dashed var(--gray-200);padding-top:12px">
@@ -5752,15 +5752,16 @@ async function guardarEdicionProducto(productoId) {
     const sumaFinal = contHuecos ? sumaMoloka : (p.stock_moloka || 0);
     const ivaRaw = parseFloat(document.getElementById('ed-iva-' + productoId).value);
     const comRaw = parseFloat(document.getElementById('ed-com-' + productoId).value);
-    // La comisión es OBLIGATORIA y ya no se rellena sola. Antes la caja aparecía con
-    // 15,5 puesto: si se guardaba sin tocarla se escribía 0,155 en el maestro, y en la
-    // base un valor inventado es indistinguible de uno medido (doctrina 39). Medido el
-    // 11-ago-2026: 307 fichas activas lo llevaban clavado. Ahora nace vacía, y guardar
-    // sin ponerla se para aquí en vez de inventar el dato.
+    // La comisión ya no se rellena sola: la caja nace VACÍA. Antes aparecía con 15,5
+    // puesto y, al guardar sin tocarla, se escribía 0,155 en el maestro — un valor
+    // inventado indistinguible de uno medido (doctrina 39). Medido el 11-ago-2026:
+    // 307 fichas activas lo llevaban clavado.
+    // 🔒 NO se bloquea el guardado, y es una decisión, no un olvido: hay 99 fichas
+    // activas sin comisión, y obligar a rellenarla para poder tocar el nombre o el
+    // stock llevaría a poner un número cualquiera — que es exactamente cómo nació el
+    // 0,1550. Lo que se bloquea es el MARGEN (ver calcularBuyBox), no el formulario.
     if (isNaN(comRaw)) {
-      showToast('Falta la comisión de Amazon (%). Es obligatoria: míralas en el Seller, no la inventes.', 'warning');
-      document.getElementById('ed-com-' + productoId).focus();
-      return;
+      showToast('Guardado sin comisión: el margen de esta ficha saldrá como «no calculable» hasta que la midas.', 'warning');
     }
     const updates = {
       nombre: document.getElementById('ed-nombre-' + productoId).value.trim(),
@@ -7570,13 +7571,17 @@ async function abrirCalculadora(id) {
   _calcAsin = p.asin || null;
   const nombre = (p.nombre || p.asin || '').substring(0, 50);
   const pvd = p.pvd || 0;
-  const comisionPct = (p.comision_pct != null) ? p.comision_pct * 100 : 15.5;
+  // Sin relleno: si la ficha no tiene comisión medida, la caja se queda VACÍA y el
+  // margen sale «no calculable». Antes se pintaba 15,5 aquí, y esta caja además
+  // ESCRIBE en productos (onchange -> guardarComisionProducto), así que era la segunda
+  // vía por la que el relleno entraba al maestro.
+  const comisionPct = (p.comision_pct != null) ? p.comision_pct * 100 : null;
   const envioGuardado = (p.comision_envio != null) ? p.comision_envio : null;
   const ivaPct = (p.iva_pct != null) ? p.iva_pct * 100 : 21.0;
 
   document.getElementById('bb-nombre').textContent = nombre;
   document.getElementById('bb-pvd').value = pvd ? pvd.toFixed(2) : '';
-  document.getElementById('bb-comision-pct').value = comisionPct.toFixed(1);
+  document.getElementById('bb-comision-pct').value = (comisionPct != null) ? comisionPct.toFixed(1) : '';
   // Para el envio: si esta guardado en ficha -> usarlo. Si no -> tarifa real del JSON. Si tampoco -> 3.74.
   let envioFinal = 3.74;
   let fuenteTxt = '';
@@ -7647,13 +7652,30 @@ async function guardarEnvioProducto() {
 function calcularBuyBox() {
   const pvd = parseFloat(document.getElementById('bb-pvd').value) || 0;
   const buybox = parseFloat(document.getElementById('bb-buybox').value) || 0;
-  const comisionPct = (parseFloat(document.getElementById('bb-comision-pct').value) || 0) / 100;
+  // 🔴 SIN COMISIÓN NO HAY MARGEN. Antes esta línea llevaba `|| 0`: con la caja vacía
+  // la comisión valía CERO y el margen salía inflado ~15 puntos, que es peor que el
+  // relleno de 15,5. La guarda va más abajo, después de pedir el precio.
+  const comRaw = parseFloat(document.getElementById('bb-comision-pct').value);
+  const comisionPct = comRaw / 100;
   const envio = parseFloat(document.getElementById('bb-envio').value) || 0;
   const almacen = parseFloat(document.getElementById('bb-almacen').value) || 0;
   const ivaPct = (parseFloat(document.getElementById('bb-iva-pct').value) || 21) / 100;
 
   if (buybox <= 0) {
     document.getElementById('bb-resultado').innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.4);font-size:13px;padding:20px">Introduce el precio de la Buy Box para calcular</div>';
+    document.getElementById('bb-verdict').style.display = 'none';
+    return;
+  }
+
+  // 🔴 Una ficha sin comisión medida NO muestra porcentaje de margen: sale como «no
+  // calculable». Mismo criterio que la regla del acantilado — cuando no se sabe, se
+  // dice; no se rellena. Un número inventado es indistinguible de uno medido.
+  if (isNaN(comRaw)) {
+    document.getElementById('bb-resultado').innerHTML =
+      '<div style="text-align:center;color:#f0b429;font-size:13px;padding:20px;line-height:1.5">' +
+      '<strong>Margen no calculable</strong><br>' +
+      '<span style="color:rgba(255,255,255,0.55);font-size:12px">Esta ficha no tiene comisión medida. ' +
+      'Míralas en el Seller y ponla arriba: no se rellena sola a propósito.</span></div>';
     document.getElementById('bb-verdict').style.display = 'none';
     return;
   }
