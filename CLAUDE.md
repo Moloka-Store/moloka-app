@@ -357,6 +357,28 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   comentarios antes de mirar — o comprobará que algo está escrito, no que se ejecuta.
   🔑 Vale para todo, no sólo para tests: una guarda nueva se hace saltar, un aviso nuevo se
   provoca, y una feature nueva se desactiva. Si al romperla no pasa nada, no estaba puesta.
+- 🔴 **LA COMPROBACIÓN QUE NO PUEDE FALLAR: el error más repetido, y siempre sale VERDE.**
+  Antes de fiarte de una comprobación, pregúntate **qué la pondría roja**. Si no hay
+  respuesta —si el resultado sale igual mida lo que mida— no comprueba nada, y encima
+  tranquiliza. Es el peor de los fallos: no da error, da permiso.
+  *Tres veces en dos días, con tres caras distintas y la misma forma:*
+  | | la comprobación | por qué no podía fallar |
+  |---|---|---|
+  | 1 | El pin del `search_path`: longitud **con** y **sin** pin en el mismo `UNION` | `set_config(…, true)` es de **transacción**: fijado en la primera rama, la segunda ya lo tiene. Salía **379 y 379** siempre |
+  | 2 | Testigo de entorno: `current_database()` y `count(*) from productos` | staging es un **clon restaurado** de producción: coinciden **por construcción**. `postgres` y **455** en las dos |
+  | 3 | La huella `es_case` para saber si `v_escaner_ultimo` estaba al día | ese texto está en la versión **vieja y en la nueva** (es una columna del `SELECT`). Lo que cambió fue la cláusula de dedup. Daba `vigente` sobre la vista vieja |
+  🔑 **La forma común: se comparan dos cosas que son iguales por construcción.** Dos ramas
+  de la misma transacción, dos copias de la misma base, dos versiones que comparten ese
+  texto. El resultado no depende del estado que se quería medir.
+  ⚠️ Y el corolario para el caso 3, que aplica a toda huella o marcador de versión: **se
+  elige contra la versión VIEJA, no contra la nueva.** Que aparezca en la actual no prueba
+  nada; hay que comprobar que **NO** aparece en la anterior. La huella va sobre lo que
+  **cambió** —la cláusula, la condición, la firma—, nunca sobre un nombre que las dos
+  versiones mencionan.
+  🔬 Las tres las destapó **medir con otra vía**, no la propia comprobación: el pin, porque
+  el número no cuadraba con uno ya conocido; el testigo, porque se midieron las dos bases a
+  la vez antes de escribirlo; y la huella, porque el cruce de `md5` entre entornos vio una
+  diferencia que la huella daba por buena.
 - 🔴 **UNA VISTA QUE NO PUEDE VER SU FUENTE DEBE CONFESARLO, NO RELLENAR CON UN FALSO.**
   El caso general de «0 filas por RLS ≠ 0 filas porque no hay»: si una vista se apoya en
   una tabla que puede estar tapada, tiene que **distinguir los dos ceros dentro del propio

@@ -59,6 +59,34 @@ La política vive en su migración. Las que ya son reaplicables:
 Si la que falta no está en esa lista, **no la inventes**: mira de qué migración salió y
 hazla reaplicable antes de nada, o el problema vuelve en el siguiente restore.
 
+### 🔴 Y en staging, ADEMÁS: cruzar las definiciones contra producción
+
+Dos minutos, y dice de golpe qué objetos quedaron viejos:
+
+```
+sql/huella_vistas_entorno.sql
+```
+
+Se lanza **tal cual en los dos entornos** y se comparan los `md5`. Lo que difiera es un
+objeto cuya definición no es la misma en los dos sitios.
+
+**Por qué es obligatorio y no una curiosidad:** una restauración devuelve el esquema del
+backup, y con él **definiciones viejas de objetos que producción ya tiene arreglados**. Un
+ensayo hecho sobre eso mide otra cosa **sin avisar** — sale verde y no significa nada.
+
+🔬 Medido el 12-ago-2026, y por eso está aquí: de siete objetos cruzados, seis coincidían
+al hash y **`v_escaner_ultimo` no**. Staging conservaba la versión con la clave de
+deduplicación corta `(ean, proveedor)` —la que perdía 30 filas— mientras producción tenía
+ya la buena, `(ean, proveedor, es_case)`. Nada lo señalaba: la vista existía, respondía y
+tenía buena cara.
+
+⚠️ **Dos trampas del método, las dos medidas** (están explicadas dentro del `.sql`):
+- El `search_path` **cambia el hash** de la misma vista. Va fijado, y cada fila trae la
+  columna `pin_aplicado`: si sale `false`, esa fila **no es comparable**.
+- El hash es de la definición **normalizada por Postgres**, no del texto del `.sql`. Sirve
+  para comparar **entorno contra entorno**, nunca contra el fichero — eso es el `sha256`
+  que imprime `aplicar-migracion.yml`, y mide otra cosa.
+
 ---
 
 ## ⏳ Las nueve vistas cerradas a `anon` — revisar a los 30 días
