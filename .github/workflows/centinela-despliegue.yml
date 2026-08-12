@@ -1,0 +1,158 @@
+name: Moloka - Centinela de DESPLIEGUE
+
+# ============================================================================
+# 🔴 QUE PROBLEMA RESUELVE, con el numero que lo costo.
+#
+#   El 11-ago-2026 produccion estuvo **5,5 horas** sirviendo codigo viejo. El commit
+#   `97ae7c4` -"la caja de comision nace vacia: 15,5 no era un dato"- llevaba horas
+#   fusionado en `main` y NO habia llegado a la app de Elena. Cada ficha que ella
+#   guardaba seguia escribiendo un 0,155 inventado. Nadie se entero.
+#
+#   No fue un fallo del despliegue automatico: ese existe y funciona (352 deploys en 4
+#   semanas, UN solo ERROR). Lo que no existia era **el aviso de que no salio**. El tope
+#   de deployments de Vercel (Hobby, 100/dia, **cupo de CUENTA, no de proyecto**) rechazo
+#   los intentos, y un deploy rechazado **no se encola, no se reintenta y no avisa**.
+#
+# 🔑 LA REGLA QUE PONE ESTO EN EL REPO EN VEZ DE EN LA MEMORIA DE ALGUIEN:
+#
+#       UN MERGE A `main` NO ES UN DESPLIEGUE.
+#
+#   Es la misma familia que el resto de verdes falsos de esa semana -el CI verde con
+#   codigo muerto, el workflow verde que no lanzo nada, `schema_migrations` mintiendo
+#   tras un restore-: algo dice OK y la cosa no esta viva. Aqui el "algo" es el check
+#   verde de GitHub al fusionar.
+#
+# QUE HACE. Tras cada push a `main`, espera a que exista un deployment de **Production**
+#   con EXACTAMENTE ese SHA y en estado `success`. Si a los 10 minutos no esta, FALLA.
+#
+# ⚠️ LO QUE NO CUBRE, dicho aqui para que nadie lo suponga:
+#   · No comprueba el CONTENIDO servido. Que Vercel diga `success` no prueba que el HTML
+#     que sirve sea el de `main` — eso se comprueba comparando el fichero, como se hizo el
+#     11-ago (md5 del `index.html` servido contra `git show origin/main:index.html`).
+#     Este centinela cubre "no salio"; no cubre "salio y sirve otra cosa".
+#   · Solo mira ESTE repo. `moloka-app-v2` necesita el suyo.
+#   · Si Actions esta caido, esto no corre — y entonces tampoco avisa. Un centinela que
+#     depende de la misma infraestructura que vigila tiene ese limite por diseño.
+# ============================================================================
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha_a_comprobar:
+        # 🔒 Existe para poder HACER SALTAR la guarda a proposito: se le pasa un SHA que
+        #    no esta desplegado y tiene que ponerse rojo. Un centinela que solo se ha
+        #    visto en verde no se ha probado, se ha ejecutado.
+        description: 'SHA a comprobar. Vacio = el HEAD de main. Poner uno viejo hace saltar la guarda.'
+        type: string
+        required: false
+        default: ''
+      minutos:
+        description: 'Cuanto esperar al deployment (minutos)'
+        type: string
+        required: false
+        default: '10'
+
+concurrency:
+  group: centinela-despliegue
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  deployments: read
+
+jobs:
+  vigilar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Que SHA se vigila
+        id: sha
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENTRADA: ${{ inputs.sha_a_comprobar }}
+        run: |
+          SHA="${ENTRADA:-${{ github.sha }}}"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Vigilando el SHA: $SHA"
+          if [ -n "$ENTRADA" ]; then
+            echo "::notice::Ejecucion MANUAL con un SHA dado a mano. Si no esta desplegado, esta guarda DEBE ponerse roja: es su prueba."
+          fi
+
+      - name: Esperar al deployment de Production con ese SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.sha.outputs.sha }}
+          MINUTOS: ${{ inputs.minutos || '10' }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          FIN=$(( $(date +%s) + MINUTOS * 60 ))
+          echo "Esperando hasta $MINUTOS minutos a un deployment de Production en $SHA"
+
+          while :; do
+            # Los deployments de Production de este repo, mas recientes primero.
+            JSON=$(gh api "repos/$REPO/deployments?environment=Production&per_page=20" 2>/dev/null || echo '[]')
+            ID=$(echo "$JSON" | jq -r --arg s "$SHA" '[.[] | select(.sha == $s)] | .[0].id // empty')
+
+            if [ -n "$ID" ]; then
+              # 🔒 Existir no es estar bien: un deployment puede quedarse en `error`. Se mira
+              #    su ULTIMO estado, no el hecho de que exista.
+              EST=$(gh api "repos/$REPO/deployments/$ID/statuses?per_page=1" --jq '.[0].state // "sin_estado"')
+              echo "  deployment $ID -> estado=$EST"
+              case "$EST" in
+                success)
+                  echo "::notice::Desplegado: $SHA esta en Production (deployment $ID)."
+                  {
+                    echo "## ✅ Production sirve el HEAD de main"
+                    echo ""
+                    echo "| | |"
+                    echo "|---|---|"
+                    echo "| SHA | \`$SHA\` |"
+                    echo "| deployment | $ID |"
+                    echo ""
+                    echo "⚠️ Esto prueba que el deploy SALIO, no que el contenido servido sea el correcto."
+                    echo "Para eso hay que comparar el fichero servido contra \`git show origin/main:<fichero>\`."
+                  } >> "$GITHUB_STEP_SUMMARY"
+                  exit 0 ;;
+                error|failure)
+                  echo "::error::El deployment $ID de $SHA termino en '$EST'. Produccion NO tiene este commit."
+                  exit 1 ;;
+                *) : ;;   # queued / in_progress / pending: se sigue esperando
+              esac
+            fi
+
+            if [ "$(date +%s)" -ge "$FIN" ]; then
+              ULT=$(echo "$JSON" | jq -r '.[0] | "\(.sha[0:8]) del \(.created_at)"')
+              echo "::error::PRODUCCION NO TIENE ESTE COMMIT. Han pasado $MINUTOS minutos desde el merge y no hay deployment de Production en $SHA."
+              {
+                echo "## 🔴 El merge NO ha llegado a produccion"
+                echo ""
+                echo "| | |"
+                echo "|---|---|"
+                echo "| SHA de \`main\` | \`$SHA\` |"
+                echo "| ultimo deployment de Production | $ULT |"
+                echo "| esperado | $MINUTOS min |"
+                echo ""
+                echo "**Un merge a \`main\` no es un despliegue.** El 11-ago-2026 esto costo 5,5 horas"
+                echo "de produccion sirviendo codigo viejo, con la app de Elena escribiendo un dato"
+                echo "inventado en cada ficha."
+                echo ""
+                echo "### Que mirar, por orden"
+                echo "1. **Cupo de Vercel**: el tope es de la CUENTA (100/dia en Hobby), no del proyecto."
+                echo "   Un deploy rechazado por cupo no se encola, no se reintenta y no avisa."
+                echo "2. **Build en ERROR** en el panel de Vercel."
+                echo "3. Si hay que forzarlo: *Create Deployment* sobre \`main\` desde Vercel."
+                echo "   ⚠️ NO con \`vercel --prod\`: sube la copia local y rompe la trazabilidad del commit."
+                echo ""
+                echo "### Y cuando salga, verificar el CONTENIDO"
+                echo "El verde de Vercel dice que salio, no que sirva lo correcto:"
+                echo "\`\`\`"
+                echo "git show origin/main:index.html > /tmp/main.html"
+                echo "curl -s https://moloka-app.vercel.app/ -o /tmp/prod.html"
+                echo "cmp /tmp/main.html /tmp/prod.html && echo IDENTICOS"
+                echo "\`\`\`"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            sleep 20
+          done
