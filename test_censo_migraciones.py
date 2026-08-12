@@ -77,7 +77,13 @@ eq('4. una migracion de solo ACL no inventa objeto', objs, [])
 eq('4b1. la huella de retro se aplica a su objeto',
    C.huella_de('2026-08-10_v_escaner_ultimo_clave_real', 'create view v_escaner_ultimo as select 1;',
                [('vista', 'v_escaner_ultimo')]).get('v_escaner_ultimo'),
-   'es_case')
+   'DISTINCT ON (ean, proveedor, es_case)')
+# 🔴 Y la lección que costó: la huella se elige contra la version VIEJA. `es_case` a secas
+#    salia en las dos -es una columna del SELECT en ambas- asi que daba `vigente` sobre una
+#    vista vieja. Lo que cambio fue la CLAVE de dedup, no las columnas.
+eq('4b1b. la huella NO puede ser un texto que la version vieja tambien tenga',
+   C.HUELLAS_RETRO[('2026-08-10_v_escaner_ultimo_clave_real', 'v_escaner_ultimo')] == 'es_case',
+   False)
 eq('4b2. @huella en linea, con UN objeto con cuerpo: se aplica',
    C.huella_de('inventada', '-- @huella: marca_nueva\n', [('vista', 'v_x')]).get('v_x'),
    'marca_nueva')

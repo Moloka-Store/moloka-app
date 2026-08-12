@@ -111,10 +111,25 @@ RE_DECLARADO = re.compile(r'^--\s*@objeto:\s*(\w+)\s+([a-z0-9_.]+)\s*$', re.I | 
 # ⚠️ Y solo se apunta lo que se ha COMPROBADO. Rellenar las nueve de memoria seria
 #    inventarse la prueba: las que no tienen huella salen listadas como punto ciego vivo,
 #    que es informacion, no un hueco escondido.
+# 🔴 UNA HUELLA SE ELIGE CONTRA LA VERSION VIEJA, NO CONTRA LA NUEVA. Que aparezca en la
+#    definicion actual no prueba nada: hay que comprobar que NO aparece en la anterior. Si
+#    sale en las dos, no distingue — y entonces el censo dice `vigente` sobre una vista
+#    vieja, que es peor que no mirarla.
+#    🔬 Me paso con esta misma tabla el 12-ago-2026. Puse `es_case` como huella de
+#       `v_escaner_ultimo` porque estaba en la version buena. Tambien estaba en la mala:
+#       es una de las columnas del SELECT, y las dos versiones la seleccionan. Lo que
+#       cambio fue la CLAVE DE DEDUPLICACION, no las columnas.
+#         · `es_case`                                → produccion true · staging true  ❌
+#         · `DISTINCT ON (ean, proveedor, es_case)`  → produccion true · staging FALSE ✅
+#       Con la huella mala, staging daba `vigente` teniendo la vista VIEJA -la de la clave
+#       corta que perdia 30 filas-. Lo destapo el cruce de md5 entre entornos, no la huella.
+#    ⇒ La huella va sobre lo que CAMBIO (la clausula, la condicion, la firma), no sobre un
+#      nombre que las dos versiones mencionan.
 HUELLAS_RETRO = {
-    # Verificado en produccion el 11-ago-2026: la vista lleva la clave real de dedup
-    # (proveedor, ean, es_case) en vez de la corta (ean, proveedor).
-    ('2026-08-10_v_escaner_ultimo_clave_real', 'v_escaner_ultimo'): 'es_case',
+    # 🔬 Comprobada en las DOS direcciones el 12-ago-2026: presente en produccion (version
+    # con la clave real de dedup) y AUSENTE en staging, que conserva la corta.
+    ('2026-08-10_v_escaner_ultimo_clave_real', 'v_escaner_ultimo'):
+        'DISTINCT ON (ean, proveedor, es_case)',
     # Verificado en produccion el 12-ago-2026 (Fernando, mirando pg_get_viewdef):
     # compara por dominio y devuelve NULL donde no hay con que comparar.
     ('2026-08-11_v_amazon_se_despierta_sin_previo', 'v_amazon_se_despierta'):
