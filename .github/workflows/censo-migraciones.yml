@@ -1,0 +1,103 @@
+name: Moloka - CENSO de migraciones
+
+# ============================================================================
+# QUE CONTESTA. Dos preguntas que hasta el 12-ago-2026 no se podian contestar:
+#
+#   A) ¿Que migracion FUSIONADA no esta aplicada?  (migracion → objeto)
+#      🔬 Nacio porque `v_salud_escaner` llevaba horas en `main` y no existia en
+#         produccion. Se descubrio por casualidad, buscandola a mano.
+#
+#   B) ¿Que objeto EXISTE sin fichero de migracion detras?  (objeto → migracion)
+#      🔴 Es el detector del atajo. El conector de Supabase puede escribir en produccion y
+#         esa puerta se queda abierta por decision de Fernando (riesgo aceptado). No se
+#         puede impedir el atajo antes; esto lo hace VISIBLE despues. Y sigue valiendo el
+#         dia que se cierre el conector: seguira enseñando lo que se aplico fuera del flujo.
+#
+# 🔴 NO SE CONSULTA `supabase_migrations` PARA DECIDIR SI ALGO ESTA APLICADO. Ese registro
+#    solo ve lo que entra por el conector -`aplicar-migracion.yml` usa `psql` crudo y no
+#    escribe en el-, asi que es ciego JUSTO a lo que sigue el procedimiento.
+#    🔬 38 ficheros vs 50 entradas, y CASAN 5. Un censo contra el habria dado 33 falsas
+#       ausencias. Aqui el registro solo se usa como FUENTE de SQL para la pregunta B.
+#
+# 🔑 UN SOLO EXTRACTOR PARA LAS DOS FUENTES. Los ficheros y el SQL del registro se parsean
+#    con la misma funcion de `scripts/censo_migraciones.py`, con sus mismos tests.
+#    ⚠️ El 12-ago se intento la pregunta B con un regex a mano en SQL: casó la palabra
+#       «ventas» dentro de la prosa española de un `comment on column` y clasifico la tabla
+#       como creada por el conector. Hubo que tirar el reparto. Dos parseos que miden lo
+#       mismo son dos verdades esperando a discrepar.
+#
+# ⚠️ LO QUE NO CUBRE, dicho aqui:
+#   · **El cubo 3 no separa «herencia de la v1» de «aplicado a mano con psql»**: las dos
+#     dejan el mismo rastro, que es ninguno.
+#   · Del censo A: dice si el objeto EXISTE, no si esta VIGENTE, salvo donde hay huella
+#     declarada. Los puntos ciegos vivos salen listados con nombre.
+#   · 13 migraciones son de solo ACL, comentarios o datos: no dejan objeto que buscar y
+#     salen como NO DETERMINABLES, nunca como correctas.
+# ============================================================================
+on:
+  workflow_dispatch:
+    inputs:
+      entorno:
+        description: 'Base de datos a censar'
+        type: choice
+        options: [produccion, staging]
+        default: produccion
+  schedule:
+    # Los martes a las 7:13. Minuto raro a proposito: no coincidir con el resto.
+    - cron: '13 5 * * 2'
+
+permissions:
+  contents: read
+
+jobs:
+  censar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main }
+
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+
+      - name: Instalar cliente Postgres 17
+        run: |
+          sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /usr/share/keyrings/pgdg.gpg
+          sudo sh -c 'echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-17
+
+      - name: A) Censo migracion -> objeto
+        env:
+          DB_URL: ${{ inputs.entorno == 'staging' && secrets.STAGING_DB_URL || secrets.SUPABASE_DB_URL }}
+        run: |
+          set -uo pipefail
+          python scripts/censo_migraciones.py > /tmp/censo.sql
+          echo "### A · ¿qué migración fusionada NO está aplicada?" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -P pager=off -f /tmp/censo.sql | tee /tmp/censo.txt
+          # 🔒 Solo lo que NO esta bien va al resumen: un informe que lo lista todo no se
+          #    lee. Lo completo queda en el log del run.
+          grep -E "FALTA|VIEJA" /tmp/censo.txt >> "$GITHUB_STEP_SUMMARY" || echo "(nada falta ni está viejo)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          python scripts/censo_migraciones.py --resumen >> "$GITHUB_STEP_SUMMARY"
+
+      - name: B) Cubos por origen (el detector del atajo)
+        env:
+          DB_URL: ${{ inputs.entorno == 'staging' && secrets.STAGING_DB_URL || secrets.SUPABASE_DB_URL }}
+        run: |
+          set -uo pipefail
+          # 🔒 La consulta la EMITE el guion, no se teclea aqui: si se copiara a mano, los
+          #    dos lados dejarian de medir lo mismo.
+          python scripts/censo_migraciones.py --sql-materia-prima > /tmp/materia.sql
+          psql "$DB_URL" -t -A -v ON_ERROR_STOP=1 -f /tmp/materia.sql > /tmp/materia.json
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### B · ¿qué objeto existe SIN fichero de migración detrás?" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          python scripts/censo_migraciones.py --cubos /tmp/materia.json | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Mesa de pruebas del extractor
+        # 🔒 Va DESPUES a proposito: si el extractor estuviera roto, el censo de arriba ya
+        #    habria salido raro y se ve el contraste. Y si sale rojo aqui, el informe de
+        #    arriba NO vale — que es justo lo que hay que saber.
+        run: python -u test_censo_migraciones.py

@@ -357,6 +357,24 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   comentarios antes de mirar — o comprobará que algo está escrito, no que se ejecuta.
   🔑 Vale para todo, no sólo para tests: una guarda nueva se hace saltar, un aviso nuevo se
   provoca, y una feature nueva se desactiva. Si al romperla no pasa nada, no estaba puesta.
+- 🔴 **CUANDO UNA REGLA SE REPITE, DEJA DE ESCRIBIRSE Y SE CONVIERTE EN FUNCIÓN.**
+  Una regla escrita **se olvida en veinte minutos**; una regla convertida en herramienta se
+  aplica sola.
+  *Medido el 12-ago-2026, y el caso es contra mí: por la mañana se escribió la regla «lo
+  que se lee como texto no distingue código de comentario», se le puso un test al censo y
+  se corrigió una atribución por ella. **Veinte minutos después**, al escribir un detector
+  en SQL a mano, el mismo fallo: un regex casó la palabra «ventas» dentro de la prosa
+  española de un `comment on column` y clasificó la tabla como creada por el conector.
+  La regla estaba escrita, probada y aplicada en Python — y no protegió al SQL de al lado.*
+  🔑 **La forma de saber que toca:** si al escribir algo piensas «esto ya lo sé», es la
+  segunda vez. La tercera no la vas a ver venir.
+  ⚠️ Y el corolario que evita el daño peor: **una sola implementación por regla.** Dos
+  parseos distintos que miden lo mismo son dos verdades esperando a discrepar; y cuando se
+  encuentra una trampa, se arregla en un sitio y queda arreglada en todos.
+  🔬 Sin nombrarlo, este movimiento ya se hizo cuatro veces: `v_salud_escaner` (la regla
+  del `presente=true` como objeto, no como nota), el centinela de despliegue (la regla del
+  merge, en el repo y no en la memoria de alguien), el canario RLS (el checklist como
+  fichero) y `sin_comentarios()` (la regla del comentario, como código con test).
 - 🔴 **LA COMPROBACIÓN QUE NO PUEDE FALLAR: el error más repetido, y siempre sale VERDE.**
   Antes de fiarte de una comprobación, pregúntate **qué la pondría roja**. Si no hay
   respuesta —si el resultado sale igual mida lo que mida— no comprueba nada, y encima
