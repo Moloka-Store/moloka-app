@@ -367,7 +367,13 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   | 1 | El pin del `search_path`: longitud **con** y **sin** pin en el mismo `UNION` | `set_config(…, true)` es de **transacción**: fijado en la primera rama, la segunda ya lo tiene. Salía **379 y 379** siempre |
   | 2 | Testigo de entorno: `current_database()` y `count(*) from productos` | staging es un **clon restaurado** de producción: coinciden **por construcción**. `postgres` y **455** en las dos |
   | 3 | La huella `es_case` para saber si `v_escaner_ultimo` estaba al día | ese texto está en la versión **vieja y en la nueva** (es una columna del `SELECT`). Lo que cambió fue la cláusula de dedup. Daba `vigente` sobre la vista vieja |
-  🔑 **La forma común: se comparan dos cosas que son iguales por construcción.** Dos ramas
+  | 4 | `bash -n` sobre el script extraído de un `.yml`, para validar su sintaxis | el extractor había petado por el encoding y no escribió nada. **Validar la nada siempre sale bien.** El `-n` decía OK sobre 0 bytes |
+  🔑 **La forma común: la entrada no puede producir un resultado distinto** — porque se
+  comparan dos cosas iguales por construcción (1, 2, 3) o porque directamente **no hay
+  entrada** (4). ⚠️ De ahí el reflejo que hay que coger: **antes de creerse un OK,
+  mirar que había algo que comprobar.** Un recuento a cero, un fichero vacío o una
+  lista sin filas convierten cualquier validación en un trámite.
+  Dicho del otro modo: se comparan dos cosas que son iguales por construcción. Dos ramas
   de la misma transacción, dos copias de la misma base, dos versiones que comparten ese
   texto. El resultado no depende del estado que se quería medir.
   ⚠️ Y el corolario para el caso 3, que aplica a toda huella o marcador de versión: **se
