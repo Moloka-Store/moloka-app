@@ -389,8 +389,14 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   🔑 **Estar vacía hoy no es motivo para excluir nada de un censo.** «Con datos» y «tapada»
   son dos estadísticas distintas: mezclarlas mete un falso positivo permanente. El recuento
   de filas ya lo da la consulta, columna a columna.
-  ⇒ Un censo o una alarma se prueban **con el estado normal**: si con todo en orden no está
-  callada, no sirve. Y esa comprobación cuesta una ejecución.
+  ⇒ **«Las dos direcciones» son DOS, y la segunda es la que se olvida:**
+  | | qué se prueba | cómo |
+  |---|---|---|
+  | 1 | **que se ponga ROJA cuando toca** | se rompe la cosa a mano y tiene que saltar |
+  | 2 | **que esté CALLADA cuando no toca** | se corre con **todo en orden** y tiene que no decir nada |
+  La 1 la hacemos casi siempre; **la 2 se nos escapó** — y es la que llevaba al canario
+  gritando desde el 11-ago. Las dos cuestan una ejecución cada una, y sin las dos no se
+  sabe si la alarma mide algo o sólo hace ruido en una dirección fija.
 - 🔴 **UNA VISTA QUE NO PUEDE VER SU FUENTE DEBE CONFESARLO, NO RELLENAR CON UN FALSO.**
   El caso general de «0 filas por RLS ≠ 0 filas porque no hay»: si una vista se apoya en
   una tabla que puede estar tapada, tiene que **distinguir los dos ceros dentro del propio
