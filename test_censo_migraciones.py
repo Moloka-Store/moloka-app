@@ -71,12 +71,39 @@ eq('3b. y GANA a lo extraido (el humano manda sobre el regex)',
 objs, origen = C.objetos_de("revoke all on public.x from anon;\ngrant select on public.x to authenticated;")
 eq('4. una migracion de solo ACL no inventa objeto', objs, [])
 
+# ── 4b. LA HUELLA: existir no es estar vigente ─────────────────────────────
+# 🔴 El caso que la motiva: 9 de los 61 objetos los tocan DOS migraciones. Sin huella, el
+#    censo dice `existe` para las dos y la segunda -la que arreglo algo- es invisible.
+eq('4b1. la huella de retro se aplica a su objeto',
+   C.huella_de('2026-08-10_v_escaner_ultimo_clave_real', 'create view v_escaner_ultimo as select 1;',
+               [('vista', 'v_escaner_ultimo')]).get('v_escaner_ultimo'),
+   'es_case')
+eq('4b2. @huella en linea, con UN objeto con cuerpo: se aplica',
+   C.huella_de('inventada', '-- @huella: marca_nueva\n', [('vista', 'v_x')]).get('v_x'),
+   'marca_nueva')
+# 🔒 Con dos objetos con cuerpo, a cual toca es una conjetura. Aqui no se conjetura.
+amb = C.huella_de('inventada', '-- @huella: marca_nueva\n', [('vista', 'v_x'), ('vista', 'v_y')])
+eq('4b3. con DOS objetos con cuerpo: se ignora y se avisa',
+   ('v_x' in amb or 'v_y' in amb, '__ambigua__' in amb), (False, True))
+eq('4b4. una columna no lleva huella (existe o no, sin version vieja)',
+   C.huella_de('inventada', '-- @huella: x\n', [('columna', 't.c')]).get('t.c'), None)
+
+# ── 4c. LOS PUNTOS CIEGOS SE DECLARAN, NO SE TAPAN ─────────────────────────
+ciegos = dict(C.puntos_ciegos(C.censar()))
+eq('4c1. v_trackeador_cola sale como punto ciego (2 migraciones, sin huella)',
+   'v_trackeador_cola' in ciegos, True)
+eq('4c2. v_escaner_ultimo NO sale: tiene huella declarada',
+   'v_escaner_ultimo' in ciegos, False)
+eq('4c3. v_amazon_se_despierta tampoco', 'v_amazon_se_despierta' in ciegos, False)
+
 # ── 5. LA REGLA DE LA CASA, EN EL PROPIO SQL ───────────────────────────────
 sql = C.sql_del_censo(C.censar())
 eq('5a. el SQL del censo NO menciona supabase_migrations',
    'supabase_migrations' in sql, False)
 eq('5b. ni schema_migrations',
    'schema_migrations' in sql, False)
+eq('5d. el SQL trae la rama de la huella (pg_get_viewdef / prosrc)',
+   all(t in sql for t in ('pg_get_viewdef', 'prosrc', "'VIEJA'", "'vigente'")), True)
 eq('5c. y consulta el catalogo real',
    all(t in sql for t in ('pg_class', 'pg_proc', 'information_schema.columns', 'pg_indexes')),
    True)
@@ -88,7 +115,7 @@ filas = C.censar()
 eq('6a. hay migraciones reales que censar', len(filas) > 20, True)
 eq('6b. y la mayoria deja objeto localizable', sum(1 for f in filas if f[1]) > 15, True)
 eq('6c. los _PRUEBA_ quedan fuera',
-   any(m.startswith('_PRUEBA') for m, _, _ in filas), False)
+   any(m.startswith('_PRUEBA') for m, _, _, _ in filas), False)
 
 print("\n" + "=" * 66)
 if fallos:
