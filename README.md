@@ -17,9 +17,20 @@ misma cara de normalidad. Si una política no vuelve tras un restore, lo normal 
 nadie se entere hasta que falte un dato en pantalla — y para entonces ya no se sabe desde
 cuándo.
 
-🔬 Medido el 11-ago-2026 en producción: **21 tablas** están así, **20 con datos dentro**,
-**13.781 filas invisibles**. Y **10 de las 18 vistas definer** funcionan hoy *sólo porque
-son definer*: leen una de esas tablas tapadas.
+🔬 Medido el 11-ago-2026 en producción: **21 tablas** están así, **20 con datos dentro**
+(sólo `web_formato` vacía) y **13.781 filas invisibles**. Y varias vistas `definer`
+funcionan hoy *sólo porque son definer*: leen una de esas tablas tapadas.
+
+⚠️ **Las 21 entran en el censo, también la vacía.** Hasta el 12-ago-2026 el censo llevaba
+20 —se armó con «las que tienen datos»— y eso hacía que el canario reportase `web_formato`
+como 🔴 TAPADA NUEVA **en cada ejecución**. Una alarma permanente se deja de leer, que es
+lo contrario de para lo que existe. *Estar vacía hoy no es motivo para excluir nada: puede
+llenarse mañana, y entonces estaría tapada CON datos y ya fuera de la lista.*
+
+⚠️ Y el recuento de vistas `definer` **ya no se cita de memoria**: durante un día se dijo
+«18» porque se contaban con un `like '%security_invoker=true%'`, que da por definer las que
+lo tienen puesto como `on`. Son **13**. La consulta correcta —por opción, no por texto—
+está en este mismo canario.
 
 ### Qué comprueba
 
@@ -58,6 +69,34 @@ La política vive en su migración. Las que ya son reaplicables:
 
 Si la que falta no está en esa lista, **no la inventes**: mira de qué migración salió y
 hazla reaplicable antes de nada, o el problema vuelve en el siguiente restore.
+
+### 🔴 Y en staging, ADEMÁS: cruzar las definiciones contra producción
+
+Dos minutos, y dice de golpe qué objetos quedaron viejos:
+
+```
+sql/huella_vistas_entorno.sql
+```
+
+Se lanza **tal cual en los dos entornos** y se comparan los `md5`. Lo que difiera es un
+objeto cuya definición no es la misma en los dos sitios.
+
+**Por qué es obligatorio y no una curiosidad:** una restauración devuelve el esquema del
+backup, y con él **definiciones viejas de objetos que producción ya tiene arreglados**. Un
+ensayo hecho sobre eso mide otra cosa **sin avisar** — sale verde y no significa nada.
+
+🔬 Medido el 12-ago-2026, y por eso está aquí: de siete objetos cruzados, seis coincidían
+al hash y **`v_escaner_ultimo` no**. Staging conservaba la versión con la clave de
+deduplicación corta `(ean, proveedor)` —la que perdía 30 filas— mientras producción tenía
+ya la buena, `(ean, proveedor, es_case)`. Nada lo señalaba: la vista existía, respondía y
+tenía buena cara.
+
+⚠️ **Dos trampas del método, las dos medidas** (están explicadas dentro del `.sql`):
+- El `search_path` **cambia el hash** de la misma vista. Va fijado, y cada fila trae la
+  columna `pin_aplicado`: si sale `false`, esa fila **no es comparable**.
+- El hash es de la definición **normalizada por Postgres**, no del texto del `.sql`. Sirve
+  para comparar **entorno contra entorno**, nunca contra el fichero — eso es el `sha256`
+  que imprime `aplicar-migracion.yml`, y mide otra cosa.
 
 ---
 

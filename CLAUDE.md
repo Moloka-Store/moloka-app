@@ -357,6 +357,52 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   comentarios antes de mirar — o comprobará que algo está escrito, no que se ejecuta.
   🔑 Vale para todo, no sólo para tests: una guarda nueva se hace saltar, un aviso nuevo se
   provoca, y una feature nueva se desactiva. Si al romperla no pasa nada, no estaba puesta.
+- 🔴 **LA COMPROBACIÓN QUE NO PUEDE FALLAR: el error más repetido, y siempre sale VERDE.**
+  Antes de fiarte de una comprobación, pregúntate **qué la pondría roja**. Si no hay
+  respuesta —si el resultado sale igual mida lo que mida— no comprueba nada, y encima
+  tranquiliza. Es el peor de los fallos: no da error, da permiso.
+  *Tres veces en dos días, con tres caras distintas y la misma forma:*
+  | | la comprobación | por qué no podía fallar |
+  |---|---|---|
+  | 1 | El pin del `search_path`: longitud **con** y **sin** pin en el mismo `UNION` | `set_config(…, true)` es de **transacción**: fijado en la primera rama, la segunda ya lo tiene. Salía **379 y 379** siempre |
+  | 2 | Testigo de entorno: `current_database()` y `count(*) from productos` | staging es un **clon restaurado** de producción: coinciden **por construcción**. `postgres` y **455** en las dos |
+  | 3 | La huella `es_case` para saber si `v_escaner_ultimo` estaba al día | ese texto está en la versión **vieja y en la nueva** (es una columna del `SELECT`). Lo que cambió fue la cláusula de dedup. Daba `vigente` sobre la vista vieja |
+  | 4 | `bash -n` sobre el script extraído de un `.yml`, para validar su sintaxis | el extractor había petado por el encoding y no escribió nada. **Validar la nada siempre sale bien.** El `-n` decía OK sobre 0 bytes |
+  🔑 **La forma común: la entrada no puede producir un resultado distinto** — porque se
+  comparan dos cosas iguales por construcción (1, 2, 3) o porque directamente **no hay
+  entrada** (4). ⚠️ De ahí el reflejo que hay que coger: **antes de creerse un OK,
+  mirar que había algo que comprobar.** Un recuento a cero, un fichero vacío o una
+  lista sin filas convierten cualquier validación en un trámite.
+  Dicho del otro modo: se comparan dos cosas que son iguales por construcción. Dos ramas
+  de la misma transacción, dos copias de la misma base, dos versiones que comparten ese
+  texto. El resultado no depende del estado que se quería medir.
+  ⚠️ Y el corolario para el caso 3, que aplica a toda huella o marcador de versión: **se
+  elige contra la versión VIEJA, no contra la nueva.** Que aparezca en la actual no prueba
+  nada; hay que comprobar que **NO** aparece en la anterior. La huella va sobre lo que
+  **cambió** —la cláusula, la condición, la firma—, nunca sobre un nombre que las dos
+  versiones mencionan.
+  🔬 Las tres las destapó **medir con otra vía**, no la propia comprobación: el pin, porque
+  el número no cuadraba con uno ya conocido; el testigo, porque se midieron las dos bases a
+  la vez antes de escribirlo; y la huella, porque el cruce de `md5` entre entornos vio una
+  diferencia que la huella daba por buena.
+  ⚠️ **Y la cara B, que es la misma enfermedad: la que SIEMPRE está roja.** Un aviso que
+  salta en cada ejecución tampoco informa — se aprende a ignorarlo, y el día que salte por
+  algo de verdad ya nadie lo lee.
+  *Medido el 12-ago-2026: el censo de `sql/canario_rls.sql` llevaba **20** tablas tapadas
+  porque se armó con «las 20 que tienen datos dentro», dejando fuera `web_formato` por
+  estar vacía. Tapadas hay **21**. Con ella fuera, el canario reportaba `web_formato` como
+  **🔴 TAPADA NUEVA** en cada pasada, para siempre.*
+  🔑 **Estar vacía hoy no es motivo para excluir nada de un censo.** «Con datos» y «tapada»
+  son dos estadísticas distintas: mezclarlas mete un falso positivo permanente. El recuento
+  de filas ya lo da la consulta, columna a columna.
+  ⇒ **«Las dos direcciones» son DOS, y la segunda es la que se olvida:**
+  | | qué se prueba | cómo |
+  |---|---|---|
+  | 1 | **que se ponga ROJA cuando toca** | se rompe la cosa a mano y tiene que saltar |
+  | 2 | **que esté CALLADA cuando no toca** | se corre con **todo en orden** y tiene que no decir nada |
+  La 1 la hacemos casi siempre; **la 2 se nos escapó** — y es la que llevaba al canario
+  gritando desde el 11-ago. Las dos cuestan una ejecución cada una, y sin las dos no se
+  sabe si la alarma mide algo o sólo hace ruido en una dirección fija.
 - 🔴 **UNA VISTA QUE NO PUEDE VER SU FUENTE DEBE CONFESARLO, NO RELLENAR CON UN FALSO.**
   El caso general de «0 filas por RLS ≠ 0 filas porque no hay»: si una vista se apoya en
   una tabla que puede estar tapada, tiene que **distinguir los dos ceros dentro del propio
