@@ -325,7 +325,90 @@ from o
 order by estado, o.migracion, o.nombre;"""
 
 
+# ---------------------------------------------------------------------------
+# LOS CUBOS: de donde salio cada objeto que hay vivo en la base.
+#
+# 🔴 EL DETECTOR DEL ATAJO. El conector de Supabase puede escribir en produccion, y esa
+#    puerta se queda abierta por decision de Fernando (riesgo aceptado, 12-ago-2026). No se
+#    puede impedir el atajo antes; lo que si se puede es **verlo despues**. Un objeto que
+#    exista sin fichero de migracion detras es SQL que se salto el flujo.
+#
+# 🔑 Y SE USA EL MISMO EXTRACTOR PARA LAS DOS FUENTES. Los ficheros de `migraciones/` y el
+#    SQL guardado en `supabase_migrations.schema_migrations` se parsean con `objetos_de`,
+#    la misma funcion, con su mismo `sin_comentarios` y sus mismos tests.
+#    ⚠️ NO es una preferencia de estilo: el 12-ago-2026 se intento hacer esta misma
+#    clasificacion con un regex escrito a mano en SQL, y casó la palabra «ventas» dentro de
+#    la PROSA ESPAÑOLA de un `comment on column` -"Mide ventas reales; ORDENA, no decide"-,
+#    clasificando la tabla como creada por el conector. El reparto entero hubo que tirarlo.
+#    Dos parseos que miden lo mismo son dos verdades esperando a discrepar.
+CUBOS = {
+    1: 'con fichero de migracion detras',
+    2: 'SIN fichero, pero con SQL en el registro  -> aplicado por CONECTOR, fuera del flujo',
+    3: 'sin fichero y sin registro                -> herencia de la v1, o mano suelta',
+}
+
+
+def cubos(objetos_vivos, registro):
+    """Clasifica cada objeto vivo. `registro` = [(nombre_migracion, sql), ...].
+
+    ⚠️ Solo mira QUIEN LO CREA, no quien lo menciona: `objetos_de` extrae los `create`
+       reales, con los comentarios fuera.
+    """
+    de_fichero = {n for _, objs, _, _ in censar() for _, n in objs}
+    de_registro = {}
+    for nombre, sql in registro:
+        for _, n in objetos_de(sql or '')[0]:
+            de_registro.setdefault(n, []).append(nombre)
+    out = {1: [], 2: [], 3: []}
+    for obj in sorted(objetos_vivos):
+        if obj in de_fichero:
+            out[1].append((obj, None))
+        elif obj in de_registro:
+            out[2].append((obj, ', '.join(de_registro[obj])))
+        else:
+            out[3].append((obj, None))
+    return out
+
+
+SQL_MATERIA_PRIMA = """
+-- Lo que hace falta para los cubos, en una sola consulta. Se ejecuta contra el entorno y
+-- su salida (JSON) alimenta a `--cubos`.
+select json_build_object(
+  'vivos', (select coalesce(json_agg(c.relname order by c.relname), '[]'::json)
+              from pg_class c join pg_namespace n on n.oid = c.relnamespace
+             where n.nspname = 'public' and c.relkind in ('r','v','m')
+               and c.relname not like 'pg_%'),
+  'registro', (select coalesce(json_agg(json_build_array(name, array_to_string(statements,' '))), '[]'::json)
+                 from supabase_migrations.schema_migrations)
+) as materia;
+""".strip()
+
+
 if __name__ == '__main__':
+    if '--sql-materia-prima' in sys.argv:
+        # 🔒 La consulta va aqui y no suelta en un .md: quien la copie a mano la escribe
+        #    distinta, y entonces los dos lados dejan de medir lo mismo.
+        print(SQL_MATERIA_PRIMA)
+        sys.exit(0)
+
+    if '--cubos' in sys.argv:
+        import json
+        ruta = sys.argv[sys.argv.index('--cubos') + 1]
+        m = json.load(io.open(ruta, encoding='utf-8'))
+        res = cubos(m['vivos'], [tuple(x) for x in m['registro']])
+        print(f"objetos vivos en public: {len(m['vivos'])}  ·  "
+              f"entradas del registro: {len(m['registro'])}\n")
+        for k in (1, 2, 3):
+            print(f"CUBO {k} · {CUBOS[k]}   →  {len(res[k])}")
+            for obj, quien in res[k]:
+                print(f"    · {obj}" + (f"   ({quien})" if quien else ""))
+            print()
+        print("⚠️ El cubo 3 NO separa «herencia de la v1» de «aplicado a mano con psql»: las")
+        print("   dos dejan el mismo rastro (ninguno). Para eso haria falta pg_stat_statements,")
+        print("   que es una senal PARCIAL -expulsa entradas por tamano, se pierde en un")
+        print("   reinicio o un reset, y no distingue psql del conector: los dos son postgres-.")
+        sys.exit(0)
+
     filas = censar()
     con = [f for f in filas if f[1]]
     sin = [f for f in filas if not f[1]]

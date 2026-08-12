@@ -118,6 +118,36 @@ eq('4d3. drop-antes-de-crear en el MISMO fichero no descuenta',
        "drop view if exists public.v_x;\ncreate or replace view public.v_x as select 1;")[0]],
    ['v_x'])
 
+# ── 4e. LOS CUBOS: el caso REAL que tiro un reparto entero ─────────────────
+# 🔴 El 12-ago-2026 se clasificaron los objetos con un regex escrito a mano en SQL, y casó
+#    la palabra «ventas» dentro de la PROSA ESPAÑOLA de un `comment on column` de
+#    sondeo_keepa.rank_drops_30d: "Mide ventas reales; ORDENA, no decide". La tabla `ventas`
+#    -herencia de la v1- quedo clasificada como creada por el conector. Hubo que tirar el
+#    reparto entero porque no se sabia cuantos mas habia asi (habia al menos otro:
+#    incidencias_juguetes.ventas_riesgo).
+# 🔑 Con el extractor del censo -el mismo, con sus mismos tests- no cuela. Ese es el motivo
+#    de que haya UNA sola implementacion y no dos.
+CASO_REAL = """comment on column public.sondeo_keepa.rank_drops_30d is
+  'Caidas de rank en 30 dias (Keepa stats.salesRankDrops30). NULL = no se sabe. Mide ventas reales; '
+  'ORDENA, no decide.';
+create table public.sondeo_keepa (id int);"""
+objs_real = [n for _, n in C.objetos_de(CASO_REAL)[0]]
+eq('4e1. la palabra suelta en la prosa de un comentario NO cuela como objeto',
+   'ventas' in objs_real, False)
+eq('4e2. y el objeto que SI se crea, se pilla', 'sondeo_keepa' in objs_real, True)
+
+_res = C.cubos(['ventas', 'sondeo_keepa', 'v_producto_amazon', 'tabla_fantasma'],
+               [('sondeo_keepa_senales_identidad', CASO_REAL)])
+eq('4e3. cubo 1 = lo que tiene fichero detras',
+   [o for o, _ in _res[1]], ['v_producto_amazon'])
+eq('4e4. cubo 2 = creado por el CONECTOR (sin fichero, con SQL en el registro)',
+   [o for o, _ in _res[2]], ['sondeo_keepa'])
+eq('4e5. cubo 3 = sin rastro en ninguna de las dos fuentes',
+   [o for o, _ in _res[3]], ['tabla_fantasma', 'ventas'])
+# 🔒 Y que el cubo 2 diga QUIEN lo aplico: sin eso es una acusacion sin firma.
+eq('4e6. el cubo 2 nombra la entrada del registro que lo creo',
+   _res[2][0][1], 'sondeo_keepa_senales_identidad')
+
 # ── 5. LA REGLA DE LA CASA, EN EL PROPIO SQL ───────────────────────────────
 sql = C.sql_del_censo(C.censar())
 eq('5a. el SQL del censo NO menciona supabase_migrations',
