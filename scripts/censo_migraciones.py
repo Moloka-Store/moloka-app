@@ -123,6 +123,21 @@ HUELLAS_RETRO = {
 
 RE_HUELLA = re.compile(r'^--\s*@huella:\s*(\S.*?)\s*$', re.I | re.M)
 
+# 🔴 LOS `DROP` TAMBIEN CUENTAN, y no estaban. Una migracion posterior puede RETIRAR a
+#    proposito lo que otra creo, y sin leerlos el censo canta un hueco donde hubo una
+#    decision.
+#    🔬 Caso real, en la primera pasada completa contra produccion (12-ago-2026): el censo
+#       dio por AUSENTE `idx_demanda_asin_ventana`. No faltaba: lo borra
+#       `2026-08-07_demanda_asin_contador.sql:228` con un `DROP INDEX IF EXISTS`, porque el
+#       modelo paso de ventana a contador y el indice de la ventana "ya no significa nada".
+#       El objeto no estaba porque NO TENIA que estar.
+#    ⇒ Un objeto creado por una migracion y borrado por otra POSTERIOR sale del censo. Se
+#      ordenan por nombre de fichero, que empieza por fecha: `2026-08-07` > `2026-07-31`.
+RE_DROP = re.compile(
+    r'^\s*drop\s+(view|materialized\s+view|table|function|index)\s+'
+    r'(?:if\s+exists\s+)?(?:public\.)?"?([a-z0-9_]+)"?',
+    re.I | re.M)
+
 TIPO_SQL = {'view': 'vista', 'materialized view': 'vista', 'table': 'tabla',
             'function': 'funcion', 'index': 'indice', 'unique index': 'indice'}
 
@@ -189,6 +204,28 @@ def censar():
         texto = io.open(os.path.join(DIR, f), encoding='utf-8').read()
         objs, origen = objetos_de(texto)
         filas.append((f[:-4], objs, origen, huella_de(f[:-4], texto, objs)))
+
+    # ── Retirar lo que una migracion POSTERIOR borro a proposito ────────────
+    # Se recorre en orden de fichero (empieza por fecha), acumulando los DROP. Un objeto
+    # solo se descuenta si su DROP viene DESPUES de su CREATE: al reves seria un
+    # `drop ... if exists` defensivo justo antes de crearlo, que es lo normal en esta casa
+    # y NO significa que el objeto sobre.
+    borrados = {}                       # nombre -> migracion que lo borro
+    for f in sorted(os.listdir(DIR)):
+        if not f.endswith('.sql') or f.startswith(PREFIJOS_IGNORADOS):
+            continue
+        cuerpo = sin_comentarios(io.open(os.path.join(DIR, f), encoding='utf-8').read())
+        creados_aqui = {n for _, n in RE_OBJETO.findall(cuerpo)}
+        for _, nom in RE_DROP.findall(cuerpo):
+            if nom.lower() not in {c.lower() for c in creados_aqui}:
+                borrados[nom.lower()] = f[:-4]
+    if borrados:
+        vivas = []
+        for mig, objs, origen, hs in filas:
+            objs = [(t, n) for t, n in objs
+                    if not (n in borrados and borrados[n] > mig)]
+            vivas.append((mig, objs, origen, hs))
+        filas = vivas
     return filas
 
 

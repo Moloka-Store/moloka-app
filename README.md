@@ -1,5 +1,48 @@
 # moloka-app
 
+## 🔴 LAS DOS BASES: cuál es cuál
+
+**Antes de lanzar nada contra una base, comprueba contra cuál la estás lanzando.**
+
+| | ref del proyecto | nombre en Supabase | región | qué es |
+|---|---|---|---|---|
+| **PRODUCCIÓN** | `ogfbjjdxcltzpygzuyla` | **Moloka** | `eu-west-1` | 🔴 **LA BASE DE VERDAD.** La que usa Elena a diario. Desde una sesión: **sólo lectura** |
+| **STAGING** | `lusujlzyndsydibkeija` | moloka-staging | `eu-central-1` | Desechable. Se restaura antes de cada ensayo |
+
+⚠️ **El nombre NO dice cuál es producción.** El proyecto de producción se llama **«Moloka»
+a secas** — no dice «producción» por ninguna parte, y el de staging sí lleva su etiqueta.
+Fiarse del nombre es exactamente la ambigüedad que hay que evitar: se mira **el ref**.
+
+🔬 **Por qué está escrito aquí y no en la cabeza de nadie.** El 12-ago-2026 una sesión pasó
+la mañana entera creyendo que no tenía acceso a producción. Lo tenía: el conector de
+Supabase es **de cuenta**, acepta un `project_id` y llega a los dos proyectos. Como sólo se
+le había pasado nunca el ref de staging, quedó mentalmente etiquetado como «el conector de
+staging». Consecuencia: dos peticiones a Fernando de mediciones que se podían hacer solas.
+**No fue un despiste: fue que el dato sólo vivía en la memoria de alguien.**
+
+🔴 **Y NO intentes distinguirlas con una consulta testigo de recuentos: NO FUNCIONA.**
+Staging es un **clon restaurado** de producción, así que casi todo coincide. 🔬 Medido el
+12-ago-2026, las dos a la vez:
+
+| | producción | staging |
+|---|---|---|
+| `current_database()` | `postgres` | `postgres` |
+| `count(*) from productos` | **455** | **455** |
+
+Iba a dejar aquí justo esa consulta como comprobación de seguridad. Habría dado confianza
+falsa en los dos sentidos — que es peor que no tener comprobación.
+
+✅ **Lo que sí distingue** es preguntarle a la API, no a la base, porque el nombre y la
+región no se clonan: `list_projects` (o `get_project` con el ref) devuelve el nombre y la
+región de la tabla de arriba. Y para dudas rápidas, `eu-west-1` = producción,
+`eu-central-1` = staging.
+
+⚠️ Lo que sí cambia entre las dos, pero **sólo sirve en el momento y hay que remedirlo**
+(staging vuelve a igualarse en cada restauración): el número de vistas, las filas de
+`keepa_escaparate_hist` y la `fecha_foto` viva.
+
+---
+
 ## 🔴 DESPUÉS DE CUALQUIER RESTAURACIÓN: correr el canario RLS
 
 **Paso obligatorio, no opcional.** Después de restaurar cualquier base —staging o

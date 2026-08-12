@@ -96,6 +96,22 @@ eq('4c2. v_escaner_ultimo NO sale: tiene huella declarada',
    'v_escaner_ultimo' in ciegos, False)
 eq('4c3. v_amazon_se_despierta tampoco', 'v_amazon_se_despierta' in ciegos, False)
 
+# ── 4d. LOS DROP: lo retirado a proposito no es un hueco ───────────────────
+# 🔴 El fallo real, cazado en la primera pasada completa contra produccion: el censo dio
+#    por AUSENTE `idx_demanda_asin_ventana`. No faltaba — lo borra a proposito
+#    `2026-08-07_demanda_asin_contador.sql` porque el modelo paso de ventana a contador.
+nombres = {n for _, objs, _, _ in C.censar() for _, n in objs}
+eq('4d1. un objeto borrado por una migracion POSTERIOR sale del censo',
+   'idx_demanda_asin_ventana' in nombres, False)
+eq('4d2. y sus hermanos del mismo fichero siguen dentro',
+   ('idx_demanda_asin_asin' in nombres, 'idx_demanda_asin_serie' in nombres), (True, True))
+# 🔒 La otra direccion: un `drop ... if exists` DEFENSIVO justo antes de crear -que es lo
+#    normal en esta casa- NO debe borrar nada. Si lo hiciera, el censo se vaciaria solo.
+eq('4d3. drop-antes-de-crear en el MISMO fichero no descuenta',
+   [n for _, n in C.objetos_de(
+       "drop view if exists public.v_x;\ncreate or replace view public.v_x as select 1;")[0]],
+   ['v_x'])
+
 # ── 5. LA REGLA DE LA CASA, EN EL PROPIO SQL ───────────────────────────────
 sql = C.sql_del_censo(C.censar())
 eq('5a. el SQL del censo NO menciona supabase_migrations',
