@@ -133,7 +133,20 @@ with tapadas as (
 definer as (
   select v.oid, v.relname from pg_class v
   where v.relnamespace='public'::regnamespace and v.relkind='v'
-    and coalesce(v.reloptions::text,'') not like '%security_invoker=true%')
+    -- 🔴 `security_invoker` SE GUARDA DE DOS FORMAS Y LAS DOS VALEN: Postgres acepta
+    --    `true` y `on` como sinónimos y almacena LITERALMENTE lo que se escribió. Este
+    --    canario buscaba sólo `=true` y contaba como DEFINER cuatro vistas que sí son
+    --    invoker: v_escaparate, v_factura_cuadre, v_factura_escaneo y v_salud_asin.
+    --    🔬 Reparto real de las 30 vistas (12-ago-2026): 13 sin poner · 13 `true` · 4 `on`.
+    --       El censo decía 18 definer. Son 13.
+    --    ⚠️ Y no es un fallo de nadie en concreto: Fernando y yo escribimos el mismo
+    --       `<> 'true'` por separado y los dos contamos 18. Un catálogo que admite dos
+    --       escrituras del mismo valor va a seguir engañando a quien lo consulte, así que
+    --       la comprobación se hace por OPCIÓN, no por texto.
+    and not exists (
+      select 1 from unnest(coalesce(v.reloptions, '{}')) o
+      where lower(split_part(o, '=', 1)) = 'security_invoker'
+        and lower(split_part(o, '=', 2)) in ('true', 'on', 'yes', '1')))
 select d.relname as vista,
        -- 🔴 LA SEGUNDA CARA: ¿además la sirve `anon`, o sea SIN SESIÓN?
        has_table_privilege('anon', 'public.' || d.relname, 'select') as anon_lee,
@@ -144,7 +157,9 @@ select d.relname as vista,
            and t.relkind = 'r' and t.relname in (select relname from tapadas)) as bases_tapadas
 from definer d
 order by bases_tapadas nulls last, anon_lee desc, 1;
--- 🔬 REFERENCIA del 11-ago-2026: **18 vistas definer, 10 de ellas sobre tabla tapada**:
+-- 🔬 REFERENCIA del 12-ago-2026: **13 vistas definer** (el censo decia 18: contaba como
+--    definer las 4 con `security_invoker=on`, que SI son invoker). De esas 13, las que
+--    ademas se apoyan en tabla tapada:
 --      v_estado_asin, v_scoreboard_reglas, v_decisiones_estado, v_sondas_pendientes,
 --      v_analisis_auditable  → monitor_analisis
 --      v_incidencias_resumen, v_incidencias_movimientos, v_incidencias_ultima

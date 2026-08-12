@@ -411,6 +411,25 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   se relanzan a propósito. Pero que un verde mudo no pueda hacerse pasar por una
   verificación. Va **detrás** del registro de migraciones de §4.
 - **"Lo ha revisado un agente" NO es prueba.** Un revisor lee código, no lo ejecuta.
+- 🔴 **LAS OPCIONES DE UN OBJETO SE LEEN POR OPCIÓN, NUNCA CON UN `like` SOBRE SU TEXTO.**
+  Postgres guarda en `reloptions` **literalmente lo que se escribió**, y acepta sinónimos:
+  `security_invoker=true` y `security_invoker=on` significan lo mismo y se almacenan
+  distinto. Un `... not like '%security_invoker=true%'` cuenta las de `on` como definer.
+  *Medido el 12-ago-2026: el censo de vistas definer decía **18**. Son **13**. Las cuatro
+  de más eran `v_escaparate`, `v_factura_cuadre`, `v_factura_escaneo` y `v_salud_asin`, que
+  sí son invoker — con `on`. Reparto real de las 30: 13 sin poner · 13 `true` · 4 `on`.*
+  🔑 **Y lo que lo convierte en regla y no en anécdota: Fernando y yo escribimos el mismo
+  `like '…=true%'` por separado, sin vernos, y los dos contamos 18.** Cuando dos personas
+  caen igual en el mismo sitio, no es un despiste: es que la forma obvia está mal. Se lee
+  así, y devuelve lo mismo se escriba como se escriba:
+  ```sql
+  exists (select 1 from unnest(coalesce(c.reloptions,'{}')) o
+           where lower(split_part(o,'=',1)) = 'security_invoker'
+             and lower(split_part(o,'=',2)) in ('true','on','yes','1'))
+  ```
+  ⚠️ Vale para **cualquier** `reloptions` (`fillfactor`, `autovacuum_*`, `check_option`…),
+  no solo para ésta, y para todo catálogo que guarde texto libre. El fallo no da error: da
+  un recuento plausible, que es el peor.
 - 🔴 **EL CENSO POR CÓDIGO NO BASTA: HAY QUE CRUZARLO CON EL CENSO POR USO.** El grep dice
   qué está **escrito**; `pg_stat_statements` dice qué se **ejecuta**. No responden a la
   misma pregunta y ninguno de los dos sustituye al otro.
