@@ -85,19 +85,37 @@ jobs:
           MINUTOS: ${{ inputs.minutos || '10' }}
           REPO: ${{ github.repository }}
         run: |
-          set -euo pipefail
+          # 🔒 SIN `-e` a proposito: un centinela tiene que FALLAR CERRADO. Con `set -e` un
+          #    hipo de la API mataria el paso con un error confuso; sin el, se agota el
+          #    reloj y sale ROJO, que es la respuesta correcta cuando no se ha podido
+          #    comprobar. Un vigilante que se cae no puede quedarse en verde.
+          set -uo pipefail
           FIN=$(( $(date +%s) + MINUTOS * 60 ))
+          # 🔴 «NO ESTA DESPLEGADO» y «NO HE PODIDO COMPROBARLO» son dos cosas distintas.
+          #    Antes, un `gh api ... || echo '[]'` convertia un error de red en una lista
+          #    vacia: el reloj se agotaba y salia el MISMO rojo que si el deploy no hubiera
+          #    salido, afirmando algo que NO CONSTA. Un rojo con la causa equivocada manda
+          #    a alguien a buscar un problema que no existe.
+          #    Se cuentan los fallos y el veredicto lo dice. Sigue fallando cerrado; lo que
+          #    cambia es lo que declara. Es el NULL confesor aplicado a un vigilante.
+          FALLOS_API=0
           echo "Esperando hasta $MINUTOS minutos a un deployment de Production en $SHA"
 
           while :; do
             # Los deployments de Production de este repo, mas recientes primero.
-            JSON=$(gh api "repos/$REPO/deployments?environment=Production&per_page=20" 2>/dev/null || echo '[]')
+            if ! JSON=$(gh api "repos/$REPO/deployments?environment=Production&per_page=20" 2>/dev/null); then
+              FALLOS_API=$((FALLOS_API + 1)); JSON='[]'
+              echo "  ⚠️ la API de GitHub no respondio (fallo $FALLOS_API)"
+            fi
             ID=$(echo "$JSON" | jq -r --arg s "$SHA" '[.[] | select(.sha == $s)] | .[0].id // empty')
 
             if [ -n "$ID" ]; then
               # 🔒 Existir no es estar bien: un deployment puede quedarse en `error`. Se mira
               #    su ULTIMO estado, no el hecho de que exista.
-              EST=$(gh api "repos/$REPO/deployments/$ID/statuses?per_page=1" --jq '.[0].state // "sin_estado"')
+              if ! EST=$(gh api "repos/$REPO/deployments/$ID/statuses?per_page=1" --jq '.[0].state // "sin_estado"' 2>/dev/null); then
+                FALLOS_API=$((FALLOS_API + 1)); EST=sin_estado
+                echo "  ⚠️ no se pudo leer el estado del deployment (fallo $FALLOS_API)"
+              fi
               echo "  deployment $ID -> estado=$EST"
               case "$EST" in
                 success)
@@ -122,7 +140,36 @@ jobs:
             fi
 
             if [ "$(date +%s)" -ge "$FIN" ]; then
-              ULT=$(echo "$JSON" | jq -r '.[0] | "\(.sha[0:8]) del \(.created_at)"')
+              # 🔒 `if length > 0`: con la lista vacia, `.[0]` es null y el jq REVIENTA —
+              #    y justo pasaria el dia que falle la API, que es cuando mas falta hace.
+              ULT=$(echo "$JSON" | jq -r 'if length > 0 then "\(.[0].sha[0:8]) del \(.[0].created_at)" else "(ninguno)" end')
+
+              # 🔴 Si la API fallo alguna vez, NO se puede afirmar que no este desplegado.
+              if [ "$FALLOS_API" -gt 0 ]; then
+                echo "::error::NO SE HA PODIDO COMPROBAR si $SHA esta desplegado: la API de GitHub fallo $FALLOS_API veces."
+                {
+                  echo "## 🟠 NO SE HA PODIDO COMPROBAR"
+                  echo ""
+                  echo "| | |"
+                  echo "|---|---|"
+                  echo "| SHA de \`main\` | \`$SHA\` |"
+                  echo "| fallos de la API de GitHub | **$FALLOS_API** |"
+                  echo ""
+                  echo "🔴 **Esto NO dice que el commit no esté desplegado. Dice que no se ha podido"
+                  echo "mirar.** Son dos cosas distintas: sale rojo porque un vigilante falla cerrado,"
+                  echo "no porque conste que falta el deploy."
+                  echo ""
+                  echo "### Qué hacer"
+                  echo "1. Comprobarlo a mano:"
+                  echo "   \`\`\`"
+                  echo "   gh api repos/$REPO/deployments?environment=Production\&per_page=1 --jq '.[0].sha'"
+                  echo "   \`\`\`"
+                  echo "2. Si coincide con \`$SHA\`, no hay nada que hacer: fue un hipo de la API."
+                  echo "3. Si no coincide, entonces sí: cupo de Vercel y panel de builds."
+                } >> "$GITHUB_STEP_SUMMARY"
+                exit 1
+              fi
+
               echo "::error::PRODUCCION NO TIENE ESTE COMMIT. Han pasado $MINUTOS minutos desde el merge y no hay deployment de Production en $SHA."
               {
                 echo "## 🔴 El merge NO ha llegado a produccion"
