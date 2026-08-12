@@ -17,9 +17,20 @@ misma cara de normalidad. Si una política no vuelve tras un restore, lo normal 
 nadie se entere hasta que falte un dato en pantalla — y para entonces ya no se sabe desde
 cuándo.
 
-🔬 Medido el 11-ago-2026 en producción: **21 tablas** están así, **20 con datos dentro**,
-**13.781 filas invisibles**. Y **10 de las 18 vistas definer** funcionan hoy *sólo porque
-son definer*: leen una de esas tablas tapadas.
+🔬 Medido el 11-ago-2026 en producción: **21 tablas** están así, **20 con datos dentro**
+(sólo `web_formato` vacía) y **13.781 filas invisibles**. Y varias vistas `definer`
+funcionan hoy *sólo porque son definer*: leen una de esas tablas tapadas.
+
+⚠️ **Las 21 entran en el censo, también la vacía.** Hasta el 12-ago-2026 el censo llevaba
+20 —se armó con «las que tienen datos»— y eso hacía que el canario reportase `web_formato`
+como 🔴 TAPADA NUEVA **en cada ejecución**. Una alarma permanente se deja de leer, que es
+lo contrario de para lo que existe. *Estar vacía hoy no es motivo para excluir nada: puede
+llenarse mañana, y entonces estaría tapada CON datos y ya fuera de la lista.*
+
+⚠️ Y el recuento de vistas `definer` **ya no se cita de memoria**: durante un día se dijo
+«18» porque se contaban con un `like '%security_invoker=true%'`, que da por definer las que
+lo tienen puesto como `on`. Son **13**. La consulta correcta —por opción, no por texto—
+está en este mismo canario.
 
 ### Qué comprueba
 

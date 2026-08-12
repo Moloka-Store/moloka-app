@@ -379,6 +379,18 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   el número no cuadraba con uno ya conocido; el testigo, porque se midieron las dos bases a
   la vez antes de escribirlo; y la huella, porque el cruce de `md5` entre entornos vio una
   diferencia que la huella daba por buena.
+  ⚠️ **Y la cara B, que es la misma enfermedad: la que SIEMPRE está roja.** Un aviso que
+  salta en cada ejecución tampoco informa — se aprende a ignorarlo, y el día que salte por
+  algo de verdad ya nadie lo lee.
+  *Medido el 12-ago-2026: el censo de `sql/canario_rls.sql` llevaba **20** tablas tapadas
+  porque se armó con «las 20 que tienen datos dentro», dejando fuera `web_formato` por
+  estar vacía. Tapadas hay **21**. Con ella fuera, el canario reportaba `web_formato` como
+  **🔴 TAPADA NUEVA** en cada pasada, para siempre.*
+  🔑 **Estar vacía hoy no es motivo para excluir nada de un censo.** «Con datos» y «tapada»
+  son dos estadísticas distintas: mezclarlas mete un falso positivo permanente. El recuento
+  de filas ya lo da la consulta, columna a columna.
+  ⇒ Un censo o una alarma se prueban **con el estado normal**: si con todo en orden no está
+  callada, no sirve. Y esa comprobación cuesta una ejecución.
 - 🔴 **UNA VISTA QUE NO PUEDE VER SU FUENTE DEBE CONFESARLO, NO RELLENAR CON UN FALSO.**
   El caso general de «0 filas por RLS ≠ 0 filas porque no hay»: si una vista se apoya en
   una tabla que puede estar tapada, tiene que **distinguir los dos ceros dentro del propio

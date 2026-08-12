@@ -39,6 +39,17 @@
 --    días por lo que es normal, y un canario que grita siempre se deja de leer. Los
 --    recuentos van abajo como REFERENCIA fechada, para mirar de reojo si algo se ha
 --    desplomado; la LISTA es el criterio.
+-- 🔴 SON 21, Y ANTES ERAN 20 POR UN ERROR MIO QUE HACIA GRITAR AL CANARIO SIEMPRE.
+--    El censo se armó el 11-ago-2026 con «las 20 tapadas CON DATOS DENTRO», dejando fuera
+--    `web_formato` por estar vacía. Pero el censo no mide datos: mide QUÉ TABLAS ESTÁN
+--    TAPADAS. Con ella fuera, cada ejecución la reportaba como **🔴 TAPADA NUEVA** — una
+--    alarma permanente por diseño, que es justo como un canario se deja de leer.
+--    🔬 Medido el 12-ago-2026: `web_formato` sigue con RLS on, 0 políticas y 0 filas.
+--    🔑 Y la lección, que vale para cualquier censo: **estar vacía hoy no es motivo para
+--       excluir nada.** Una tabla vacía puede llenarse mañana y entonces estaría tapada
+--       CON datos y sin que nadie se enterara, porque ya se la había sacado de la lista.
+--       «Con datos» y «tapada» son dos estadísticas distintas y no se mezclan: el recuento
+--       de filas ya lo da la propia consulta, columna a columna.
 with censo(tabla) as (values
   ('keepa_escaparate_hist'), ('paneu_oferta_pais'), ('inventario_internacional_historico'),
   ('listings_amazon_hist'), ('bb_observaciones'), ('paneu_aptos'),
@@ -46,7 +57,8 @@ with censo(tabla) as (values
   ('salud_fba_hist'), ('zentrada_captura'), ('monitor_doctrina'), ('escaner_chase_asin'),
   ('seller_observaciones'), ('ficha_observaciones'),
   ('productos_backup_consolidacion_05may2026'), ('incidencias_contador'),
-  ('monitor_reponibilidad_manual'), ('reglas_director'), ('incidencias_lecturas')
+  ('monitor_reponibilidad_manual'), ('reglas_director'), ('incidencias_lecturas'),
+  ('web_formato')   -- vacía hoy; en el censo igual que las demás (ver arriba)
 ),
 hoy as (
   select c.relname as tabla,
