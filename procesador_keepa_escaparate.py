@@ -93,6 +93,62 @@ RE_FICHERO = re.compile(
 # ES 212), todos del seller A2R25VOCZPEH8K.
 DOMINIO_NUM = {'3': 'de', '4': 'fr', '8': 'it', '9': 'es'}
 
+# 🆕 A2 (19-ago-2026) · EL EXPORT DEL **VISUALIZADOR DE PRODUCTOS**, que es el del buzón
+#    único: se pega la lista de ASIN del catálogo entero y Keepa devuelve UN CSV por país
+#    con todo dentro, esté o no en el escaparate.
+#
+# 🔬 Verificado contra los seis ficheros reales del 17 y 18-ago-2026: 578 columnas, BOM
+#    presente, y **las 62 cabeceras que este procesador busca están las 62**. El export del
+#    Visualizador es un SUPERCONJUNTO del Resumen del Vendedor.
+#
+# 🔴 DEL NOMBRE SOLO SALE LA FECHA. No trae dominio ni seller, y ésa es la diferencia que
+#    obliga a todo lo demás: el dominio pasa a leerse del DATO (Guarda 5 bis, en
+#    `analizar`) y el `seller_id` se ESTAMPA con `NUESTRO_SELLER_ID`.
+#
+# 🔒 EL PATRÓN VIEJO SE QUEDA Y SU CAMINO NO CAMBIA NI UNA LÍNEA. Los ficheros del Resumen
+#    del Vendedor tienen que seguir entrando exactamente igual que ayer.
+#
+# ⚠️ EL SUFIJO DEL NAVEGADOR SE TOLERA A PROPÓSITO: al repetir una descarga, Chrome deja
+#    `… (1).csv`, `… (2).csv`. 🔬 Cuatro de los seis ficheros reales lo traen. Sin
+#    tolerarlo, el segundo intento del día aborta por el nombre — y quien lo sufra
+#    aprenderá a renombrar a mano, que es justo donde se cuela el error de país.
+#
+# ⚠️ Y OJO AL NOMBRE, QUE EL ENCARGO LO TRAÍA MAL: es `KeepaExport-2026-08-18-…`, CON
+#    guiones. El encargo decía `KeepaExport20260818…` porque venía de un fichero al que se
+#    le habían comido los guiones. Manda el fichero real.
+RE_FICHERO_VIS = re.compile(
+    r'^KeepaExport-(\d{4}-\d{2}-\d{2})-VisualizadorDeProductos'
+    r'(?:\s*\(\d+\)|\s+\d+)?\.csv$'
+)
+
+# 🔴 GUARDA 12 · CUÁNTOS DE LOS ASIN DEL FICHERO TIENEN QUE ESTAR EN `productos`.
+#
+# Existe porque al pasar el escaparate al Visualizador **los dos ficheros dejan de
+# distinguirse por el nombre**: hoy `…ResumenDelVendedor…` y `…VisualizadorDeProductos…`
+# los separan solos; mañana los dos son «VisualizadorDeProductos». Y el Visualizador es la
+# herramienta con la que se escanean CATÁLOGOS DE PROVEEDOR: soltar uno de ésos en este
+# buzón por un despiste borraría la foto del país y metería miles de productos ajenos.
+# 🔬 La guarda del 50 % de `foto_comun` NO lo caza: solo aborta cuando el fichero trae
+#    MENOS de la mitad de lo que había. CRECER pasa limpio.
+# Es el mismo error que ya costó caro una vez (los ~3.374 Funko marcados agotados por
+# subir un fichero al director equivocado).
+#
+# 🔬 EL UMBRAL ESTÁ MEDIDO, no puesto a ojo. Contra los diez ficheros reales que había en
+#    Descargas el 18-ago-2026, el porcentaje de sus ASIN presentes en `productos`:
+#      · los CUATRO del Resumen del Vendedor (11-ago, dominios 3/4/8/9) → **100,0 %**
+#      · los SEIS del Visualizador, todos escaneos de proveedor (de 4 a 2.792 filas)
+#        → **0,0 % · 3,4 % · 5,2 % · 5,2 % · 5,3 % · 6,2 %**
+#    O sea un foso de 74 puntos entre lo legítimo y lo ajeno. El 80 % deja 20 puntos de
+#    holgura para los ASIN que se den de baja entre generar la semilla y subir el CSV, y
+#    sigue a 74 puntos del peor caso malo.
+# 🔒 Lo aprobó Fernando el 19-ago-2026 con esa medición delante.
+#
+# ⚠️ Y lo que este número NO es: un juicio sobre la calidad del fichero. Un export legítimo
+#    da 100 % porque la semilla SALE de `productos` (`lib/buzones/semilla-asin.ts`, en
+#    moloka-app-v2). El día que la semilla se genere de otra cosa, este umbral hay que
+#    volver a MEDIRLO, no heredarlo.
+UMBRAL_PERTENENCIA = 0.80
+
 # ---------------------------------------------------------------------------
 # Columnas TIPADAS: (encabezado EXACTO del CSV, columna Postgres, tipo).
 #   tipo: 't' text · 'i' integer · 'n' numeric · 'b' boolean · 'd' date ·
@@ -397,17 +453,100 @@ def extraer_seller(raw):
 
 
 # ---------------------------------------------------------------------------
+# GUARDA 12 · ¿ESTE FICHERO ES NUESTRO? (pertenencia)
+# ---------------------------------------------------------------------------
+def guarda_pertenencia(cur, filas, fichero, meta):
+    """Aborta si una parte alta de los ASIN del fichero no está en `productos`.
+
+    🔴 EL AGUJERO QUE TAPA. Hasta hoy, los dos exports de Keepa se distinguían solos por el
+       nombre: `…ResumenDelVendedor…` era el escaparate y `…VisualizadorDeProductos…` era
+       otra cosa. Con el buzón único los DOS son «VisualizadorDeProductos», y el
+       Visualizador es justo la herramienta con la que se escanean catálogos de proveedor.
+       Un despiste soltando uno de ésos aquí **borra la foto del país** y mete miles de
+       productos ajenos.
+
+    🔬 Y NO LO CAZA NADIE MÁS. La guarda del 50 % de `foto_comun` solo aborta cuando el
+       fichero trae MENOS de la mitad de lo que había: crecer pasa limpio. El fichero real
+       del 18-ago con el que se probó esto trae **2.762 filas** contra las **91** de FR.
+
+    🔒 SE MIDE SOBRE `productos` ENTERA, no sobre la semilla (activos y no-chase). Es a
+       propósito y es la lectura INCLUSIVA: un ASIN que se dio de baja entre generar la
+       lista y subir el CSV sigue siendo nuestro, y no tiene por qué contar en contra.
+    """
+    asins = sorted({(f['asin'] or '').strip().upper()
+                    for f in filas if (f.get('asin') or '').strip()})
+    if not asins:
+        raise Aborta("[Guarda 12] El fichero no trae ni un ASIN legible. Abortando.")
+
+    # 🔴 `count(DISTINCT asin)`, no `count(*)`: un ASIN con dos fichas (los hay — 10
+    #    repetidos medidos el 19-ago) contaría dos veces y el porcentaje podría pasar del
+    #    100 %. Se cuenta cuántos de LOS DEL FICHERO existen, no cuántas fichas los citan.
+    cur.execute("""
+        select count(distinct upper(btrim(p.asin))) from productos p
+         where upper(btrim(p.asin)) = any(%s)
+    """, (asins,))
+    dentro = cur.fetchone()[0]
+    pct = dentro / len(asins)
+
+    print(f"   · Guarda 12 (pertenencia): {dentro}/{len(asins)} ASIN del fichero están en "
+          f"`productos` = {pct:.1%} (umbral {UMBRAL_PERTENENCIA:.0%})", flush=True)
+
+    if pct < UMBRAL_PERTENENCIA:
+        raise Aborta(
+            f"[Guarda 12] Este fichero NO parece del catálogo de Moloka.\n"
+            f"   Solo {dentro} de sus {len(asins)} ASIN están en `productos` "
+            f"({pct:.1%}), por debajo del umbral del {UMBRAL_PERTENENCIA:.0%}.\n"
+            f"   Fichero: {fichero!r} · dominio {meta['dominio']} · {len(filas)} filas.\n"
+            f"   Lo más probable es que sea un ESCANEO DE PROVEEDOR bajado con el mismo\n"
+            f"   Visualizador de Keepa: desde el buzón único los dos ficheros se llaman\n"
+            f"   igual y ya no se distinguen por el nombre.\n"
+            f"   🔴 Si entrara, BORRARÍA la foto de '{meta['dominio']}' y la sustituiría por\n"
+            f"      productos que no son tuyos. La guarda del 50 % no lo caza porque el\n"
+            f"      fichero CRECE, no encoge.\n"
+            f"   👉 La lista buena se genera en la app (buzón de Keepa → «Generar lista de\n"
+            f"      ASIN»); con ella, este porcentaje sale del 100 %.\n"
+            f"   Abortando.")
+
+
+# ---------------------------------------------------------------------------
 # El nombre del fichero es DATO (Guarda 4): fecha de la foto, dominio, seller.
 # ---------------------------------------------------------------------------
 def leer_nombre(fichero):
+    # 🆕 A2 · EL EXPORT DEL VISUALIZADOR VA PRIMERO porque es el del buzón único y pasará a
+    #    ser el caso normal. Del nombre solo sale la FECHA: ni dominio ni seller.
+    mv = RE_FICHERO_VIS.match(fichero)
+    if mv:
+        try:
+            fecha_foto = date.fromisoformat(mv.group(1))
+        except ValueError:
+            raise Aborta(f"[Guarda 4] La fecha del nombre no es válida: {mv.group(1)!r}.")
+        return {
+            'fecha_foto': fecha_foto,
+            # 🔴 `None` NO ES UN HUECO QUE SE RELLENE LUEGO CON CUALQUIER COSA: es la señal
+            #    de que el dominio TIENE que salir del dato, y la Guarda 5 bis lo exige. Si
+            #    alguien lo pusiera a `'es'` «por defecto», un export francés se guardaría
+            #    entero como español sin que nada fallase.
+            'dominio': None,
+            # 🔴 SE ESTAMPA, Y ES EL PUNTO QUE ROMPE EN SILENCIO SI FALTA. «¿La buy box es
+            #    mía?» se resuelve comparando `bb_seller_id` con `seller_id` fila a fila.
+            #    Con `seller_id` a NULL esa comparación pasa a `null` en TODAS las filas y
+            #    el Cockpit se queda ciego de buy box sin un solo error: la columna BB, la
+            #    alerta de la caja perdida y los motivos LA_PIERDES / RECUPERADA se apagan
+            #    a la vez. Un verde falso de manual.
+            'seller_id': NUESTRO_SELLER_ID,
+            'origen': 'visualizador',
+        }
+
     m = RE_FICHERO.match(fichero)
     if not m:
         raise Aborta(
-            f"[Guarda 4] El nombre del fichero no casa con el patrón "
-            f"'KeepaExport-YYYY-MM-DD-ResumenDelVendedor-DOMINIO-SELLERID.csv'.\n"
-            f"   Visto: {fichero!r}. Sin nombre válido no se sabe de qué día ni "
-            f"de qué país es la foto (la columna 'Última actualización' abarca 80 h "
-            f"y NO es un instante). Abortando.")
+            f"[Guarda 4] El nombre del fichero no casa con ninguno de los dos patrones:\n"
+            f"     · 'KeepaExport-YYYY-MM-DD-ResumenDelVendedor-DOMINIO-SELLERID.csv'\n"
+            f"     · 'KeepaExport-YYYY-MM-DD-VisualizadorDeProductos.csv'"
+            f" (admite el sufijo del navegador: ' (1)', ' 2'…)\n"
+            f"   Visto: {fichero!r}. Sin nombre válido no se sabe de qué día es la foto "
+            f"(la columna 'Última actualización' abarca 80 h y NO es un instante). "
+            f"Abortando.")
     fecha_txt, dom_num, seller = m.group(1), m.group(2), m.group(3)
     try:
         fecha_foto = date.fromisoformat(fecha_txt)
@@ -422,7 +561,7 @@ def leer_nombre(fichero):
         raise Aborta(f"[Guarda 4] Dominio Keepa desconocido en el nombre: {dom_num!r} "
                      f"(conocidos: {conocidos}).")
     return {'fecha_foto': fecha_foto, 'dominio': DOMINIO_NUM[dom_num],
-            'seller_id': seller}
+            'seller_id': seller, 'origen': 'resumen'}
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +607,44 @@ def analizar(texto, fichero, meta):
     duplicadas = []
     salida = []
     dom_esperado = meta['dominio']
+
+    # 🔴 GUARDA 5 BIS · EL DOMINIO SALE DEL DATO CUANDO EL NOMBRE NO LO TRAE.
+    #
+    # Con el export del Visualizador el nombre solo dice la fecha, así que el país lo dice
+    # la columna `Localización`. Se exige que sea **UNO SOLO en todo el fichero**: si hay
+    # dos, se aborta.
+    #
+    # 🔑 Es MÁS ROBUSTO que lo de antes, no menos: deja de depender de cómo se llame el
+    #    fichero. Un renombrado a mano —o el sufijo del navegador mal puesto— ya no puede
+    #    hacer que un export francés se guarde como español.
+    # 🔒 Y PARA EL RESUMEN DEL VENDEDOR NO CAMBIA NADA: allí `meta['dominio']` viene del
+    #    nombre y la Guarda 5 de siempre sigue confirmando fila a fila que el dato le da la
+    #    razón. Nombre manda, filas confirman.
+    if dom_esperado is None:
+        vistos = set()
+        for pos, fila in enumerate(filas_datos):
+            loc = celda(fila, 'Localización').lower()
+            if loc == '':
+                raise Aborta(
+                    f"[Guarda 5 bis] Fila {pos + 2}: 'Localización' vacía. Este fichero no "
+                    f"trae el país en el nombre, así que la columna es la ÚNICA fuente de "
+                    f"país que hay. Sin ella no se sabe qué foto se está sustituyendo. "
+                    f"Abortando.")
+            vistos.add(loc)
+        if len(vistos) != 1:
+            raise Aborta(
+                f"[Guarda 5 bis] El fichero mezcla {len(vistos)} países en 'Localización': "
+                f"{sorted(vistos)}. Cada export de Keepa es de UN país y sustituye la foto "
+                f"de ESE país; con dos dentro, cargarlo dejaría medio país sin borrar y "
+                f"medio país con datos del otro. Baja un CSV por dominio. Abortando.")
+        dom_esperado = vistos.pop()
+        # 🔴 SE DEVUELVE POR `meta` porque el ÁMBITO del borrado se calcula con él. Si esto
+        #    se quedara solo dentro de esta función, el `DELETE` de la foto se haría sobre
+        #    `dominio = None` y no borraría nada: la carga nueva se APILARÍA sobre la vieja
+        #    y la Foto se convertiría en un collage de dos días — el error de §1.6 exacto.
+        meta['dominio'] = dom_esperado
+        print(f"   · dominio LEÍDO DEL DATO (el nombre no lo trae): {dom_esperado}",
+              flush=True)
 
     for pos, fila in enumerate(filas_datos):
         num_fila = pos + 2   # +1 cabecera, +1 para numerar desde 1
@@ -655,7 +832,11 @@ def main():
     except Aborta as e:
         print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
         sys.exit(1)
-    print(f"   · fecha_foto={meta['fecha_foto']} · dominio={meta['dominio']} · "
+    # 🔒 Con el export del Visualizador el dominio TODAVÍA no se sabe aquí: lo dice el dato,
+    #    y el dato aún no se ha bajado. Se dice así en vez de pintar un `None` que se leería
+    #    como «no tiene país».
+    print(f"   · origen={meta['origen']} · fecha_foto={meta['fecha_foto']} · "
+          f"dominio={meta['dominio'] or '(lo dirá el dato)'} · "
           f"seller_id={meta['seller_id']}", flush=True)
 
     crudo_bytes = descargar_buzon(sb, BUCKET, f"{CARPETA}/{fichero}")
@@ -685,6 +866,16 @@ def main():
     # fichero sustituye es la de SU dominio, no la tabla entera: sin acotar,
     # cargar el de ES borraría IT y FR enteros.
     AMBITO = ('dominio', [meta['dominio']])
+
+    # Guarda 12: PERTENENCIA. Corre ANTES que ninguna otra que toque la base, porque es la
+    # que decide si este fichero es NUESTRO. Las demás (encogimiento, no-retroceder) dan
+    # por hecho que lo es y comparan volúmenes; con un catálogo de proveedor delante,
+    # comparar volúmenes no significa nada.
+    try:
+        guarda_pertenencia(cur, filas, fichero, meta)
+    except Aborta as e:
+        print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
+        con.rollback(); cur.close(); con.close(); sys.exit(1)
 
     # Guarda 10: anti-encogimiento. Corre ANTES de borrar y ANTES de escribir.
     try:
