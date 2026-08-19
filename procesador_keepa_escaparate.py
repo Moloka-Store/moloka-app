@@ -116,8 +116,23 @@ DOMINIO_NUM = {'3': 'de', '4': 'fr', '8': 'it', '9': 'es'}
 # ⚠️ Y OJO AL NOMBRE, QUE EL ENCARGO LO TRAÍA MAL: es `KeepaExport-2026-08-18-…`, CON
 #    guiones. El encargo decía `KeepaExport20260818…` porque venía de un fichero al que se
 #    le habían comido los guiones. Manda el fichero real.
+# 🆕 19-ago-2026 · SE ADMITE UN SUFIJO DE PAÍS OPCIONAL (`-ES`, `-IT`, `-FR`, `-DE`).
+#
+# 🔑 POR QUÉ. Los cuatro exports del buzón único se llaman IGUAL salvo el contador del
+#    navegador (` (3)`, ` (4)`…), que no dice el país. El procesador lo resuelve leyendo el
+#    dato, pero quien tiene que elegir un fichero a mano —o mirar el buzón— no puede saber
+#    cuál es cuál sin abrirlo. Poder renombrarlos arregla eso.
+#
+# 🔴 Y NO ES UNA ETIQUETA DECORATIVA: SI ESTÁ, SE COMPRUEBA. Un nombre que dice `-ES` sobre
+#    un fichero cuyo dato dice `fr` es peor que un nombre mudo — es una etiqueta que miente,
+#    y las etiquetas se creen. Así que el sufijo se contrasta contra el dominio LEÍDO DEL
+#    DATO y, si discrepan, se ABORTA (Guarda 5 ter). Con eso el renombrado deja de ser una
+#    comodidad y pasa a ser una segunda red: caza el despiste de renombrar dos ficheros con
+#    el mismo país, que es exactamente lo que se hace al renombrar cuatro seguidos.
+# 🔒 El dato SIGUE MANDANDO: el sufijo nunca decide el dominio, solo puede contradecirlo.
 RE_FICHERO_VIS = re.compile(
     r'^KeepaExport-(\d{4}-\d{2}-\d{2})-VisualizadorDeProductos'
+    r'(?:-([A-Za-z]{2}))?'
     r'(?:\s*\(\d+\)|\s+\d+)?\.csv$'
 )
 
@@ -520,8 +535,24 @@ def leer_nombre(fichero):
             fecha_foto = date.fromisoformat(mv.group(1))
         except ValueError:
             raise Aborta(f"[Guarda 4] La fecha del nombre no es válida: {mv.group(1)!r}.")
+        # 🔒 El sufijo de país, si viene. Se normaliza a minúscula y se comprueba que sea uno
+        #    de los cuatro dominios conocidos: un `-XX` cualquiera es un nombre inventado y
+        #    se aborta aquí, antes de bajar nada.
+        declarado = (mv.group(2) or '').lower() or None
+        if declarado is not None and declarado not in set(DOMINIO_NUM.values()):
+            conocidos = ', '.join(sorted(set(DOMINIO_NUM.values())))
+            raise Aborta(
+                f"[Guarda 4] El nombre trae un sufijo de país que no existe: {declarado!r} "
+                f"(conocidos: {conocidos}).\n"
+                f"   Visto: {fichero!r}. El sufijo es opcional, pero si se pone tiene que "
+                f"ser de verdad: un país inventado en el nombre es una etiqueta que miente. "
+                f"Abortando.")
         return {
             'fecha_foto': fecha_foto,
+            # 🔴 LO QUE EL NOMBRE **DICE** que es, que no es lo que ES. El dominio de verdad
+            #    lo pone el dato (Guarda 5 bis); esto solo sirve para contrastarlo después
+            #    (Guarda 5 ter). Nunca se usa para decidir.
+            'dominio_declarado': declarado,
             # 🔴 `None` NO ES UN HUECO QUE SE RELLENE LUEGO CON CUALQUIER COSA: es la señal
             #    de que el dominio TIENE que salir del dato, y la Guarda 5 bis lo exige. Si
             #    alguien lo pusiera a `'es'` «por defecto», un export francés se guardaría
@@ -638,6 +669,25 @@ def analizar(texto, fichero, meta):
                 f"de ESE país; con dos dentro, cargarlo dejaría medio país sin borrar y "
                 f"medio país con datos del otro. Baja un CSV por dominio. Abortando.")
         dom_esperado = vistos.pop()
+        # 🔴 GUARDA 5 TER · si el nombre DECLARA un país, tiene que ser el del dato.
+        #
+        # 🔑 El caso que caza, y es el que se va a dar: renombrar cuatro ficheros seguidos y
+        #    poner dos veces el mismo país. Sin esto, el segundo entraría como el país que
+        #    diga su CONTENIDO —correcto en la base— pero el buzón se quedaría con dos
+        #    ficheros llamados igual y uno sin cargar, y nadie lo notaría hasta que faltara
+        #    un país en la pantalla.
+        # 🔒 El dato manda: aquí no se corrige el nombre ni se cae al sufijo. Se para.
+        declarado = meta.get('dominio_declarado')
+        if declarado is not None and declarado != dom_esperado:
+            raise Aborta(
+                f"[Guarda 5 ter] EL NOMBRE Y EL DATO NO DICEN LO MISMO.\n"
+                f"   El nombre del fichero declara '{declarado}' y sus {len(filas_datos)} "
+                f"filas dicen '{dom_esperado}'.\n"
+                f"   Fichero: {fichero!r}.\n"
+                f"   Lo más probable es un renombrado a mano: al poner el país a cuatro "
+                f"ficheros seguidos es fácil repetir uno.\n"
+                f"   🔒 No se elige ninguno de los dos. Renombra el fichero con el país que "
+                f"de verdad trae dentro ('{dom_esperado}') y vuelve a lanzarlo. Abortando.")
         # 🔴 SE DEVUELVE POR `meta` porque el ÁMBITO del borrado se calcula con él. Si esto
         #    se quedara solo dentro de esta función, el `DELETE` de la foto se haría sobre
         #    `dominio = None` y no borraría nada: la carga nueva se APILARÍA sobre la vieja
