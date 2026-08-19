@@ -97,6 +97,35 @@ begin
   end if;
 end $$;
 
+-- 🔴 EL RENOMBRADO VA ANTES Y CON `ALTER VIEW`, NO DENTRO DEL `CREATE OR REPLACE`.
+--
+-- 🔬 Descubierto ensayando (run 32239661123): Postgres aborta con
+--       ERROR: cannot change name of view column "activo_sin_export" to "pedido_sin_respuesta"
+--       HINT:  Use ALTER VIEW ... RENAME COLUMN ...
+--    `CREATE OR REPLACE VIEW` puede cambiar el CUERPO, pero no los NOMBRES de las columnas
+--    existentes. No es un capricho de Postgres: renombrar una columna cambia el contrato de
+--    la vista para todo lo que la lee, y por eso lo obliga a ser explícito.
+--
+-- 🔒 Y LA ALTERNATIVA OBVIA ESTÁ PROHIBIDA AQUÍ: `DROP VIEW` + `CREATE` sí permitiría
+--    cambiar el nombre, pero **DROP+CREATE PIERDE EL ACL** y el objeto renace con el
+--    default de Supabase (§4 de CLAUDE.md — el caso `entrada_factura_pvd`, donde una vista
+--    recreada así se quedó con `anon` dentro y las dos bases dejaron de ser iguales).
+--    `ALTER VIEW ... RENAME COLUMN` conserva permisos, dueño y dependencias.
+--
+-- 🔒 IDEMPOTENTE a propósito: si la migración se relanza, la columna ya se llama como debe
+--    y el `ALTER` reventaría. Se comprueba antes de tocar.
+do $$
+begin
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'v_keepa_cruce'
+                and column_name = 'activo_sin_export') then
+    alter view v_keepa_cruce rename column activo_sin_export to pedido_sin_respuesta;
+    raise notice 'Columna renombrada: activo_sin_export → pedido_sin_respuesta';
+  else
+    raise notice 'La columna ya se llamaba `pedido_sin_respuesta`: nada que renombrar';
+  end if;
+end $$;
+
 create or replace view v_keepa_cruce as
  SELECT 'escaparate'::text AS origen,
     k.asin,
