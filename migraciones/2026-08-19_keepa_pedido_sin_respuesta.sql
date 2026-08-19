@@ -73,7 +73,13 @@
 --               → producción ensayo → producción aplicar → verificación SQL.
 -- ============================================================================
 
-begin;
+-- 🔴 SIN `begin;` NI `commit;` — Y NO ES UN OLVIDO, ES UN CERROJO DEL WORKFLOW.
+--    `aplicar-migracion.yml` ya envuelve el fichero en UNA transacción
+--    (`--single-transaction`), y su cerrojo 4 ABORTA cualquier migración que maneje la
+--    suya. El motivo es exacto: en modo ENSAYO el workflow hace `rollback` al final, así
+--    que un `commit;` dentro del fichero **escribiría de verdad** y el ensayo dejaría de
+--    ser un ensayo. Se descubrió aquí, en el primer intento (run 32239546538).
+--    🔒 La atomicidad no se pierde: la pone el workflow, que es quien debe ponerla.
 
 -- 🔒 TESTIGO PREVIO. No se guarda un número fijo (eso salta por el entorno, §3): se mide lo
 --    que hay ANTES para poder contrastarlo, y se aborta si no hay NADA que comprobar — una
@@ -218,4 +224,3 @@ begin
   end if;
 end $$;
 
-commit;
