@@ -1030,7 +1030,14 @@ def main():
                 ('§5.2 tarifa_discrepante',      'tarifa_discrepante'),
                 ('§5.3 sin_foto_curable',        'sin_foto_curable'),
                 ('§5.4 buybox_ajena_con_stock',  'buybox_ajena_con_stock'),
-                ('§5.5 activo_sin_export',       'activo_sin_export')]
+                # 🔴 19-ago-2026 · `activo_sin_export` → `pedido_sin_respuesta`. No es un
+                #    renombrado: la alerta CAMBIÓ de significado al cambiar el suelo.
+                #    Antes, con el escaparate = «lo que vendo», faltar del export de ES
+                #    no significaba nada. Ahora, con el escaparate = «mi catálogo»,
+                #    significa que se lo pediste a Keepa y Keepa no lo conoce en NINGUNO
+                #    de los cuatro países — firma de ASIN muerto. Ver la migración
+                #    `2026-08-19_keepa_pedido_sin_respuesta.sql`.
+                ('§5.5 pedido_sin_respuesta',    'pedido_sin_respuesta')]
 
     # Por dominio: total de filas + (nº de true, nº de NULL) de cada bandera.
     sel = ", ".join(
@@ -1096,7 +1103,7 @@ def main():
     print(f"\n=== FIN · entorno={ENTORNO} · modo={MODO} · filas={len(filas)} · "
           f"altas={len(altas)} · bajas={borradas} · hist_archivadas={arch} · "
           f"ean_no_confirmado={n_ean} · tarifa_discrepante={n_tarifa} · "
-          f"sin_foto_curable={n_foto} · buybox_ajena={n_bb} · activo_sin_export={n_sinexport} ===",
+          f"sin_foto_curable={n_foto} · buybox_ajena={n_bb} · pedido_sin_respuesta={n_sinexport} ===",
           flush=True)
 
 
