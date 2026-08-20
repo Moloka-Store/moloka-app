@@ -403,6 +403,24 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   el número no cuadraba con uno ya conocido; el testigo, porque se midieron las dos bases a
   la vez antes de escribirlo; y la huella, porque el cruce de `md5` entre entornos vio una
   diferencia que la huella daba por buena.
+  🔴 **LA FORMA MÁS FRECUENTE, MEDIDA CINCO VECES EN UN SOLO DÍA: LA COMPROBACIÓN QUE
+  MIRA LO QUE NO CAMBIA.** Un assert que busca un texto presente en las DOS versiones —el
+  prefijo de una firma, el nombre de una función, una columna del `SELECT`— sale verde
+  hagas lo que hagas. 🔑 **Se ancla contra lo que NO debe aparecer**, que es la única mitad
+  que se mueve: no «¿está el parámetro?» sino «¿tiene default?»; no «¿existe la marca?»
+  sino «¿sigue la excepción que la tapaba?».
+  *Los cinco del 20-ago-2026, todos cazados por la MISMA maniobra —romper la cosa a mano y
+  ver que no saltaba nada—:*
+  | | la comprobación | por qué no podía fallar |
+  |---|---|---|
+  | 1 | el test de la paginación | los asserts usaban el fixture del propio test, que calculaba con SU copia de la cascada |
+  | 2 | el test de la velocidad efectiva | el servidor de mentira nunca llegaba a descuadrar |
+  | 3 | el test del criterio del negro | el caso real no discriminaba: sus motivos estaban en países que la app no mira |
+  | 4 | `isd` sin default | el regex casaba el PREFIJO de la firma, así que daba verde con el default puesto |
+  | 5 | el assert del ISD en el escáner | sumaba la tarifa FBA **a mano** en vez de leer `incluye_fba`, así que la tabla podía decir lo contrario |
+  ⚠️ Los cinco eran tests **nuevos, escritos ese día, para cazar un bug recién medido** — y
+  ninguno lo habría cazado. Escribir el test no es la prueba; verlo rojo sí.
+
   ⚠️ **Y la cara B, que es la misma enfermedad: la que SIEMPRE está roja.** Un aviso que
   salta en cada ejecución tampoco informa — se aprende a ignorarlo, y el día que salte por
   algo de verdad ya nadie lo lee.
