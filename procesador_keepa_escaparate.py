@@ -1055,7 +1055,27 @@ def main():
         for _, c in BANDERAS)
     cur.execute(f"SELECT dominio, count(*), {sel} FROM v_keepa_cruce "
                 f"GROUP BY dominio ORDER BY dominio;")
-    filas_vista = cur.fetchall()
+    # 🔴 EL DOMINIO PUEDE VENIR A NULL, Y ESO TUMBABA EL PROCESADOR ENTERO.
+    #
+    # 🔬 Medido el 20-ago-2026 en produccion Y en staging: `v_keepa_cruce` devuelve UNA fila
+    #    con `dominio` nulo, y es `B08HGXZQ7P` (el Messi) — el ASIN que esta en `productos`,
+    #    esta Active, iba en la semilla y Keepa NO devolvio en NINGUNO de los cuatro paises.
+    #    O sea, justo el caso que la alerta `pedido_sin_respuesta` (#168, 19-ago) vino a
+    #    marcar. La vista empezo a emitir esa fila ese dia; el procesador no la esperaba y
+    #    reventaba al formatear la cabecera del desglose:
+    #        TypeError: unsupported format string passed to NoneType.__format__
+    #
+    # 🔴 LO GRAVE NO ES EL TypeError: es CUANDO salta. El volcado ya se ha hecho —la foto
+    #    esta escrita y el historico apilado— y el proceso muere DESPUES, al imprimir el
+    #    resumen. O sea que la carga es correcta y el run sale en ROJO: el peor sitio para
+    #    fallar, porque invita a relanzar algo que ya esta hecho.
+    #
+    # 🔒 No se filtra la fila: se ETIQUETA. Un ASIN que no esta en ningun pais es un dato,
+    #    no un estorbo — es exactamente lo que `pedido_sin_respuesta` quiere que se vea. Si
+    #    se descartara aqui, el desglose diria que todo cuadra escondiendo al unico que no.
+    SIN_PAIS = '(sin pais)'
+    filas_vista = [(r[0] if r[0] is not None else SIN_PAIS,) + tuple(r[1:])
+                   for r in cur.fetchall()]
     dominios = [r[0] for r in filas_vista]
     total_dom = {r[0]: r[1] for r in filas_vista}     # filas de la vista por dominio
     por_dominio = {r[0]: r[2:] for r in filas_vista}  # pares (true, null) por bandera
