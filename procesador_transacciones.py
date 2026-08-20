@@ -4,7 +4,7 @@
 # ----------------------------------------------------------------------------
 # Qué hace:
 #   Lee el "Custom Transaction Report" del Seller (Pagos → Todas las transacciones,
-#   .csv, uno por marketplace ES/IT/FR) del buzón informes/transacciones/ y carga
+#   .csv, uno por marketplace ES/IT/FR/DE) del buzón informes/transacciones/ y carga
 #   TODOS los movimientos —pedidos, reembolsos, ajustes, tarifas de stock, saldos,
 #   transferencias— en la tabla `transacciones_movimientos`.
 #
@@ -105,7 +105,16 @@ PAIS         = os.environ.get('PAIS', '').strip().upper()             # ES | IT 
 FICHERO      = os.environ.get('FICHERO', '').strip()                  # nombre EXACTO; vacío = más reciente
 
 BUCKET, CARPETA = 'informes', 'transacciones'
-PAISES_VALIDOS = ('ES', 'IT', 'FR')
+# 🔴 ALEMANIA ENTRA AQUÍ EL 20-ago-2026, y hasta hoy NO era que se descartara: es que no
+#    se podía ni elegir. El selector tenía tres opciones, así que el fichero alemán no se
+#    había descargado nunca — y de ahí salían dos cosas que parecían hechos y eran huecos:
+#      · el ISD alemán del 3 %, «supuesto por prudencia» porque *«no hay ni una venta
+#        alemana en transacciones_movimientos»*. No las hay porque falta el fichero.
+#      · `v_velocidad_ventas_paneu.uds_30d_de`, que es
+#        `sum(cantidad) FILTER (WHERE pais = 'DE')` sobre esta tabla. Sin una sola fila
+#        alemana esa columna vale CERO para todos los ASIN, siempre. No falla: devuelve
+#        cero, y un cero parece un dato.
+PAISES_VALIDOS = ('ES', 'IT', 'FR', 'DE')
 
 # ---------------------------------------------------------------------------
 # Mapa por país: aliases de cada columna canónica (normalizados SIN acentos y en
@@ -170,6 +179,20 @@ COLS_ALIAS = {
         'estado':           ['statut de la transaction'],
         'fecha_liberacion': ['date de sortie de la transaction'],
     },
+    # 🔴 ALEMANIA VA VACÍA A PROPÓSITO, Y NO ES UN OLVIDO.
+    #
+    #    Las cabeceras de los otros tres están MEDIDAS contra los ficheros reales (28-jul).
+    #    Del alemán no hay fichero todavía, así que aquí no hay nada que medir — y la regla
+    #    de la casa es que un mapa de columnas no se traduce a ojo. No es escrupulosidad:
+    #    la resolución acepta coincidencia POR PREFIJO, así que un alias inventado puede
+    #    casar con la columna de al lado y meter el importe equivocado en una columna de
+    #    dinero. Eso no daría error: cargaría cifras falsas con aspecto de buenas.
+    #
+    # 🔑 POR ESO LA PRIMERA CARGA ALEMANA ES UNA MEDICIÓN, no un intento fallido: la
+    #    Guarda 2 aborta ANTES de tocar nada e imprime la cabecera real del fichero. Con
+    #    esa línea se rellena este mapa con valores medidos y la segunda carga entra.
+    #    Un `ensayo` basta: no hace falta arriesgar un `aplicar`.
+    'DE': {},
 }
 
 # Columnas cuya AUSENCIA aborta (las que la vista PR-C necesita para la fórmula).
@@ -189,6 +212,13 @@ COLS_OBLIGATORIAS = ('fecha', 'tipo', 'sku', 'cantidad', 'ventas_producto',
 #     0/44 (no imputable a producto) frente a 122/122 del otro. Mezclarlos rompe el análisis
 #     por SKU. (Los 44 son 'cambio de peso y dimensión', 1-10 jun, todos a favor: +54,90 €.)
 # Un literal SIN canon → tipo_norm NULL y se GRITA en el resumen (así DE no entra en silencio).
+# 🔴 Y ESO LE TOCA A ALEMANIA EN LA PRIMERA CARGA: aquí no hay ni un literal alemán, porque
+#    tampoco hay fichero contra el que medirlos. Consecuencia dicha, porque no es obvia y
+#    es la que decide si el arreglo sirve de algo: `tipo_norm` a NULL significa que la vista
+#    NO cuenta esas filas, y `v_velocidad_ventas_paneu` filtra por `tipo_norm = 'pedido'`.
+#    O sea que cargar el fichero alemán SIN rellenar esto deja `uds_30d_de` valiendo cero
+#    igual que antes — la bomba seguiría armada, sólo que con datos dentro.
+#    El grito del resumen trae los literales exactos con su recuento: de ahí salen medidos.
 TIPO_CANON = {
     'Pedido': 'pedido', 'Ordine': 'pedido', 'Commande': 'pedido',
     'Reembolso': 'reembolso', 'Rimborso': 'reembolso', 'Remboursement': 'reembolso',
@@ -212,7 +242,7 @@ COLS_DB = ['pais', 'fecha', 'fecha_hora', 'tipo', 'tipo_norm', 'numero_pedido', 
            'tarifa_otras', 'otro', 'total', 'estado', 'fecha_liberacion', 'fichero', 'crudo']
 
 # marketplace → país, para la GUARDA de coherencia (no para detectar).
-MKT_A_PAIS = {'amazon.es': 'ES', 'amazon.fr': 'FR', 'amazon.it': 'IT'}
+MKT_A_PAIS = {'amazon.es': 'ES', 'amazon.fr': 'FR', 'amazon.it': 'IT', 'amazon.de': 'DE'}
 
 # Nombres de mes por idioma (los del informe: '31 dic 2025', '7 avr. 2026', '8 gen 2026').
 MESES_ES = {'ene':1,'feb':2,'mar':3,'abr':4,'may':5,'jun':6,'jul':7,'ago':8,'sep':9,'oct':10,'nov':11,'dic':12}
@@ -340,24 +370,39 @@ def _resolver_columna(cabecera, cab_norm, alias_list):
 
 def analizar(texto, pais, fichero):
     if pais not in PAISES_VALIDOS:
-        raise Aborta(f"[PAIS] {pais!r} no es ES/IT/FR. El país lo manda el selector del "
-                     f"workflow y no se asume: sin país determinado, se ABORTA (§3.1).")
+        raise Aborta(f"[PAIS] {pais!r} no es uno de {PAISES_VALIDOS}. El país lo manda el "
+                     f"selector del workflow y no se asume: sin país determinado, ABORTA (§3.1).")
 
     lector = csv.reader(io.StringIO(texto))
     filas = [f for f in lector if any((c or '').strip() for c in f)]
 
     # Guarda 1: encontrar la cabecera (tras ~9 filas de metadatos). Primera fila con
     # ≥15 columnas que contenga una columna de tipo/type.
+    # 🔴 LA PALABRA DE LA COLUMNA DE TIPO VA POR IDIOMA, y hasta el 20-ago-2026 la
+    #    lista eran dos: 'tipo' (ES/IT) y 'type' (FR). En alemán es 'Typ', así que un
+    #    fichero DE no llegaba ni a la Guarda 2: moría aquí preguntando «�es un Custom
+    #    Transaction Report?» — que es mandar a buscar el fallo donde no está.
+    # 🔒 Ampliar esta lista es seguro: solo sirve para ENCONTRAR la fila de cabecera. Quién
+    #    es cada columna lo decide COLS_ALIAS, y eso sigue exigiendo valores medidos.
+    CAB_TIPO = ('tipo', 'type', 'typ')
     cab_idx, cabecera = None, None
     for i, f in enumerate(filas[:30]):
         norm = [_norm(c) for c in f]
-        if len(f) >= 15 and any(n in ('tipo', 'type') for n in norm):
+        if len(f) >= 15 and any(n in CAB_TIPO for n in norm):
             cab_idx, cabecera = i, f
             break
     if cab_idx is None:
-        raise Aborta("[Guarda 1] No se encuentra la cabecera del informe (ninguna fila con "
-                     "≥15 columnas y una columna 'tipo'/'type' en las primeras 30). "
-                     "¿Es un Custom Transaction Report? Abortando.")
+        # 🔑 SE ENSEÑA LO QUE SÍ SE HA VISTO. Un «no la encuentro» a secas obliga a abrir el
+        #    CSV a mano; con la fila más ancha delante se ve en un vistazo si es que el
+        #    informe no es el que toca, o es que su columna de tipo se llama de otra forma
+        #    — y entonces se añade a CAB_TIPO con el literal medido, no traducido.
+        anchas = sorted(filas[:30], key=len, reverse=True)[:1]
+        raise Aborta("[Guarda 1] No se encuentra la cabecera del informe: ninguna fila de las "
+                     f"30 primeras tiene >=15 columnas Y una columna de tipo {CAB_TIPO}.\n"
+                     "   O no es un Custom Transaction Report, o su columna de tipo se llama "
+                     "de otra forma en ese idioma (se añade a CAB_TIPO).\n"
+                     f"   La fila más ancha que se ha visto ({len(anchas[0]) if anchas else 0} "
+                     f"cols): {anchas[0] if anchas else '(ninguna)'}")
 
     cab_norm = [_norm(c) for c in cabecera]
     alias = COLS_ALIAS[pais]
@@ -368,6 +413,18 @@ def analizar(texto, pais, fichero):
         col[canon] = _resolver_columna(cabecera, cab_norm, al)
     faltan = [c for c in COLS_OBLIGATORIAS if col.get(c) is None]
     if faltan:
+        # 🔑 UN PAÍS SIN MAPA NO ES UN FICHERO MALO, y el mensaje genérico mandaría a
+        #    buscar el fallo donde no está (¿me equivoqué de selector?). Se dice cuál de
+        #    los dos casos es, y en los dos se imprime la cabecera REAL, que es la única
+        #    forma de rellenar el mapa con algo medido en vez de traducido.
+        if not alias:
+            raise Aborta(
+                f"[Guarda 2] El mapa de columnas de {pais} está VACÍO: nadie ha medido "
+                f"todavía cómo se llaman sus columnas, así que no hay con qué leer el "
+                f"fichero. Esto NO es un fallo del fichero ni del selector.\n"
+                f"   👉 Copia la cabecera de aquí abajo y rellena COLS_ALIAS[{pais!r}] en "
+                f"procesador_transacciones.py. Con eso la siguiente carga entra.\n"
+                f"   Cabecera real ({len(cabecera)} cols): {cabecera}")
         raise Aborta(
             f"[Guarda 2] En un fichero marcado {pais} NO aparecen columnas obligatorias: "
             f"{faltan}. O el fichero no es de {pais} (el selector va equivocado), o Amazon "

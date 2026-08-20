@@ -21,9 +21,13 @@ on:
         options: [ensayo, aplicar]
         default: ensayo
       pais:
-        description: 'País del fichero (LO MANDA EL SELECTOR, no se deduce del fichero). Sube a informes/transacciones/ el CSV de ESE país.'
+        description: 'País del fichero (LO MANDA EL SELECTOR, no se deduce del fichero). Sube a informes/transacciones/ el CSV de ESE país. ⚠️ DE: la primera carga ABORTA a propósito e imprime la cabecera real — ver el aviso del procesador.'
         type: choice
-        options: [ES, IT, FR]
+        # 🔒 Entrecomilladas por el «problema de Noruega»: en YAML un `NO` suelto es el
+        #    BOOLEANO false, no la cadena «NO». Aquí ninguna de las cuatro lo dispara, pero
+        #    la regla de la casa es que las opciones de texto van con comillas — y la lista
+        #    de países es justo la que va a seguir creciendo.
+        options: ['ES', 'IT', 'FR', 'DE']
         default: ES
       fichero:
         # Igual que procesar-salud-fba.yml y procesar-keepa-escaparate.yml: procesa
@@ -53,6 +57,13 @@ jobs:
 
       - name: Instalar dependencias
         run: pip install --quiet supabase psycopg2-binary
+
+      # 🔒 La mesa de pruebas del país, ANTES del procesador — igual que hace
+      #    procesar-keepa-escaparate.yml con la suya, y por el mismo motivo: en este repo
+      #    NADA corre en push ni en PR, así que un test que no se lanza aquí es decoración.
+      #    Tarda menos de un segundo, no toca red ni base, y sólo ejercita las guardas.
+      - name: Mesa de pruebas del país y su mapa de columnas
+        run: python -u test_transacciones_pais.py
 
       - name: Ejecutar procesador
         env:
