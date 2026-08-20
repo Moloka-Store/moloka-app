@@ -206,6 +206,16 @@ TIPADAS = [
     ('Caja de Compra: Tiempo de envío', 'bb_plazo_txt', 't'),
     ('Vendedor FBA más barato', 'fba_mas_barato', 't'),
     ('Vendedor FBM más barato', 'fbm_mas_barato', 't'),
+    # 🔴 EL PRECIO CONTRA EL QUE SE COMPETE DE VERDAD: el más barato de las ofertas NUEVAS,
+    #    lo mande Amazon o lo mande el vendedor desde su casa. `p3_fba_precio` (debajo) es
+    #    solo el más barato DE LOS FBA, y hay fichas con 22 ofertas FBM y ninguna FBA donde
+    #    esa columna viene vacía habiendo precio de mercado.
+    #    🔬 `B01MYNI1W6` el 19-ago-2026: it 21,92 € y de 18,65 € en «Nuevo: Actual», con
+    #       `p3_fba_precio` vacío en los dos. Ganan precio 123 casillas de la foto.
+    # ⚠️ SIN el envío dentro: el CSV solo trae gastos de envío para la Caja de Compra
+    #    (`bb_envio`). No existe variante de «Nuevo: Actual» con el envío — medido sobre las
+    #    claves del `crudo` real, no supuesto.
+    ('Nuevo: Actual', 'nuevo_precio', 'n'),
     ('Nuevo, de Vendedor Externo FBA: Actual', 'p3_fba_precio', 'n'),
     ('Nuevo, de Vendedor Externo FBA: Stock', 'p3_fba_stock', 'i'),
     ('Nuevo, de Vendedor Externo FBM: Stock', 'p3_fbm_stock', 'i'),
@@ -280,7 +290,7 @@ COLUMNAS_ESPERADAS = (
     'comision_eur_bb', 'bb_precio', 'bb_vendedor', 'bb_es_fba',
     'bb_stock', 'bb_pct_amazon_30d', 'bb_disponibilidad', 'bb_envio',
     'bb_pais_envio', 'bb_plazo_txt', 'fba_mas_barato', 'fbm_mas_barato',
-    'p3_fba_precio', 'p3_fba_stock', 'p3_fbm_stock', 'ofertas_nuevas',
+    'nuevo_precio', 'p3_fba_precio', 'p3_fba_stock', 'p3_fbm_stock', 'ofertas_nuevas',
     'ofertas_nuevas_fba', 'ofertas_nuevas_fbm', 'ofertas_total', 'umbral_competitivo',
     'amazon_precio', 'amazon_disponibilidad', 'rank', 'rank_30d',
     'rank_90d', 'rank_drops_30d', 'rank_drops_90d', 'categoria',
