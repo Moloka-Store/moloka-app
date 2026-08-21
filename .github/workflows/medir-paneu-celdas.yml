@@ -1,0 +1,38 @@
+# MEDIDOR PanEU · celdas ilegibles por país. SOLO LECTURA.
+#
+# 🔴 POR QUÉ HACE FALTA UN WORKFLOW Y NO VALE UNA CONSULTA: `paneu_aptos` es una FOTO —solo
+#    guarda el último informe— y todo lo que está dentro pasó la Guarda 5 POR CONSTRUCCIÓN.
+#    Preguntarle a la base «¿cuántas celdas ilegibles ha habido?» devuelve CERO siempre, y
+#    no porque no las haya habido: porque las que las traían nunca entraron. La historia
+#    vive en los ficheros del buzón, y el buzón es privado.
+#
+# 🔒 NO ESCRIBE NADA: ni en la base ni en el Storage. Lista, baja y cuenta.
+#    No lleva input de entorno porque no hay nada que elegir: los ficheros están en el
+#    buzón de producción y no se tocan.
+name: Moloka - MEDIR PanEU (celdas por país)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: medir-paneu-celdas
+  cancel-in-progress: false
+
+jobs:
+  medir:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install --quiet supabase
+
+      - name: Medir
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python -u medir_paneu_celdas.py
