@@ -73,6 +73,19 @@
 -- marca el lote; la vista es nueva y no sustituye a nada.
 -- ===========================================================================
 
+-- 🔴 EL CANDADO, ANTES DE NADA. `productos` es la tabla VIVA de Elena: la v1 lee y
+--    escribe en ella todo el día. El `alter table` pide un ACCESS EXCLUSIVE, y aunque
+--    añadir una columna con default constante sea metadato puro en Postgres 11+ (no
+--    reescribe la tabla, se resuelve en milisegundos), el peligro no es lo que tarda:
+--    es que si alguien tiene una transacción larga abierta sobre `productos`, este
+--    ALTER se pone A LA COLA — y entonces bloquea a TODO el que llegue detrás, incluidas
+--    las lecturas. El almacén se para por una migración aditiva e inerte.
+-- 🔑 Con `lock_timeout` corto la migración FALLA RÁPIDO en vez de encolar. Fallar y
+--    relanzar en dos minutos es barato; dejar a Elena esperando no lo es.
+-- ⚠️ `set local` — el workflow envuelve el fichero en UNA transacción, así que muere con
+--    ella y no deja el ajuste puesto para el siguiente que use esa conexión.
+set local lock_timeout = '3s';
+
 do $$
 declare
   antes_filas  bigint;
