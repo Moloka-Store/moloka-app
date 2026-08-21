@@ -36,6 +36,11 @@ jobs:
       - name: Instalar dependencias
         run: pip install --quiet supabase psycopg2-binary
 
+      # 🔒 La pregunta anti-cero, hecha codigo. `docs/guion-anti-cero.md`. En este repo
+      #    nada corre en push ni en PR: un test que no se lanza aqui es decoracion.
+      - name: Mesa de pruebas del guion anti-cero
+        run: python -u test_anti_cero.py
+
       - name: Medir
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
