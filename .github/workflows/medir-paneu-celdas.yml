@@ -28,8 +28,11 @@ jobs:
         with:
           python-version: '3.11'
 
+      # psycopg2 hace falta AUNQUE EL MEDIDOR NO TOQUE LA BASE: importa el procesador
+      # para reusar su clasificador, y el procesador lo importa arriba del todo. Reusar la
+      # pieza de verdad tiene ese precio, y sigue siendo mejor trato que copiar el criterio.
       - name: Instalar dependencias
-        run: pip install --quiet supabase
+        run: pip install --quiet supabase psycopg2-binary
 
       - name: Medir
         env:
