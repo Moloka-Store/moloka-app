@@ -71,7 +71,13 @@ def main():
             idx = {c: i for i, c in enumerate(cab)}
 
             malas = Counter()
-            for fila in filas[1:]:
+            # 🔴 EL DETALLE DE LA FILA, que es lo que decide la FORMA del arreglo: no es lo
+            #    mismo «una celda suelta de un país» que «una fila entera sin ningún estado».
+            #    Lo primero se arregla por país; lo segundo, por fila. Sin este dato se
+            #    elegiría el arreglo por intuición.
+            detalle = []
+            for num, fila in enumerate(filas[1:], start=2):
+                sueltas = []
                 for pais, (col_estado, _) in P.MAPA_PAIS.items():
                     i = idx.get(col_estado)
                     if i is None:
@@ -86,6 +92,17 @@ def main():
                             + int(of['no_requiere_oferta']) + int(of['motivo_bloqueo'] is not None))
                     if suma != 1:
                         malas[pais] += 1
+                        sueltas.append((pais, cell))
+                if sueltas:
+                    # Cuántas celdas de la fila ENTERA vienen con algo: distingue una fila
+                    # huérfana (SKU recién creado, sin evaluar) de un fichero corrupto.
+                    con_algo = sum(1 for c in fila if (c or '').strip())
+                    detalle.append((num, fila[0] if fila else '?', len(sueltas),
+                                    con_algo, len(fila)))
+
+            for num, sku, n_paises, con_algo, ancho in detalle[:6]:
+                print(f'   🔴 fila {num} · sku {sku!r}: {n_paises}/10 países ilegibles · '
+                      f'{con_algo} de {ancho} celdas de la fila traen algo', flush=True)
 
             for p, n in malas.items():
                 if n:
