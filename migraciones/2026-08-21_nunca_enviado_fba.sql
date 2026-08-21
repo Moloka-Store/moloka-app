@@ -101,13 +101,20 @@ begin
      and historia_previa_desconocida is distinct from true;
 
   comment on column public.productos.historia_previa_desconocida is
-    'El producto vino en la CARGA INICIAL del catálogo (created_at = 2026-04-29): lo que '
-    'pasara con él antes de esa fecha no está en ninguna de nuestras fuentes. Las tres que '
-    'saben de historia tienen fondo — transacciones 1-ene-2026, ledger 23-abr-2026, '
-    'salud_fba_historico 22-jul-2026 — y el negocio es anterior. Con esto a true, una '
-    'respuesta como «nunca ha ido a FBA» NO SE PUEDE AFIRMAR: se aplica igual, pero queda '
-    'constancia de que ahí no lo sabemos. Escrito una vez el 21-ago-2026 sobre 202 de 470 '
-    'productos; no se recalcula.';
+    'OPERATIVA, NO INFORMATIVA: esta columna DECIDE. Con ella a true, la regla del PRIMER '
+    'ENVIO de la app (mandar el almacen entero de lo recien comprado) NO se aplica por la '
+    'via de la historia. No documenta una limitacion: la VETA. == QUE DICE: el producto '
+    'vino en la CARGA INICIAL del catalogo (created_at = 2026-04-29), y lo que pasara con '
+    'el antes de esa fecha no esta en ninguna de nuestras fuentes. Las cuatro que saben de '
+    'historia arrancan DESPUES de que el producto existiera: transacciones 1-ene-2026, '
+    'ledger 23-abr-2026, envios_fba 2-may-2026, salud_fba_historico 22-jul-2026. Para estos '
+    '202 productos, un "nunca ha ido a FBA" significa "no consta", no "no paso". == POR QUE '
+    'VETA Y NO SOLO AVISA: medido el 21-ago-2026, de las 3 referencias que ganarian la '
+    'regla por la via nueva, DOS son de este lote (una es el Dr Beckmann). Darles "manda el '
+    'almacen entero" sobre un nunca que no podemos afirmar seria abrir un riesgo, no cerrar '
+    'un agujero. Con el veto, sobre estos 202 el cambio es INERTE: se comportan como antes. '
+    '== Escrita una sola vez el 21-ago-2026 sobre 202 de 470 productos; no se recalcula. La '
+    'lee v_nunca_enviado_fba y la expone como historia_incierta.';
 
   select count(*) into despues_cols
     from information_schema.columns
@@ -184,11 +191,12 @@ vistos as (
 )
 select c.asin,
        (v.asin is null) as nunca_enviado,
-       -- 🔑 EL SUELO VIAJA CON LA RESPUESTA, no aparte. `nunca_enviado = true` con
+       -- 🔴 ESTA COLUMNA DECIDE, NO DOCUMENTA. `nunca_enviado = true` con
        --    `historia_incierta = true` significa «no consta que se enviara», NO «no se
-       --    envió». Son dos cosas distintas y quien consulte tiene que poder separarlas sin
-       --    ir a buscar otra tabla — la app las separa: con la historia incierta NO aplica
-       --    la regla nueva y se queda con la de siempre.
+       --    envió» — y la app lo trata como un VETO: con la historia incierta la regla del
+       --    primer envío no se aplica por esta vía y el producto se queda con la señal de
+       --    siempre. Quien lea esto dentro de un año tiene que saber que de aquí depende
+       --    cuánta mercancía sale del almacén, no una nota al pie.
        c.incierta as historia_incierta
   from cat c
   left join vistos v on v.asin = c.asin;
@@ -199,8 +207,9 @@ comment on view public.v_nunca_enviado_fba is
   'CUATRO fuentes que saben de historia porque ninguna sola basta: medido el 21-ago-2026, '
   'de los 60 productos con stock que no están en salud_fba_historico, OCHO sí habían '
   'estado en FBA (7 por el ledger, 1 sólo por sus ventas). `historia_incierta` dice si el '
-  'producto viene de la carga inicial del catálogo: con ella a true, `nunca_enviado` '
-  'significa «no consta», no «no pasó».';
+  'producto viene de la carga inicial del catalogo. Y ES OPERATIVA, NO INFORMATIVA: con '
+  'ella a true la app NO aplica la regla del primer envio por esta via — nunca_enviado '
+  'significa "no consta", no "no paso", y sobre eso no se manda un almacen entero.';
 
 -- 🔴 REVOCAR ANTES DE CONCEDER: en `public` un objeto nuevo puede nacer con permisos para
 --    `anon`, y un `grant` encima no quita nada. Se revoca a cada rol por su nombre.
