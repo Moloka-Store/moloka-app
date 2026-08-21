@@ -253,6 +253,7 @@ def analizar(texto, fichero, snapshot_date):
     par_visto = {}
     dup_par = []
     estados_desconocidos = {}   # valor → nº de filas (Guarda 6, "en el dato" vía estado_paneu)
+    pendientes = []             # fichas que Amazon aún no ha evaluado (los DIEZ países vacíos)
 
     for pos, fila in enumerate(filas_datos):
         num_fila = pos + 2   # +1 cabecera, +1 para numerar desde 1
@@ -289,20 +290,65 @@ def analizar(texto, fichero, snapshot_date):
             'ultima_actividad': txt(celda(fila, 'Última actividad el')),
             'comentarios': txt(celda(fila, 'Comentarios del producto')),
             'crudo': crudo,
+            # Se rellena justo abajo. Va en TODAS las filas para que el INSERT tenga
+            # siempre la misma forma; la inmensa mayoría son False.
+            'pendiente_evaluacion': False,
         })
 
+        # ── PENDIENTE DE EVALUAR · los DIEZ países en blanco ────────────────
+        #
+        # 🔴 QUÉ ES, y no es un fichero roto: una ficha que Amazon TODAVÍA NO HA EVALUADO.
+        #    Cuando entra mercancía nueva, sus SKU aparecen en el informe con la identidad
+        #    puesta y los veintiséis campos de país en blanco, porque el programa
+        #    paneuropeo aún no ha dicho nada de ellos.
+        #
+        # 🔬 EL CASO QUE LE DA NOMBRE (20-ago-2026): `B0CQDG7Y94`, el Llavero Pocket POP
+        #    Deadpool & Wolverine, de la factura de OcioStock 26-17346-S1 que entró el
+        #    19-ago. El fichero pasó de 384 a 400 filas — esas 16 nuevas son esa caja. La
+        #    fila traía 4 de 30 celdas con algo: sólo la identidad.
+        #    Y la carga entera abortó por ella, dejando `paneu_aptos` CINCO DÍAS sin
+        #    actualizar — y con él los estados de país de la pestaña Enviar.
+        #
+        # 🔑 ESTO VA A PASAR CADA VEZ QUE ENTRE MERCANCÍA NUEVA, que en este negocio es lo
+        #    normal. No es una rareza que tolerar: es el funcionamiento esperado.
+        #
+        # 🔒 Y LA GUARDA 5 NO SE RELAJA NI UN MILÍMETRO. La distinción es comprobable y no
+        #    es de grado: CERO de diez países legibles = Amazon no se ha pronunciado sobre
+        #    esta ficha. ENTRE UNO Y NUEVE = el fichero dice algunas cosas y otras no, y eso
+        #    sí es corrupción → aborta igual que siempre.
+        #
+        # ⚠️ SE SALTA, SE CUENTA Y SE GRITA — y queda EN EL DATO, no sólo en el log:
+        #    `paneu_aptos.pendiente_evaluacion`. Es un estado del negocio («fichas nuevas
+        #    esperando el veredicto de Amazon»), no un incidente de carga, y tiene que
+        #    poder consultarse sin abrir un log de hace tres días.
+        clasificadas = {p: clasificar_oferta(celda(fila, col_estado))
+                        for p, (col_estado, _) in paises.items()}
+
+        def _suma(of):
+            return sum([of['tiene_oferta'], of['sin_listing'],
+                        of['no_requiere_oferta'], of['motivo_bloqueo'] is not None])
+
+        ilegibles = [p for p, of in clasificadas.items() if _suma(of) != 1]
+        if len(ilegibles) == len(paises):
+            aptos[-1]['pendiente_evaluacion'] = True
+            pendientes.append(f"{sku} · asin {aptos[-1]['asin']} · fila {num_fila}")
+            continue   # sin filas de oferta: no hay nada que Amazon haya dicho
+
         for pais, (col_estado, col_benef) in paises.items():
-            of = clasificar_oferta(celda(fila, col_estado))
+            of = clasificadas[pais]
 
             # Guarda 5 (protege el §5.1): los cuatro estados suman EXACTAMENTE 1.
-            suma = sum([of['tiene_oferta'], of['sin_listing'],
-                        of['no_requiere_oferta'], of['motivo_bloqueo'] is not None])
+            suma = _suma(of)
             if suma != 1:
                 raise Aborta(
                     f"[Guarda 5] Fila {num_fila} (sku {sku}, país {pais}): los cuatro estados "
                     f"de la oferta suman {suma}, no 1. Celda literal: "
                     f"{of['crudo_celda']!r}. La columna 'Estado de la oferta' significa tres "
-                    f"cosas y esta celda no encaja en ninguna.")
+                    f"cosas y esta celda no encaja en ninguna.\n"
+                    f"   🔑 En esta fila hay {len(ilegibles)} de {len(paises)} países "
+                    f"ilegibles ({', '.join(ilegibles)}). Si fueran los {len(paises)} sería "
+                    f"una ficha sin evaluar y se saltaría; como no lo son, el fichero dice "
+                    f"unas cosas y otras no, y eso NO se interpreta.")
 
             of['beneficios_paneu'] = (_clean(celda(fila, col_benef)) == 'Y') if col_benef else None
 
@@ -333,14 +379,21 @@ def analizar(texto, fichero, snapshot_date):
     if len(aptos) != len(filas_datos):
         raise Aborta(f"[Guarda 8] Filas de datos del fichero ({len(filas_datos)}) ≠ filas "
                      f"paneu_aptos ({len(aptos)}).")
-    if len(ofertas) != len(aptos) * len(paises):
-        raise Aborta(f"[Guarda 8] paneu_oferta_pais ({len(ofertas)}) ≠ aptos × países "
-                     f"({len(aptos)} × {len(paises)} = {len(aptos) * len(paises)}).")
+    # 🔒 LAS PENDIENTES SE DESCUENTAN, y la guarda sigue midiendo lo mismo: que ninguna
+    #    ficha EVALUADA se quede sin sus diez países. Dejarla en el producto redondo
+    #    obligaría a saltarse la aritmética entera, que es peor: se perdería la red que
+    #    caza una fila a medio escribir.
+    evaluadas = len(aptos) - len(pendientes)
+    if len(ofertas) != evaluadas * len(paises):
+        raise Aborta(f"[Guarda 8] paneu_oferta_pais ({len(ofertas)}) ≠ evaluadas × países "
+                     f"({evaluadas} × {len(paises)} = {evaluadas * len(paises)}). "
+                     f"[{len(aptos)} filas, de ellas {len(pendientes)} sin evaluar]")
 
     return {
         'aptos': aptos, 'ofertas': ofertas, 'fichero': fichero,
         'snapshot_date': snapshot_date, 'paises': list(paises.keys()),
         'paises_nuevos': paises_nuevos, 'estados_desconocidos': estados_desconocidos,
+        'pendientes': pendientes,
     }
 
 
@@ -362,6 +415,10 @@ CREATE TABLE IF NOT EXISTS paneu_aptos (
     snapshot_date     date,
     fichero           text,
     crudo             jsonb,
+    -- 🔴 La ficha existe pero Amazon NO se ha pronunciado sobre ella en NINGÚN país. Es un
+    --    estado del negocio (mercancía recién dada de alta), no un incidente de carga: por
+    --    eso vive en el dato y se puede consultar, en vez de quedarse en el log.
+    pendiente_evaluacion boolean NOT NULL DEFAULT false,
     procesado_en      timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (seller_sku)
 );
@@ -386,7 +443,8 @@ CREATE TABLE IF NOT EXISTS paneu_oferta_pais (
 """
 
 COLS_APTOS = ['seller_sku', 'asin', 'fnsku', 'titulo', 'estado_paneu', 'registrado',
-              'fecha_inscripcion', 'fecha_caducidad', 'ultima_actividad', 'comentarios']
+              'fecha_inscripcion', 'fecha_caducidad', 'ultima_actividad', 'comentarios',
+              'pendiente_evaluacion']
 COLS_OFERTA = ['seller_sku', 'pais', 'tiene_oferta', 'precio', 'sin_listing',
                'no_requiere_oferta', 'motivo_bloqueo', 'beneficios_paneu', 'crudo_celda']
 
@@ -460,6 +518,19 @@ def main():
               flush=True)
         for val, n in sorted(info['estados_desconocidos'].items()):
             print(f"        · {val!r} en {n} fila(s)", flush=True)
+    # 🔴 SE GRITA AUNQUE NO SEA UN FALLO: son fichas nuevas esperando el veredicto de
+    #    Amazon, y quien lance la carga tiene que verlas. Que estén además EN EL DATO
+    #    (`pendiente_evaluacion`) no quita el grito: el log dice «hoy han entrado éstas»,
+    #    la columna contesta «¿cuáles siguen pendientes?». Son dos preguntas distintas.
+    if info['pendientes']:
+        print(f"\n⚠️  SIN EVALUAR POR AMAZON: {len(info['pendientes'])} ficha(s) con los "
+              f"{len(info['paises'])} países en blanco. Entran a `paneu_aptos` con "
+              f"`pendiente_evaluacion = true` y SIN filas de oferta — no se inventa un "
+              f"estado que Amazon no ha dado. Es lo normal cuando entra mercancía nueva.",
+              flush=True)
+        for p in info['pendientes']:
+            print(f"        · {p}", flush=True)
+
     if info['paises_nuevos']:
         print("\n⚠️  [Guarda 7] País(es) NUEVO(s) en la cabecera "
               "(se cargan como filas de paneu_oferta_pais y se GRITA; Amazon abrió un país):",
@@ -621,6 +692,7 @@ def main():
           f"ofertas={len(ofertas)} · bajas={borradas_aptos}+{borradas_ofertas} · "
           f"paises={len(paises)} · "
           f"estados_desconocidos={len(info['estados_desconocidos'])} · "
+          f"sin_evaluar={len(info['pendientes'])} · "
           f"paises_nuevos={len(info['paises_nuevos'])} ===", flush=True)
 
 

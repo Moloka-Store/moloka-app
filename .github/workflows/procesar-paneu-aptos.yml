@@ -35,6 +35,12 @@ jobs:
       - name: Instalar dependencias
         run: pip install --quiet supabase psycopg2-binary
 
+      # 🔒 La mesa de pruebas de «sin evaluar» contra «corrupto», ANTES del procesador —
+      #    como en keepa y salud. En este repo nada corre en push ni en PR: un test que no
+      #    se lanza aquí es decoración.
+      - name: Mesa de pruebas de las fichas sin evaluar
+        run: python -u test_paneu_pendiente.py
+
       - name: Ejecutar procesador
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
