@@ -26,6 +26,7 @@ from collections import Counter
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import procesador_paneu_aptos as P
 from foto_comun import listar_buzon, descargar_buzon
+from tsv_comun import leer_tsv
 from supabase import create_client
 
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
@@ -61,7 +62,10 @@ def main():
             except UnicodeDecodeError:
                 texto = crudo.decode('cp1252', errors='replace')
 
-            lector = csv.reader(io.StringIO(texto), delimiter='\t')
+            # 🔒 Por `leer_tsv`, no por `csv.reader` a pelo: la comilla de Amazon es TEXTO, no
+            #    entrecomillado, y una que abra un campo sin cerrar FUSIONA FILAS en silencio. El
+            #    porqué y la medición de los 54 ficheros del buzón, en `tsv_comun.py`.
+            lector = leer_tsv(texto)
             filas = [f for f in lector if any((c or '').strip() for c in f)]
             if len(filas) < 2:
                 resumen.append((nombre, 0, {}, 'fichero vacío o no es TSV'))

@@ -35,6 +35,14 @@ jobs:
       - name: Instalar dependencias
         run: pip install --quiet supabase psycopg2-binary
 
+      # 🔒 CÓMO SE LEE UN TSV DE AMAZON, antes del procesador. La comilla es TEXTO y
+      #    una que abra un campo sin cerrar FUSIONA FILAS en silencio. El test lleva los
+      #    cuatro casos medidos y vigila también que el LEDGER siga fuera del cambio.
+      #    En este repo nada corre en push ni en PR: un test que no se lanza aquí es
+      #    decoración.
+      - name: Mesa de pruebas del parseo TSV
+        run: python -u test_tsv_quote_none.py
+
       - name: Ejecutar procesador
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

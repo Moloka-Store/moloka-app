@@ -50,6 +50,7 @@ import os, sys, io, csv
 from collections import Counter
 
 import psycopg2
+from tsv_comun import leer_tsv
 from psycopg2.extras import Json, execute_values
 from supabase import create_client
 
@@ -103,7 +104,10 @@ def _clean(v):
 # 1) Parseo + guardas estructurales (1..5). Sin tocar la base todavía.
 # ---------------------------------------------------------------------------
 def analizar(texto, fichero, fecha_foto):
-    lector = csv.reader(io.StringIO(texto), delimiter='\t')
+    # 🔒 Por `leer_tsv`, no por `csv.reader` a pelo: la comilla de Amazon es TEXTO, no
+    #    entrecomillado, y una que abra un campo sin cerrar FUSIONA FILAS en silencio. El
+    #    porqué y la medición de los 54 ficheros del buzón, en `tsv_comun.py`.
+    lector = leer_tsv(texto)
     filas = [f for f in lector if any((c or '').strip() for c in f)]
 
     # Guarda 2: anti-vacío (≥1 fila de datos)

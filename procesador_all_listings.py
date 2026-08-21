@@ -45,6 +45,7 @@ import os, sys, io, csv, re
 from datetime import date
 
 import psycopg2
+from tsv_comun import leer_tsv
 from psycopg2.extras import execute_values
 from supabase import create_client
 
@@ -140,7 +141,10 @@ except UnicodeDecodeError:
 # ---------------------------------------------------------------------------
 # 2) Parsear (tab-separated) con cabeceras tolerantes
 # ---------------------------------------------------------------------------
-lector = csv.reader(io.StringIO(texto), delimiter='\t')
+# 🔒 Por `leer_tsv`, no por `csv.reader` a pelo: la comilla de Amazon es TEXTO, no
+#    entrecomillado, y una que abra un campo sin cerrar FUSIONA FILAS en silencio. El
+#    porqué y la medición de los 54 ficheros del buzón, en `tsv_comun.py`.
+lector = leer_tsv(texto)
 filas = [f for f in lector if any(c.strip() for c in f)]
 if len(filas) < 2:
     sys.exit("El informe está vacío o no es tab-separated. Abortando.")
