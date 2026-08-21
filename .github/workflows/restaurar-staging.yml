@@ -1030,3 +1030,56 @@ jobs:
           psql "$STAGING_DB_URL" -c "
             select restaurado_en, quien, coalesce(motivo,'-') as motivo
               from public.staging_restauraciones order by restaurado_en desc limit 3;"
+
+      # ⚠️ VA EL ULTIMO, DETRAS DEL RASTRO, y no por orden estetico: este paso FALLA
+      #    el run cuando staging va por detras, y si fuera antes se llevaria por delante
+      #    el paso 9. La restauracion SI ha ocurrido aunque este veredicto sea rojo, y
+      #    staging es compartido: no dejar constancia de quien restauro seria peor que
+      #    el problema que este paso avisa.
+      # ════════════════════════════════════════════════════════════════════════
+      # 🔴 10) ¿LE FALTA A STAGING ALGO QUE PRODUCCION SI TIENE?
+      #
+      # El backup es de ANOCHE. Restaurar DESHACE lo que se haya aplicado a produccion
+      # HOY, y despues de esto viene un ensayo encima. Fernando, 21-ago-2026:
+      #
+      #   🔑 «puede ser una migracion que se aplique LIMPIAMENTE en un staging al que le
+      #      falta la columna con la que iba a chocar en produccion»
+      #
+      # Ese ensayo saldria VERDE sin probar nada. No es una molestia: es la escalera
+      # mintiendo, y la escalera es la unica red que hay para no romper la operativa de
+      # Elena. 🔬 Paso de verdad esa manana con `paneu_aptos.pendiente_evaluacion`; se
+      # cazo de rebote porque un procesador murio con `column does not exist`.
+      #
+      # 🔒 SE LEE PRODUCCION, Y ES A PROPOSITO. Sin mirarla no se puede separar
+      #    «falta en staging porque produccion ya la tiene» (peligro) de «falta en los dos
+      #    porque es la que vas a ensayar ahora» (normal). Sin esa distincion el aviso
+      #    saltaria SIEMPRE y se dejaria de leer en dos semanas — la cara B de §3.
+      # 🔒 Y SE LEE EN SOLO LECTURA FORZADA: `default_transaction_read_only=on` no es un
+      #    acuerdo, es el servidor negandose. Este workflow tiene un cerrojo
+      #    anti-produccion en el paso 1 y aqui entra la unica credencial de produccion que
+      #    toca en toda su vida; que no pueda escribir lo garantiza Postgres, no el
+      #    cuidado de quien lo escribio.
+      # ⚠️ FALLA EL RUN a proposito. Un resumen verde con un aviso dentro se pasa por
+      #    alto, y lo que se pide es que no se pueda empezar a ciegas. Solo salta cuando
+      #    falta algo de verdad, asi que no es una alarma permanente.
+      - name: 10) VEREDICTO - staging no puede ir por detras de produccion
+        env:
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+          PROD_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -uo pipefail
+          if [ -z "${PROD_DB_URL:-}" ]; then
+            echo "::error::Falta SUPABASE_DB_URL. Sin produccion no se puede saber si staging va por detras, y dar por bueno lo que no se ha mirado es justo lo que este paso evita."
+            exit 1
+          fi
+          python scripts/censo_migraciones.py > /tmp/censo.sql
+          # 🔒 Solo lectura FORZADA por el servidor para la conexion de produccion.
+          PGOPTIONS='-c default_transaction_read_only=on'             psql "$PROD_DB_URL" -t -A -F'|' -v ON_ERROR_STOP=1 -P pager=off -f /tmp/censo.sql > /tmp/censo_prod.txt
+          psql "$STAGING_DB_URL" -t -A -F'|' -v ON_ERROR_STOP=1 -P pager=off -f /tmp/censo.sql > /tmp/censo_stg.txt
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### 10 · ¿staging va por detras de produccion?" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          python scripts/comparar_censos.py /tmp/censo_prod.txt /tmp/censo_stg.txt | tee -a "$GITHUB_STEP_SUMMARY"
+          ESTADO=${PIPESTATUS[0]}
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          exit $ESTADO
