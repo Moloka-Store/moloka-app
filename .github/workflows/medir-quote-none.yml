@@ -1,0 +1,38 @@
+# MEDIDOR · ¿cambia algo parsear los TSV de Amazon con QUOTE_NONE? SOLO LECTURA.
+#
+# 🔴 POR QUÉ UN WORKFLOW Y NO UNA CONSULTA: lo que se compara son DOS PARSEOS DEL MISMO
+#    FICHERO, y los ficheros están en el buzón de Storage, que es privado. La base guarda
+#    el `crudo` de cuatro de los cinco informes, pero el `crudo` es la fila YA PARSEADA:
+#    sirve para ver qué produjo el parseo de entonces, no para volver a parsear. Para
+#    comparar dos lecturas hace falta el fichero.
+#
+# 🔒 NO ESCRIBE NADA: ni en la base ni en el Storage. Lista, baja y compara en memoria.
+name: Moloka - MEDIR QUOTE_NONE (los cinco TSV)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: medir-quote-none
+  cancel-in-progress: false
+
+jobs:
+  medir:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Aquí NO hace falta psycopg2: el medidor no importa ningún procesador — compara dos
+      # llamadas a `csv.reader` y nada más. Se instala lo mínimo a propósito.
+      - name: Instalar dependencias
+        run: pip install --quiet supabase
+
+      - name: Medir
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python -u medir_quote_none.py
