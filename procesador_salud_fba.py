@@ -40,6 +40,7 @@ import os, sys, io, csv, json
 from datetime import date, datetime
 
 import psycopg2
+from tsv_comun import leer_tsv
 from psycopg2.extras import Json, execute_values
 from supabase import create_client
 
@@ -259,7 +260,10 @@ def parse_val(tipo, raw):
 #    Devuelve la lista de filas ya tipadas + su `crudo`, o lanza Aborta.
 # ---------------------------------------------------------------------------
 def analizar(texto, fichero):
-    lector = csv.reader(io.StringIO(texto), delimiter='\t')
+    # 🔒 Por `leer_tsv`, no por `csv.reader` a pelo: la comilla de Amazon es TEXTO, no
+    #    entrecomillado, y una que abra un campo sin cerrar FUSIONA FILAS en silencio. El
+    #    porqué y la medición de los 54 ficheros del buzón, en `tsv_comun.py`.
+    lector = leer_tsv(texto)
     filas = [f for f in lector if any((c or '').strip() for c in f)]
 
     # Guarda 8: anti-vacío

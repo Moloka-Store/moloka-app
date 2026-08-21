@@ -41,6 +41,7 @@ import os, sys, io, csv, re
 from datetime import datetime, timezone
 
 import psycopg2
+from tsv_comun import leer_tsv
 from psycopg2.extras import Json, execute_values
 from supabase import create_client
 
@@ -191,7 +192,10 @@ def clasificar_oferta(cell):
 #    Devuelve filas de las DOS tablas + los avisos que van "en el dato".
 # ---------------------------------------------------------------------------
 def analizar(texto, fichero, snapshot_date):
-    lector = csv.reader(io.StringIO(texto), delimiter='\t')
+    # 🔒 Por `leer_tsv`, no por `csv.reader` a pelo: la comilla de Amazon es TEXTO, no
+    #    entrecomillado, y una que abra un campo sin cerrar FUSIONA FILAS en silencio. El
+    #    porqué y la medición de los 54 ficheros del buzón, en `tsv_comun.py`.
+    lector = leer_tsv(texto)
     filas = [f for f in lector if any((c or '').strip() for c in f)]
 
     # Anti-vacío (sin datos = fichero incompleto o no es TSV): aborta.
