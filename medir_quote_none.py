@@ -29,6 +29,7 @@ import io, os, sys, csv
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from foto_comun import listar_buzon, descargar_buzon
+from scripts.anti_cero import exigir_poblacion
 from supabase import create_client
 
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
@@ -164,12 +165,8 @@ def main():
     print(f'  con alguna diferencia            {tot_con_cambio}')
     print(f'  🔴 QUOTE_NONE da MENOS filas     {tot_pierde}   <- si esto no es 0, NO se cambia')
     print(f'  🔴 mismas filas, OTRO valor       {tot_mismas_filas_otro_valor}   <- ni esto (caso C: comillas que hoy se quitan)')
-    if tot_ficheros == 0:
-        # ⚠️ El caso que convertiría este medidor en un trámite: sin ficheros, cualquier
-        #    resumen sale «bien». Se dice en alto en vez de imprimir un verde vacío.
-        print('\n  ⚠️ NO SE HA MEDIDO NI UN FICHERO. Esto NO es «no cambia nada»: es que no')
-        print('     había nada que comparar. No sirve para decidir.')
-        sys.exit(1)
+    # 🔒 Por `exigir_poblacion`, no a mano. Ver `docs/guion-anti-cero.md`.
+    exigir_poblacion('ficheros TSV en el buzon', tot_ficheros)
     if tot_pierde or tot_mismas_filas_otro_valor:
         print('')
         print('  ⛔ HAY UN FRENO. El cambio no es inerte sobre el dato de hoy: o pierde filas')

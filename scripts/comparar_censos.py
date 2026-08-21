@@ -40,6 +40,8 @@ USO
 import io
 import sys
 
+from anti_cero import exigir_poblacion
+
 # ⚠️ LA SALIDA VA EN ASCII PELADO, y no es descuido de estilo: los emoji revientan en
 #    una consola cp1252 y el `print` muere A MEDIAS — con lo que los NOMBRES de las
 #    migraciones, que son lo unico que hace util este aviso, se quedan sin imprimir.
@@ -77,13 +79,10 @@ def main():
     #    se genero, porque el fichero quedo a cero bytes— haria que la resta diera CERO
     #    diferencias y el paso saliera verde sin haber mirado nada. Es el `bash -n` sobre
     #    0 bytes, otra vez.
-    if not prod or not stg:
-        print('')
-        print('  ERROR: uno de los dos censos vino VACIO.')
-        print('    produccion: %d objetos   staging: %d objetos' % (len(prod), len(stg)))
-        print('  Esto NO es «no falta nada»: es que no se ha comparado nada. Mira si el')
-        print('  psql de arriba fallo antes de creerte ningun verde.')
-        sys.exit(1)
+    # 🔒 Por `exigir_poblacion`, no a mano: esta comprobacion se habia escrito tres
+    #    veces en un dia y la tercera es la que no se ve venir. Ver `docs/guion-anti-cero.md`.
+    exigir_poblacion('objetos en el censo de PRODUCCION', prod)
+    exigir_poblacion('objetos en el censo de STAGING', stg)
 
     faltan = []      # 🔴 produccion lo tiene y staging no
     viejas = []      # 🟠 los dos lo tienen, pero el de staging es la version vieja

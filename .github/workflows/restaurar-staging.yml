@@ -133,6 +133,12 @@ jobs:
       #       pero NO protege a quien está midiendo: para eso hace falta que se vea quién
       #       ha restaurado y cuándo. Este paso avisa; no impide nada, porque a veces hay
       #       que restaurar igual.
+      # 🔒 La pregunta anti-cero, hecha codigo, ANTES de que este workflow la use en su
+      #    paso 10 (`comparar_censos.py` corta si un censo viene vacio). Si el guarda
+      #    esta roto, el veredicto de abajo se lo cree. `docs/guion-anti-cero.md`.
+      - name: Mesa de pruebas del guion anti-cero
+        run: python -u test_anti_cero.py
+
       - name: 2b) Quien restauro antes (staging es compartido)
         env:
           STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}

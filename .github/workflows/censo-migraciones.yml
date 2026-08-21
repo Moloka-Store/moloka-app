@@ -66,6 +66,11 @@ jobs:
           sudo sh -c 'echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
           sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-17
 
+      # 🔒 La pregunta anti-cero, hecha codigo. `docs/guion-anti-cero.md`. En este repo
+      #    nada corre en push ni en PR: un test que no se lanza aqui es decoracion.
+      - name: Mesa de pruebas del guion anti-cero
+        run: python -u test_anti_cero.py
+
       - name: A) Censo migracion -> objeto
         env:
           DB_URL: ${{ inputs.entorno == 'staging' && secrets.STAGING_DB_URL || secrets.SUPABASE_DB_URL }}
