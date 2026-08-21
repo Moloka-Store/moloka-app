@@ -26,10 +26,15 @@ jobs:
         with:
           python-version: '3.11'
 
-      # Aquí NO hace falta psycopg2: el medidor no importa ningún procesador — compara dos
-      # llamadas a `csv.reader` y nada más. Se instala lo mínimo a propósito.
+      # 🔴 psycopg2 SÍ hace falta, y lo escribí al revés: puse «aquí no hace falta, el
+      #    medidor no importa ningún procesador». Es cierto que no importa ninguno — pero
+      #    importa `foto_comun` (para `listar_buzon`/`descargar_buzon`), y ESE sí lo importa
+      #    arriba del todo. El run 32472323573 murió con `ModuleNotFoundError: psycopg2`.
+      # ⚠️ La lección, que es la de siempre: escribí en un comentario algo que no había
+      #    comprobado. Reusar la pieza de verdad tiene ese precio, y sigue siendo mejor
+      #    trato que copiar el código de bajar ficheros.
       - name: Instalar dependencias
-        run: pip install --quiet supabase
+        run: pip install --quiet supabase psycopg2-binary
 
       - name: Medir
         env:
