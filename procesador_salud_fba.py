@@ -449,6 +449,98 @@ def sql_crear_historico():
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# GUARDA 11 · LAS COLUMNAS DE VENTAS NO PUEDEN VENIR VACÍAS DE GOLPE
+# ---------------------------------------------------------------------------
+# 🔴 LO QUE COSTÓ NO TENERLA, y por eso existe: el 16-ago-2026 entró un informe
+#    con `units_shipped_t30` a NULL en 173 de 215 filas —el 80,5 %, contra el
+#    ~17 % de siempre— y NADIE SE ENTERÓ. El fichero pasó todas las guardas
+#    porque el stock venía perfecto (`available` 6.910 contra los 7.184 de la
+#    foto anterior): lo único roto eran las columnas de VENTAS.
+#
+#    🔬 Y estuvo CINCO DÍAS alimentando la portada. Con `t30` a NULL no hay
+#       ritmo de venta, así que la tarjeta «Manda N productos al almacén de
+#       Amazon» decía **0** mientras la pestaña Enviar decía 65 referencias y
+#       870 unidades. Lo cazó Fernando mirando la pantalla, no la app.
+#       Y de paso el panel del catálogo daba 173 de 217 «sin moverse en 90
+#       días» —el 80 %— que no era el negocio, era la avería.
+#
+# 🔑 POR QUÉ MIRA LA PROPORCIÓN Y NO UN NÚMERO DE NULOS: que falten ventas de
+#    algunas fichas es NORMAL —Amazon no reporta las que no tienen histórico— y
+#    el recuento absoluto sube y baja con el tamaño del informe. Lo que no es
+#    normal es que la proporción se dispare de una foto a otra.
+#
+# 🔬 EL UMBRAL ESTÁ CALIBRADO CONTRA EL HISTÓRICO ENTERO, no puesto a ojo. Las
+#    ocho fotos sanas de `salud_fba_historico` (ES), en % de nulos de `t30`:
+#      22-jul 15,7 · 25-jul 18,3 · 28-jul 16,3 · 30-jul 15,2 · 07-ago 21,4
+#      09-ago 19,6 · 10-ago 17,5 · 12-ago 17,3      → banda 15,2 % – 21,4 %
+#    y la averiada:  16-ago 80,5 %.
+#    Con «el DOBLE de la mediana de las cinco anteriores»:
+#      · la avería del 16-ago se mide contra una mediana de 17,5 % → tope 35 %.
+#        Con 80,5 % ABORTA, y por más del doble del tope.
+#      · la peor foto sana (07-ago, 21,4 %) se mide contra 16,3 % → tope 32,6 %.
+#        Pasa con holgura: se queda en dos tercios del tope.
+#    O sea que entre «lo peor que ha pasado siendo normal» y «la avería» hay un
+#    factor de 3,8, y el corte cae justo en medio. No es un número elegido: es
+#    el hueco que dejan los datos.
+NULOS_FACTOR = 2.0        # tope = FACTOR × mediana de las anteriores
+NULOS_MUESTRA = 5         # cuántas fotos anteriores se miran
+NULOS_SUELO = 0.50        # tope absoluto cuando NO hay con qué comparar
+
+
+def _mediana(xs):
+    v = sorted(xs)
+    n = len(v)
+    return v[n // 2] if n % 2 else (v[n // 2 - 1] + v[n // 2]) / 2.0
+
+
+def guarda_columnas_ventas(cur, filas, marketplaces, campo='units_shipped_t30'):
+    """ABORTA si la proporción de NULL en `campo` se dispara respecto a las
+    fotos anteriores. Devuelve el texto del contraste para el log."""
+    total = len(filas)
+    nulos = sum(1 for f in filas if f['registro'].get(campo) is None)
+    pct = nulos / total if total else 0.0
+
+    # Las N fotos anteriores del MISMO ámbito, de la Película.
+    cur.execute(
+        f"SELECT snapshot_date, count(*), count(*) FILTER (WHERE {campo} IS NULL) "
+        "FROM salud_fba_historico WHERE marketplace = ANY(%s) "
+        "GROUP BY 1 ORDER BY 1 DESC LIMIT %s;", (list(marketplaces), NULOS_MUESTRA))
+    prev = [(d, n, x) for d, n, x in cur.fetchall() if n]
+    linea_prev = ' · '.join(f"{d} {100.0 * x / n:.1f}%" for d, n, x in prev) or '(ninguna)'
+    detalle = (f"{campo}: esta carga {nulos}/{total} = {100.0 * pct:.1f}% NULL\n"
+               f"   las {len(prev)} anteriores: {linea_prev}")
+
+    # 🔒 SIN HISTÓRICO NO SE INVENTA UNA MEDIANA. Con menos de tres fotos previas
+    #    no hay banda que calcular, así que sólo actúa el suelo absoluto — que es
+    #    generoso a propósito (2,3× el peor caso sano medido) para no bloquear un
+    #    estreno legítimo. Y se DICE que la guarda está a medio gas.
+    if len(prev) < 3:
+        if pct > NULOS_SUELO:
+            raise Aborta(
+                f"[Guarda 11] Más de la mitad del informe sin ventas.\n   {detalle}\n"
+                f"   No hay histórico suficiente para calibrar (solo {len(prev)} fotos), "
+                f"así que se aplica el suelo fijo del {100 * NULOS_SUELO:.0f}%.")
+        print(f"⚠️  [Guarda 11] Sin histórico suficiente ({len(prev)} fotos): solo se "
+              f"aplica el suelo del {100 * NULOS_SUELO:.0f}%. {detalle}", flush=True)
+        return detalle
+
+    tope = NULOS_FACTOR * _mediana([x / n for _, n, x in prev])
+    if pct > tope:
+        raise Aborta(
+            f"[Guarda 11] Las columnas de ventas vienen vacías de golpe.\n   {detalle}\n"
+            f"   Tope: {100.0 * tope:.1f}% ({NULOS_FACTOR:g}× la mediana de las anteriores).\n"
+            "   🔴 ESTO NO ES UN INFORME VIEJO, ES UN INFORME ROTO: el stock puede venir\n"
+            "      perfecto y las ventas vacías, y entonces la portada y el panel del\n"
+            "      catálogo dan cifras falsas sin que nada chille. Pasó el 16-ago-2026 y\n"
+            "      estuvo cinco días dentro.\n"
+            "   👉 Vuelve a descargar el informe del Seller. Si la proporción alta se\n"
+            "      repite en varias descargas seguidas, entonces ha cambiado el negocio\n"
+            "      y lo que hay que mover es el umbral — pero eso se decide viendo la\n"
+            "      serie de arriba, no forzando una carga.")
+    return detalle
+
+
 def main():
     # 🔒 PRIMERA línea del log, bien visible (el desplegable de Actions se queda
     # donde lo dejaste — ya mordió una vez).
@@ -527,9 +619,17 @@ def main():
         # Guarda 10: no-retroceder. Una foto más vieja que la que ya hay no se
         # carga (informe caducado = información FALSA). PERMITIR_RETROCESO=1 la salta.
         guarda_no_retroceder(cur, 'salud_fba', 'snapshot_date', snap, ambito=AMBITO)
+        # Guarda 11: las columnas de VENTAS no pueden venir vacías de golpe. Va aquí,
+        # con las demás: antes de borrar y antes de escribir.
+        contraste_ventas = guarda_columnas_ventas(cur, filas, AMBITO[1])
     except Aborta as e:
         print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
+
+    # 🔒 EL CONTRASTE DE LA GUARDA 11 SE IMPRIME AUNQUE PASE. No es una alarma: es la serie
+    #    que deja ver la DERIVA antes de que se convierta en aborto. Una guarda que sólo
+    #    habla cuando salta deja a quien lee el log sin saber por dónde iba la cosa.
+    print(f"\n--- Columnas de ventas (Guarda 11) ---\n   {contraste_ventas}", flush=True)
 
     # Claves que ya estaban (solo para contar altas). Antes del barrido.
     prev = claves_previas(cur, 'salud_fba', ['asin', 'marketplace', 'sku'], ambito=AMBITO)

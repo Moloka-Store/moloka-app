@@ -45,6 +45,14 @@ jobs:
       - name: Instalar dependencias
         run: pip install --quiet supabase psycopg2-binary
 
+      # 🔒 La mesa de pruebas de la Guarda 11, ANTES del procesador — igual que en
+      #    procesar-keepa-escaparate.yml y por el mismo motivo: en este repo NADA corre en
+      #    push ni en PR, así que un test que no se lanza aquí es decoración. Tarda menos de
+      #    un segundo, no toca red ni base, y sólo ejercita la guarda con las cifras reales
+      #    del histórico — incluida la avería del 16-ago-2026, que es la que la justifica.
+      - name: Mesa de pruebas de las columnas de ventas
+        run: python -u test_salud_guarda_ventas.py
+
       - name: Ejecutar procesador
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
