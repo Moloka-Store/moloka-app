@@ -1030,3 +1030,37 @@ jobs:
           psql "$STAGING_DB_URL" -c "
             select restaurado_en, quien, coalesce(motivo,'-') as motivo
               from public.staging_restauraciones order by restaurado_en desc limit 3;"
+
+      # ----------------------------------------------------------------------
+      # 🔴 10) DECIRLE A STAGING QUE ES STAGING.
+      #
+      # `public._entorno` viaja EN EL DUMP (`pg_dump --schema=public`), asi que acaba de
+      # llegar diciendo 'produccion'. Si nadie la reescribe, esta base se hace pasar por
+      # produccion — que es el lado peligroso por el que mentir, y el que puede acabar con
+      # una migracion aplicada donde no toca.
+      #
+      # 🔒 Y por eso `entorno()` NO se fia de esta tabla sola: contrasta con un segundo
+      #    testigo que el dump no puede copiar (si el Storage respalda el historico de
+      #    Keepa). Si este paso NO llega a correr —porque el workflow se corta aqui— los dos
+      #    testigos discrepan y `entorno()` ABORTA en vez de responder 'produccion'. O sea
+      #    que una restauracion a medias se nota, en vez de pasar por buena.
+      #
+      # ⚠️ `if: always()` NO: si la restauracion fallo antes, esta base no esta en un estado
+      #    del que se pueda afirmar nada. Se deja que los dos testigos discrepen.
+      - name: 10) Marcar esta base como STAGING
+        env:
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+        run: |
+          set -euo pipefail
+          # La tabla puede no existir todavia (backups anteriores a su migracion): entonces
+          # no hay nada que reescribir, y `entorno()` tampoco existe. Se dice y se sigue.
+          EXISTE=$(psql "$STAGING_DB_URL" -tAc "select to_regclass('public._entorno') is not null;")
+          if [ "$EXISTE" != "t" ]; then
+            echo "::warning::public._entorno no existe en este backup: nada que marcar."
+            exit 0
+          fi
+          psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -q -c "
+            delete from public._entorno;
+            insert into public._entorno (nombre) values ('staging');"
+          echo "--- Los dos testigos, contrastados por entorno() ---"
+          psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -c "select public.entorno() as esta_base_es;"
