@@ -94,8 +94,14 @@ eq('(E) 🔒 … y sigue con `csv.reader`, que es lo correcto AHÍ',
 # ── F) 🔴 Y LOS CUATRO QUE SÍ, TAMBIÉN ANCLADOS ───────────────────────────
 # 🔑 Anclado sobre lo que NO debe aparecer: preguntar «¿está `leer_tsv`?» saldría verde con
 #    un `csv.reader` puesto al lado. Lo que se mira es que la llamada vieja se haya ido.
+# 🔴 23-ago-2026 · SALE `procesador_salud_fba.py` (se jubila con el informe) y ENTRA
+#    `procesador_inventario_fba.py`, que es quien lee ese TSV ahora. El censo NO encoge en
+#    silencio: quitar al viejo sin meter al que ocupa su sitio dejaría la comprobación
+#    mirando a tres ficheros y con la cañería viva fuera. Y no es cosmético — sin el
+#    cambio este test REVIENTA (`FileNotFoundError`) en cuanto se borre el fichero, y
+#    corre al principio de procesar-inventario-fba.yml.
 for f in ('procesador_all_listings.py', 'procesador_internacional.py',
-          'procesador_paneu_aptos.py', 'procesador_salud_fba.py'):
+          'procesador_paneu_aptos.py', 'procesador_inventario_fba.py'):
     with io.open(f, encoding='utf-8') as fh:
         src = fh.read()
     # Fuera los comentarios: el de al lado NOMBRA `csv.reader` para explicar por qué no se
