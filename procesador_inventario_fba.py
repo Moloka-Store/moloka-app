@@ -121,6 +121,7 @@ ENTORNO      = os.environ.get('ENTORNO', 'staging').strip().lower()   # staging 
 
 BUCKET, CARPETA = 'informes', 'inventario_fba'
 TABLA = 'inventario_fba'
+TABLA_HIST = 'inventario_fba_historico'
 
 # ---------------------------------------------------------------------------
 # EL UMBRAL DE FILAS — Guarda 4. El número, y de dónde sale.
@@ -194,6 +195,19 @@ TIPADAS = [
 ]
 TIPO_SQL = {'t': 'text', 'i': 'integer', 'n': 'numeric'}
 CABECERA_ESPERADA = [h for h, _, _ in TIPADAS]
+
+# ---------------------------------------------------------------------------
+# EL HISTÓRICO (cajón PELÍCULA). Mismas columnas tipadas + fecha_foto y fichero.
+# 🔴 SIN `crudo`, y es decisión: el .txt entero se conserva en
+#    informes/inventario_fba/, así que la despensa común del histórico vive en el
+#    Storage y no duplicada en la base. CONTRAPARTIDA: esos ficheros NO SE BORRAN
+#    NUNCA — el rescate va por la columna `fichero`. (Mismo trato que los CSV de
+#    Keepa desde el 29-jul-2026.)
+# 🔑 La PK lleva `fecha_foto`: es lo que convierte la foto en fotograma. Sin ella
+#    cada carga pisaría a la anterior y esto no sería una película.
+# ---------------------------------------------------------------------------
+HIST_PK = ('sku', 'fecha_foto')
+HIST_COLS = ['sku', 'fecha_foto'] + [c for _, c, _ in TIPADAS if c != 'sku'] + ['fichero']
 
 # Las numéricas que NO pueden faltar: son el inventario. Un hueco aquí no es un
 # 0, es un informe que dejó de decir lo que decía → ABORTA (Guarda 6).
@@ -460,6 +474,25 @@ def sql_crear_tabla():
     """
 
 
+def sql_crear_tabla_historico():
+    """DDL idempotente del histórico. La RLS y los índices los pone la MIGRACIÓN
+    (2026-08-23_inventario_fba_historico.sql): un `ENABLE RLS` en cada carga es un
+    AccessExclusiveLock en cada carga, y ése fue el lock que tumbó la base el
+    28-jul. Aquí solo el `IF NOT EXISTS`, que es barato."""
+    tipos = {c: TIPO_SQL[t] for _, c, t in TIPADAS}
+    tipos['fecha_foto'] = 'date'
+    tipos['fichero'] = 'text'
+    cols = ",\n        ".join(
+        f"{c} {tipos[c]}" + (' NOT NULL' if c in HIST_PK else '') for c in HIST_COLS)
+    return f"""
+    CREATE TABLE IF NOT EXISTS {TABLA_HIST} (
+        {cols},
+        capturado_en timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (sku, fecha_foto)
+    );
+    """
+
+
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
@@ -608,6 +641,69 @@ def main():
     execute_values(cur, sql_upsert, vals, template=f"({ph})", page_size=500)
 
     altas = sum(1 for f in filas if (f['registro']['sku'],) not in prev)
+
+    # --- HISTÓRICO: apilar esta foto (cajón PELÍCULA) ---
+    # 🔴 POR QUÉ EXISTE: la tabla de arriba es FOTO y tira la hoja vieja en cada
+    #    carga. Sin esto, la lectura de hoy desaparece mañana y no hay de dónde
+    #    sacarla — ni tendencias, ni «qué cambió desde ayer», ni la serie de
+    #    `inbound_shipped`, que es lo único que dice CUÁNDO salió y CUÁNDO llegó un
+    #    envío. Una cifra que se mueve sin serie no cuenta una historia.
+    # 🔒 Se APILA, jamás se borra: aquí no hay barrido. La misma pareja que
+    #    inventario_internacional / inventario_internacional_historico.
+    # 🔴 SIN `crudo`, y es decisión: el .txt entero se conserva en
+    #    informes/inventario_fba/ (por eso esos ficheros NO SE BORRAN NUNCA), así
+    #    que la despensa común del histórico vive en el Storage, no duplicada en
+    #    la base. El rescate va por la columna `fichero`.
+    cur.execute(sql_crear_tabla_historico())
+    cur.execute(f"SELECT relrowsecurity FROM pg_class WHERE oid = 'public.{TABLA_HIST}'::regclass;")
+    if not cur.fetchone()[0]:
+        print(f"\n❌ ABORTA (no se ha escrito nada):\n"
+              f"RLS no está activa en {TABLA_HIST}. La tabla nace CERRADA por migración, "
+              f"no por el procesador. Aplica "
+              f"migraciones/2026-08-23_inventario_fba_historico.sql y relanza.", flush=True)
+        con.rollback(); cur.close(); con.close(); sys.exit(1)
+
+    def _val_hist(f, col):
+        if col == 'fecha_foto': return info['fecha_foto']
+        if col == 'fichero':    return fichero
+        return f['registro'][col]
+
+    # 🔒 Dedup por la clave REAL del histórico (sku, fecha_foto), derivada con el
+    #    MISMO `_val_hist` que escribe los valores: así la clave del dedup nunca se
+    #    separa de la del ON CONFLICT. Hoy la Guarda 5 ya aborta por sku duplicado,
+    #    o sea que esto no debería descartar nada nunca — y si algún día descarta,
+    #    lo GRITA en vez de tragárselo en silencio.
+    dedup = {}
+    for f in filas:
+        dedup[tuple(_val_hist(f, c) for c in HIST_PK)] = f
+    filas_hist = list(dedup.values())
+    if len(filas_hist) != len(filas):
+        print(f"⚠️ {len(filas) - len(filas_hist)} filas duplicadas por {HIST_PK} en "
+              f"{TABLA_HIST}, me quedo con la última. (Ojo: la Guarda 5 debería haber "
+              f"abortado antes por sku duplicado — míralo.)", flush=True)
+
+    ph_h  = ", ".join(['%s'] * len(HIST_COLS))
+    set_h = ", ".join(f"{c}=EXCLUDED.{c}" for c in HIST_COLS if c not in HIST_PK)
+    sql_hist = (f"INSERT INTO {TABLA_HIST} ({', '.join(HIST_COLS)}) VALUES %s "
+                f"ON CONFLICT (sku, fecha_foto) DO UPDATE SET {set_h}, capturado_en=now();")
+    vals_hist = [tuple(_val_hist(f, c) for c in HIST_COLS) for f in filas_hist]
+    execute_values(cur, sql_hist, vals_hist, template=f"({ph_h})", page_size=500)
+
+    cur.execute(f"SELECT count(*) FROM {TABLA_HIST} WHERE fecha_foto=%s;", (info['fecha_foto'],))
+    hist_hoy = cur.fetchone()[0]
+    cur.execute(f"SELECT count(DISTINCT fecha_foto), min(fecha_foto), max(fecha_foto) FROM {TABLA_HIST};")
+    hist_fechas, hist_desde, hist_hasta = cur.fetchone()
+    print(f"\n--- HISTORICO {TABLA_HIST} (cajon PELICULA) ---")
+    print(f"   · filas apiladas de esta foto ({info['fecha_foto']}): {hist_hoy}")
+    print(f"   · fechas acumuladas: {hist_fechas} (de {hist_desde} a {hist_hasta})", flush=True)
+
+    # 🔒 El fotograma de hoy tiene que cuadrar con la foto viva, AL DÍGITO. Si no,
+    #    algo se quedó por el camino y la película empieza a mentir desde el primer
+    #    día — que es cuando menos se nota.
+    if hist_hoy != len(filas):
+        print(f"\n❌ ABORTA: la foto trae {len(filas)} filas y el fotograma de "
+              f"{info['fecha_foto']} tiene {hist_hoy}. No cuadran.", flush=True)
+        con.rollback(); cur.close(); con.close(); sys.exit(1)
 
     # --- La verificación que importa, DENTRO de la transacción ---
     # 🔒 El log dice lo que el procesador cree; esto lee lo que la tabla tiene.

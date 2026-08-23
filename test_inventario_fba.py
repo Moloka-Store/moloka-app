@@ -391,6 +391,54 @@ for aguja in ('moloka_buzones_fase0', 'storage.objects', 'buzones_v2',
     eq('(14) la migracion de la tabla NO toca %s' % aguja, aguja in sql, False)
 
 
+print('\n== 15) EL HISTORICO: PELICULA, no otra foto ==')
+# 🔴 La foto tira la hoja vieja en cada carga. Si el historico se equivocara de
+#    clave —solo (sku), sin fecha_foto— cada carga pisaria la anterior y esto
+#    dejaria de ser una pelicula SIN QUE NADIE SE ENTERE: la tabla existiria, se
+#    llenaria, y solo tendria el ultimo dia. Es el fallo mudo peor de este PR.
+from procesador_inventario_fba import (HIST_COLS, HIST_PK, TABLA_HIST,  # noqa: E402
+                                       sql_crear_tabla_historico)
+
+eq('(15) la PK del historico lleva fecha_foto', HIST_PK, ('sku', 'fecha_foto'))
+eq('(15) … y el DDL tambien', 'PRIMARY KEY (sku, fecha_foto)' in sql_crear_tabla_historico(), True)
+# 🔒 Anclado sobre lo que NO debe aparecer: preguntar «¿esta sku en la PK?» saldria
+#    verde con la clave mal puesta, porque sku esta en las dos versiones.
+eq('(15) … y NO es una PK de solo sku',
+   'PRIMARY KEY (sku)' in sql_crear_tabla_historico(), False)
+eq('(15) el historico NO guarda crudo (vive en el Storage)', 'crudo' in HIST_COLS, False)
+eq('(15) … pero SI el fichero, que es la llave del rescate', 'fichero' in HIST_COLS, True)
+eq('(15) lleva inbound_shipped, que es su razon de ser', 'inbound_shipped' in HIST_COLS, True)
+
+# La migracion del historico y el procesador escriben la MISMA tabla.
+MIG_H = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     'migraciones', '2026-08-23_inventario_fba_historico.sql')
+with open(MIG_H, encoding='utf-8') as fh:
+    sql_h = sin_comentarios(fh.read())
+ini_h = sql_h.lower().index('create table if not exists public.inventario_fba_historico')
+cuerpo_h = sql_h[sql_h.index('(', ini_h) + 1:sql_h.index(');', ini_h)]
+cols_h = set()
+for linea in cuerpo_h.split('\n'):
+    linea = linea.strip()
+    if linea and not linea.lower().startswith('primary key'):
+        cols_h.add(linea.split()[0].strip(','))
+eq('(15) el recorte del CREATE TABLE trae columnas', len(cols_h) > 0, True)
+py_h = set(HIST_COLS) | {'capturado_en'}
+eq('(15) las que el procesador escribe y la tabla no tiene', sorted(py_h - cols_h), [])
+eq('(15) las que la tabla tiene y el procesador no escribe', sorted(cols_h - py_h), [])
+eq('(15) la migracion del historico tampoco toca storage',
+   'storage.objects' in sql_h or 'moloka_buzones_fase0' in sql_h, False)
+# 🔴 Y LA PK DE LA MIGRACION, que es la que manda: el DDL del procesador es
+#    `IF NOT EXISTS`, o sea que sobre una base donde la tabla YA existe no hace
+#    nada y la clave real es la que puso la migracion. Comprobar solo la del
+#    procesador dejaba este agujero — cazado al romperlo a mano el 23-ago-2026:
+#    con la PK de la migracion a `(sku)` el suite seguia VERDE.
+eq('(15) la PK de la MIGRACION lleva fecha_foto',
+   'PRIMARY KEY (sku, fecha_foto)' in cuerpo_h, True)
+eq('(15) … y no es de solo sku', 'PRIMARY KEY (sku)' in cuerpo_h, False)
+# La guarda de la propia migracion tambien tiene que exigirlo, no solo el DDL.
+eq('(15) … y su numero de control lo verifica', "'sku,fecha_foto'" in sql_h, True)
+
+
 print('')
 if fallos:
     print('%d FALLOS: %s' % (len(fallos), ', '.join(fallos)))
