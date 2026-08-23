@@ -1,6 +1,5 @@
 -- ============================================================================
--- inventario_fba — la tabla del informe «Gestión de inventario de Logística de
--- Amazon», y su buzón autorizado.                              23-ago-2026
+-- inventario_fba — LA TABLA, y sólo la tabla.                    23-ago-2026
 -- ----------------------------------------------------------------------------
 -- POR QUÉ. `salud_fba` está roto por parte de Amazon (sirve ficheros truncados y
 --   los para su Guarda 9) y lleva congelado desde el 16-ago. Casi todo lo suyo lo
@@ -8,20 +7,33 @@
 --   (`inbound_shipped`). Sin ese dato la app manda a preparar un envío que ya
 --   salió. Medido el 23-ago-2026 en el fichero real (50632020686.txt): 363
 --   unidades de camino en 17 ASIN, contra las 143 que era lo último que sabía
---   `salud_fba` (`select sum(inbound_shipped) from salud_fba` → 143, snapshot del
---   16-ago).
+--   `salud_fba` (`select sum(inbound_shipped) from salud_fba` → 143 en 9 filas,
+--   snapshot del 16-ago).
 --
--- 🔒 ESTO SÓLO AÑADE. No toca `salud_fba`, ni su procesador, ni ninguna tabla
---   existente, ni ninguna vista. Nadie lee `inventario_fba` todavía, así que no
---   roza la operativa de Elena: la tabla nace vacía y cerrada, y hasta que algo la
---   consulte no cambia ni una pantalla.
+-- 🔴 QUÉ **NO** HACE ESTA MIGRACIÓN, Y POR QUÉ SE SACÓ (decisión de Fernando,
+--    23-ago-2026). La primera versión traía además un `CREATE OR REPLACE` de
+--    `public.moloka_buzones_fase0()` para autorizar la carpeta del buzón. **Se ha
+--    sacado a su propia migración, que se verá aparte y con Fernando delante.**
+--    El motivo, medido: de esa función cuelgan las CUATRO políticas
+--    `buzones_v2_*` de `storage.objects`, y las cuatro la invocan en su expresión
+--    (`(storage.foldername(name))[1] = ANY (moloka_buzones_fase0() || ARRAY['entrada','escaner'])`).
+--    O sea que esa función ES la lista blanca de subida de Elena: si se rompe,
+--    Elena no puede meter informes. Eso no viaja de polizón en la migración de
+--    una tabla que no lee nadie.
+--    ⚠️ CONSECUENCIA, dicha en alto para que no sorprenda: hasta que exista esa
+--    segunda migración, **subir el informe a `informes/inventario_fba/` DESDE LA
+--    APP dará «new row violates row-level security policy»**. La CARGA sí
+--    funciona: el procesador lee el Storage con la clave de servicio, que salta la
+--    RLS. Lo que falta es la puerta de la app, no la del robot.
 --
--- QUÉ HACE, en tres cosas:
+-- QUÉ HACE, entonces:
 --   1) CREA la tabla `inventario_fba`, CERRADA (RLS activa, 0 políticas, y el
---      revoke a cada rol POR SU NOMBRE — ver el bloque de abajo).
---   2) Sus índices.
---   3) AÑADE 'inventario_fba' a `public.moloka_buzones_fase0()`, que es lo que
---      autoriza a subir el informe al buzón desde la app.
+--      revoke a cada rol POR SU NOMBRE — ver abajo).
+--   2) Sus índices y sus comentarios.
+--   3) Comprueba, DENTRO de la transacción, que ha nacido como se quería.
+--   Ni una línea toca `storage`, ni `pg_policy` de otra tabla, ni ninguna función
+--   existente. Si sale mal, se revierte limpia y no hay nada que dependa de ella:
+--   la tabla nace vacía y NADIE la lee todavía.
 --
 -- 🔴 POR QUÉ EL `REVOKE` VA AUNQUE LA TABLA SEA NUEVA, Y NO ES DECORACIÓN.
 --   «Nace cerrado» NO es el estado por defecto en esta base. Medido el 30-jul-2026
@@ -38,75 +50,18 @@
 --   nada sobre producción: staging viene de un dump con `--no-privileges` y sus ACL
 --   son los de Supabase por defecto. La ÚNICA excepción es justo el objeto que crea
 --   la migración que se está ensayando —éste—, porque lleva su `revoke` dentro. Aun
---   así, el ACL se cuenta EN PRODUCCIÓN después de aplicar (bloque de verificación
---   del final).
+--   así, el ACL se cuenta EN PRODUCCIÓN después de aplicar (bloque final).
 --
--- 🔴 `CREATE OR REPLACE` PARA LA FUNCIÓN DEL BUZÓN, JAMÁS `DROP`. Las CUATRO
---   políticas `buzones_v2_*` de `storage.objects` cuelgan de ella: un DROP ... CASCADE
---   se las llevaría por delante. Y la guarda del final compara el recuento de
---   políticas contra el de ANTES (paso 1b), NO contra un 4 fijo: `backup-bd.yml`
---   vuelca con `--schema=public`, así que esas políticas NO están en la copia y
---   `restaurar-staging.yml` no las repone — un `<> 4` daría ROJO en staging por el
---   alcance del backup, no por la migración. El invariante real de un REPLACE es
---   «no se llevó ninguna por delante», y eso es cierto valgan 4 o valga otra cosa.
---
--- ⚠️ EL ENSAYO DE ESTA MIGRACIÓN SÓLO PRUEBA ALGO SI LA TABLA **NO** EXISTE YA EN
---   staging. Es idempotente (IF NOT EXISTS / OR REPLACE), y un ensayo sobre un
---   destino que ya está en el estado final sale verde sin haber medido nada. Mira en
---   qué estado está staging antes de fiarte del verde:
+-- ⚠️ EL ENSAYO DE ESTA MIGRACIÓN SÓLO PRUEBA ALGO SI LA TABLA **NO** EXISTE YA.
+--   Es idempotente (IF NOT EXISTS), y un ensayo sobre un destino que ya está en el
+--   estado final sale verde sin haber medido nada. El testigo, antes de fiarte:
 --       select to_regclass('public.inventario_fba');   -- null = hay algo que probar
+--   Medido el 23-ago-2026: `null` en staging Y en producción.
 --
 -- ESCALERA: restaurar staging → staging ensayo → staging aplicar → verificación SQL
 --   → producción ensayo → producción aplicar → verificación SQL. Con
 --   `aplicar-migracion.yml`.
 -- ============================================================================
-
--- ── 1) GUARDA: la función del buzón tiene que ser la que creemos ────────────
--- Si alguien la cambió por otro camino, PARA antes de sobrescribirla: reemplazar a
--- ciegas una función que no es la que leímos es cómo se pierde trabajo ajeno.
-DO $$
-DECLARE n_carpetas int; es_inmutable boolean; sp text[];
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_proc
-                  WHERE proname = 'moloka_buzones_fase0'
-                    AND pronamespace = 'public'::regnamespace) THEN
-    RAISE EXCEPTION 'ABORTA: public.moloka_buzones_fase0() no existe en esta base. '
-                    'Aquí no se crea de cero: PARA y mira qué base es.';
-  END IF;
-
-  SELECT array_length(public.moloka_buzones_fase0(), 1) INTO n_carpetas;
-  SELECT provolatile = 'i', proconfig INTO es_inmutable, sp
-    FROM pg_proc WHERE proname = 'moloka_buzones_fase0'
-                   AND pronamespace = 'public'::regnamespace;
-
-  IF n_carpetas <> 8 THEN
-    RAISE EXCEPTION 'ABORTA: esperaba 8 carpetas antes del cambio y hay %. La función '
-                    'no es la que se leyó el 23-ago. PARA y compara.', n_carpetas;
-  END IF;
-  IF NOT es_inmutable THEN
-    RAISE EXCEPTION 'ABORTA: la función ya no es IMMUTABLE. PARA: algo la cambió.';
-  END IF;
-  IF sp IS DISTINCT FROM ARRAY['search_path=""'] THEN
-    RAISE EXCEPTION 'ABORTA: el search_path de la función no es el esperado (es %). PARA.', sp;
-  END IF;
-
-  RAISE NOTICE 'Guarda 1 OK: 8 carpetas, IMMUTABLE, search_path a vacío.';
-END $$;
-
--- ── 1b) FOTO DE LAS POLÍTICAS **ANTES** ─────────────────────────────────────
--- Se guarda el RECUENTO PREVIO, no un número fijo (ver la cabecera).
-CREATE TEMP TABLE _control_buzones AS
-SELECT count(*)::int AS n_politicas_antes
-  FROM pg_policy
- WHERE polrelid = 'storage.objects'::regclass
-   AND polname LIKE 'buzones_v2%';
-
-DO $$
-DECLARE n int;
-BEGIN
-  SELECT n_politicas_antes INTO n FROM _control_buzones;
-  RAISE NOTICE 'Políticas buzones_v2_* ANTES del cambio: %', n;
-END $$;
 
 -- ── 2) LA TABLA ─────────────────────────────────────────────────────────────
 -- Cajón FOTO: cada carga tira la hoja vieja (lo que no viene en el fichero se
@@ -209,69 +164,13 @@ COMMENT ON COLUMN public.inventario_fba.crudo IS
   'Las 26 columnas del informe tal cual, aunque hoy sólo se tipen 16. La despensa '
   'común: el sales-rank de keepa llevaba semanas sin mirarse y resultó ser el detector '
   'de ASIN muertos.';
-
--- ── 3) EL BUZÓN: autorizar la carpeta ───────────────────────────────────────
--- Sin esto, subir el informe desde la app da «new row violates row-level security
--- policy» — es el último eslabón de la cadena y el único que se olvidó con
--- custom_analytics el 10-ago. Firma idéntica, para que las cuatro políticas sigan
--- colgando de ella sin enterarse.
-CREATE OR REPLACE FUNCTION public.moloka_buzones_fase0()
- RETURNS text[]
- LANGUAGE sql
- IMMUTABLE
- SET search_path TO ''
-AS $function$
-  select array['salud_fba','internacional','keepa_escaparate',
-               'all_listings','ledger','paneu_aptos','transacciones',
-               'custom_analytics','inventario_fba']
-$function$;
-
--- ── 4) EL NÚMERO DE CONTROL, DENTRO DE LA TRANSACCIÓN ───────────────────────
--- Si algo no cuadra, el RAISE aborta y el cambio entero se deshace. Verificar
+-- ── 3) EL NÚMERO DE CONTROL, DENTRO DE LA TRANSACCIÓN ───────────────────────
+-- Si algo no cuadra, el RAISE aborta y la tabla no llega a existir. Verificar
 -- después de commitear sería enterarse tarde.
 DO $$
 DECLARE
-  n_carpetas int; n_politicas int; n_antes int; es_inmutable boolean; sp text[];
-  faltan text; rls boolean; n_pol_tabla int; n_cols int; n_idx int;
+  rls boolean; n_pol_tabla int; n_cols int; n_idx int;
 BEGIN
-  -- 4a) El buzón
-  SELECT array_length(public.moloka_buzones_fase0(), 1) INTO n_carpetas;
-  IF NOT ('inventario_fba' = any(public.moloka_buzones_fase0())) THEN
-    RAISE EXCEPTION 'ABORTA: tras el REPLACE, inventario_fba sigue sin estar autorizado.';
-  END IF;
-  IF n_carpetas <> 9 THEN
-    RAISE EXCEPTION 'ABORTA: esperaba 9 carpetas y hay %.', n_carpetas;
-  END IF;
-  SELECT string_agg(c, ', ') INTO faltan
-    FROM unnest(ARRAY['salud_fba','internacional','keepa_escaparate','all_listings',
-                      'ledger','paneu_aptos','transacciones','custom_analytics']) AS c
-   WHERE NOT (c = any(public.moloka_buzones_fase0()));
-  IF faltan IS NOT NULL THEN
-    RAISE EXCEPTION 'ABORTA: han desaparecido carpetas que estaban: %', faltan;
-  END IF;
-
-  SELECT provolatile = 'i', proconfig INTO es_inmutable, sp
-    FROM pg_proc WHERE proname = 'moloka_buzones_fase0'
-                   AND pronamespace = 'public'::regnamespace;
-  IF NOT es_inmutable THEN
-    RAISE EXCEPTION 'ABORTA: la función ha dejado de ser IMMUTABLE.';
-  END IF;
-  IF sp IS DISTINCT FROM ARRAY['search_path=""'] THEN
-    RAISE EXCEPTION 'ABORTA: se ha perdido el search_path a vacío (es %).', sp;
-  END IF;
-
-  -- 🔴 Lo que un DROP se habría llevado: las políticas. Contra el recuento PREVIO,
-  --    no contra un 4 fijo (ver la cabecera).
-  SELECT count(*) INTO n_politicas
-    FROM pg_policy WHERE polrelid = 'storage.objects'::regclass
-                     AND polname LIKE 'buzones_v2%';
-  SELECT n_politicas_antes INTO n_antes FROM _control_buzones;
-  IF n_politicas <> n_antes THEN
-    RAISE EXCEPTION 'ABORTA: había % políticas buzones_v2_* antes y ahora hay %. El '
-                    'CREATE OR REPLACE se ha llevado alguna por delante — eso sólo pasa '
-                    'con un DROP. PARA y mira qué se ha ejecutado.', n_antes, n_politicas;
-  END IF;
-
   -- 4b) La tabla, y que nace CERRADA
   SELECT relrowsecurity INTO rls
     FROM pg_class WHERE oid = 'public.inventario_fba'::regclass;
@@ -311,19 +210,20 @@ BEGIN
 
   SELECT count(*) INTO n_idx FROM pg_indexes
    WHERE schemaname = 'public' AND tablename = 'inventario_fba';
-  RAISE NOTICE 'Número de control OK: 9 carpetas (inventario_fba dentro), las % '
-               'políticas buzones_v2_* siguen en pie, y la tabla nace CERRADA '
-               '(RLS on, 0 políticas, anon y authenticated sin SELECT) con sus 20 '
-               'columnas y % índices.', n_politicas, n_idx;
+  RAISE NOTICE 'Número de control OK: inventario_fba nace CERRADA (RLS on, 0 '
+               'políticas, anon y authenticated sin SELECT) con sus 20 columnas y '
+               '% índices.', n_idx;
 END $$;
-
 -- ============================================================================
 -- VERIFICACIÓN POSTERIOR (por SQL, aparte del job — el log no es la verificación):
 --
---   -- el buzón
---   select 'inventario_fba' = any(public.moloka_buzones_fase0()) as autorizado,
---          array_length(public.moloka_buzones_fase0(), 1)        as n_carpetas;
---   -- → true · 9
+--   -- ¿existe y con qué forma?
+--   select to_regclass('public.inventario_fba')                  as tabla,
+--          (select count(*) from information_schema.columns
+--            where table_schema='public' and table_name='inventario_fba') as n_columnas,
+--          (select count(*) from pg_indexes
+--            where schemaname='public' and tablename='inventario_fba')    as n_indices;
+--   -- → inventario_fba · 20 · 3   (2 índices propios + el de la PK)
 --
 --   -- 🔴 EL ACL SE CUENTA EN PRODUCCIÓN, NO EN EL ENSAYO (ver la cabecera)
 --   select relrowsecurity                                        as rls_activa,
@@ -334,6 +234,16 @@ END $$;
 --          has_table_privilege('authenticated','public.inventario_fba','SELECT') as auth_lee
 --     from pg_class where oid = 'public.inventario_fba'::regclass;
 --   -- → true · 0 · (sin anon ni authenticated) · false · false
+--
+--   -- 🔒 Y LO QUE ESTA MIGRACIÓN **NO** DEBE HABER TOCADO. Se cuenta a propósito:
+--   --    el buzón se sacó a otra migración, así que aquí todo esto tiene que salir
+--   --    EXACTAMENTE igual que antes de aplicar.
+--   select array_length(public.moloka_buzones_fase0(),1)          as n_carpetas,
+--          'inventario_fba' = any(public.moloka_buzones_fase0())  as buzon_autorizado,
+--          (select count(*) from pg_policy
+--            where polrelid='storage.objects'::regclass
+--              and polname like 'buzones_v2%')                    as politicas_buzon;
+--   -- → 8 · false · 4     (los MISMOS de antes: esta migración no toca el buzón)
 --
 --   -- y cuando el procesador haya cargado, LO QUE IMPORTA:
 --   select count(*)                                        as filas,

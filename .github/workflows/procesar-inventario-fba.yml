@@ -9,8 +9,20 @@ name: Moloka - Procesar INVENTARIO_FBA
 #            producción ensayo → producción aplicar → verificación SQL.
 #
 # ⚠️ ANTES DEL PRIMER ENSAYO hay que aplicar migraciones/2026-08-23_inventario_fba.sql
-#    (crea la tabla CERRADA y autoriza la carpeta del buzón). El procesador NO activa
+#    (crea la tabla CERRADA). El procesador NO activa
 #    la RLS —era un lock exclusivo en cada carga— y aborta pidiéndola si no está.
+#
+# 🔴 Y LO QUE **NO** ESTÁ HECHO TODAVÍA, para que no sorprenda al lanzarlo: la
+#    carpeta `informes/inventario_fba/` NO está autorizada en
+#    `moloka_buzones_fase0()`. Eso se sacó a su propia migración (23-ago-2026,
+#    decisión de Fernando: de esa función cuelgan las cuatro políticas
+#    `buzones_v2_*` de storage.objects — la lista blanca de subida de Elena — y eso
+#    se ve aparte, no de polizón).
+#    CONSECUENCIA PRÁCTICA: subir el informe al buzón DESDE LA APP dará «new row
+#    violates row-level security policy» hasta que esa segunda migración esté
+#    aplicada. Esta cañería sí funciona igual — lee el Storage con la clave de
+#    servicio, que salta la RLS —, así que mientras tanto el fichero entra por el
+#    conector de Supabase.
 on:
   workflow_dispatch:
     inputs:

@@ -375,21 +375,20 @@ eq('(14) las que la tabla tiene y el procesador no escribe', sorted(cols_sql - c
 # La PK tambien: si la migracion la pusiera en otra columna, el ON CONFLICT (sku)
 # del procesador reventaria en la carga.
 eq('(14) la PK de la migracion es sku', 'PRIMARY KEY (sku)' in cuerpo, True)
-# 🔒 Y la carpeta del buzon que el procesador va a leer tiene que estar autorizada
-#    en la funcion que la migracion deja escrita. Es el eslabon que se olvido con
-#    custom_analytics el 10-ago: buzon creado, procesador hecho, y la subida
-#    bloqueada por RLS.
-# ⚠️ Y aqui el mismo vicio otra vez, cazado al romperlo a mano: mirar el nombre de
-#    la carpeta desde la funcion hasta el final del fichero SALIA VERDE con la
-#    carpeta quitada del array, porque el bloque de verificacion de mas abajo la
-#    menciona (`'inventario_fba' = any(...)`). Se recorta el CUERPO de la funcion —
-#    lo que hay entre los dos $function$ — y se mira SOLO dentro de el.
-from procesador_inventario_fba import CARPETA  # noqa: E402
-_f = sql.index('$function$') + len('$function$')
-cuerpo_fn = sql[_f:sql.index('$function$', _f)]
-eq('(14) el recorte de la funcion del buzon trae carpetas', 'salud_fba' in cuerpo_fn, True)
-eq('(14) la carpeta del buzon esta autorizada en moloka_buzones_fase0()',
-   "'%s'" % CARPETA in cuerpo_fn, True)
+# 🔴 Y LO QUE ESTA MIGRACION NO PUEDE TOCAR, QUE ES LA MITAD QUE IMPORTA AHORA.
+#    El 23-ago-2026 Fernando mando SACAR de aqui el `CREATE OR REPLACE` de
+#    `moloka_buzones_fase0()`: de esa funcion cuelgan las CUATRO politicas
+#    buzones_v2_* de storage.objects, o sea que ES la lista blanca de subida de
+#    Elena. Si se rompe, Elena no puede meter informes. Eso se ve aparte y con el
+#    delante, no de polizon en la migracion de una tabla que no lee nadie.
+#    Este assert es lo que impide que vuelva a colarse sin querer.
+# ⚠️ Se mira sobre el CODIGO (sin comentarios): la cabecera EXPLICA por que se saco
+#    y nombra la funcion y las politicas. Un grep sobre el fichero crudo daria rojo
+#    por la explicacion — que es justo el vicio de «lo que se lee como texto no
+#    distingue codigo de comentario».
+for aguja in ('moloka_buzones_fase0', 'storage.objects', 'buzones_v2',
+              'CREATE OR REPLACE FUNCTION'):
+    eq('(14) la migracion de la tabla NO toca %s' % aguja, aguja in sql, False)
 
 
 print('')
