@@ -69,6 +69,25 @@ FICHERO      = os.environ.get('FICHERO', '').strip()
 BUCKET, CARPETA = 'informes', 'salud_fba'
 
 # ---------------------------------------------------------------------------
+# 🔴 LA TABLA YA NO SE LLAMA `salud_fba` (23-ago-2026)
+# ---------------------------------------------------------------------------
+# Amazon lleva sirviendo este informe roto desde el 16-ago (filas truncadas y
+# columnas de ventas vacías), y con la tabla congelada la app daba por PARADAS
+# 174 referencias que sí vendían. La solución no fue tocar la app: `salud_fba`
+# pasó a ser una VISTA alimentada por fuentes vivas (`inventario_fba` para el
+# stock, `v_ventas_ventanas` para las ventas), y LO QUE DICE AMAZON vive ahora
+# en `salud_fba_amazon`. Ver migraciones/2026-08-23_salud_fba_pasa_a_vista.sql.
+#
+# Este procesador NO cambia en nada más: sigue cargando exactamente lo mismo,
+# con las mismas guardas, sólo que en la tabla de al lado. El día que Amazon
+# arregle el informe, esta tabla volverá a traer ventas y entonces se decide si
+# se deshace la vista (hay vuelta atrás escrita y probada).
+#
+# 🔒 El BUZÓN sigue siendo `informes/salud_fba/`: lo que cambió es el destino en
+#    la base, no de dónde baja el fichero.
+TABLA = 'salud_fba_amazon'
+
+# ---------------------------------------------------------------------------
 # Columnas OBLIGATORIAS: si falta el encabezado de alguna → ABORTA (Guarda 1).
 # (Amazon renombra columnas: mejor parar que adivinar.) Nombre humano tal cual
 # aparece en el informe; la comprobación es tolerante a mayúsculas/espacios.
@@ -420,7 +439,7 @@ def analizar(texto, fichero):
 def sql_crear_tabla():
     cols = ",\n    ".join(f"{c} {TIPO_SQL[t]}" for c, t in TIPADAS)
     return f"""
-    CREATE TABLE IF NOT EXISTS salud_fba (
+    CREATE TABLE IF NOT EXISTS {TABLA} (
         {cols},
         snapshot_date  date,
         fichero        text,
@@ -618,11 +637,11 @@ def main():
 
     # Guarda 9: anti-encogimiento. Corre ANTES de borrar y ANTES de escribir.
     try:
-        previas = guarda_anti_encogimiento(cur, 'salud_fba', len(filas),
+        previas = guarda_anti_encogimiento(cur, TABLA, len(filas),
                                            ambito=AMBITO, etiqueta='9')
         # Guarda 10: no-retroceder. Una foto más vieja que la que ya hay no se
         # carga (informe caducado = información FALSA). PERMITIR_RETROCESO=1 la salta.
-        guarda_no_retroceder(cur, 'salud_fba', 'snapshot_date', snap, ambito=AMBITO)
+        guarda_no_retroceder(cur, TABLA, 'snapshot_date', snap, ambito=AMBITO)
         # Guarda 11: las columnas de VENTAS no pueden venir vacías de golpe. Va aquí,
         # con las demás: antes de borrar y antes de escribir.
         contraste_ventas = guarda_columnas_ventas(cur, filas, AMBITO[1])
@@ -636,7 +655,7 @@ def main():
     print(f"\n--- Columnas de ventas (Guarda 11) ---\n   {contraste_ventas}", flush=True)
 
     # Claves que ya estaban (solo para contar altas). Antes del barrido.
-    prev = claves_previas(cur, 'salud_fba', ['asin', 'marketplace', 'sku'], ambito=AMBITO)
+    prev = claves_previas(cur, TABLA, ['asin', 'marketplace', 'sku'], ambito=AMBITO)
 
     # --- Cruce en memoria contra `productos` (para los avisos §4.2 y el premio §5) ---
     cur.execute("SELECT btrim(asin), btrim(sku) FROM productos WHERE activo AND asin IS NOT NULL;")
@@ -678,10 +697,10 @@ def main():
     # AccessExclusiveLock sobre salud_fba (relation 20505 en el log del 29-jul) EN
     # CADA carga. Viven en migraciones/2026-07-29_rls_indices_fuera_del_arranque.sql.
     # Solo se comprueba que la tabla está CERRADA (RLS activa); si no, ABORTA.
-    cur.execute("SELECT relrowsecurity FROM pg_class WHERE oid = 'public.salud_fba'::regclass;")
+    cur.execute("SELECT relrowsecurity FROM pg_class WHERE oid = %s::regclass;", (f'public.{TABLA}',))
     if not cur.fetchone()[0]:
         raise Aborta(
-            "RLS no está activa en salud_fba. Ya NO la activa el procesador (era un lock exclusivo "
+            f"RLS no está activa en {TABLA}. Ya NO la activa el procesador (era un lock exclusivo "
             "en cada carga). Aplica migraciones/2026-07-29_rls_indices_fuera_del_arranque.sql y relanza.")
     # La vista v_salud_fba_cruce YA NO se recrea aquí (recrearla en cada carga pedía lock
     # exclusivo sobre media base y tumbó la app el 28-jul 15:47). Su definición vive en
@@ -695,7 +714,7 @@ def main():
     cols = [c for c, _ in TIPADAS] + ['snapshot_date', 'fichero', 'crudo']
     ph = ", ".join(['%s'] * len(cols))
     set_upd = ", ".join(f"{c}=EXCLUDED.{c}" for c in cols if c not in ('asin', 'marketplace', 'sku'))
-    sql_upsert = (f"INSERT INTO salud_fba ({', '.join(cols)}) VALUES %s "
+    sql_upsert = (f"INSERT INTO {TABLA} ({', '.join(cols)}) VALUES %s "
                   f"ON CONFLICT (asin, marketplace, sku) DO UPDATE SET {set_upd}, procesado_en=now();")
 
     # 🔒 LA FOTO TIRA LA HOJA VIEJA: los (asin, marketplace) del ámbito que ya no
@@ -754,7 +773,7 @@ def main():
     cur.execute(
         "SELECT asin, marketplace, sku, product_name, "
         "       COALESCE(available,0)+COALESCE(fc_transfer,0), units_shipped_t30, snapshot_date "
-        "FROM salud_fba WHERE marketplace = ANY(%s);", (AMBITO[1],))
+        f"FROM {TABLA} WHERE marketplace = ANY(%s);", (AMBITO[1],))
     protegidas, bajas = [], []
     for asin_p, mk_p, sku_p, nombre_p, disp_p, t30_p, snap_p in cur.fetchall():
         if (asin_p.upper(), mk_p.upper(), sku_p.upper()) in en_fichero:
@@ -807,7 +826,7 @@ def main():
     # ────────────────────────────────────────────────────────────────────────
 
     try:
-        borradas = barrer_sobrantes(cur, 'salud_fba', ['asin', 'marketplace', 'sku'],
+        borradas = barrer_sobrantes(cur, TABLA, ['asin', 'marketplace', 'sku'],
                                     claves_barrido, ambito=AMBITO)
     except Aborta as e:
         print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
@@ -871,19 +890,19 @@ def main():
     # ────────────────────────────────────────────────────────────────────────
 
     # --- Resumen (se imprime siempre) ---
-    print(resumen_foto('salud_fba', AMBITO, previas, len(filas),
+    print(resumen_foto(TABLA, AMBITO, previas, len(filas),
                        len(altas), borradas, MODO), flush=True)
 
     # --- Cuadre de la foto (el log no puede mentir) ---
     # `len(filas)` es lo que trae el FICHERO; la tabla tiene además las filas que
     # la salvaguarda protegió (ausentes del informe pero con stock). Se imprime el
     # count REAL para que las dos cifras no se confundan nunca más.
-    cur.execute("SELECT count(*) FROM salud_fba WHERE marketplace = ANY(%s);",
+    cur.execute(f"SELECT count(*) FROM {TABLA} WHERE marketplace = ANY(%s);",
                 (AMBITO[1],))
     en_tabla = cur.fetchone()[0]
     # De las protegidas, las que llevan >3 días sin aparecer en ningún informe:
     # su snapshot_date se quedó atrás porque no se refrescan. Son las "rancias".
-    cur.execute("SELECT count(*) FROM salud_fba WHERE marketplace = ANY(%s) "
+    cur.execute(f"SELECT count(*) FROM {TABLA} WHERE marketplace = ANY(%s) "
                 "AND snapshot_date < %s - INTERVAL '3 days';", (AMBITO[1], snap))
     rancias = cur.fetchone()[0]
 
@@ -919,7 +938,7 @@ def main():
     # --- Escritura (o no) ---
     if MODO == 'aplicar':
         con.commit()
-        print(f"\n✅ APLICADO en {ENTORNO}: salud_fba queda con {en_tabla} filas "
+        print(f"\n✅ APLICADO en {ENTORNO}: {TABLA} queda con {en_tabla} filas "
               f"({len(filas)} del informe + {len(protegidas)} protegidas) "
               f"(tabla y vista listas, RLS activo sin políticas).")
         print(f"   · salud_fba_historico: {h_filas} filas en {h_dias} día(s) "
