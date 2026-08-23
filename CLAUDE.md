@@ -106,6 +106,13 @@ el histórico y no hay de dónde recuperarlo.
   - **INTERNACIONAL → sin BOM** (medido en el PR #2; hoy solo vive como comentario en
     `procesador_paneu_aptos.py`). **LEDGER → no consta.** Ninguno de los dos tiene procesador en
     este repo todavía: cuando lo tengan, se mide, no se hereda de aquí.
+  - **INVENTARIO_FBA → sin BOM y en CRLF** (medido el 23-ago-2026 sobre `50632020686.txt`: los
+    seis primeros bytes son `b'sku\tfn'`). Se decodifica con `utf-8-sig` igualmente —decodifica
+    bien con BOM y sin él— y `cp1252` de reserva. Los CRLF los resuelve el propio `csv`.
+    🔬 Y de paso, el aviso que deja: **el PESO tampoco se hereda ni se conjetura.** El encargo daba
+    "97-107 KB" como fichero sano y el real pesa **68.365 bytes**; un umbral por bytes copiado de
+    ahí habría RECHAZADO el fichero bueno. El peso de un TSV lo mandan los títulos de producto, que
+    cambian solos. Se cuentan FILAS, que es lo que se quiere medir.
 - **El LEDGER se descarga SIEMPRE en `.txt`.** El `.csv` se come los ceros a la izquierda de
   MSKU/ASIN/FNSKU. Lo avisa el propio Seller.
 - 🔴 **CUSTOM ANALYTICS se exporta SIEMPRE con el periodo «Desde el inicio de año».** Es el
