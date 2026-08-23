@@ -155,6 +155,13 @@ SELECT
     coalesce(d.devoluciones_30d, 0)                AS devoluciones_30d,
     a.hasta_ledger                                 AS ventana_hasta_ledger,
     a.hasta_trans                                  AS ventana_hasta_marketplace,
+    -- ⚠️ MIDE CONTRA EL ÚLTIMO DÍA CARGADO, NO CONTRA EL ÚLTIMO DÍA USADO. Desde
+    --    hoy los datos de las ventanas acaban en `hasta_ledger - 1`, así que esta
+    --    columna diría «0 días» sobre cifras de ayer. NO se cambia porque su
+    --    pregunta es otra —«¿cuánto lleva sin cargarse el ledger?»— y esa sigue
+    --    contestándose contra el último día cargado. Se deja dicho aquí y en el
+    --    COMMENT porque hoy no la lee nadie (`salud_fba`, su único dependiente, no
+    --    la expone) y el día que alguien la pinte se va a creer el 0.
     CURRENT_DATE - a.hasta_ledger                  AS dias_desde_ultimo_dato
 FROM salidas s
 FULL JOIN mercado m  ON m.asin = s.asin
@@ -181,6 +188,11 @@ COMMENT ON COLUMN public.v_ventas_ventanas.ventana_hasta_ledger IS
   'Ultimo dia CARGADO del ledger. OJO: desde el 24-ago-2026 NO es el ultimo dia de la ventana — '
   'las ventanas del ledger acaban el dia ANTERIOR a este, porque este llega truncado. Para saber '
   'hasta cuando cuentan de verdad: ventana_hasta_ledger - 1.';
+
+COMMENT ON COLUMN public.v_ventas_ventanas.dias_desde_ultimo_dato IS
+  'Dias desde el ultimo dia CARGADO del ledger: contesta «cuanto lleva sin cargarse», no «que '
+  'antiguedad tienen las cifras». OJO si algun dia se pinta: desde el 24-ago-2026 las ventanas '
+  'acaban en ventana_hasta_ledger - 1, asi que un 0 aqui significa cifras de AYER, no de hoy.';
 
 COMMENT ON COLUMN public.v_ventas_ventanas.ventana_hasta_marketplace IS
   'Ultimo dia cargado de transacciones, y SI es el ultimo dia de las ventanas de marketplace: esa '
