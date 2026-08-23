@@ -278,11 +278,69 @@ jobs:
           ENTORNO: ${{ inputs.entorno }}
           MODO: ${{ inputs.modo }}
         run: |
+          # 🔴 `set -euo pipefail` NO ES ADORNO: SIN EL, ESTE PASO PUEDE HASHEAR LA NADA.
+          #   Sin `-e`, un comando que falla no para el paso; sin `-o pipefail`, en una
+          #   tuberia solo cuenta el ULTIMO comando. Y `sha256sum` de cero bytes NO da
+          #   error: da `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`,
+          #   que es una huella perfectamente valida de NADA.
+          #   🔬 Medido el 23-ago-2026, con el fichero AUSENTE:
+          #       $ git show origin/main:migraciones/no_existe.sql | sha256sum
+          #       fatal: path ... exists on disk, but not in 'origin/main'   <- por STDERR
+          #       e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+          #   El `fatal:` se va por stderr y el hash por stdout: quien capture solo stdout
+          #   -- un script, una comparacion automatica, un copiar y pegar -- se lleva un
+          #   VERDE DE REGALO sobre un fichero que no existe. Es el caso 4 de §3 del
+          #   CLAUDE.md (validar la nada siempre sale bien), el mismo del `bash -n` sobre
+          #   un fichero de 0 bytes.
+          set -euo pipefail
+
           RUTA="migraciones/$FICHERO"
-          SHA=$(sha256sum "$RUTA" | cut -d' ' -f1)
           COMMIT=$(git rev-parse HEAD)
-          BYTES=$(wc -c < "$RUTA")
-          LINEAS=$(wc -l < "$RUTA")
+
+          # 🔒 LA HUELLA SALE DEL BLOB DEL REPO, VOLCADO A UN FICHERO, NO DE UNA TUBERIA.
+          #   Asi se calcula con EXACTAMENTE el mismo comando que se documenta abajo para
+          #   contrastarla -- una sola implementacion de la regla, no dos que hoy
+          #   coinciden -- y ademas queda un fichero al que se le puede preguntar si
+          #   tiene algo dentro. Con `set -e`, si `git show` falla, el paso muere aqui.
+          git show "$COMMIT:$RUTA" > _huella.sql
+
+          # Guarda 8a: EL FICHERO NO PUEDE ESTAR VACIO.
+          if [ ! -s _huella.sql ]; then
+            echo "::error::migraciones/$FICHERO existe pero esta VACIO en el commit $COMMIT."
+            echo "::error::Su sha256 seria el del vacio (e3b0c442...), una huella valida de NADA,"
+            echo "::error::y psql aplicaria cero sentencias saliendo VERDE. Un fallo mudo."
+            exit 1
+          fi
+
+          # Guarda 8b: el blob y el fichero que psql va a aplicar TIENEN QUE SER EL MISMO.
+          #   Si no, la huella describiria una cosa y se aplicaria otra -- y entonces el
+          #   rastro de Actions dice que corriste algo, no QUE corriste.
+          if ! cmp -s _huella.sql "$RUTA"; then
+            echo "::error::El fichero del checkout y el blob del repo NO coinciden para"
+            echo "::error::migraciones/$FICHERO. Algo (un filtro de git, un .gitattributes)"
+            echo "::error::los ha separado: la huella dejaria de describir lo que se aplica."
+            exit 1
+          fi
+
+          # Guarda 8c: tiene que haber SQL, no solo comentarios y lineas en blanco.
+          #   Un .sql de puros comentarios pasa la 8a (no esta vacio) y aplica CERO
+          #   sentencias: el mismo verde mudo por otra puerta.
+          # ⚠️ Y HAY DOS CLASES DE COMENTARIO, no una. La primera version de esta
+          #   guarda solo entendia los de linea (`--`), asi que un fichero con un
+          #   unico bloque `/* ... */` y nada mas LA PASABA. Es el mismo vicio que
+          #   persigue: mirar solo la mitad del problema y creerse el verde. Se
+          #   quitan los bloques ANTES de contar, con el mismo criterio que
+          #   `sin_comentarios()` de scripts/censo_migraciones.py.
+          sed -E ':a;N;$!ba;s@/\*([^*]|\*[^/])*\*/@@g' _huella.sql > _huella_sin_com.sql
+          if ! grep -qvE '^[[:space:]]*(--.*)?$' _huella_sin_com.sql; then
+            echo "::error::migraciones/$FICHERO no tiene ni una sentencia: solo comentarios"
+            echo "::error::y lineas en blanco. Aplicarlo saldria VERDE sin hacer nada."
+            exit 1
+          fi
+
+          SHA=$(sha256sum _huella.sql | cut -d' ' -f1)
+          BYTES=$(wc -c < _huella.sql)
+          LINEAS=$(wc -l < _huella.sql)
           echo "================ QUE SE VA A APLICAR ================"
           echo "  fichero : migraciones/$FICHERO"
           echo "  sha256  : $SHA"
@@ -304,7 +362,10 @@ jobs:
           #   `git show` devuelve el BLOB tal cual esta en el repo, que es exactamente
           #   lo que baja el runner, asi que no depende del checkout de nadie.
           echo "Para contrastar contra main (independiente de CRLF/LF y del checkout):"
-          echo "    git show origin/main:migraciones/$FICHERO | sha256sum"
+          echo "    git show origin/main:migraciones/$FICHERO > /tmp/h.sql && test -s /tmp/h.sql && sha256sum /tmp/h.sql"
+          echo "  🔴 NO con 'git show ... | sha256sum' a secas: si el fichero no esta, git"
+          echo "     escribe el error por STDERR y sha256sum hashea CERO BYTES, devolviendo"
+          echo "     e3b0c442... -- una huella valida de la nada. El 'test -s' lo caza"
           echo "  NO uses 'sha256sum migraciones/$FICHERO' a secas: en Windows tu copia"
           echo "  de trabajo lleva CRLF y no cuadrara aunque el contenido sea el mismo."
           {

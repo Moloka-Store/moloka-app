@@ -3,3 +3,12 @@ __pycache__/
 # Claude Code: copias aisladas de cada sesión ("árbol de trabajo" / worktree).
 # Viven aquí dentro y NO deben subirse al repo.
 .claude/worktrees/
+
+# Ficheros de trabajo que `aplicar-migracion.yml` escribe MIENTRAS corre. Nacen en
+# el runner y mueren con el, asi que ahi dan igual — pero al probar un paso del
+# workflow en local aparecen dentro del repo y se cuelan en un `git add -A`.
+# Pasó el 23-ago-2026 al probar la guarda del hash del vacio.
+_ensayo.sql
+_psql_error.log
+_huella.sql
+_huella_sin_com.sql
