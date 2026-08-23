@@ -323,9 +323,16 @@ jobs:
           fi
 
           # Guarda 8c: tiene que haber SQL, no solo comentarios y lineas en blanco.
-          #   Un .sql de puros `--` pasa la 8a (no esta vacio) y aplica CERO sentencias:
-          #   el mismo verde mudo por otra puerta.
-          if ! grep -qvE '^[[:space:]]*(--.*)?$' _huella.sql; then
+          #   Un .sql de puros comentarios pasa la 8a (no esta vacio) y aplica CERO
+          #   sentencias: el mismo verde mudo por otra puerta.
+          # ⚠️ Y HAY DOS CLASES DE COMENTARIO, no una. La primera version de esta
+          #   guarda solo entendia los de linea (`--`), asi que un fichero con un
+          #   unico bloque `/* ... */` y nada mas LA PASABA. Es el mismo vicio que
+          #   persigue: mirar solo la mitad del problema y creerse el verde. Se
+          #   quitan los bloques ANTES de contar, con el mismo criterio que
+          #   `sin_comentarios()` de scripts/censo_migraciones.py.
+          sed -E ':a;N;$!ba;s@/\*([^*]|\*[^/])*\*/@@g' _huella.sql > _huella_sin_com.sql
+          if ! grep -qvE '^[[:space:]]*(--.*)?$' _huella_sin_com.sql; then
             echo "::error::migraciones/$FICHERO no tiene ni una sentencia: solo comentarios"
             echo "::error::y lineas en blanco. Aplicarlo saldria VERDE sin hacer nada."
             exit 1
