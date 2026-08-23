@@ -356,8 +356,15 @@ GRANT SELECT ON public.salud_fba TO authenticated;
 REVOKE ALL ON public.salud_fba FROM PUBLIC, anon;
 
 DROP POLICY IF EXISTS inventario_read_authenticated ON public.inventario_fba;
+-- 🔒 `(SELECT auth.uid()) IS NOT NULL`, NO `true`. La primera version ponia
+--    `USING (true)`, que dejaba esta tabla MAS ABIERTA que sus seis hermanas: medido
+--    en pg_policy, salud_fba, ledger_movimientos, transacciones_movimientos,
+--    listings_amazon, keepa_escaparate e inventario_internacional usan todas
+--    `auth.uid() IS NOT NULL`. Y con la subconsulta, que es la forma que usan cinco
+--    de las seis y la que Supabase recomienda por plan (se evalua una vez, no por
+--    fila).
 CREATE POLICY inventario_read_authenticated ON public.inventario_fba
-    FOR SELECT TO authenticated USING (true);
+    FOR SELECT TO authenticated USING ((SELECT auth.uid()) IS NOT NULL);
 GRANT SELECT ON public.inventario_fba TO authenticated;
 REVOKE ALL ON public.inventario_fba FROM PUBLIC, anon;
 
@@ -393,4 +400,79 @@ BEGIN
                  n, f, disp, trans, n_ventas;
     RAISE NOTICE 'v_salud_asin % · v_salud_fba_cruce % · v_incidencias_ultima con stock % · v_keepa_cruce %',
                  n_asin, n_cruce, n_inc, n_keepa;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 6) EL TESTIGO DEL CAMINO COMPLETO: recorrerlo COMO `authenticated`.
+-- ---------------------------------------------------------------------------
+-- 🔴 POR QUE HACE FALTA, y es la leccion que deja este PR: todos los testigos de
+--    arriba hacen `select count(*)` corriendo como `postgres`, que lo puede todo.
+--    Salen VERDES aunque a la app le falte un GRANT en cualquier eslabon, y el
+--    fallo aparece despues, en la cara de Elena. Es una comprobacion que no puede
+--    fallar (§3), esta vez por el ROL.
+--    🔬 No es hipotetico: al probarlo el 23-ago-2026 salto de verdad, con
+--       `permission denied for table inventario_fba` -- el GRANT que faltaba en la
+--       cadena `salud_fba -> v_ventas_ventanas`, que ningun otro testigo veia.
+--
+-- 🔴 ESTE TESTIGO MIRA LA EXCEPCION, JAMAS EL NUMERO, Y ESA ES TODA SU GRACIA:
+--      · un `permission denied` (SQLSTATE 42501) salta ANTES de que la RLS filtre;
+--      · la RLS solo QUITA FILAS, nunca da error.
+--    Asi que un `PERFORM count(*)` bajo el rol distingue las dos cosas sin
+--    confundirlas. 🔬 Y comprobar el numero seria un ROJO GARANTIZADO: al asumir el
+--    rol no hay JWT, `auth.uid()` es NULL, y las politicas de TODA la cadena son
+--    `auth.uid() IS NOT NULL` (medido en pg_policy: salud_fba, ledger_movimientos,
+--    transacciones_movimientos, listings_amazon, keepa_escaparate,
+--    inventario_internacional y, desde este fichero, inventario_fba). Con los
+--    permisos PERFECTOS el count sale 0. Cero filas aqui es lo NORMAL.
+--
+-- ⚠️ Y EL MATIZ QUE LO HACE UTIL EN VEZ DE RUIDOSO. Este testigo no puede contestar
+--    lo mismo en las dos bases:
+--      · Los objetos que ESTAS migraciones conceden (`salud_fba`, `inventario_fba`,
+--        `v_ventas_ventanas`) llevan su GRANT dentro, asi que valen igual en las
+--        dos. Si uno de esos falla, es fallo NUESTRO -> ABORTA.
+--      · Las tablas base tienen su ACL de antes, y `backup-bd.yml` vuelca con
+--        `--no-privileges`: **en staging esos permisos NO son los de produccion**.
+--        Medido el 23-ago-2026: en produccion `authenticated` SI puede leer
+--        `ledger_movimientos`; en staging recien restaurado, NO. Abortar por eso
+--        seria un rojo por el alcance de la copia -> GRITA y manda medirlo EN
+--        PRODUCCION, que es el unico sitio donde el ACL significa algo.
+--    🔑 De ahi la regla, que vale para cualquier migracion: **los permisos no se
+--       ensayan en staging.** Un verde de ACL alli no prueba nada.
+DO $$
+DECLARE
+  msg text; obj text;
+BEGIN
+  -- 🔒 SIN BLOQUE ANIDADO, Y NO ES ESTILO: el cerrojo 4 de `aplicar-migracion.yml`
+  --    bloquea cualquier linea que sea `END;` a solas -- su falso positivo conocido
+  --    y documentado. Un BEGIN ... EXCEPTION ... END; dentro del DO dejaria justo
+  --    esa linea y la migracion no arrancaria. El handler va en el bloque de fuera.
+  SET LOCAL ROLE authenticated;
+  PERFORM count(*) FROM public.salud_fba;
+  RESET ROLE;
+
+  RAISE NOTICE 'Camino completo OK como `authenticated`: se recorre salud_fba entera '
+               '(vista -> inventario_fba -> v_ventas_ventanas -> ledger/transacciones/'
+               'listings -> keepa) sin un solo permiso denegado. NO se mira el numero de '
+               'filas: sin JWT auth.uid() es NULL y la RLS filtra a cero con los permisos '
+               'perfectos.';
+
+EXCEPTION WHEN insufficient_privilege THEN
+  RESET ROLE;   -- garantizado, aunque el subtx del handler ya lo revierte
+  GET STACKED DIAGNOSTICS msg = MESSAGE_TEXT;
+  obj := coalesce(substring(msg from 'permission denied for [a-z]+ ([a-zA-Z0-9_.]+)$'), '');
+
+  IF obj IN ('salud_fba', 'inventario_fba', 'v_ventas_ventanas') THEN
+    RAISE EXCEPTION 'ABORTA: la app (rol authenticated) NO puede recorrer salud_fba: %. Falta '
+                    'un GRANT sobre "%", que es un objeto que ESTAS migraciones crean y '
+                    'conceden -- o sea, fallo nuestro y reproducible en las dos bases. Los '
+                    'testigos de arriba no lo ven porque corren como postgres.', msg, obj;
+  END IF;
+
+  RAISE WARNING 'NO PUEDO CONTESTAR ESTO AQUI, y no es un verde: %', msg;
+  RAISE WARNING '  El objeto "%" NO es de los que estas migraciones conceden: su ACL viene de '
+                'antes, y backup-bd.yml vuelca con --no-privileges, asi que en STAGING los '
+                'permisos no son los de produccion (medido: alli authenticated SI lee '
+                'ledger_movimientos; en staging recien restaurado, NO).', obj;
+  RAISE WARNING '  >> VERIFICA ESTE MISMO TESTIGO EN PRODUCCION DESPUES DE APLICAR. Si alli '
+                'tambien salta, entonces si es un eslabon roto de verdad.';
 END $$;
