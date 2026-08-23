@@ -46,9 +46,38 @@
 -- 🔒 sku → asin por `listings_amazon` (el traductor de SKU, §3.3), quedándose con
 --    el listing más reciente de cada SKU. `salud_fba` NO se usa aquí a propósito:
 --    es justo la tabla que está rota.
--- 🔒 security_invoker: la vista no da más permiso del que ya tiene quien pregunta.
---    Las cinco tablas base tienen `inventario_read_authenticated` (SELECT para
---    authenticated), así que la app entra y anon no.
+-- 🔴 PERMISOS: HAY QUE CONCEDERLOS A MANO, Y NO POR LA RAZON QUE PARECE.
+--    MEDIDO EN PRODUCCION EL 23-ago-2026, no deducido de la doctrina:
+--
+--    1) En `public` hay DOS `pg_default_acl`, y el que aplica depende de QUIEN crea
+--       el objeto:
+--          creado por supabase_admin -> {postgres, anon, authenticated, service_role}
+--          creado por postgres       -> {postgres, service_role}          <- SIN anon
+--       Las migraciones corren como `postgres`, asi que por ESTE camino una vista
+--       nueva NO nace abierta a `anon`. (La regla de §4 del CLAUDE.md sigue siendo
+--       cierta para el otro camino — el editor de Supabase —, que es de donde
+--       venian las vistas que hubo que cerrar en `revoke_anon_9_vistas`.)
+--
+--    2) 🔴 PERO NACE SIN `authenticated`, Y ESO ROMPE LA APP. `salud_fba` es
+--       `security_invoker`: cuando la app pregunta, Postgres comprueba el permiso
+--       sobre CADA objeto de debajo COMO `authenticated` — y esta vista es uno de
+--       ellos. Sin el GRANT, la app se lleva un
+--           permission denied for view v_ventas_ventanas
+--       justo en la pantalla que esto viene a arreglar.
+--       🔬 La prueba de que nace asi: `inventario_fba`, creada el mismo dia por este
+--          mismo workflow, quedo con `{postgres=arwdDxtm, service_role=arwdDxtm}` —
+--          `authenticated` NO estaba.
+--       ⚠️ Y NO LO CAZA NINGUN TESTIGO DE LAS OTRAS MIGRACIONES, porque sus
+--          `SELECT count(*)` corren como `postgres`, que lo puede todo. Es una
+--          comprobacion que no puede fallar: sale verde y la app se cae despues.
+--          Por eso el bloque del final pregunta explicitamente por el rol.
+--
+--    Se revoca a cada rol por su nombre y se concede lo minimo, como sus hermanas.
+--
+-- 🔒 Sobre los datos: `anon` no ve nada de aqui porque las tablas base tienen RLS
+--    con politica solo para `authenticated`. Ojo, es la RLS quien lo para y no el
+--    grant: medido, `listings_amazon` y `transacciones_movimientos` SI tienen
+--    `anon=arwdDxtm` en su ACL; solo `ledger_movimientos` no.
 -- ============================================================================
 
 SET lock_timeout = '5s';
@@ -123,3 +152,42 @@ COMMENT ON VIEW v_ventas_ventanas IS
   'se anclan al ultimo dia CARGADO de cada fuente, nunca a now(): un informe retrasado no debe '
   'rellenar la ventana de dias vacios. Contrastadas las dos fuentes a 30 dias: 162 asin identicos '
   'y 209 dentro de +-2 sobre 212.';
+
+-- ---------------------------------------------------------------------------
+-- PERMISOS. Revocar ANTES de conceder, y a cada rol por su nombre (§4).
+-- ---------------------------------------------------------------------------
+REVOKE ALL ON public.v_ventas_ventanas FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.v_ventas_ventanas TO authenticated;
+
+-- ---------------------------------------------------------------------------
+-- TESTIGOS, dentro de la transaccion. Si esto no cuadra, no se escribe nada.
+-- 🔑 Va aqui y no solo en la migracion siguiente: una migracion que no deja
+--    rastro en el log no se distingue de una que no aplico nada.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE n_30 int; n_7 int; n_total int; f_led date; f_tra date; retraso int;
+BEGIN
+    SELECT count(*) FILTER (WHERE uds_30d > 0), count(*) FILTER (WHERE uds_7d > 0),
+           count(*), max(ventana_hasta_ledger), max(ventana_hasta_marketplace),
+           max(dias_desde_ultimo_dato)
+      INTO n_30, n_7, n_total, f_led, f_tra, retraso
+      FROM public.v_ventas_ventanas;
+
+    IF n_total = 0 THEN
+        RAISE EXCEPTION 'ABORTA: v_ventas_ventanas devuelve 0 filas. Sin entrada no hay nada que medir.';
+    END IF;
+    -- El mismo suelo que exige la migracion siguiente, aqui y no dentro de tres
+    -- pasos: si no llega, la vista no arregla lo que viene a arreglar.
+    IF n_30 < 100 THEN
+        RAISE EXCEPTION 'ABORTA: solo % referencias con venta en 30 dias. Medido el 23-ago-2026: 211. Por debajo de 100 esto no cura la app.', n_30;
+    END IF;
+    IF has_table_privilege('anon', 'public.v_ventas_ventanas', 'SELECT') THEN
+        RAISE EXCEPTION 'ABORTA: `anon` puede leer v_ventas_ventanas. El revoke no ha hecho su trabajo (default privileges de Supabase).';
+    END IF;
+    IF NOT has_table_privilege('authenticated', 'public.v_ventas_ventanas', 'SELECT') THEN
+        RAISE EXCEPTION 'ABORTA: `authenticated` NO puede leer v_ventas_ventanas: la app se quedaria sin ventas.';
+    END IF;
+
+    RAISE NOTICE 'v_ventas_ventanas OK: % filas · % con venta 30d · % con venta 7d · ledger hasta % · marketplace hasta % · % dias de retraso · anon fuera, authenticated dentro',
+                 n_total, n_30, n_7, f_led, f_tra, retraso;
+END $$;
