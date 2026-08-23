@@ -1,0 +1,85 @@
+name: Moloka - Procesar INVENTARIO_FBA
+
+# El informe «Gestión de inventario de Logística de Amazon». Existe por UNA cosa:
+# `inbound_shipped`, las unidades EN TRÁNSITO — el único dato de salud_fba que no
+# cubre ninguna otra tabla, y salud_fba lleva congelado desde el 16-ago.
+#
+# A DEMANDA, sin reloj. Espejo de procesar-internacional.yml. STAGING + ENSAYO por
+# defecto. Escalera: staging ensayo → staging aplicar → verificación SQL →
+#            producción ensayo → producción aplicar → verificación SQL.
+#
+# ⚠️ ANTES DEL PRIMER ENSAYO hay que aplicar migraciones/2026-08-23_inventario_fba.sql
+#    (crea la tabla CERRADA y autoriza la carpeta del buzón). El procesador NO activa
+#    la RLS —era un lock exclusivo en cada carga— y aborta pidiéndola si no está.
+on:
+  workflow_dispatch:
+    inputs:
+      entorno:
+        description: 'Base de datos destino'
+        type: choice
+        options: ['staging', 'produccion']
+        default: 'staging'
+      modo:
+        description: 'ensayo = solo comprueba y dice qué escribiría; aplicar = vuelca inventario_fba'
+        type: choice
+        options: ['ensayo', 'aplicar']
+        default: 'ensayo'
+      # 🔒 Las válvulas, con nombre y por defecto APAGADAS. Que existan aquí, a la
+      #    vista, es parte del trato: una guarda que se salta editando el código se
+      #    salta sin que quede constancia.
+      permitir_umbral_bajo:
+        description: 'Cargar aunque el fichero traiga menos de 150 filas (Guarda 4). Sólo si el catálogo ha encogido DE VERDAD.'
+        type: choice
+        options: ['no', 'si']
+        default: 'no'
+      exigir_inbound:
+        description: 'ABORTAR si el informe no trae NADA en tránsito, en vez de sólo gritarlo (Guarda 7b).'
+        type: choice
+        options: ['no', 'si']
+        default: 'no'
+
+# ⚠️ Las opciones y los defaults van ENTRECOMILLADOS: en YAML un `no` suelto es el
+#    BOOLEANO false, no la cadena "no" (el problema de Noruega: NO = Norway). Medido
+#    el 11-ago-2026 sobre procesar-custom-analytics.yml, donde `options: [no, si]` se
+#    leía `[False, 'si']`.
+
+concurrency:
+  group: procesar-inventario-fba
+  cancel-in-progress: false
+
+jobs:
+  procesar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install --quiet supabase psycopg2-binary
+
+      # 🔒 CÓMO SE LEE UN TSV DE AMAZON, antes del procesador. La comilla es TEXTO y
+      #    una que abra un campo sin cerrar FUSIONA FILAS en silencio.
+      - name: Mesa de pruebas del parseo TSV
+        run: python -u test_tsv_quote_none.py
+
+      # 🔴 LAS GUARDAS DE ESTA CAÑERÍA, VISTAS ROJAS Y VISTAS CALLADAS. En este repo
+      #    nada corre en push ni en PR: un test que no se lanza aquí es decoración.
+      #    Las 12 guardas se rompieron a mano el 23-ago-2026 y las 12 se pusieron
+      #    rojas; el suite también comprueba la mitad que se olvida — que con el
+      #    fichero sano NO dice nada.
+      - name: Mesa de pruebas de las guardas de inventario_fba
+        run: python -u test_inventario_fba.py
+
+      - name: Ejecutar procesador
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          ENTORNO: ${{ inputs.entorno }}
+          MODO: ${{ inputs.modo }}
+          DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
+          PERMITIR_UMBRAL_BAJO: ${{ inputs.permitir_umbral_bajo == 'si' && '1' || '0' }}
+          EXIGIR_INBOUND: ${{ inputs.exigir_inbound == 'si' && '1' || '0' }}
+        run: python -u procesador_inventario_fba.py
