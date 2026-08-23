@@ -2,11 +2,16 @@
 // Moloka - Funcion intermediaria (Vercel) para disparar workflows de GitHub
 // Ruta en la app: POST  https://moloka-app.vercel.app/api/disparar
 //
-// Sirve para DOS workflows (lista blanca):
-//   - actualizar-app.yml  (procesar informes -> refrescar la app)   [por defecto]
-//   - escaner-app.yml     (escanear catalogo de proveedor)
-// La app elige cual con el campo "workflow" del body. Si no lo manda, va el de
-// actualizar (compatibilidad con el boton que ya existia).
+// Sirve para los workflows de la LISTA BLANCA de abajo. La app elige cual con el
+// campo "workflow" del body; si no lo manda, va actualizar-app.yml (compatibilidad
+// con el boton que ya existia). Los inputs del workflow viajan en body.inputs.
+//
+// 🔴 EL SECRETO VIAJA DESDE EL NAVEGADOR en la app v1 (body.secreto). Eso significa
+//    que DISPARO_SECRET esta en el cliente y cualquiera que abra la consola lo ve.
+//    Se aguanta porque la barrera real es la lista blanca (no se puede disparar
+//    cualquier cosa) y la de corrida-en-marcha. Pero cualquier llamada NUEVA —la de
+//    la app v2, por ejemplo— debe hacerse DESDE EL SERVIDOR, no desde el navegador:
+//    asi el secreto no sale de Vercel. No se arregla la v1 aqui para no mezclar.
 //
 // DOS BARRERAS: secreto compartido (DISPARO_SECRET) + no disparar si ese
 // workflow ya tiene una corrida en marcha (acota el gasto de tokens Keepa).
@@ -15,7 +20,19 @@
 // ============================================================
 
 const REPO = 'Moloka-Store/moloka-app';
-const WORKFLOWS_OK = ['actualizar-app.yml', 'escaner-app.yml', 'escaner-pro.yml', 'fabrica-preparar.yml', 'fabrica-generar.yml', 'fabrica-redactar.yml', 'fabrica-rehacer.yml', 'web-rebuild.yml', 'web-rank.yml', 'fabrica-lote.yml', 'actualizar-tcg.yml', 'miravia-excel.yml', 'miravia-resultado.yml', 'sync-stock-web.yml', 'tracker-app.yml', 'tracker-cerebro.yml'];   // lista blanca
+const WORKFLOWS_OK = ['actualizar-app.yml', 'escaner-app.yml', 'escaner-pro.yml', 'fabrica-preparar.yml', 'fabrica-generar.yml', 'fabrica-redactar.yml', 'fabrica-rehacer.yml', 'web-rebuild.yml', 'web-rank.yml', 'fabrica-lote.yml', 'actualizar-tcg.yml', 'miravia-excel.yml', 'miravia-resultado.yml', 'sync-stock-web.yml', 'tracker-app.yml', 'tracker-cerebro.yml',
+  // 23-ago-2026 · EL BUZON DE INVENTARIO_FBA. Es el primer informe de la Fase 0 que
+  // se puede cargar DESDE la app, y nace por lo del 16-ago: Amazon rompio el informe
+  // de salud, la tabla se quedo congelada siete dias y nadie tenia un boton para
+  // meter el sustituto. El fichero de hoy lo subio una persona a mano al Storage.
+  // 🔒 Este workflow escribe en PRODUCCION cuando se le pasa {entorno:'produccion',
+  //    modo:'aplicar'}, igual que actualizar-app.yml lleva haciendo meses. Lo que lo
+  //    hace seguro NO es la escalera —esa es para migraciones y para estrenar un
+  //    procesador, y este la paso entera el 23-ago— sino sus guardas: cabecera exacta,
+  //    filas dentadas, umbral de filas, PK duplicada, anti-cero, anti-encogimiento,
+  //    anti-retroceso de fecha y el desplome del disponible. Un informe roto como los
+  //    de salud_fba aborta solo y no escribe nada.
+  'procesar-inventario-fba.yml'];   // lista blanca
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
