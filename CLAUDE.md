@@ -716,6 +716,22 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   alarma diaria cuya única acción posible es siempre la misma —restaurar staging— se deja de leer en
   dos semanas. Es el `ON_ERROR_STOP=0` por el otro extremo. Restaurando antes de cada ensayo, staging
   nunca es más viejo que el backup de anoche y no queda deriva que vigilar.
+  ⚠️ **LA ÚNICA EXCEPCIÓN, y viene con su fecha para que no se haga costumbre: el día en que el
+  volcado va POR DETRÁS de lo que se acaba de crear.** El 23-ago-2026, con la migración
+  `2026-08-23_jubilar_salud_fba.sql`, restaurar staging lo habría dejado **PEOR**: el backup de
+  anoche es anterior a `inventario_fba`, así que la tabla no existiría allí y la primera guarda de
+  la migración habría abortado por una causa que no tiene nada que ver con la migración.
+  🔑 **No se desactiva la regla: se esquiva el único día en que el volcado va por detrás de la
+  base.** La regla existe para que staging se PAREZCA a producción, y ese día se parecía —medido
+  desde las dos bases antes de decidir: `inventario_fba` 354 filas y foto del 23-ago,
+  `inventario_fba_historico` 354 y 1 fecha, `salud_fba` con `relkind='v'`, `salud_fba_amazon` 219,
+  `salud_fba_historico` 1.984 filas y 9 fechas, `v_ventas_ventanas` viva, y los 8 buzones—; era
+  restaurar lo que la habría alejado.
+  ⏳ **Y la ventana es de UN día**: el backup de esa noche ya incluye `inventario_fba`, así que a
+  partir del 24-ago el restaurado vuelve a hacer lo que promete y la regla se aplica entera.
+  📌 La forma de saber si vuelve a tocar: **mirar el estado del destino antes de decidir**, no la
+  fecha. Si lo que la migración necesita nació DESPUÉS del último volcado, restaurar borra el
+  suelo sobre el que se iba a ensayar; en cualquier otro caso, se restaura.
 - **Antes de picar: lee cómo se hizo lo anterior.** Hay procesadores en producción que funcionan;
   el siguiente se les tiene que parecer. Si algo se aparta del patrón, dilo y explica por qué.
 - **Las dudas de diseño no se resuelven en caliente.** Se anotan en una línea y se deciden en frío.
