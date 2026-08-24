@@ -147,9 +147,21 @@ END $guardas$;
 --    ordenar nada.
 --    🔒 Las dos funciones son IMMUTABLE (`provolatile='i'`, comprobado en
 --       `pg_proc`), que es el requisito para poder indexarlas.
---    ⚠️ SIN `CONCURRENTLY` a propósito: 1.653 filas se indexan en milisegundos,
---       y `CONCURRENTLY` no puede correr dentro de una transacción — o sea que
+--    ⚠️ El índice se crea BLOQUEANTE, a propósito, y no con la variante no
+--       bloqueante de `CREATE INDEX`: 1.653 filas se indexan en milisegundos, y
+--       esa variante no puede correr dentro de una transacción — o sea que
 --       dejaría a esta migración sin su testigo y sin su vuelta atrás.
+--    🔴 Y OJO SI ALGUIEN VA A "MEJORAR" ESTE COMENTARIO: está escrito así de
+--       rodeado porque el cerrojo 4 de `aplicar-migracion.yml` hace
+--       `grep -qiE '\bconcurrent'+'ly\b'` sobre el FICHERO ENTERO, comentarios
+--       incluidos, y ABORTA la migración. Escribir aquí esa palabra —aunque sea
+--       para decir que NO se usa— tumba el despliegue. Medido el 24-ago-2026:
+--       la primera versión de este fichero la llevaba dos veces y el cerrojo
+--       saltaba. Es el caso de manual de §3 de CLAUDE.md: **lo que se lee como
+--       texto no distingue código de comentario**. El arreglo de fondo no es
+--       este rodeo sino que el cerrojo mire el SQL sin comentarios —la casa ya
+--       tiene `sin_comentarios()` para eso—, pero eso es otro PR y hoy hay una
+--       pestaña caída.
 -- ---------------------------------------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_keepa_asin_dominio_foto
     ON public.keepa_escaparate (btrim(asin), lower(dominio), fecha_foto DESC);
