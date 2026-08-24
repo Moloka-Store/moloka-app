@@ -118,6 +118,10 @@ SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')   # llave de servicio: LEER el
 DB_URL       = os.environ.get('DB_URL', '')         # postgres del ENTORNO (staging o prod)
 MODO         = os.environ.get('MODO', 'ensayo').strip().lower()       # ensayo | aplicar
 ENTORNO      = os.environ.get('ENTORNO', 'staging').strip().lower()   # staging | produccion
+# Nombre EXACTO del .txt del buzón que se quiere procesar. Vacío = el más reciente.
+# Lo manda la app v2 al soltar el fichero (`inputFichero` de su catálogo): procesa ESE,
+# no «el último que haya», que con dos informes en la carpeta es una lotería.
+FICHERO      = os.environ.get('FICHERO', '').strip()
 
 BUCKET, CARPETA = 'informes', 'inventario_fba'
 TABLA = 'inventario_fba'
@@ -494,6 +498,38 @@ def sql_crear_tabla_historico():
 
 
 # ---------------------------------------------------------------------------
+# ¿CUÁL DE LOS FICHEROS DEL BUZÓN?
+# ---------------------------------------------------------------------------
+def elegir_fichero(txts, pedido):
+    """De los .txt del buzón, cuál se procesa. Devuelve (objeto, motivo).
+
+    🔒 Devuelve el OBJETO del Storage, no el nombre: de él sale también la `fecha_foto`
+       (este informe no trae su fecha ni dentro ni en el nombre, así que la fecha del
+       dato es la de subida al buzón). Quien elija el fichero tiene que elegir su fecha
+       con él, o serían dos decisiones que pueden discrepar.
+
+    🔴 SE PIDE A DEDO Y NO ESTÁ → ABORTA, y NO se cae al más reciente. Caer sería la
+       forma silenciosa de cargar una foto distinta de la que se mandó: quien pulsó el
+       botón en la app vería «Procesado» sobre un fichero que no es el suyo, y el
+       inventario de Elena quedaría el de otro día sin que nada lo dijera. Es la misma
+       decisión que ya tomaron keepa y custom_analytics, por el mismo motivo.
+    """
+    recientes = sorted(txts, key=lambda o: (o.get('updated_at') or o.get('created_at') or ''),
+                       reverse=True)
+    if not pedido:
+        return recientes[0], f"el mas reciente de {len(recientes)}"
+    for o in recientes:
+        if (o.get('name') or '') == pedido:
+            return o, "pedido a dedo"
+    nombres = [o.get('name') for o in recientes]
+    raise Aborta(
+        f"[Guarda fichero] Se pidio {pedido!r} y no esta en {BUCKET}/{CARPETA}/.\n"
+        f"   Hay {len(nombres)} .txt en el buzon: {nombres}\n"
+        f"   NO se cae al mas reciente: cargaria una foto de otro dia y la carga\n"
+        f"   saldria verde sobre un fichero que nadie pidio.")
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 def main():
@@ -510,7 +546,7 @@ def main():
     if not SUPABASE_KEY or not DB_URL:
         sys.exit("Faltan credenciales (SUPABASE_KEY / DB_URL). Revisa los secrets del workflow.")
 
-    # --- Bajar el informe más reciente del buzón (Storage de PRODUCCIÓN) ---
+    # --- Bajar el informe del buzón (Storage de PRODUCCIÓN) ---
     sb = create_client(SUPABASE_URL, SUPABASE_KEY)
     objs = listar_buzon(sb, BUCKET, CARPETA)
     txts = [o for o in objs if (o.get('name') or '').lower().endswith('.txt')]
@@ -518,10 +554,13 @@ def main():
     #    saldría «bien» sin haber medido nada.
     exigir_poblacion(f"ficheros .txt en el buzon {BUCKET}/{CARPETA}/ "
                      f"(informe «Gestion de inventario de Logistica de Amazon»)", txts)
-    txts.sort(key=lambda o: (o.get('updated_at') or o.get('created_at') or ''), reverse=True)
-    elegido = txts[0]
+    try:
+        elegido, motivo = elegir_fichero(txts, FICHERO)
+    except Aborta as e:
+        print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
+        sys.exit(1)
     fichero = elegido['name']
-    print(f"Informe elegido (el mas reciente de {len(txts)}): {fichero}", flush=True)
+    print(f"Informe elegido ({motivo}): {fichero}", flush=True)
 
     # fecha_foto = LA FECHA DEL DATO. Este informe no la trae ni dentro ni en el
     # nombre (es un ID numérico de Amazon): el único sello honrado es cuándo se

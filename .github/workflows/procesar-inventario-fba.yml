@@ -34,6 +34,19 @@ on:
         type: choice
         options: ['ensayo', 'aplicar']
         default: 'ensayo'
+      # 🔴 EL FICHERO EXACTO, y es lo que convierte esta cañería en un buzón de la
+      #    app. Sin este input, la v2 no puede disparar: procesaría «el más reciente»
+      #    del buzón, que con dos informes dentro es una lotería — Elena soltaría el
+      #    suyo y podría cargarse el de otro día, con la pantalla diciendo «Procesado».
+      #    Vacío = el más reciente, que es como se lanzó a mano hasta el 24-ago-2026.
+      # ⚠️ `required: false` y default entrecomillado: un `workflow_dispatch` rechaza
+      #    el disparo ENTERO (422) si le falta un input declarado obligatorio, y la app
+      #    lo manda sólo cuando la ficha lo declara.
+      fichero:
+        description: 'Nombre EXACTO del .txt del buzon (informes/inventario_fba/). Vacio = el mas reciente.'
+        type: string
+        required: false
+        default: ''
       # 🔒 Las válvulas, con nombre y por defecto APAGADAS. Que existan aquí, a la
       #    vista, es parte del trato: una guarda que se salta editando el código se
       #    salta sin que quede constancia.
@@ -89,6 +102,7 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           ENTORNO: ${{ inputs.entorno }}
           MODO: ${{ inputs.modo }}
+          FICHERO: ${{ inputs.fichero }}
           DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
           PERMITIR_UMBRAL_BAJO: ${{ inputs.permitir_umbral_bajo == 'si' && '1' || '0' }}
           EXIGIR_INBOUND: ${{ inputs.exigir_inbound == 'si' && '1' || '0' }}
