@@ -439,6 +439,103 @@ eq('(15) … y no es de solo sku', 'PRIMARY KEY (sku)' in cuerpo_h, False)
 eq('(15) … y su numero de control lo verifica', "'sku,fecha_foto'" in sql_h, True)
 
 
+print('\n== 16) QUE FICHERO SE PROCESA: el que se PIDE, o el mas reciente ==')
+# 🔴 Nace con el buzon de la app (24-ago-2026). Hasta hoy esta caneria cogia siempre
+#    «el mas reciente» del buzon, y eso es una loteria en cuanto hay dos informes
+#    dentro: Elena suelta el suyo, se procesa otro, y la pantalla dice «Procesado».
+#    La direccion que importa aqui NO es «¿aborta si no esta?» sino «¿se cae al mas
+#    reciente cuando el pedido no aparece?» — porque un fallback silencioso pasaria
+#    igual de verde y seria justo el bug.
+from procesador_inventario_fba import elegir_fichero  # noqa: E402
+
+VIEJO = {'name': '50632020686.txt', 'updated_at': '2026-08-21T10:00:00Z'}
+NUEVO = {'name': '50638020688.txt', 'updated_at': '2026-08-23T13:17:00Z'}
+# A proposito DESORDENADO y con el viejo delante: si alguien quitara el `sorted`, el
+# «mas reciente» pasaria a ser «el primero que liste el Storage» sin que nada chille.
+BUZON = [VIEJO, NUEVO]
+
+eq('(16) sin pedir nada, el mas reciente', elegir_fichero(BUZON, '')[0]['name'], NUEVO['name'])
+eq('(16) … y por FECHA, no por el orden en que vino la lista',
+   elegir_fichero([NUEVO, VIEJO], '')[0]['name'], NUEVO['name'])
+eq('(16) se pide el VIEJO y se procesa el viejo',
+   elegir_fichero(BUZON, VIEJO['name'])[0]['name'], VIEJO['name'])
+# 🔒 El OBJETO, no el nombre: de el sale la fecha_foto. Si devolviera otro con el
+#    mismo nombre, la foto se sellaria con una fecha que no es la suya.
+eq('(16) … y devuelve el OBJETO entero, que es de donde sale la fecha_foto',
+   elegir_fichero(BUZON, VIEJO['name'])[0] is VIEJO, True)
+
+falta, msg = False, ''
+try:
+    elegir_fichero(BUZON, 'no_existe.txt')
+except Aborta as e:
+    falta, msg = True, str(e)
+eq('(16) 🔴 se pide uno que NO esta → ABORTA', falta, True)
+eq('(16) … y el aborto dice cual se pidio', 'no_existe.txt' in msg, True)
+eq('(16) … y lista lo que si hay, para que se vea el dedazo', VIEJO['name'] in msg, True)
+
+# 🔴 LA MITAD QUE SE OLVIDA, y aqui es la que vale: que NO caiga al mas reciente.
+#    Un `return recientes[0]` en vez del `raise` pasaria los tres asserts de arriba
+#    salvo este. Se comprueba por el valor devuelto, no por el mensaje.
+cayo = None
+try:
+    cayo = elegir_fichero(BUZON, 'no_existe.txt')[0]['name']
+except Aborta:
+    pass
+eq('(16) 🔴 … y NO se cae al mas reciente', cayo, None)
+
+
+print('\n== 17) EL DATO LLEGA: el input del workflow y el env ==')
+# 🔴 Un CI verde no prueba que una feature este viva (§3 de CLAUDE.md). `elegir_fichero`
+#    puede estar perfecta y no ejecutarse nunca: si el .yml no declara el input, la app
+#    recibe un 422 al disparar; si el `env:` no lo pasa, el procesador ve FICHERO vacio
+#    y vuelve a coger el mas reciente EN SILENCIO. Estos asserts mueren si se quita
+#    cualquiera de las dos piezas.
+# ⚠️ Sobre el texto SIN comentarios: la cabecera del input explica por que existe y
+#    nombra `fichero` y `FICHERO` varias veces — un grep sobre el fichero crudo daria
+#    verde con el input borrado. Es la trampa de siempre: lo que se lee como texto no
+#    distingue codigo de comentario.
+#    📌 Esta es la SEGUNDA copia de este recorte (la otra, en test_tsv_quote_none.py).
+#       A la tercera deja de escribirse y se convierte en funcion, al lado de
+#       `sin_comentarios` de scripts/censo_migraciones.py.
+def sin_almohadillas(texto):
+    return '\n'.join(l for l in texto.split('\n') if not l.lstrip().startswith('#'))
+
+YML = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                   '.github', 'workflows', 'procesar-inventario-fba.yml')
+with open(YML, encoding='utf-8') as fh:
+    yml = sin_almohadillas(fh.read())
+
+eq('(17) el recorte deja codigo (si no, no comprueba nada)', 'workflow_dispatch' in yml, True)
+eq('(17) el .yml declara el input `fichero`', '\n      fichero:' in yml, True)
+eq('(17) 🔴 … y el env se lo pasa al procesador',
+   'FICHERO: ${{ inputs.fichero }}' in yml, True)
+# 🔒 Anclado sobre lo que NO debe aparecer: `required: true` en ese input haria que la
+#    app —y cualquier lanzamiento a mano sin rellenarlo— se comiera un 422.
+#    ⚠️ El recorte se hace por INDENTACION, no con un `index` del siguiente salto de
+#       linea: la linea de abajo (`description:`) lleva OCHO espacios y empieza igual
+#       que una de seis, asi que cortar por ahi dejaba el trozo en una sola linea —
+#       y entonces el assert de `required: true` no podia fallar NUNCA. Cazado al
+#       verlo pasar con el trozo vacio.
+lineas = yml[yml.index('\n      fichero:') + 1:].split('\n')
+trozo, hermanos = [lineas[0]], 0
+for linea in lineas[1:]:
+    if linea[:6] == '      ' and linea[6:7] not in ('', ' '):
+        break
+    trozo.append(linea)
+trozo = '\n'.join(trozo)
+eq('(17) el recorte coge el bloque entero del input (%d lineas)' % len(trozo.split('\n')),
+   len(trozo.split('\n')) >= 4, True)
+eq('(17) … y NO es obligatorio (un 422 dejaria a Elena sin boton)',
+   'required: true' in trozo, False)
+eq('(17) … lo es opcional, dicho a proposito', 'required: false' in trozo, True)
+
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       'procesador_inventario_fba.py'), encoding='utf-8') as fh:
+    codigo = sin_almohadillas(fh.read())
+eq('(17) 🔴 y main() le pasa FICHERO de verdad, no una cadena vacia',
+   'elegir_fichero(txts, FICHERO)' in codigo, True)
+
+
 print('')
 if fallos:
     print('%d FALLOS: %s' % (len(fallos), ', '.join(fallos)))
