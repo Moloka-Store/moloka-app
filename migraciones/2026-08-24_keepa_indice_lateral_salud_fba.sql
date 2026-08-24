@@ -34,12 +34,18 @@
 --    buffers y plan, no milisegundos**: es la única cifra que no depende de
 --    quién más esté trabajando en ese momento.
 --
--- 🔴 Y POR QUÉ REVIENTA JUSTO AHORA, que es lo que explica el «dos veces
---    seguidas». El rol `anon` tiene `statement_timeout = 3s` (`authenticated`,
---    8s). La consulta en frío ya va por 2,8 s contando el planificado: está
---    ROZANDO el techo. No hace falta que la base se degrade — basta con que
---    otro proceso toque disco a la vez para pasarse. Un margen del 7 % no es un
---    margen.
+-- 🔴 Y CUÁNTO SE PASÓ, que es peor de lo que parece. La app lee `salud_fba`
+--    como `authenticated` —medido: `has_table_privilege('anon', …)` es FALSE,
+--    `authenticated` TRUE—, y ese rol tiene `statement_timeout = 8s`. O sea que
+--    el error de Elena no es una consulta de 2,8 s rozando un techo de 3: es una
+--    consulta que **se pasó de OCHO segundos**. Las dos lecturas de EXPLAIN
+--    (2.257 ms bajo carga, 474 ms en frío) se tomaron en momentos MÁS tranquilos
+--    que el del fallo, así que ninguna de las dos ve el pico que lo tumbó.
+--    🔑 Lo que eso significa para el arreglo: con 206.212 buffers la consulta
+--       queda a merced de lo que haga el resto de la base, y por eso falla «dos
+--       veces seguidas» sin que nadie haya cambiado nada. Bajar a ~3.555 no la
+--       hace un 58 % más rápida: la saca de la zona en la que la carga ajena
+--       decide si Elena puede trabajar.
 --
 -- EL ARREGLO: un índice funcional cuyas expresiones son LAS MISMAS que las del
 -- LATERAL, para que el planificador pueda casarlas. Ni una línea de la vista se
