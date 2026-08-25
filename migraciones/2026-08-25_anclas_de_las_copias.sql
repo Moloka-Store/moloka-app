@@ -208,8 +208,30 @@ END
 $puerta_anon$;
 
 DO $puerta_auth$
-DECLARE n int;
+DECLARE
+    n int; sin_permiso text;
 BEGIN
+    -- 🔴 ESTE TESTIGO NO SE PUEDE CORRER EN STAGING, Y NO ES UNA LIMITACION VAGA:
+    --    esta MEDIDA. La funcion es SECURITY INVOKER, asi que leer sus seis fuentes
+    --    exige que `authenticated` tenga SELECT sobre ellas. En staging NO lo tiene
+    --    -- su ACL es solo `postgres` y `service_role` --, porque el volcado se hace
+    --    con `--no-privileges` y la restauracion no repone ni un GRANT.
+    --    Medido el 25-ago-2026 en staging: las SEIS con has_table_privilege = false.
+    -- 🔑 ASI QUE SE MIRA PRIMERO Y SE GRITA, en vez de abortar por una causa que no
+    --    tiene nada que ver con esta migracion. Una guarda que puede ponerse roja por
+    --    el alcance de una copia de seguridad no es una guarda: es ruido futuro.
+    -- 🔒 Y NO SE RELAJA EN PRODUCCION: alli las seis SI lo tienen --la app las lee a
+    --    diario-- asi que este mismo bloque se ejecuta entero y aborta si falla.
+    SELECT string_agg(t, ', ') INTO sin_permiso FROM (
+        SELECT unnest(ARRAY['ledger_movimientos','transacciones_movimientos','listings_amazon',
+                            'keepa_escaparate','keepa_escaparate_hist','demanda_asin']) AS t) x
+     WHERE NOT has_table_privilege('authenticated', 'public.' || t, 'SELECT');
+
+    IF sin_permiso IS NOT NULL THEN
+        RAISE WARNING 'PUERTA NO COMPROBADA EN ESTE ENTORNO: `authenticated` no tiene SELECT sobre % , asi que la funcion --que es SECURITY INVOKER-- rebotaria por LAS FUENTES, no por el EXECUTE de la funcion. Esto NO dice nada sobre produccion: pasa porque el volcado va con --no-privileges y la restauracion no repone ni un GRANT. Se verifica EN PRODUCCION, al aplicar.', sin_permiso;
+        RETURN;
+    END IF;
+
     SET LOCAL ROLE authenticated;
     EXECUTE 'SELECT count(*) FROM public.anclas_de_las_copias()' INTO n;
     RESET ROLE;
@@ -220,6 +242,10 @@ BEGIN
 EXCEPTION
     WHEN insufficient_privilege THEN
         RESET ROLE;
-        RAISE EXCEPTION 'ABORTA: authenticated NO puede ejecutar anclas_de_las_copias. La pantalla recibiria un 42501 y el centinela diria "no he podido comprobarlo" -- un aviso falso a Elena en cada carga.';
+        -- 🔴 SE DICE QUE FUE LO QUE REBOTO, no solo que reboto. La primera version de
+        --    este bloque se tragaba el SQLERRM y decia "authenticated no puede ejecutar
+        --    la funcion" -- que era FALSO: podia ejecutarla y lo que no podia era leer
+        --    una de sus fuentes. Costo una vuelta entera averiguarlo.
+        RAISE EXCEPTION 'ABORTA: authenticated ha rebotado con: %. Si el objeto que nombra NO es anclas_de_las_copias, el problema no es el EXECUTE de la funcion sino un SELECT que le falta sobre esa fuente. La pantalla recibiria un 42501 y el centinela diria "no he podido comprobarlo" -- un aviso falso a Elena en cada carga.', SQLERRM;
 END
 $puerta_auth$;
