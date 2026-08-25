@@ -358,24 +358,29 @@ BEGIN
     RESET ROLE;
 
     -- 🔴 LAS DOS MITADES DEL PLAN.
+    --    ⚠️ Y cada una dice CUAL ha saltado. La primera version usaba `%%` en el
+    --       mensaje --que en RAISE es un POR CIENTO LITERAL y no consume argumento--,
+    --       asi que reventaba con 'too many parameters specified for RAISE' y tapaba
+    --       cual de las tres comprobaciones habia fallado. Un error que oculta el
+    --       error es peor que no comprobar.
     --    (a) que el Seq Scan sobre keepa haya DESAPARECIDO -- es lo que costaba 1,6 GB.
     IF position('Seq Scan on keepa_escaparate' in plan) > 0 THEN
-        RAISE EXCEPTION 'ABORTA: el plan SIGUE recorriendo keepa_escaparate entera. La migracion no ha servido de nada. Plan:%%', chr(10) || plan;
+        RAISE EXCEPTION 'ABORTA: el plan SIGUE recorriendo keepa_escaparate entera. La migracion no ha servido de nada. Plan: %', chr(10) || plan;
     END IF;
     --    (b) …y que use un Index Scan. Anclado sobre lo que TIENE que aparecer ademas
     --        de sobre lo que no: sin esto, un plan que no leyera nada pasaria.
     IF position('Index Scan' in plan) = 0 AND position('Index Only Scan' in plan) = 0 THEN
-        RAISE EXCEPTION 'ABORTA: el plan no usa ningun indice sobre keepa_escaparate. Plan:%%', chr(10) || plan;
+        RAISE EXCEPTION 'ABORTA: el plan no usa ningun indice sobre keepa_escaparate. Plan: %', chr(10) || plan;
     END IF;
     -- 🔒 Y el numero, que es lo unico que no se puede fingir. Era 209.385 con RLS y
     --    1.075 con el cruce crudo. Un techo de 20.000 esta 10x por encima de lo bueno y
     --    10x por debajo de lo malo: no puede pasar por casualidad en ninguno de los dos
     --    sentidos.
     IF buffers IS NULL THEN
-        RAISE EXCEPTION 'ABORTA: no se ha podido leer los buffers del plan. Sin ese numero esto no comprueba nada. Plan:%%', chr(10) || plan;
+        RAISE EXCEPTION 'ABORTA: no se ha podido leer los buffers del plan. Sin ese numero esto no comprueba nada. Plan: %', chr(10) || plan;
     END IF;
     IF buffers > 20000 THEN
-        RAISE EXCEPTION 'ABORTA: el plan lee % buffers y antes leia 209.385. Se esperaba del orden de 1.075. Plan:%%', buffers, chr(10) || plan;
+        RAISE EXCEPTION 'ABORTA: el plan lee % buffers y antes leia 209.385. Se esperaba del orden de 1.075. Plan: %', buffers, chr(10) || plan;
     END IF;
 
     RAISE NOTICE 'Testigo OK (plan). CON LA RLS PUESTA el LATERAL usa indice y lee % buffers (antes 209.385, o sea 1,6 GB). Mejora de %x.', buffers, round(209385.0 / greatest(buffers,1));
