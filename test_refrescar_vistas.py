@@ -360,6 +360,17 @@ eq('(5) 🔒 … y NADIE MAS la refresca',
    sorted(f for f, vs in REFRESCOS_POR_FUENTE.items() if 'mv_keepa_asin_visto' in vs),
    ['keepa'])
 
+# 🔴 LA SEXTA COPIA. Mismo reparto que `mv_ventas_ventanas` y por el mismo motivo:
+#    `dias_desde_ultimo_dato` depende del RELOJ y se queda VIVO arriba. Y las mismas
+#    dos fuentes: transacciones (las ventas) y listings (el mapa SKU->ASIN).
+eq('(5) 🔴 las transacciones refrescan la velocidad paneuropea',
+   'mv_velocidad_ventas_paneu' in REFRESCOS_POR_FUENTE.get('transacciones', ()), True)
+eq('(5) 🔴 … y listings TAMBIEN (sin el mapa, la velocidad sale BAJA)',
+   'mv_velocidad_ventas_paneu' in REFRESCOS_POR_FUENTE.get('listings', ()), True)
+eq('(5) 🔒 … y nadie mas',
+   sorted(f for f, vs in REFRESCOS_POR_FUENTE.items() if 'mv_velocidad_ventas_paneu' in vs),
+   ['listings', 'transacciones'])
+
 print('\n== 5b) LAS ETIQUETAS DEL AVISO SALEN DE LO QUE SE REFRESCO ==')
 # 🔴 LAS DOS DIRECCIONES, y la segunda es la que importa: que la etiqueta APAREZCA
 #    cuando toca y que NO aparezca cuando no toca. Una lista fija de etiquetas pasaria
@@ -402,7 +413,7 @@ c = CursorFalso(trackeador_revienta=psycopg2.errors.InsufficientPrivilege(
 r, txt, con = corre(c, fuente='transacciones')
 eq('(5c) 🔒 si revienta, devuelve False sin tumbar nada', r, False)
 eq('(5c) 🔒 … diciendo el error', 'permission denied' in txt, True)
-eq('(5c) 🔒 … y las nuestras SI se habian refrescado', len(refrescos(c)), 3)   # transacciones: ventanas + rentabilidad + asin_con_pedido
+eq('(5c) 🔒 … y las nuestras SI se habian refrescado', len(refrescos(c)), 4)   # transacciones: ventanas + rentabilidad + asin_con_pedido + velocidad
 
 print('\n== 6) LOS PROCESADORES LO LLAMAN DE VERDAD ==')
 # 🔴 Un CI verde no prueba que una feature este viva. `refrescar_vistas` puede estar
