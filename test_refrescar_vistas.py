@@ -215,10 +215,22 @@ print('\n== 3c) LLAMADO CON UNA TRANSACCION ABIERTA ==')
 c = CursorFalso()
 con_sucia = ConexionFalsa(c, estado=psycopg2.extensions.TRANSACTION_STATUS_INTRANS)
 r, txt, con_sucia = corre(c, con=con_sucia)
-eq('(3c) 🔴 con transaccion abierta NO revienta, refresca', r, True)
-eq('(3c) 🔴 … porque la cierra el mismo antes de tocar autocommit', con_sucia.rollbacks, 1)
-eq('(3c) … y lo dice', 'transaccion abierta' in txt, True)
+eq('(3c) 🔴 con transaccion abierta NO revienta', r is not None, True)
+eq('(3c) 🔴 … y RENUNCIA al refresco (devuelve False)', r, False)
+# 🔴 EL ASSERT QUE MAS IMPORTA DE ESTE BLOQUE, y viene de una correccion de Fernando:
+#    aqui hubo un `con.rollback()` "para dejar la conexion limpia". Era un error. Una
+#    transaccion abierta significa que quien llamo tenia trabajo SIN CONFIRMAR, y
+#    hacerle rollback SE LO DESTRUYE. La justificacion --"si solo se leyo, no deshace
+#    nada"-- daba por hecho justo lo que no se puede saber en ese punto.
+#    Lo que se pierde renunciando es que la copia se quede vieja, y ESO LO CAZA EL
+#    CENTINELA. Lo que perderia un rollback no lo caza nadie.
+eq('(3c) 🔴 … SIN tocar la transaccion de quien llamo', con_sucia.rollbacks, 0)
+eq('(3c) … diciendo por que', 'TRANSACCION ABIERTA' in txt, True)
+eq('(3c) … y que la copia se queda vieja', 'centinela' in txt, True)
+eq('(3c) 🔴 NO avisa a la app', '/api/cache/invalidar' in txt, False)
 eq('(3c) 🔒 y deja el autocommit como estaba', con_sucia.autocommit, False)
+eq('(3c) 🔒 … y ni siquiera intento refrescar',
+   any('refresh materialized view' in e.lower() for e in c.ejecutadas), False)
 
 print('\n== 3d) SI ASIGNAR autocommit REVIENTA, TAMPOCO TUMBA LA CARGA ==')
 # 🔴 La misma excepcion exacta, pero por un camino que el rollback no arregla. La
