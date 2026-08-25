@@ -96,6 +96,20 @@ BEGIN
                           ORDER BY ke.fecha_foto DESC LIMIT 1) k2 ON true;
     RAISE NOTICE 'Guardas OK. salud_fba=% filas (% en ES). El LATERAL empareja % de % fichas.',
         n, n_es, casan, (SELECT count(*) FROM inventario_fba);
+    -- 🔴 LA FOTO DE ANTES SE TOMA AQUI, Y ESO ES MEJOR QUE UNA CONSTANTE.
+    --    La primera version traia la huella medida en PRODUCCION y la comparaba solo si
+    --    el RECUENTO de filas coincidia. Fallo en el ensayo: staging tiene 362 filas
+    --    IGUAL que produccion pero con OTRO contenido --es un clon de anoche mas lo que
+    --    se ha aplicado encima--, asi que la guarda se creyo que estaba en produccion y
+    --    aborto por una diferencia de DATOS que no tenia nada que ver con la migracion.
+    -- 🔑 El recuento de filas NO es prueba de "mismos datos". El invariante de verdad no
+    --    es "la vista devuelve lo que devolvia en produccion el 25-ago": es "la vista
+    --    devuelve LO MISMO QUE DEVOLVIA HACE UN SEGUNDO". Eso se puede medir en
+    --    cualquier entorno, y es mas fuerte.
+    CREATE TEMP TABLE _salud_fba_antes ON COMMIT DROP AS
+        SELECT md5(string_agg(t::text, '|' ORDER BY t.sku, t.marketplace)) AS huella,
+               count(*) AS filas
+          FROM (SELECT * FROM salud_fba) t;
 END
 $guardas$;
 
@@ -213,6 +227,7 @@ DECLARE
     CASAN  constant bigint := 345;
     n bigint; h text; cols text;
     casan_nuevo bigint; casan_roto bigint;
+    h_antes text; n_antes bigint; n_distintas bigint;
 BEGIN
     SELECT count(*) INTO n FROM salud_fba;
     IF n = 0 THEN RAISE EXCEPTION 'ABORTA: salud_fba se ha quedado vacia.'; END IF;
@@ -247,18 +262,41 @@ BEGIN
     SELECT md5(string_agg(t::text,'|' ORDER BY t.sku, t.marketplace)) INTO h
       FROM (SELECT * FROM salud_fba) t;
 
-    IF n <> FILAS THEN
-        RAISE WARNING 'HUELLA NO COMPROBADA EN ESTE ENTORNO: se midio sobre PRODUCCION con % filas y aqui hay %. No es un fallo: son bases con datos distintos. Lo que este ensayo NO ha comprobado es que la vista devuelva lo mismo que antes; ESO SE VERIFICA EN PRODUCCION, al aplicar. Lo que SI vale aqui: el cruce empareja % fichas y con un espacio inyectado cae a 0.', FILAS, n, casan_nuevo;
-    ELSE
-        IF h <> HUELLA THEN
-            RAISE EXCEPTION 'ABORTA: la huella de salud_fba es % y antes era %. Se ha movido un dato.', h, HUELLA;
-        END IF;
-        IF casan_nuevo <> CASAN THEN
-            RAISE EXCEPTION 'ABORTA: el cruce normalizado empareja % fichas y el de antes emparejaba %.', casan_nuevo, CASAN;
-        END IF;
+    -- 🔴 LA COMPARACION QUE VALE EN CUALQUIER ENTORNO: contra la foto tomada al empezar,
+    --    sobre los MISMOS datos. Si esto cuadra, la migracion no ha movido nada -- aqui,
+    --    en staging, y en produccion.
+    SELECT huella, filas INTO h_antes, n_antes FROM _salud_fba_antes;
+    IF n_antes IS NULL THEN
+        RAISE EXCEPTION 'ABORTA: no se tomo la foto de antes. Sin ella esto no comprueba nada.';
+    END IF;
+    IF n <> n_antes THEN
+        RAISE EXCEPTION 'ABORTA: salud_fba tenia % filas al empezar y ahora tiene %.', n_antes, n;
+    END IF;
+    IF h <> h_antes THEN
+        RAISE EXCEPTION 'ABORTA: la huella de salud_fba era % al empezar y ahora es %. Se ha movido un dato.', h_antes, h;
     END IF;
 
-    RAISE NOTICE 'Testigo OK (dato). % filas (huella %), contrato de 59 columnas con sus tipos intacto, el cruce empareja % y con un espacio inyectado cae a 0.', n, h, casan_nuevo;
+    -- 🔒 Y ADEMAS, la comparacion DIFERENCIAL sobre lo unico que ha cambiado: cada fila
+    --    contra lo que habria dado la formula VIEJA. Es redundante con la huella a
+    --    proposito -- la huella dice QUE algo se movio, esto dice CUANTAS filas y
+    --    cual es la columna.
+    SELECT count(*) INTO n_distintas
+      FROM salud_fba s
+      LEFT JOIN LATERAL (SELECT ke.rank FROM keepa_escaparate ke
+                          WHERE btrim(ke.asin) = btrim(s.asin) AND lower(ke.dominio) = 'es'
+                          ORDER BY ke.fecha_foto DESC LIMIT 1) viejo ON true
+     WHERE s.sales_rank IS DISTINCT FROM viejo.rank;
+    IF n_distintas > 0 THEN
+        RAISE EXCEPTION 'ABORTA: % fila(s) tienen un sales_rank distinto del que daba la formula vieja.', n_distintas;
+    END IF;
+
+    -- 🔒 La huella de PRODUCCION se comprueba solo si coincide la de antes: alli si
+    --    dice algo, y en cualquier otro sitio seria un rojo por el entorno.
+    IF h_antes = HUELLA AND n = FILAS AND casan_nuevo <> CASAN THEN
+        RAISE EXCEPTION 'ABORTA: el cruce empareja % fichas y en produccion emparejaba %.', casan_nuevo, CASAN;
+    END IF;
+
+    RAISE NOTICE 'Testigo OK (dato). % filas, huella IDENTICA a la de antes de tocar nada (%), 0 filas con sales_rank distinto de la formula vieja, contrato de 59 columnas con tipos intacto, el cruce empareja % y con un espacio inyectado cae a 0.', n, h, casan_nuevo;
 END
 $testigo$;
 
