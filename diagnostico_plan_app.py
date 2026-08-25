@@ -127,6 +127,23 @@ CASOS = [
 ]
 
 
+# 🔴 EL BARRIDO. La pregunta que sale del hallazgo y que nadie habia hecho: ¿donde MAS
+#    pasa esto? Cualquier cruce VIVO bajo RLS que envuelva una columna en btrim/lower/
+#    upper pierde su indice igual, exista el indice o no.
+# 🔑 El filtro que decide NO es "tiene envoltorios": son TRES condiciones a la vez.
+#      1. la vista es `security_invoker` (si es definer corre como el dueno y la RLS ni
+#         se evalua),
+#      2. la app la lee VIVA (las que solo se leen a traves de una copia estan a salvo:
+#         la copia la refresca `postgres`, que salta la RLS),
+#      3. y hay un indice que se pudiera usar.
+#    El censo por texto da 11 vistas vivas con envoltorios; cruzando las tres quedan DOS.
+BARRIDO = [
+    ('v_producto_proveedor', 'invoker · 90 llamadas de la app'),
+    ('v_escaner_ultimo', 'definer · 173 llamadas -- se espera que NO le afecte'),
+    ('v_nunca_enviado_fba', 'definer · 80 llamadas -- se espera que NO le afecte'),
+]
+
+
 def explicar(cur, sql):
     cur.execute("EXPLAIN (ANALYZE, BUFFERS, COSTS OFF) " + sql)
     return [f[0] for f in cur.fetchall()]
