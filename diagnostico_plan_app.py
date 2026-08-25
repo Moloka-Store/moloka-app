@@ -79,7 +79,36 @@ CONSULTA_PELADA = """
 SELECT * FROM public.salud_fba WHERE marketplace = 'ES'
 """
 
-# 🔑 LOS TRES CASOS SON UNA COMPARACION, NO TRES MEDICIONES SUELTAS. El orden importa:
+# 🔴 EL LATERAL AISLADO, QUE ES DONDE ESTA EL 99,8% DEL COSTE. Las dos versiones son
+#    la MISMA consulta salvo en una cosa: si el cruce lleva `btrim`/`lower` o va crudo.
+#    Con eso se contesta, ANTES de tocar nada, si el arreglo funciona.
+# 🔒 Y el `count(*)` de las dos tiene que salir IGUAL: si no, no son la misma consulta y
+#    la comparacion no vale. Esta comprobado aparte que los envoltorios son inertes
+#    (0 filas cambian sobre 1.653 + 362), pero aqui se vuelve a mirar en la misma
+#    corrida -- una comparacion entre dos cosas que devuelven distinto no mide nada.
+LATERAL_CON_ENVOLTORIOS = """
+SELECT count(k.sales_rank) AS casan
+  FROM public.inventario_fba i
+  LEFT JOIN LATERAL (
+    SELECT ke.sales_rank
+      FROM public.keepa_escaparate ke
+     WHERE btrim(ke.asin) = btrim(i.asin) AND lower(ke.dominio) = 'es'
+     ORDER BY ke.fecha_foto DESC
+     LIMIT 1) k ON true
+"""
+
+LATERAL_CRUDO = """
+SELECT count(k.sales_rank) AS casan
+  FROM public.inventario_fba i
+  LEFT JOIN LATERAL (
+    SELECT ke.sales_rank
+      FROM public.keepa_escaparate ke
+     WHERE ke.asin = i.asin AND ke.dominio = 'es'
+     ORDER BY ke.fecha_foto DESC
+     LIMIT 1) k ON true
+"""
+
+# 🔑 LOS CASOS SON UNA COMPARACION, NO TRES MEDICIONES SUELTAS. El orden importa:
 #    el que de verdad interesa va PRIMERO, con la cache tal como se la encuentra la app.
 #    Los otros dos van despues, y hay que leerlos sabiendo que corren con la cache ya
 #    caliente por el primero -- o sea que si aun asi salen BAJOS, la diferencia es real
@@ -88,6 +117,9 @@ CASOS = [
     ('1. LA DE LA APP, con RLS (authenticated)', CONSULTA_APP, True),
     ('2. La misma pelada, con RLS (authenticated)', CONSULTA_PELADA, True),
     ('3. La misma pelada, SIN RLS (postgres) -- el contraste', CONSULTA_PELADA, False),
+    ('4. EL LATERAL solo, con btrim/lower, con RLS', LATERAL_CON_ENVOLTORIOS, True),
+    ('5. EL LATERAL solo, con cruce CRUDO, con RLS', LATERAL_CRUDO, True),
+    ('6. EL LATERAL con btrim/lower, SIN RLS -- el contraste', LATERAL_CON_ENVOLTORIOS, False),
 ]
 
 
