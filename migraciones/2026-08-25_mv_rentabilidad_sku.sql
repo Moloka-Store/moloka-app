@@ -277,7 +277,11 @@ WITH prod AS (
     SELECT pais, mes, max(fecha_hasta) AS fecha_hasta,
            round(sum(f_iva), 2) AS facturacion_iva,
            round(sum(f_sin), 2) AS facturacion_sin_iva,
-           sum(uds) AS unidades,
+           -- 🔴 EL CAST NO ES ADORNO: `sum(bigint)` devuelve NUMERIC, y esta columna
+           --    es BIGINT en el contrato (el original suma `cantidad`, que es integer,
+           --    y `sum(integer)` si da bigint). Sin el, `CREATE OR REPLACE VIEW`
+           --    rechaza la vista entera. Es exacto porque son unidades enteras.
+           sum(uds)::bigint AS unidades,
            round(sum(pvd), 2) AS coste_pvd,
            round(sum(com), 2) AS comision_amazon,
            round(sum(fba), 2) AS logistica_fba,
@@ -336,17 +340,24 @@ BEGIN
         RAISE EXCEPTION 'ABORTA: producto_mes=% filas y transacciones=% filas. Algo se ha quedado vacio.', n_pm, n_tx;
     END IF;
 
-    -- El contrato: mismas columnas, en el mismo orden.
-    SELECT count(*), string_agg(column_name, ',' ORDER BY ordinal_position)
+    -- El contrato: mismas columnas, mismos TIPOS, en el mismo orden.
+    -- 🔴 LOS TIPOS VAN AQUI PORQUE LA HUELLA md5 ES CIEGA A ELLOS. `t::text` imprime
+    --    `1234::numeric` y `1234::bigint` exactamente igual, asi que las dos huellas
+    --    casaban con `unidades` cambiada de bigint a numeric. Quien lo cazo fue
+    --    `CREATE OR REPLACE VIEW`, que se niega a cambiar el tipo de una columna --no
+    --    este testigo--. Medido el 25-ago-2026 en el ensayo de staging.
+    -- 🔑 La regla: una huella sobre el TEXTO de las filas prueba los VALORES, no la
+    --    forma. Si el contrato incluye tipos, el testigo tiene que mirarlos aparte.
+    SELECT count(*), string_agg(column_name || ':' || data_type, ',' ORDER BY ordinal_position)
       INTO n_cols_pm, cols_pm FROM information_schema.columns
      WHERE table_schema='public' AND table_name='v_rentabilidad_producto_mes';
-    IF cols_pm <> 'pais,mes,sku,con_ficha,asin,nombre,ean,es_chase,es_pack,factor_pack,fecha_hasta,unidades,facturacion_iva,facturacion_sin_iva,coste_pvd,comision_amazon,logistica_fba,otras_tarifas,coste_almacen,reembolsos_netos,beneficio' THEN
+    IF cols_pm <> 'pais:text,mes:date,sku:text,con_ficha:boolean,asin:text,nombre:text,ean:text,es_chase:boolean,es_pack:boolean,factor_pack:integer,fecha_hasta:date,unidades:bigint,facturacion_iva:numeric,facturacion_sin_iva:numeric,coste_pvd:numeric,comision_amazon:numeric,logistica_fba:numeric,otras_tarifas:numeric,coste_almacen:numeric,reembolsos_netos:numeric,beneficio:numeric' THEN
         RAISE EXCEPTION 'ABORTA: v_rentabilidad_producto_mes cambio de columnas o de orden. Ahora: %', cols_pm;
     END IF;
-    SELECT count(*), string_agg(column_name, ',' ORDER BY ordinal_position)
+    SELECT count(*), string_agg(column_name || ':' || data_type, ',' ORDER BY ordinal_position)
       INTO n_cols_tx, cols_tx FROM information_schema.columns
      WHERE table_schema='public' AND table_name='v_rentabilidad_transacciones';
-    IF cols_tx <> 'pais,mes,facturacion_iva,facturacion_sin_iva,unidades,coste_pvd,comision_amazon,logistica_fba,otras_tarifas,coste_almacen,reembolsos_netos,beneficio,margen_pct,fecha_hasta' THEN
+    IF cols_tx <> 'pais:text,mes:date,facturacion_iva:numeric,facturacion_sin_iva:numeric,unidades:bigint,coste_pvd:numeric,comision_amazon:numeric,logistica_fba:numeric,otras_tarifas:numeric,coste_almacen:numeric,reembolsos_netos:numeric,beneficio:numeric,margen_pct:numeric,fecha_hasta:date' THEN
         RAISE EXCEPTION 'ABORTA: v_rentabilidad_transacciones cambio de columnas o de orden. Ahora: %', cols_tx;
     END IF;
 
