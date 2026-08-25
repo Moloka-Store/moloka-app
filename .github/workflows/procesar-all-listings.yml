@@ -49,6 +49,15 @@ jobs:
       - name: Mesa de pruebas del refresco de materializadas
         run: python -u test_refrescar_vistas.py
 
+      # 🔴 LAS COLUMNAS GENERADAS NO SE ARCHIVAN, Y ESTE PASO ES EL QUE LO SUJETA.
+      #    `archivar_foto()` saca las columnas de `pg_attribute`: una sola columna
+      #    `GENERATED ALWAYS AS (...) STORED` en la foto haria que su guarda
+      #    `faltan_en_hist` PARASE ESTA CARGA, y con un error que no menciona la
+      #    palabra "generada" por ninguna parte. Tarda menos de un segundo y no toca
+      #    ni red ni base.
+      - name: Mesa de pruebas del archivado (columnas generadas)
+        run: python -u test_archivar_foto.py
+
       - name: Ejecutar procesador
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

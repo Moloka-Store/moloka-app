@@ -523,11 +523,26 @@ def archivar_foto(cur, tabla_viva, pk_cols, col_fecha, etiqueta='HISTORICO', exc
     # Columnas reales de viva e histórico, leídas AHORA (dentro de la txn: la DDL
     # de arriba ya es visible). Nada de SELECT *: se enumeran, se validan y se
     # guarda el TIPO SQL exacto de cada una (format_type) para poder dar el remedio.
+    # 🔴 LAS COLUMNAS GENERADAS NO SE ARCHIVAN NUNCA, Y NO ES UNA OPCION: es lo que
+    #    SON. Una columna `GENERATED ALWAYS AS (...) STORED` no es un dato, es una
+    #    lectura del dato de al lado -- guardarla en el historico seria guardar dos
+    #    veces lo mismo, y encima congelada con la formula del dia en que se archivo.
+    # 🔴 Y SI NO SE FILTRARAN, ESTO NO SERIA UN DETALLE DE ESTILO: TUMBARIA LA CARGA.
+    #    `cols_viva` sale de aqui, y la guarda `faltan_en_hist` ABORTA cuando la foto
+    #    tiene una columna que el historico no tiene. O sea que anadir una sola columna
+    #    generada a `keepa_escaparate` --sin tocar nada mas-- pararia el siguiente
+    #    informe de Keepa con un error que no menciona la palabra "generada" por
+    #    ninguna parte. Medido leyendo el codigo antes de anadir ninguna, el 25-ago-2026.
+    # 🔒 Va aqui y no en el parametro `excluir` de cada llamada a proposito: `excluir`
+    #    es para decisiones (el `crudo` de Keepa se excluye porque vive en Storage);
+    #    esto es una REGLA, y una regla que hay que acordarse de pasar en cada llamada
+    #    es una regla que se olvida.
     def _cols(tabla):
         cur.execute(
             "SELECT a.attname, format_type(a.atttypid, a.atttypmod), "
             "       (NOT a.attnotnull) AS nullable, "
-            "       pg_get_expr(ad.adbin, ad.adrelid) AS defecto "
+            "       pg_get_expr(ad.adbin, ad.adrelid) AS defecto, "
+            "       a.attgenerated "
             "FROM pg_attribute a "
             "JOIN pg_class c ON c.oid = a.attrelid "
             "JOIN pg_namespace n ON n.oid = c.relnamespace "
@@ -535,7 +550,16 @@ def archivar_foto(cur, tabla_viva, pk_cols, col_fecha, etiqueta='HISTORICO', exc
             "WHERE n.nspname = 'public' AND c.relname = %s "
             "  AND a.attnum > 0 AND NOT a.attisdropped "
             "ORDER BY a.attnum;", (tabla,))
-        return cur.fetchall()
+        filas = cur.fetchall()
+        # `attgenerated` es '' cuando la columna es normal y 's' cuando es STORED.
+        generadas = [r[0] for r in filas if r[4]]
+        if generadas:
+            # 🔒 Se GRITA, no se hace en silencio. Saltarse columnas sin decirlo es
+            #    justo como se cuelan los huecos en un historico.
+            print(f"   · [{etiqueta}] {tabla}: {len(generadas)} columna(s) GENERADA(S) "
+                  f"que NO se archivan (son derivadas, no dato): "
+                  f"{', '.join(generadas)}", flush=True)
+        return [r[:4] for r in filas if not r[4]]
 
     viva_rows = _cols(tabla_viva)
     # Se quitan las excluidas AQUÍ, antes de todo lo demás: así ni se copian (INSERT)
