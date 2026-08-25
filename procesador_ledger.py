@@ -88,7 +88,7 @@ from psycopg2.extras import Json, execute_values
 
 # Del patrón común solo se reutiliza Aborta: la carga por rango es lógica propia
 # (barrer_sobrantes es para FOTOS y aquí borraría el histórico).
-from foto_comun import Aborta, conectar_bd, listar_buzon, descargar_buzon
+from foto_comun import Aborta, conectar_bd, listar_buzon, descargar_buzon, refrescar_vistas
 
 # ---------------------------------------------------------------------------
 # 0) Configuración (secrets de GitHub; jamás credenciales en el código)
@@ -621,6 +621,12 @@ def main():
 
     if MODO == 'aplicar':
         con.commit()
+        # 🔒 EL REFRESCO VA AQUI, DESPUES DEL COMMIT Y SOLO EN `aplicar`. Fuera de la
+        #    transaccion porque refrescar sin bloquear lectores no puede correr dentro
+        #    de una; y solo con el volcado confirmado, porque en `ensayo` no se ha
+        #    escrito nada y refrescar seria copiar un estado que se acaba de deshacer.
+        #    No aborta nunca: la carga ya esta hecha y el refresco es aguas abajo.
+        refrescar_vistas(con, 'ledger')
         print(f"\n✅ APLICADO en {ENTORNO}: {insertadas} movimientos en ledger_movimientos "
               f"(rango efectivo {fmin_ef}→{fmax_ef} recerrado; RLS activo sin políticas; "
               f"sello del rango escrito en informes_subidos).")

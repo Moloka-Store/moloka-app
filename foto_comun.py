@@ -598,3 +598,151 @@ def resumen_foto(tabla, ambito, previas, nuevas, altas, borradas, modo):
         f"   · altas (clave nueva):      {altas}\n"
         f"   · actualizaciones:          {nuevas - altas}\n"
         f"   · BAJAS ({verbo} borrado):{'':<{max(0, 10 - len(verbo))}}{borradas}")
+
+
+# ---------------------------------------------------------------------------
+# EL REFRESCO DE LAS VISTAS MATERIALIZADAS
+# ---------------------------------------------------------------------------
+# 🔴 SE ATA AL EVENTO, NO AL RELOJ. Estas materializadas solo pueden cambiar
+#    cuando cambia su fuente, y su fuente solo cambia cuando entra un informe.
+#    Un cron las refrescaria a ciegas: la mayoria de las veces sin nada que
+#    hacer, y las que importan con horas de retraso.
+#
+# 🔴 VA DESPUES DEL COMMIT, Y FUERA DE LA TRANSACCION. Refrescar sin bloquear a
+#    quien este leyendo la pantalla NO se puede hacer dentro de un bloque de
+#    transaccion: Postgres lo prohibe. Por eso esto se llama con el volcado ya
+#    confirmado y pone la conexion en autocommit.
+#    ⚠️ Y por eso mismo NO puede vivir en la migracion (que corre entera dentro
+#       de una transaccion). El SQL crea la materializada; el refresco es de aqui.
+#
+# 🔒 EL ORDEN ES REFRESCAR -> COMPROBAR -> AVISAR, y el aviso SOLO si el
+#    refresco fue bien. Al reves, la app tiraria su cache, releeria la copia
+#    VIEJA y la volveria a cachear con sello nuevo: dato caducado disfrazado de
+#    fresco, que es peor que no avisar.
+#
+# 🔴 `current_user` SE REGISTRA SIEMPRE, no solo cuando falla. `REFRESH
+#    MATERIALIZED VIEW` no se resuelve con permisos: EXIGE SER DUENO. Y la
+#    conexion del procesador (DB_URL del ENTORNO) puede no ser la misma que la
+#    de la migracion: staging contesta sobre staging. Si esto no se registrara,
+#    un refresco que no puede correr en produccion se descubriria cuando alguien
+#    mirase la pantalla y viera ventas viejas.
+
+# 🔴 UNA ENTRADA POR CADA FUENTE DE CADA MATERIALIZADA, no por cada fuente "obvia".
+#    `v_ventas_ventanas` bebe de TRES tablas, no de dos: ademas del ledger y las
+#    transacciones lee `listings_amazon`, y no de adorno -- es el MAPA SKU -> ASIN
+#    (`sku_asin AS (SELECT DISTINCT ON (btrim(seller_sku)) ... FROM listings_amazon)`).
+#    Las ventas de marketplace llegan por SKU y esa tabla dice a que ASIN pertenecen.
+#    Si entra un informe de listings sin que entre uno de ledger o transacciones --una
+#    referencia nueva, un SKU que cambia de ASIN--, la copia se queda con el mapa viejo
+#    y las ventas de ese SKU dejan de sumarse a su ASIN: el numero sale BAJO.
+# 🔒 La lista de fuentes NO se escribe de memoria: se deriva con el mapeador recursivo
+#    de `pg_depend` (con freno de ciclos). Escribirla a mano es como se perdio listings
+#    en la primera version de este mapa.
+REFRESCOS_POR_FUENTE = {
+    # fuente que cambia  ->  materializadas que dependen de ella
+    'ledger':        ('mv_ventas_ventanas',),
+    'transacciones': ('mv_ventas_ventanas',),
+    'listings':      ('mv_ventas_ventanas',),
+}
+
+
+def avisar_a_la_app(etiquetas, escribir=print):
+    """Invalida la cache de datos de la app para esas etiquetas.
+
+    🔒 HOY NO HACE NADA MAS QUE REGISTRARLO, y la ruta del otro lado devuelve 200
+       sin trabajar. Es a proposito: un no-op que nunca se ejecuta es codigo
+       muerto, y el dia que se encienda falla por una variable mal escrita. Asi
+       el camino se recorre entero desde el primer dia y encenderlo es cambiar el
+       cuerpo de la ruta, no volver a tocar nueve procesadores.
+    """
+    escribir(f"   · aviso a la app (etiquetas: {', '.join(etiquetas)}): "
+             f"pendiente de encender, ver /api/cache/invalidar")
+    return True
+
+
+def refrescar_vistas(con, fuente, escribir=print):
+    """Refresca las materializadas que dependen de `fuente`. Devuelve True si TODAS
+    quedaron al dia.
+
+    `con` es la conexion del procesador CON EL COMMIT YA HECHO. Esta funcion la
+    pone en autocommit, refresca, comprueba y la deja como estaba.
+
+    🔴 NO ABORTA NUNCA. La carga del informe --que es lo que importa-- ya esta
+       confirmada; el refresco es aguas abajo. Un fallo aqui se GRITA con todo lo
+       que hace falta para arreglarlo (quien es, quien es el dueno, y el error
+       exacto), y el centinela de la pantalla lo dira tambien en el dato.
+    """
+    vistas = REFRESCOS_POR_FUENTE.get(fuente, ())
+    if not vistas:
+        return True
+
+    antes = con.autocommit
+    con.autocommit = True
+    cur = con.cursor()
+    todo_bien = True
+    try:
+        cur.execute("SELECT current_user")
+        quien = cur.fetchone()[0]
+        escribir(f"\n--- REFRESCO DE MATERIALIZADAS (fuente: {fuente}) ---")
+        escribir(f"   · conectado como: {quien}")
+
+        for vista in vistas:
+            cur.execute("SELECT to_regclass(%s)", (f'public.{vista}',))
+            if cur.fetchone()[0] is None:
+                escribir(f"   · ⚠️  {vista} NO EXISTE todavia: no se refresca nada.")
+                escribir(f"        No es un fallo de esta carga --el informe ya esta escrito--")
+                escribir(f"        sino que la migracion que la crea aun no se ha aplicado en")
+                escribir(f"        este entorno. Aplicala y el proximo informe la pondra al dia.")
+                todo_bien = False
+                continue
+
+            cur.execute("SELECT pg_get_userbyid(relowner) FROM pg_class "
+                        "WHERE oid = %s::regclass", (f'public.{vista}',))
+            dueno = cur.fetchone()[0]
+            t0 = time.time()
+            try:
+                cur.execute(f"REFRESH MATERIALIZED VIEW CONCURRENTLY public.{_ident(vista)}")
+            except psycopg2.Error as e:
+                escribir(f"   · ❌ {vista}: NO SE HA PODIDO REFRESCAR.")
+                escribir(f"        conectado como : {quien}")
+                escribir(f"        dueno de la mv : {dueno}")
+                escribir(f"        error          : {str(e).strip()}")
+                escribir(f"        REFRESH exige SER DUENO: ni SELECT ni ALL PRIVILEGES valen.")
+                escribir(f"        Si {quien} no es {dueno} ni miembro suyo, hay que darle la")
+                escribir(f"        propiedad o envolver el refresco en una funcion SECURITY")
+                escribir(f"        DEFINER de {dueno} con EXECUTE para {quien}.")
+                todo_bien = False
+                continue
+            ms = (time.time() - t0) * 1000
+            escribir(f"   · {vista} refrescada en {ms:.0f} ms (dueno: {dueno})")
+
+        con.autocommit = antes
+        cur.close()
+    except Exception as e:
+        # 🔴 NO SE DEJA SUBIR LA EXCEPCION, NUNCA. El commit ya paso: el informe esta
+        #    escrito y a salvo. Si esto tumbara la corrida, el workflow saldria ROJO y
+        #    quien lo mirase pensaria que la carga fallo -- y volveria a subir el
+        #    informe, que es el dano de verdad. Se grita y se sigue.
+        # 🔒 Y es seguro hacerlo asi precisamente porque el centinela de la pantalla ya
+        #    esta desplegado: si el refresco se cae callado, la pantalla lo DICE. Sin ese
+        #    centinela, tragarse el fallo aqui seria esconderlo.
+        con.autocommit = antes
+        try:
+            cur.close()
+        except Exception:
+            pass
+        escribir(f"   · ❌ EL REFRESCO HA REVENTADO: {type(e).__name__}: {str(e).strip()}")
+        escribir(f"        La CARGA DEL INFORME NO se ve afectada: el commit ya se hizo y")
+        escribir(f"        el dato esta escrito. NO vuelvas a subir el informe.")
+        escribir(f"        Lo que queda viejo es la copia materializada, y la pantalla lo")
+        escribir(f"        dira por su cuenta (centinela de frescura).")
+        return False
+
+    # 🔒 AVISAR SOLO SI FUE BIEN. Ver la cabecera: al reves se cachea dato viejo
+    #    con sello nuevo.
+    if todo_bien:
+        avisar_a_la_app(('inventario', 'ventas'), escribir=escribir)
+    else:
+        escribir("   · aviso a la app: NO se manda, porque el refresco no ha ido bien. "
+                 "Tirar la cache ahora releeria la copia vieja y la sellaria como fresca.")
+    return todo_bien

@@ -91,7 +91,7 @@ from psycopg2.extras import Json, execute_values
 
 # Del patrón común solo se reutiliza Aborta: la carga por rango es lógica propia
 # (barrer_sobrantes es para FOTOS y aquí borraría el histórico) — igual que el ledger.
-from foto_comun import Aborta, conectar_bd, listar_buzon, descargar_buzon
+from foto_comun import Aborta, conectar_bd, listar_buzon, descargar_buzon, refrescar_vistas
 
 # ---------------------------------------------------------------------------
 # 0) Configuración (secrets de GitHub; jamás credenciales en el código)
@@ -858,6 +858,9 @@ def main():
 
     if MODO == 'aplicar':
         con.commit()
+        # 🔒 Mismo sitio y mismo porque que en el ledger: despues del commit, fuera de la
+        #    transaccion, y solo en `aplicar`. Ver refrescar_vistas() en foto_comun.py.
+        refrescar_vistas(con, 'transacciones')
         print(f"\n✅ APLICADO en {ENTORNO}: {insertadas} movimientos de {PAIS} en "
               f"transacciones_movimientos (rango efectivo {fmin_ef}→{fmax_ef} recerrado; "
               f"RLS activo sin políticas; sello escrito en informes_subidos).")

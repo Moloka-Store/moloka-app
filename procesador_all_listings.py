@@ -50,8 +50,10 @@ from psycopg2.extras import execute_values
 from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
-from foto_comun import (Aborta, conectar_bd, listar_buzon, descargar_buzon, guarda_anti_encogimiento, guarda_no_retroceder,
-                        claves_previas, barrer_sobrantes, resumen_foto, archivar_foto)
+from foto_comun import (Aborta, conectar_bd, listar_buzon, descargar_buzon,
+                        guarda_anti_encogimiento, guarda_no_retroceder,
+                        claves_previas, barrer_sobrantes, resumen_foto, archivar_foto,
+                        refrescar_vistas)
 
 # ---------------------------------------------------------------------------
 # 0) Configuración
@@ -437,6 +439,10 @@ bloque("CONFLICTOS de SKU repetido (no se toca)", conflictos)
 
 if MODO == 'aplicar':
     con.commit()
+    # 🔒 Despues del commit, fuera de la transaccion y SOLO en `aplicar`. listings_amazon
+    #    es el mapa SKU -> ASIN de `mv_ventas_ventanas`: si cambia y no se refresca, las
+    #    ventas de un SKU nuevo dejan de sumarse a su ASIN y el numero sale bajo.
+    refrescar_vistas(con, 'listings')
     print(f"\n✅ APLICADO en {DESTINO}: listings_amazon con {len(skus_fichero)} filas "
           f"(la foto del informe y nada más).")
 else:
