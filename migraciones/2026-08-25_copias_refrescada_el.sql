@@ -388,10 +388,16 @@ BEGIN
     IF cols <> 'pais:text,mes:date,facturacion_iva:numeric,facturacion_sin_iva:numeric,unidades:bigint,coste_pvd:numeric,comision_amazon:numeric,logistica_fba:numeric,otras_tarifas:numeric,coste_almacen:numeric,reembolsos_netos:numeric,beneficio:numeric,margen_pct:numeric,fecha_hasta:date' THEN
         RAISE EXCEPTION 'ABORTA: v_rentabilidad_transacciones cambio de contrato. Ahora: %', cols;
     END IF;
+    -- ⚠️ ESTE CONTRATO ESTA COPIADO DE LA BASE, NO ESCRITO A MANO, y hubo que
+    --    aprenderlo: la primera version decia `ventana_hasta_listings:date` porque
+    --    las otras dos anclas lo son. No: sale de `listings_amazon.fecha_informe`,
+    --    que es `timestamptz`. Lo cazo el ensayo -- que es lo que tiene que pasar --
+    --    pero un contrato que se escribe de memoria no es un contrato, es un
+    --    recuerdo. Se saca con la misma consulta que lo comprueba.
     SELECT string_agg(column_name || ':' || data_type, ',' ORDER BY ordinal_position)
       INTO cols FROM information_schema.columns
      WHERE table_schema='public' AND table_name='v_ventas_ventanas';
-    IF cols <> 'asin:text,uds_7d:bigint,uds_30d:bigint,uds_60d:bigint,uds_90d:bigint,vel_dia_30d:numeric,vel_dia_90d:numeric,uds_30d_es:bigint,uds_30d_it:bigint,uds_30d_fr:bigint,uds_30d_marketplace:bigint,eur_30d_marketplace:numeric,devoluciones_30d:bigint,ventana_hasta_ledger:date,ventana_hasta_marketplace:date,dias_desde_ultimo_dato:integer,ventana_hasta_listings:date' THEN
+    IF cols <> 'asin:text,uds_7d:bigint,uds_30d:bigint,uds_60d:bigint,uds_90d:bigint,vel_dia_30d:numeric,vel_dia_90d:numeric,uds_30d_es:bigint,uds_30d_it:bigint,uds_30d_fr:bigint,uds_30d_marketplace:bigint,eur_30d_marketplace:numeric,devoluciones_30d:bigint,ventana_hasta_ledger:date,ventana_hasta_marketplace:date,dias_desde_ultimo_dato:integer,ventana_hasta_listings:timestamp with time zone' THEN
         RAISE EXCEPTION 'ABORTA: v_ventas_ventanas cambio de contrato. Ahora: %', cols;
     END IF;
 
