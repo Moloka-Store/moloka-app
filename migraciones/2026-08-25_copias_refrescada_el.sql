@@ -58,9 +58,15 @@ BEGIN
 
     -- 🔴 SI YA TIENEN LA COLUMNA, ESTA MIGRACION YA CORRIO. Un ensayo sobre el
     --    estado de destino sale verde sin demostrar nada.
-    IF EXISTS (SELECT 1 FROM information_schema.columns
-                WHERE table_schema='public' AND table_name='mv_ventas_ventanas'
-                  AND column_name='refrescada_el') THEN
+    -- 🔴 `pg_attribute` Y NO `information_schema`: ESE CATALOGO NO VE LAS
+    --    MATERIALIZADAS. No son parte del estandar SQL, asi que no aparecen -- y una
+    --    consulta contra el no da error: DEVUELVE CERO FILAS. Escrito asi, este
+    --    `IF EXISTS` era inerte: no podia dispararse NUNCA, dijera lo que dijera la
+    --    base. Cazado el 25-ago porque el testigo de abajo, escrito con el mismo
+    --    error, aborto el ensayo en staging.
+    IF EXISTS (SELECT 1 FROM pg_attribute
+                WHERE attrelid = 'public.mv_ventas_ventanas'::regclass
+                  AND attname = 'refrescada_el' AND attnum > 0 AND NOT attisdropped) THEN
         RAISE EXCEPTION 'ABORTA: mv_ventas_ventanas YA tiene refrescada_el.';
     END IF;
 
@@ -356,12 +362,14 @@ BEGIN
     END IF;
 
     -- La columna nueva, en las dos copias y en NINGUNA vista.
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
-                    WHERE table_schema='public' AND table_name='mv_ventas_ventanas'
-                      AND column_name='refrescada_el')
-       OR NOT EXISTS (SELECT 1 FROM information_schema.columns
-                       WHERE table_schema='public' AND table_name='mv_rentabilidad_sku'
-                         AND column_name='refrescada_el') THEN
+    -- 🔴 Por `pg_attribute`, no por `information_schema`: ese catalogo NO VE LAS
+    --    MATERIALIZADAS y devuelve cero filas sin dar error. Ver la guarda de arriba.
+    IF NOT EXISTS (SELECT 1 FROM pg_attribute
+                    WHERE attrelid = 'public.mv_ventas_ventanas'::regclass
+                      AND attname = 'refrescada_el' AND attnum > 0 AND NOT attisdropped)
+       OR NOT EXISTS (SELECT 1 FROM pg_attribute
+                       WHERE attrelid = 'public.mv_rentabilidad_sku'::regclass
+                         AND attname = 'refrescada_el' AND attnum > 0 AND NOT attisdropped) THEN
         RAISE EXCEPTION 'ABORTA: alguna copia se ha quedado sin refrescada_el.';
     END IF;
     -- 🔒 Y anclado sobre lo que NO debe aparecer, que es la mitad que se mueve: si la
