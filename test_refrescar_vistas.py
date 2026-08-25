@@ -130,6 +130,43 @@ eq('(3) 🔒 … y como se arregla', 'SECURITY' in txt, True)
 eq('(3) 🔴 NO avisa a la app', '/api/cache/invalidar' in txt, False)
 eq('(3) 🔒 y deja el autocommit como estaba', con.autocommit, False)
 
+print('\n== 3b) UN FALLO INESPERADO NO PUEDE TUMBAR LA CORRIDA ==')
+# 🔴 EL DANO DE VERDAD NO ES QUE FALLE EL REFRESCO: es que el workflow salga ROJO.
+#    El commit ya paso, asi que el informe esta escrito y a salvo. Si esto tumbara la
+#    corrida, quien la mirase pensaria que la carga fallo y VOLVERIA A SUBIR EL
+#    INFORME. Por eso `refrescar_vistas` no deja subir NINGUNA excepcion.
+# 🔒 Y es seguro tragarselo aqui SOLO porque el centinela de la pantalla ya esta
+#    desplegado: si el refresco se cae callado, la pantalla lo dice.
+# ⚠️ Este caso NO lo cubria ningun test hasta el 25-ago-2026: la conexion de mentira
+#    solo sabia reventar en el REFRESH, que lo caza el manejador de DENTRO. El de
+#    FUERA --el que da esta garantia-- no se ejecutaba nunca. Cazado rompiendolo.
+
+
+class CursorQueRevientaRaro(CursorFalso):
+    """Revienta con algo que NO es un error de psycopg2, y en un sitio que el
+    manejador de dentro no cubre: al preguntar si la mv existe."""
+
+    def execute(self, sql, args=None):
+        if 'to_regclass' in sql.lower():
+            raise RuntimeError('la conexion se ha caido en mitad del refresco')
+        return super().execute(sql, args)
+
+
+c = CursorQueRevientaRaro()
+tumbo = False
+try:
+    r, txt, con = corre(c)
+except Exception:
+    tumbo = True
+    r, txt, con = None, '', None
+eq('(3b) 🔴 NO deja subir la excepcion', tumbo, False)
+eq('(3b) 🔴 … y devuelve False', r, False)
+eq('(3b) … diciendo que ha reventado', 'REVENTADO' in txt, True)
+eq('(3b) 🔴 … y que la CARGA no se ve afectada', 'NO se ve afectada' in txt, True)
+eq('(3b) 🔒 … y que NO se vuelva a subir el informe', 'NO vuelvas a subir' in txt, True)
+eq('(3b) 🔴 NO avisa a la app', '/api/cache/invalidar' in txt, False)
+eq('(3b) 🔒 y deja el autocommit como estaba', con.autocommit, False)
+
 print('\n== 4) UNA FUENTE QUE NO TIENE MATERIALIZADAS ==')
 c = CursorFalso()
 r, txt, _ = corre(c, fuente='keepa')
@@ -145,6 +182,16 @@ eq('(5) el ledger refresca las ventanas',
    'mv_ventas_ventanas' in REFRESCOS_POR_FUENTE.get('ledger', ()), True)
 eq('(5) las transacciones tambien',
    'mv_ventas_ventanas' in REFRESCOS_POR_FUENTE.get('transacciones', ()), True)
+# 🔴 LA TERCERA, que es la que se me olvido en la primera version de este mapa.
+#    listings_amazon es el MAPA SKU -> ASIN de esa vista: si cambia y no se refresca,
+#    las ventas de un SKU nuevo dejan de sumarse a su ASIN y el numero sale BAJO.
+eq('(5) 🔴 y listings TAMBIEN las refresca (es el mapa SKU->ASIN)',
+   'mv_ventas_ventanas' in REFRESCOS_POR_FUENTE.get('listings', ()), True)
+# 🔒 Anclado sobre el RECUENTO: si manana alguien anade una fuente a la vista y se
+#    olvida del gancho, esto no lo caza -- pero si caza que alguien QUITE una.
+eq('(5) 🔒 v_ventas_ventanas se refresca desde sus TRES fuentes',
+   sorted(f for f, vs in REFRESCOS_POR_FUENTE.items() if 'mv_ventas_ventanas' in vs),
+   ['ledger', 'listings', 'transacciones'])
 
 print('\n== 6) LOS DOS PROCESADORES LO LLAMAN DE VERDAD ==')
 # 🔴 Un CI verde no prueba que una feature este viva. `refrescar_vistas` puede estar
@@ -160,7 +207,8 @@ def sin_almohadillas(texto):
 
 
 for fichero, fuente in (('procesador_ledger.py', 'ledger'),
-                        ('procesador_transacciones.py', 'transacciones')):
+                        ('procesador_transacciones.py', 'transacciones'),
+                        ('procesador_all_listings.py', 'listings')):
     with open(fichero, encoding='utf-8') as fh:
         codigo = sin_almohadillas(fh.read())
     eq('(6) %s llama al refresco con su fuente' % fichero,

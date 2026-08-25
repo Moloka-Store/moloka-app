@@ -41,6 +41,14 @@ jobs:
       - name: Mesa de pruebas del parseo TSV
         run: python -u test_tsv_quote_none.py
 
+      # 🔴 EL GANCHO DEL REFRESCO. listings_amazon es el MAPA SKU -> ASIN de
+      #    mv_ventas_ventanas: si cambia y no se refresca, las ventas de un SKU nuevo
+      #    dejan de sumarse a su ASIN y el numero sale BAJO, en silencio. Esta mesa
+      #    prueba que el gancho esta puesto, que grita si no puede refrescar, y que NO
+      #    tumba la corrida (el commit ya paso: el informe esta a salvo).
+      - name: Mesa de pruebas del refresco de materializadas
+        run: python -u test_refrescar_vistas.py
+
       - name: Ejecutar procesador
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

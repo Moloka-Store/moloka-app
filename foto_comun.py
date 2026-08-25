@@ -627,10 +627,22 @@ def resumen_foto(tabla, ambito, previas, nuevas, altas, borradas, modo):
 #    un refresco que no puede correr en produccion se descubriria cuando alguien
 #    mirase la pantalla y viera ventas viejas.
 
+# 🔴 UNA ENTRADA POR CADA FUENTE DE CADA MATERIALIZADA, no por cada fuente "obvia".
+#    `v_ventas_ventanas` bebe de TRES tablas, no de dos: ademas del ledger y las
+#    transacciones lee `listings_amazon`, y no de adorno -- es el MAPA SKU -> ASIN
+#    (`sku_asin AS (SELECT DISTINCT ON (btrim(seller_sku)) ... FROM listings_amazon)`).
+#    Las ventas de marketplace llegan por SKU y esa tabla dice a que ASIN pertenecen.
+#    Si entra un informe de listings sin que entre uno de ledger o transacciones --una
+#    referencia nueva, un SKU que cambia de ASIN--, la copia se queda con el mapa viejo
+#    y las ventas de ese SKU dejan de sumarse a su ASIN: el numero sale BAJO.
+# 🔒 La lista de fuentes NO se escribe de memoria: se deriva con el mapeador recursivo
+#    de `pg_depend` (con freno de ciclos). Escribirla a mano es como se perdio listings
+#    en la primera version de este mapa.
 REFRESCOS_POR_FUENTE = {
     # fuente que cambia  ->  materializadas que dependen de ella
     'ledger':        ('mv_ventas_ventanas',),
     'transacciones': ('mv_ventas_ventanas',),
+    'listings':      ('mv_ventas_ventanas',),
 }
 
 
@@ -706,13 +718,25 @@ def refrescar_vistas(con, fuente, escribir=print):
 
         con.autocommit = antes
         cur.close()
-    except Exception:
+    except Exception as e:
+        # 🔴 NO SE DEJA SUBIR LA EXCEPCION, NUNCA. El commit ya paso: el informe esta
+        #    escrito y a salvo. Si esto tumbara la corrida, el workflow saldria ROJO y
+        #    quien lo mirase pensaria que la carga fallo -- y volveria a subir el
+        #    informe, que es el dano de verdad. Se grita y se sigue.
+        # 🔒 Y es seguro hacerlo asi precisamente porque el centinela de la pantalla ya
+        #    esta desplegado: si el refresco se cae callado, la pantalla lo DICE. Sin ese
+        #    centinela, tragarse el fallo aqui seria esconderlo.
         con.autocommit = antes
         try:
             cur.close()
         except Exception:
             pass
-        raise
+        escribir(f"   · ❌ EL REFRESCO HA REVENTADO: {type(e).__name__}: {str(e).strip()}")
+        escribir(f"        La CARGA DEL INFORME NO se ve afectada: el commit ya se hizo y")
+        escribir(f"        el dato esta escrito. NO vuelvas a subir el informe.")
+        escribir(f"        Lo que queda viejo es la copia materializada, y la pantalla lo")
+        escribir(f"        dira por su cuenta (centinela de frescura).")
+        return False
 
     # 🔒 AVISAR SOLO SI FUE BIEN. Ver la cabecera: al reves se cachea dato viejo
     #    con sello nuevo.

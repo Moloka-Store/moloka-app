@@ -30,9 +30,11 @@
 --    (Comprobado que no la lee nadie: ni una vista de la base, ni ninguno de
 --    los dos repos. Aun asi se conserva, y viva.)
 --
--- 🔒 EL CONTRATO NO SE MUEVE: la vista de encima devuelve las MISMAS 16
---    columnas, con los mismos nombres, tipos y ORDEN. `dias_desde_ultimo_dato`
---    ya era la ultima, asi que no hay que reordenar nada.
+-- 🔒 EL CONTRATO NO SE ROMPE: la vista de encima devuelve las MISMAS 16 columnas
+--    de antes, con los mismos nombres, tipos y ORDEN, y ANADE una 17.a al final
+--    (`ventana_hasta_listings`). `CREATE OR REPLACE VIEW` admite anadir al final
+--    y nada mas -- por eso va ahi y no junto a las otras dos anclas.
+--    Nadie que lea las 16 de antes se entera del cambio.
 --
 -- ⚠️ UNA MATERIALIZADA NO APLICA RLS: la puerta pasa a ser SOLO el GRANT. Aqui
 --    es equivalente, y esta medido: NINGUNA politica de `public` filtra por
@@ -42,8 +44,10 @@
 --    `authenticated`, y eso SE VERIFICA EN PRODUCCION despues de aplicar (en
 --    staging no prueba nada: el dump va sin privilegios).
 --
--- 🔒 EL REFRESCO NO VIVE AQUI. Va en los procesadores del ledger y de las
---    transacciones, atado al evento que cambia el dato y no al reloj. Y no
+-- 🔒 EL REFRESCO NO VIVE AQUI. Va en los procesadores de las TRES fuentes
+--    --ledger, transacciones y listings--, atado al evento que cambia el dato y
+--    no al reloj. Una fuente sin gancho es una copia que se queda vieja sin que
+--    nadie la refresque; una fuente sin ancla es un desfase invisible. Y no
 --    puede ir en una migracion aunque se quisiera: refrescar una materializada
 --    sin bloquear lectores no se puede hacer dentro de una transaccion, y este
 --    fichero corre entero dentro de una.
@@ -123,7 +127,17 @@ $guardas$;
 CREATE MATERIALIZED VIEW public.mv_ventas_ventanas AS
 WITH ancla AS (
     SELECT (SELECT max(ledger_movimientos.fecha) FROM ledger_movimientos) AS hasta_ledger,
-           (SELECT max(transacciones_movimientos.fecha) FROM transacciones_movimientos) AS hasta_trans
+           (SELECT max(transacciones_movimientos.fecha) FROM transacciones_movimientos) AS hasta_trans,
+           -- 🔴 LA TERCERA FUENTE, Y SIN ELLA SU DESFASE ES INVISIBLE POR DISENO.
+           --    `listings_amazon` no es adorno aqui: es el MAPA SKU -> ASIN del CTE
+           --    `sku_asin`. Las ventas de marketplace llegan por SKU y esa tabla dice a
+           --    que ASIN pertenecen. Si entra un informe de listings sin que entre uno de
+           --    ledger o transacciones --una referencia nueva, un SKU que cambia de
+           --    ASIN--, la copia se queda con el mapa viejo y las ventas de ese SKU dejan
+           --    de sumarse a su ASIN: el numero sale BAJO, en silencio.
+           --    Las otras dos anclas NO lo ven: ninguna se mueve cuando solo cambia
+           --    listings. Por eso hace falta una POR CADA FUENTE.
+           (SELECT max(listings_amazon.fecha_informe) FROM listings_amazon) AS hasta_listings
 ), salidas AS (
     SELECT l.asin,
            sum(abs(l.quantity)) FILTER (WHERE l.fecha > (a_1.hasta_ledger - 8)  AND l.fecha < a_1.hasta_ledger) AS uds_7d,
@@ -177,7 +191,8 @@ SELECT COALESCE(s.asin, m.asin) AS asin,
        COALESCE(m.eur_30d_marketplace, 0::numeric) AS eur_30d_marketplace,
        COALESCE(d.devoluciones_30d, 0::bigint) AS devoluciones_30d,
        a.hasta_ledger AS ventana_hasta_ledger,
-       a.hasta_trans  AS ventana_hasta_marketplace
+       a.hasta_trans  AS ventana_hasta_marketplace,
+       a.hasta_listings AS ventana_hasta_listings
   FROM salidas s
   FULL JOIN mercado m ON m.asin = s.asin
   LEFT JOIN devueltas d ON d.asin = COALESCE(s.asin, m.asin)
@@ -236,7 +251,11 @@ SELECT asin,
        devoluciones_30d,
        ventana_hasta_ledger,
        ventana_hasta_marketplace,
-       CURRENT_DATE - ventana_hasta_ledger AS dias_desde_ultimo_dato
+       CURRENT_DATE - ventana_hasta_ledger AS dias_desde_ultimo_dato,
+       -- 🔒 AL FINAL, y no por gusto: `CREATE OR REPLACE VIEW` solo admite ANADIR
+       --    columnas al final. Meterla en medio obligaria a un DROP, y un DROP aqui se
+       --    lleva por delante los diez objetos que cuelgan.
+       ventana_hasta_listings
   FROM public.mv_ventas_ventanas;
 
 -- -- TESTIGO · el contrato y el dato, no el log ------------------------------
@@ -268,18 +287,32 @@ BEGIN
         RAISE EXCEPTION 'ABORTA: la mv tiene % filas y la vista %. La vista de encima no puede perder ni anadir filas.', n_mv, n_vista;
     END IF;
 
-    -- 2) EL CONTRATO: 16 columnas, la del reloj la ultima. Es lo que impide que
-    --    los diez objetos que cuelgan se rompan.
+    -- 2) EL CONTRATO: las 16 de antes intactas + la 17.a anadida al final. Es lo
+    --    que impide que los diez objetos que cuelgan se rompan.
     SELECT count(*) INTO n_cols FROM information_schema.columns
      WHERE table_schema='public' AND table_name='v_ventas_ventanas';
-    IF n_cols <> 16 THEN
-        RAISE EXCEPTION 'ABORTA: la vista quedo con % columnas y tenia 16.', n_cols;
+    IF n_cols <> 17 THEN
+        RAISE EXCEPTION 'ABORTA: la vista quedo con % columnas y tenian que ser 17 (las 16 de antes + ventana_hasta_listings).', n_cols;
+    END IF;
+    -- 🔒 La 16.a sigue siendo la del reloj: si se hubiera colado la nueva EN MEDIO,
+    --    el orden del contrato habria cambiado para los diez que cuelgan.
+    SELECT column_name INTO ultima FROM information_schema.columns
+     WHERE table_schema='public' AND table_name='v_ventas_ventanas'
+       AND ordinal_position = 16;
+    IF ultima <> 'dias_desde_ultimo_dato' THEN
+        RAISE EXCEPTION 'ABORTA: la columna 16 es % y tenia que seguir siendo dias_desde_ultimo_dato. La nueva se ha colado en medio.', ultima;
     END IF;
     SELECT column_name INTO ultima FROM information_schema.columns
      WHERE table_schema='public' AND table_name='v_ventas_ventanas'
      ORDER BY ordinal_position DESC LIMIT 1;
-    IF ultima <> 'dias_desde_ultimo_dato' THEN
-        RAISE EXCEPTION 'ABORTA: la ultima columna es % y tenia que ser dias_desde_ultimo_dato.', ultima;
+    IF ultima <> 'ventana_hasta_listings' THEN
+        RAISE EXCEPTION 'ABORTA: la ultima columna es % y tenia que ser ventana_hasta_listings.', ultima;
+    END IF;
+
+    -- 🔴 Y EL ANCLA NUEVA TIENE QUE CUADRAR CON SU FUENTE, que es para lo que existe.
+    IF (SELECT ventana_hasta_listings FROM v_ventas_ventanas LIMIT 1)
+       IS DISTINCT FROM (SELECT max(fecha_informe) FROM listings_amazon) THEN
+        RAISE EXCEPTION 'ABORTA: ventana_hasta_listings no coincide con max(fecha_informe) de listings_amazon. El ancla de la tercera fuente no mide lo que dice medir.';
     END IF;
 
     -- 3) 🔴 LA COLUMNA DEL RELOJ SIGUE VIVA, que es la mitad de este diseno. Se
