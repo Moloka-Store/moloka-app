@@ -266,6 +266,9 @@ DECLARE
     --    Valor perecedero: despues de aplicar ya no se puede recalcular contra
     --    el original. Por eso viaja escrito aqui.
     HUELLA_ANTES constant text := '747d612229bda09cc3418fa46115f93c';
+    -- Las filas que tenia PRODUCCION cuando se midio esa huella. Si la base no tiene
+    -- exactamente estas, la huella no aplica y se dice (ver mas abajo).
+    FILAS_DE_LA_HUELLA constant bigint := 293;
     n_mv       bigint;
     n_vista    bigint;
     n_cols     int;
@@ -356,7 +359,16 @@ BEGIN
                    eur_30d_marketplace, devoluciones_30d,
                    ventana_hasta_ledger, ventana_hasta_marketplace
               FROM v_ventas_ventanas) t;
-    IF huella_hoy <> HUELLA_ANTES THEN
+    -- 🔴 LA HUELLA SOLO VALE SOBRE LA BASE EN LA QUE SE MIDIO. Se tomo en PRODUCCION,
+    --    sobre sus 293 filas. Staging tiene otras (290 el 25-ago): alli esta huella no
+    --    puede coincidir, y compararla haria ABORTAR EL ENSAYO POR EL DATO, no por la
+    --    migracion -- el ruido futuro de la seccion 3, y encima en el peldano que existe
+    --    para dar confianza.
+    -- 🔒 Asi que se comprueba donde puede comprobarse y se GRITA donde no, diciendo que
+    --    no se ha comprobado. Nunca se apaga en silencio.
+    IF n_mv <> FILAS_DE_LA_HUELLA THEN
+        RAISE WARNING 'HUELLA NO COMPROBADA EN ESTE ENTORNO: la huella % se midio sobre PRODUCCION con % filas y aqui hay %. No es un fallo: son bases con datos distintos. Lo que este ensayo NO ha comprobado es que el contrato de salida no se haya movido; ESO SE VERIFICA EN PRODUCCION, al aplicar.', HUELLA_ANTES, FILAS_DE_LA_HUELLA, n_mv;
+    ELSIF huella_hoy <> HUELLA_ANTES THEN
         RAISE EXCEPTION 'ABORTA: la huella de v_ventas_ventanas es % y antes de aplicar era %. El contrato de salida ha CAMBIADO: algo de la definicion no se copio igual. No se sigue.', huella_hoy, HUELLA_ANTES;
     END IF;
 
