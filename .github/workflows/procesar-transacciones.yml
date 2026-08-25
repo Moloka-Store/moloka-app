@@ -65,6 +65,15 @@ jobs:
       - name: Mesa de pruebas del país y su mapa de columnas
         run: python -u test_transacciones_pais.py
 
+      # 🔴 EL GANCHO DEL REFRESCO. `refrescar_vistas()` corre DESPUES del commit y
+      #    NO aborta: si falla, la carga ya esta escrita y lo unico que queda es el
+      #    grito. O sea que un fallo suyo no tumba este workflow y se descubriria
+      #    dias despues, con la pantalla enseñando ventas viejas. Esta mesa prueba
+      #    que GRITA, que grita lo que hace falta para arreglarlo, y --la mitad que
+      #    se olvida-- que NO avisa a la app cuando el refresco fue mal.
+      - name: Mesa de pruebas del refresco de materializadas
+        run: python -u test_refrescar_vistas.py
+
       - name: Ejecutar procesador
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
