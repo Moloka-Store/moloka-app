@@ -638,6 +638,8 @@ def resumen_foto(tabla, ambito, previas, nuevas, altas, borradas, modo):
 # 🔒 La lista de fuentes NO se escribe de memoria: se deriva con el mapeador recursivo
 #    de `pg_depend` (con freno de ciclos). Escribirla a mano es como se perdio listings
 #    en la primera version de este mapa.
+_NL = chr(10)
+
 REFRESCOS_POR_FUENTE = {
     # fuente que cambia  ->  materializadas que dependen de ella
     'ledger':        ('mv_ventas_ventanas',),
@@ -670,123 +672,116 @@ def avisar_a_la_app(etiquetas, escribir=print):
 
 
 def refrescar_vistas(con, fuente, escribir=print):
-    """Refresca las materializadas que dependen de `fuente`. Devuelve True si TODAS
-    quedaron al dia.
+    """Pone al dia las copias que dependen de `fuente`. Devuelve True si TODAS quedaron
+    al dia --las materializadas de esa fuente y la del Trackeador--.
 
-    `con` es la conexion del procesador CON EL COMMIT YA HECHO. Esta funcion la
-    pone en autocommit, refresca, comprueba y la deja como estaba.
+    `con` es la conexion del procesador CON EL COMMIT YA HECHO.
 
     🔴 NO ABORTA NUNCA. La carga del informe --que es lo que importa-- ya esta
-       confirmada; el refresco es aguas abajo. Un fallo aqui se GRITA con todo lo
-       que hace falta para arreglarlo (quien es, quien es el dueno, y el error
-       exacto), y el centinela de la pantalla lo dira tambien en el dato.
+       confirmada; el refresco es aguas abajo. Un fallo aqui se GRITA con todo lo que
+       hace falta para arreglarlo (quien es, quien es el dueno, y el error exacto), y el
+       centinela de la pantalla lo dira tambien en el dato.
+
+    ⏱️ ESTO TARDA, Y SE DIMENSIONA POR EL PEOR CASO, NO POR EL MEJOR. Solo el refresco
+       del Trackeador ha medido 17,9 · 8,6 · 7,6 · 7,1 · 2,7 s en sus ultimas cinco
+       corridas: se cuenta con 18 s, no con 7. Sumadas las nueve materializadas de la
+       casa mas la suya, una carga de informe puede pasar un MINUTO aqui. No es un
+       problema --va despues del commit y nadie espera-- pero que no sorprenda ver un
+       workflow tardando eso.
     """
     vistas = REFRESCOS_POR_FUENTE.get(fuente, ())
-    if not vistas:
-        return True
 
-    # 🔴 TODO LO QUE PUEDE FALLAR VA DENTRO DEL `try`, Y `con.autocommit = True` PUEDE
-    #    FALLAR. Aqui vivio un bug que hacia FALSA la garantia de la linea de abajo: esa
-    #    asignacion estaba FUERA, y con una transaccion abierta psycopg2 lanza
-    #    `ProgrammingError: set_session cannot be used inside a transaction`. En un
-    #    procesador real eso habria TUMBADO LA CARGA DEL INFORME -- exactamente lo que
-    #    este arreglo existe para impedir. Y la mesa de pruebas no lo cazo porque la
-    #    conexion de mentira siempre llegaba a esa linea en estado limpio.
+    # 🔴 NO SE REFRESCA SOBRE UNA TRANSACCION QUE NO ES MIA, y el motivo CAMBIO el
+    #    25-ago-2026: antes era "refrescar exige salir de la transaccion". ESO ERA FALSO
+    #    (ver la nota del CONCURRENTLY mas abajo). El motivo bueno es otro y es mas
+    #    fuerte: aqui abajo hay `con.commit()`, y si quien llamo tenia trabajo SIN
+    #    CONFIRMAR, ese commit se lo CONFIRMARIA por la espalda. Es peor que el rollback
+    #    que ya se descarto una vez.
+    # 🔑 La conservadora sigue siendo la misma: gritar, devolver False y no tocar nada.
+    #    Que la copia se quede vieja lo caza el centinela; lo que confirmaria un commit
+    #    ajeno no lo caza nadie.
+    if con.info.transaction_status != psycopg2.extensions.TRANSACTION_STATUS_IDLE:
+        escribir("   · ❌ NO SE REFRESCA: me han llamado con una TRANSACCION ABIERTA.")
+        escribir("        Poner al dia las copias termina en un commit, y ese commit")
+        escribir("        confirmaria trabajo que NO es mio. No se toca.")
+        escribir("        Quien llame debe hacer commit (o rollback) ANTES de pedirlo.")
+        escribir("        La copia se queda vieja, y eso lo dice la pantalla por su centinela.")
+        return False
+
+    # 🔴 AQUI NO SE TOCA EL ESTADO DE LA SESION, Y ESE ES EL ARREGLO DEL 25-ago-2026.
+    #    Esta funcion ponia la conexion en autocommit, y de ahi salio un rojo en
+    #    produccion: `psycopg2.ProgrammingError: set_session cannot be used inside a
+    #    transaction`.
+    # ⚠️ Y LA REGLA QUE SE ESCRIBIO ENTONCES TENIA LA CAUSA EQUIVOCADA. Se dijo que
+    #    `REFRESH ... CONCURRENTLY` no puede correr dentro de una transaccion. **Eso no
+    #    es verdad**: lo que se vio fue una queja de PSYCOPG2 al CAMBIAR el modo de la
+    #    sesion, no de Postgres al refrescar. Comprobado despues en produccion: el
+    #    refresco corre dentro de un BEGIN/ROLLBACK explicito sin problema.
+    # 🔑 Una regla con la causa equivocada hace dano de verdad: dentro de tres meses
+    #    alguien evitaria algo que SI se puede hacer, y seguiria tropezando con lo que si
+    #    falla. Sin autocommit desaparecen de golpe el `set_session`, el guardar y
+    #    restaurar el modo, y la pregunta de si el `finally` lo devuelve bien.
     #
-    # 🔴 Y SI LLEGA UNA TRANSACCION ABIERTA, NO SE TOCA: SE RENUNCIA AL REFRESCO.
-    #    No se da por hecho que el caller llame justo despues del commit --es verdad en el
-    #    camino que se escribio y falso en cualquier otro: basta un SELECT despues para
-    #    que psycopg2 abra una transaccion implicita--.
-    #    ⚠️ AQUI HUBO UN ROLLBACK, Y ERA UN ERROR. Se justificaba con "sobre una
-    #       transaccion de solo lectura no deshace nada", que es cierto y DA POR HECHO
-    #       justo lo que no se puede saber en este punto. Una transaccion abierta
-    #       significa que quien llamo tenia trabajo SIN CONFIRMAR, y hacerle rollback se
-    #       lo DESTRUYE.
-    #    🔑 La opcion conservadora de verdad es no tocarla: se grita, se devuelve False y
-    #       no se refresca. Lo que se pierde es que la copia se quede vieja, Y ESO LO CAZA
-    #       EL CENTINELA. Lo que se evitaria perder con un rollback no lo caza nadie.
-    antes = con.autocommit
-    cur = None
+    # 🔴 CADA COPIA, SU PROPIA TRANSACCION. Si un REFRESH falla dentro de una transaccion
+    #    compartida, Postgres la ABORTA entera y todo lo que venga detras revienta con
+    #    "current transaction is aborted": una copia rota se llevaria por delante a las
+    #    demas y al Trackeador. Con commit por copia, cada una cae sola.
     todo_bien = True
+    cur = None
+    quien = '?'
     try:
-        if not antes and con.info.transaction_status != psycopg2.extensions.TRANSACTION_STATUS_IDLE:
-            escribir("   · ❌ NO SE REFRESCA: me han llamado con una TRANSACCION ABIERTA.")
-            escribir("        Refrescar exige salir de la transaccion, y salir de ella "
-                     "significaria")
-            escribir("        confirmar o deshacer trabajo que NO es mio. No se toca.")
-            escribir("        Quien llame debe hacer commit (o rollback) ANTES de pedir el "
-                     "refresco.")
-            escribir("        La copia se queda vieja, y eso lo dice la pantalla por su "
-                     "centinela.")
-            return False
-        con.autocommit = True
         cur = con.cursor()
         cur.execute("SELECT current_user")
         quien = cur.fetchone()[0]
-        escribir(f"\n--- REFRESCO DE MATERIALIZADAS (fuente: {fuente}) ---")
+        con.commit()
+        escribir(_NL + "--- REFRESCO DE COPIAS (fuente: " + str(fuente) + ") ---")
+        # 🔴 Se registra SIEMPRE, no solo cuando falla: si un dia el refresco no va, la
+        #    primera pregunta es quien se conecto, y para entonces ya no hay forma de
+        #    saberlo. Anclado en el rotulo, no en el valor: `postgres` sale tambien en la
+        #    linea del dueno, asi que buscar el valor daba verde con esta linea borrada.
         escribir(f"   · conectado como: {quien}")
 
         for vista in vistas:
-            cur.execute("SELECT to_regclass(%s)", (f'public.{vista}',))
-            if cur.fetchone()[0] is None:
-                escribir(f"   · ⚠️  {vista} NO EXISTE todavia: no se refresca nada.")
-                escribir(f"        No es un fallo de esta carga --el informe ya esta escrito--")
-                escribir(f"        sino que la migracion que la crea aun no se ha aplicado en")
-                escribir(f"        este entorno. Aplicala y el proximo informe la pondra al dia.")
+            if not _refrescar_una(con, cur, vista, quien, escribir):
                 todo_bien = False
-                continue
 
-            cur.execute("SELECT pg_get_userbyid(relowner) FROM pg_class "
-                        "WHERE oid = %s::regclass", (f'public.{vista}',))
-            dueno = cur.fetchone()[0]
-            t0 = time.time()
-            try:
-                cur.execute(f"REFRESH MATERIALIZED VIEW CONCURRENTLY public.{_ident(vista)}")
-            except psycopg2.Error as e:
-                escribir(f"   · ❌ {vista}: NO SE HA PODIDO REFRESCAR.")
-                escribir(f"        conectado como : {quien}")
-                escribir(f"        dueno de la mv : {dueno}")
-                escribir(f"        error          : {str(e).strip()}")
-                escribir(f"        REFRESH exige SER DUENO: ni SELECT ni ALL PRIVILEGES valen.")
-                escribir(f"        Si {quien} no es {dueno} ni miembro suyo, hay que darle la")
-                escribir(f"        propiedad o envolver el refresco en una funcion SECURITY")
-                escribir(f"        DEFINER de {dueno} con EXECUTE para {quien}.")
-                todo_bien = False
-                continue
-            ms = (time.time() - t0) * 1000
-            escribir(f"   · {vista} refrescada en {ms:.0f} ms (dueno: {dueno})")
+        # 🔴 EL TRACKEADOR VA AL FINAL Y VA SIEMPRE, tenga esta fuente materializadas o
+        #    no. `v_trackeador_pantalla` bebe de NUEVE tablas --compras, escaner_memoria,
+        #    inventario_fba, inventario_internacional, keepa_escaparate, listings_amazon,
+        #    paneu_oferta_pais, productos y transacciones_movimientos--, o sea de casi
+        #    todos los informes. Es lo que hace que su pestana refleje el Keepa de la
+        #    manana en vez del de ayer.
+        # 🔒 Y va DESPUES de las nuestras a proposito: su vista lee las mismas tablas, asi
+        #    que ponerla primero la dejaria mirando lo de antes.
+        if not _refrescar_trackeador(con, cur, escribir):
+            todo_bien = False
 
     except Exception as e:
-        # 🔴 NO SE DEJA SUBIR LA EXCEPCION, NUNCA. El commit ya paso: el informe esta
-        #    escrito y a salvo. Si esto tumbara la corrida, el workflow saldria ROJO y
-        #    quien lo mirase pensaria que la carga fallo -- y volveria a subir el
+        # 🔴 NO SE DEJA SUBIR LA EXCEPCION, NUNCA. El commit del informe ya paso: el dato
+        #    esta escrito y a salvo. Si esto tumbara la corrida, el workflow saldria ROJO
+        #    y quien lo mirase pensaria que la carga fallo -- y volveria a subir el
         #    informe, que es el dano de verdad. Se grita y se sigue.
-        # 🔒 Y es seguro hacerlo asi precisamente porque el centinela de la pantalla ya
-        #    esta desplegado: si el refresco se cae callado, la pantalla lo DICE. Sin ese
-        #    centinela, tragarse el fallo aqui seria esconderlo.
+        # 🔒 Es seguro tragarselo precisamente porque el centinela de la pantalla ya esta
+        #    desplegado: si el refresco se cae callado, la pantalla lo DICE.
         escribir(f"   · ❌ EL REFRESCO HA REVENTADO: {type(e).__name__}: {str(e).strip()}")
-        escribir(f"        La CARGA DEL INFORME NO se ve afectada: el commit ya se hizo y")
-        escribir(f"        el dato esta escrito. NO vuelvas a subir el informe.")
-        escribir(f"        Lo que queda viejo es la copia materializada, y la pantalla lo")
-        escribir(f"        dira por su cuenta (centinela de frescura).")
+        escribir("        La CARGA DEL INFORME NO se ve afectada: el commit ya se hizo y")
+        escribir("        el dato esta escrito. NO vuelvas a subir el informe.")
+        escribir("        Lo que queda viejo son las copias, y la pantalla lo dira por su")
+        escribir("        cuenta (centinela de frescura).")
+        try:
+            con.rollback()
+        except Exception:
+            pass
         return False
     finally:
-        # 🔒 SE RESTAURA SIEMPRE, tambien si reventamos: dejar la conexion en autocommit
-        #    cambiaria el comportamiento del procesador que nos llamo -- sus siguientes
-        #    escrituras se confirmarian solas, sin transaccion. Y el propio restablecer
-        #    puede fallar (conexion caida), asi que tampoco puede propagar.
         try:
             if cur is not None:
                 cur.close()
         except Exception:
             pass
-        try:
-            con.autocommit = antes
-        except Exception:
-            pass
 
-    # 🔒 AVISAR SOLO SI FUE BIEN. Ver la cabecera: al reves se cachea dato viejo
-    #    con sello nuevo.
+    # 🔒 AVISAR SOLO SI FUE BIEN. Al reves se cachea dato viejo con sello nuevo: la app
+    #    tiraria su cache, releeria la copia VIEJA y la sellaria como fresca.
     if todo_bien:
         etiquetas = tuple(sorted({e for v in vistas for e in ETIQUETAS_POR_VISTA.get(v, ())}))
         avisar_a_la_app(etiquetas, escribir=escribir)
@@ -794,3 +789,69 @@ def refrescar_vistas(con, fuente, escribir=print):
         escribir("   · aviso a la app: NO se manda, porque el refresco no ha ido bien. "
                  "Tirar la cache ahora releeria la copia vieja y la sellaria como fresca.")
     return todo_bien
+
+
+def _refrescar_una(con, cur, vista, quien, escribir):
+    """Una materializada, en su propia transaccion. True si quedo al dia."""
+    cur.execute("SELECT to_regclass(%s)", (f'public.{vista}',))
+    if cur.fetchone()[0] is None:
+        con.commit()
+        escribir(f"   · ⚠️  {vista} NO EXISTE todavia: no se refresca nada.")
+        escribir("        No es un fallo de esta carga --el informe ya esta escrito--")
+        escribir("        sino que la migracion que la crea aun no se ha aplicado en")
+        escribir("        este entorno. Aplicala y el proximo informe la pondra al dia.")
+        return False
+
+    cur.execute("SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = %s::regclass",
+                (f'public.{vista}',))
+    dueno = cur.fetchone()[0]
+    t0 = time.time()
+    try:
+        cur.execute(f"REFRESH MATERIALIZED VIEW CONCURRENTLY public.{_ident(vista)}")
+        con.commit()
+    except psycopg2.Error as e:
+        con.rollback()
+        escribir(f"   · ❌ {vista}: NO SE HA PODIDO REFRESCAR.")
+        escribir(f"        conectado como : {quien}")
+        escribir(f"        dueno de la mv : {dueno}")
+        escribir(f"        error          : {str(e).strip()}")
+        escribir("        REFRESH exige SER DUENO: ni SELECT ni ALL PRIVILEGES valen.")
+        escribir(f"        Si {quien} no es {dueno} ni miembro suyo, hay que darle la")
+        escribir(f"        propiedad o envolver el refresco en una funcion SECURITY")
+        escribir(f"        DEFINER de {dueno} con EXECUTE para {quien}.")
+        return False
+    escribir(f"   · {vista} refrescada en {(time.time()-t0)*1000:.0f} ms (dueno: {dueno})")
+    return True
+
+
+def _refrescar_trackeador(con, cur, escribir):
+    """`fn_trackeador_refrescar(false)`, que pone al dia `mv_trackeador_pantalla`.
+
+    🔒 EL `false` NO ES UN DETALLE: es el modo "no relances". La funcion registra el
+       fallo en `trackeador_refrescos`, devuelve el texto del error y NO lanza
+       excepcion, para que aqui quede escrito QUE fallo en vez de una excepcion
+       generica tragada por el manejador de arriba. El `true` es para su cron de las
+       19:45, que si tiene que verse rojo.
+    """
+    t0 = time.time()
+    try:
+        cur.execute("SELECT public.fn_trackeador_refrescar(false)")
+        salida = cur.fetchone()[0]
+        con.commit()
+    except psycopg2.Error as e:
+        con.rollback()
+        escribir(f"   · ❌ trackeador: NO SE HA PODIDO REFRESCAR. {str(e).strip()}")
+        escribir("        Su pestana se queda con la foto anterior.")
+        return False
+    ms = (time.time() - t0) * 1000
+    # 🔴 QUE DEVUELVA TEXTO NO SIGNIFICA QUE HAYA IDO BIEN. Con `false` la funcion se
+    #    traga su propia excepcion y devuelve 'ERROR: ...' como valor NORMAL. Mirar solo
+    #    "no ha lanzado" daria verde sobre un refresco fallido: una comprobacion que no
+    #    puede fallar.
+    if salida is None or str(salida).startswith('ERROR:'):
+        escribir(f"   · ❌ trackeador: {salida}")
+        escribir("        Su pestana se queda con la foto anterior. Queda registrado en")
+        escribir("        `trackeador_refrescos`, con el error.")
+        return False
+    escribir(f"   · trackeador refrescado en {ms:.0f} ms ({salida})")
+    return True

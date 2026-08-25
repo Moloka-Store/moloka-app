@@ -439,9 +439,14 @@ bloque("CONFLICTOS de SKU repetido (no se toca)", conflictos)
 
 if MODO == 'aplicar':
     con.commit()
-    # 🔒 Despues del commit, fuera de la transaccion y SOLO en `aplicar`. listings_amazon
-    #    es el mapa SKU -> ASIN de `mv_ventas_ventanas`: si cambia y no se refresca, las
-    #    ventas de un SKU nuevo dejan de sumarse a su ASIN y el numero sale bajo.
+    # 🔒 Despues del commit y SOLO en `aplicar`. listings_amazon es el mapa SKU -> ASIN
+    #    de `mv_ventas_ventanas`: si cambia y no se refresca, las ventas de un SKU nuevo
+    #    dejan de sumarse a su ASIN y el numero sale bajo.
+    # ⚠️ AQUI PONIA "fuera de la transaccion", Y ESA CAUSA ERA FALSA: `REFRESH ...
+    #    CONCURRENTLY` corre dentro de un BEGIN sin problema. Lo que se vio aquel dia
+    #    fue una queja de PSYCOPG2 al cambiar el modo de la sesion, no de Postgres al
+    #    refrescar. Va DESPUES DEL COMMIT por el motivo bueno: no tener la transaccion
+    #    de carga abierta durante los segundos que tarda.
     refrescar_vistas(con, 'listings')
     print(f"\n✅ APLICADO en {DESTINO}: listings_amazon con {len(skus_fichero)} filas "
           f"(la foto del informe y nada más).")
