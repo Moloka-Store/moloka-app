@@ -684,20 +684,32 @@ def refrescar_vistas(con, fuente, escribir=print):
     #    este arreglo existe para impedir. Y la mesa de pruebas no lo cazo porque la
     #    conexion de mentira siempre llegaba a esa linea en estado limpio.
     #
-    # 🔒 Y NO SE DA POR HECHO QUE EL CALLER LLAME JUSTO DESPUES DEL COMMIT. Es verdad en
-    #    el camino que se escribio y falso en cualquier otro: basta con que alguien haga
-    #    un SELECT despues del commit para que psycopg2 abra una transaccion implicita.
-    #    Se deja la conexion limpia AQUI, con un rollback --que sobre una transaccion de
-    #    solo lectura no deshace nada, y sobre una con escritura sin confirmar es la
-    #    opcion conservadora: no persiste nada que el caller no haya confirmado el--.
+    # 🔴 Y SI LLEGA UNA TRANSACCION ABIERTA, NO SE TOCA: SE RENUNCIA AL REFRESCO.
+    #    No se da por hecho que el caller llame justo despues del commit --es verdad en el
+    #    camino que se escribio y falso en cualquier otro: basta un SELECT despues para
+    #    que psycopg2 abra una transaccion implicita--.
+    #    ⚠️ AQUI HUBO UN ROLLBACK, Y ERA UN ERROR. Se justificaba con "sobre una
+    #       transaccion de solo lectura no deshace nada", que es cierto y DA POR HECHO
+    #       justo lo que no se puede saber en este punto. Una transaccion abierta
+    #       significa que quien llamo tenia trabajo SIN CONFIRMAR, y hacerle rollback se
+    #       lo DESTRUYE.
+    #    🔑 La opcion conservadora de verdad es no tocarla: se grita, se devuelve False y
+    #       no se refresca. Lo que se pierde es que la copia se quede vieja, Y ESO LO CAZA
+    #       EL CENTINELA. Lo que se evitaria perder con un rollback no lo caza nadie.
     antes = con.autocommit
     cur = None
     todo_bien = True
     try:
         if not antes and con.info.transaction_status != psycopg2.extensions.TRANSACTION_STATUS_IDLE:
-            escribir("   · (habia una transaccion abierta al entrar; se cierra con rollback "
-                     "antes de refrescar -- si solo se habia leido, no deshace nada)")
-            con.rollback()
+            escribir("   · ❌ NO SE REFRESCA: me han llamado con una TRANSACCION ABIERTA.")
+            escribir("        Refrescar exige salir de la transaccion, y salir de ella "
+                     "significaria")
+            escribir("        confirmar o deshacer trabajo que NO es mio. No se toca.")
+            escribir("        Quien llame debe hacer commit (o rollback) ANTES de pedir el "
+                     "refresco.")
+            escribir("        La copia se queda vieja, y eso lo dice la pantalla por su "
+                     "centinela.")
+            return False
         con.autocommit = True
         cur = con.cursor()
         cur.execute("SELECT current_user")
