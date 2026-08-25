@@ -224,6 +224,49 @@ def main():
             #    transaccion, tambien si el EXPLAIN reventó.
             con.rollback()
 
+    # ── EL BARRIDO ────────────────────────────────────────────────────────
+    print(f"\n{'=' * 78}\nBARRIDO · ¿donde MAS pasa esto?\n{'=' * 78}", flush=True)
+    barrido = {}
+    for vista, nota in BARRIDO:
+        sql = f"SELECT * FROM public.{vista}"
+        pareja = {}
+        for etiqueta, con_rls in (('con RLS', True), ('sin RLS', False)):
+            try:
+                if con_rls:
+                    cur.execute("SELECT set_config('request.jwt.claims', %s, true)", (CLAIMS,))
+                    cur.execute("SET LOCAL ROLE authenticated")
+                    cur.execute("SELECT current_user, auth.uid()")
+                    efectivo, uid = cur.fetchone()
+                    # 🔴 Las mismas guardas: sin rol efectivo o sin uid, el plan no mide nada.
+                    if efectivo != 'authenticated' or uid is None:
+                        raise RuntimeError(
+                            f"rol efectivo {efectivo!r}, auth.uid()={uid!r}. El plan no "
+                            f"mediria con la RLS puesta.")
+                plan = explicar(cur, sql)
+                pareja[etiqueta] = total_buffers(plan)
+                pareja[etiqueta + ' plan'] = plan
+            except Exception as e:
+                print(f"   ❌ {vista} ({etiqueta}): {type(e).__name__}: {str(e).strip()[:160]}",
+                      flush=True)
+                pareja[etiqueta] = None
+            finally:
+                con.rollback()
+        a, b = pareja.get('con RLS'), pareja.get('sin RLS')
+        barrido[vista] = (a, b, nota)
+        if a is None or b is None or b == 0:
+            print(f"   · {vista}: sin medida ({nota})", flush=True)
+            continue
+        veces = a / b
+        marca = '🔴' if veces >= 2 else '·'
+        print(f"   {marca} {vista}: con RLS {a:,} buffers · sin RLS {b:,} · "
+              f"x{veces:.1f}   ({nota})", flush=True)
+        # 🔒 El plan entero solo se imprime si hay diferencia: si las dos mitades salen
+        #    iguales no hay nada que leer, y un muro de texto tapa lo que si.
+        if veces >= 2:
+            print("      --- el plan CON RLS ---", flush=True)
+            for linea in pareja.get('con RLS plan', []):
+                print("      " + linea, flush=True)
+
     print(f"\n{'=' * 78}\nRESUMEN\n{'=' * 78}", flush=True)
     for titulo, _, _ in CASOS:
         v = salidas.get(titulo)
@@ -233,6 +276,13 @@ def main():
             b, filas = v
             print(f"   · {titulo}: {b:,} buffers = {b * 8192 / 1048576:,.0f} MB "
                   f"({filas} filas)", flush=True)
+
+    print("\n   --- BARRIDO ---", flush=True)
+    for vista, (a, b, nota) in barrido.items():
+        if a is None or b is None or b == 0:
+            print(f"   · {vista}: sin medida", flush=True)
+        else:
+            print(f"   · {vista}: x{a/b:.1f}  ({a:,} con RLS / {b:,} sin RLS)", flush=True)
 
     cur.close()
     con.close()
