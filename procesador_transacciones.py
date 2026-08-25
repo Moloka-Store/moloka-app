@@ -858,8 +858,13 @@ def main():
 
     if MODO == 'aplicar':
         con.commit()
-        # 🔒 Mismo sitio y mismo porque que en el ledger: despues del commit, fuera de la
-        #    transaccion, y solo en `aplicar`. Ver refrescar_vistas() en foto_comun.py.
+        # 🔒 Mismo sitio y mismo porque que en el ledger: despues del commit y solo en
+        #    `aplicar`. Ver refrescar_vistas() en foto_comun.py.
+        # ⚠️ AQUI PONIA "fuera de la transaccion", Y ESA CAUSA ERA FALSA: `REFRESH ...
+        #    CONCURRENTLY` corre dentro de un BEGIN sin problema. Lo que se vio aquel dia
+        #    fue una queja de PSYCOPG2 al cambiar el modo de la sesion, no de Postgres al
+        #    refrescar. Va DESPUES DEL COMMIT por el motivo bueno: no tener la transaccion
+        #    de carga abierta durante los segundos que tarda.
         refrescar_vistas(con, 'transacciones')
         print(f"\n✅ APLICADO en {ENTORNO}: {insertadas} movimientos de {PAIS} en "
               f"transacciones_movimientos (rango efectivo {fmin_ef}→{fmax_ef} recerrado; "

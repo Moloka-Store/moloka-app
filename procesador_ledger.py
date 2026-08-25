@@ -621,10 +621,18 @@ def main():
 
     if MODO == 'aplicar':
         con.commit()
-        # 🔒 EL REFRESCO VA AQUI, DESPUES DEL COMMIT Y SOLO EN `aplicar`. Fuera de la
-        #    transaccion porque refrescar sin bloquear lectores no puede correr dentro
-        #    de una; y solo con el volcado confirmado, porque en `ensayo` no se ha
-        #    escrito nada y refrescar seria copiar un estado que se acaba de deshacer.
+        # 🔒 EL REFRESCO VA AQUI, DESPUES DEL COMMIT Y SOLO EN `aplicar`.
+        #    · DESPUES DEL COMMIT, para no tener la transaccion de carga abierta durante
+        #      los segundos que tarda. ⚠️ AQUI PONIA "porque refrescar sin bloquear
+        #      lectores no puede correr dentro de una transaccion", Y ESO ERA FALSO:
+        #      `REFRESH ... CONCURRENTLY` corre dentro de un BEGIN sin problema. Lo que
+        #      se vio aquel dia fue una queja de PSYCOPG2 al cambiar el modo de la
+        #      sesion, no de Postgres al refrescar. Una regla con la causa equivocada
+        #      hace que dentro de tres meses alguien evite algo permitido y siga
+        #      tropezando con lo que si falla.
+        #    · SOLO EN `aplicar`, porque en `ensayo` no se ha escrito nada y refrescar
+        #      seria copiar un estado que se acaba de deshacer. Un ensayo con efectos
+        #      secundarios deja de ser un ensayo.
         #    No aborta nunca: la carga ya esta hecha y el refresco es aguas abajo.
         refrescar_vistas(con, 'ledger')
         print(f"\n✅ APLICADO en {ENTORNO}: {insertadas} movimientos en ledger_movimientos "

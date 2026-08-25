@@ -40,6 +40,9 @@ DB_URL = os.environ.get('DB_URL', '')
 ENTORNO = os.environ.get('ENTORNO', 'staging').strip().lower()
 FUENTE = os.environ.get('FUENTE', 'ledger').strip().lower()
 
+# Las que el mapa conoce mas las que solo mueven la copia del Trackeador.
+FUENTES_VALIDAS = set(REFRESCOS_POR_FUENTE) | {'keepa'}
+
 
 def main():
     print("=== DIAGNOSTICO DEL REFRESCO DE MATERIALIZADAS ===", flush=True)
@@ -49,9 +52,15 @@ def main():
 
     if not DB_URL:
         sys.exit("Falta DB_URL. Revisa los secrets del workflow.")
-    if FUENTE not in REFRESCOS_POR_FUENTE:
+    # 🔴 UNA FUENTE VALIDA NO ES "una que esta en el mapa de materializadas". Desde el
+    #    25-ago-2026, `refrescar_vistas` refresca TAMBIEN la copia del Trackeador, y eso
+    #    corre para CUALQUIER fuente --tenga materializadas propias o no--. `keepa` es
+    #    justo ese caso: no tiene ninguna nuestra y si alimenta la suya.
+    #    Este guardarrail rechazaba `keepa` y habria hecho creer que no se puede
+    #    diagnosticar el camino que mas falta hacia comprobar.
+    if FUENTE not in FUENTES_VALIDAS:
         sys.exit(f"FUENTE desconocida: {FUENTE!r}. Conocidas: "
-                 f"{', '.join(sorted(REFRESCOS_POR_FUENTE))}")
+                 f"{', '.join(sorted(FUENTES_VALIDAS))}")
 
     # 🔒 La MISMA puerta que usan los procesadores. Si se conectara de otra forma,
     #    este diagnostico contestaria sobre una conexion que no es la que importa.
@@ -69,7 +78,7 @@ def main():
 
     print(f"\n--- ¿ES DUENO DE LAS MATERIALIZADAS DE ESTA FUENTE? ---", flush=True)
     puede_todas = True
-    for vista in REFRESCOS_POR_FUENTE[FUENTE]:
+    for vista in REFRESCOS_POR_FUENTE.get(FUENTE, ()):
         cur.execute("SELECT to_regclass(%s)", (f'public.{vista}',))
         if cur.fetchone()[0] is None:
             print(f"   · {vista}: NO EXISTE en {ENTORNO}. La migracion que la crea no "

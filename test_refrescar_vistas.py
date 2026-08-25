@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""El gancho del refresco de materializadas, visto ROJO y visto CALLADO.
+"""El gancho del refresco de copias, visto ROJO y visto CALLADO.
 
 🔴 POR QUE ESTE FICHERO EXISTE. `refrescar_vistas()` corre DESPUES del commit y no
    aborta nunca: si falla, la carga del informe ya esta escrita y lo unico que
@@ -39,15 +39,30 @@ class CursorFalso:
     """Se comporta como el cursor de psycopg2 en lo que esta funcion usa, y deja
     APUNTADO todo lo que se le pidio ejecutar."""
 
-    def __init__(self, existe=True, dueno='postgres', quien='postgres', refresco_revienta=None):
+    # 🔴 SABE ABORTAR LA TRANSACCION, y eso es lo que lo hace un doble y no un decorado.
+    #    En Postgres, un error dentro de una transaccion la ABORTA ENTERA: todo lo que
+    #    venga detras revienta con `InFailedSqlTransaction` hasta que alguien haga commit
+    #    o rollback. Sin esto, la mesa daba VERDE con el commit-por-copia quitado --el
+    #    fallo de una copia se llevaria por delante a las demas y al Trackeador, y aqui
+    #    no se veria--. Cazado el 25-ago rompiendolo a mano.
+    def __init__(self, existe=True, dueno='postgres', quien='postgres',
+                 refresco_revienta=None, trackeador='1234 filas en 7.4 s',
+                 trackeador_revienta=None):
+        self.abortada = False
         self.existe = existe
         self.dueno = dueno
         self.quien = quien
         self.refresco_revienta = refresco_revienta
+        self.trackeador = trackeador
+        self.trackeador_revienta = trackeador_revienta
         self.ejecutadas = []
         self._ultimo = None
 
     def execute(self, sql, args=None):
+        if self.abortada:
+            raise psycopg2.errors.InFailedSqlTransaction(
+                'current transaction is aborted, commands ignored until end of '
+                'transaction block')
         self.ejecutadas.append(sql)
         s = sql.lower()
         if 'current_user' in s:
@@ -56,8 +71,14 @@ class CursorFalso:
             self._ultimo = ('algo' if self.existe else None,)
         elif 'pg_get_userbyid' in s:
             self._ultimo = (self.dueno,)
+        elif 'fn_trackeador_refrescar' in s:
+            if self.trackeador_revienta is not None:
+                self.abortada = True
+                raise self.trackeador_revienta
+            self._ultimo = (self.trackeador,)
         elif 'refresh materialized view' in s:
             if self.refresco_revienta is not None:
+                self.abortada = True
                 raise self.refresco_revienta
             self._ultimo = None
         else:
@@ -76,20 +97,23 @@ class InfoFalsa:
 
 
 class ConexionFalsa:
-    """🔴 Sabe de `transaction_status`, de `rollback()` y de que asignar `autocommit`
-    PUEDE FALLAR -- las tres cosas que la version anterior NO sabia, y por eso no cazo
-    el bug del 25-ago: `con.autocommit = True` estaba fuera del try y con una
-    transaccion abierta psycopg2 lanza `set_session cannot be used inside a
-    transaction`. En un procesador real eso habria tumbado la carga del informe.
-    Una conexion de mentira que solo sabe el camino feliz no prueba el infeliz."""
+    """🔴 Sabe de `transaction_status`, de `commit()`, de `rollback()`, y de que NADIE
+    debe tocar `autocommit`.
 
-    def __init__(self, cur, estado=psycopg2.extensions.TRANSACTION_STATUS_IDLE,
-                 autocommit_revienta=False):
+    ⚠️ Ese ultimo detalle es un assert disfrazado de doble, y esta anclado sobre lo
+       que NO debe pasar --que es la unica mitad que se mueve--: hasta el 25-ago-2026
+       esta funcion ponia la conexion en autocommit, y de ahi salio un rojo en
+       produccion (`set_session cannot be used inside a transaction`). Ahora no hace
+       falta, asi que el doble REVIENTA si alguien vuelve a asignarlo. Un test que
+       solo comprobara "sigue valiendo False" saldria verde con la asignacion puesta
+       y deshecha en el `finally`."""
+
+    def __init__(self, cur, estado=psycopg2.extensions.TRANSACTION_STATUS_IDLE):
         self._cur = cur
         self._autocommit = False
         self._estado = estado
-        self.autocommit_revienta = autocommit_revienta
         self.rollbacks = 0
+        self.commits = 0
 
     @property
     def info(self):
@@ -101,15 +125,19 @@ class ConexionFalsa:
 
     @autocommit.setter
     def autocommit(self, valor):
-        # psycopg2 lanza ProgrammingError si hay una transaccion abierta.
-        if self.autocommit_revienta and valor:
-            raise psycopg2.ProgrammingError(
-                'set_session cannot be used inside a transaction')
-        self._autocommit = valor
+        raise AssertionError(
+            'refrescar_vistas NO debe tocar el autocommit de la conexion: '
+            'esa era la causa del rojo del 25-ago y ya no hace falta')
+
+    def commit(self):
+        self.commits += 1
+        self._estado = psycopg2.extensions.TRANSACTION_STATUS_IDLE
+        self._cur.abortada = False
 
     def rollback(self):
         self.rollbacks += 1
         self._estado = psycopg2.extensions.TRANSACTION_STATUS_IDLE
+        self._cur.abortada = False
 
     def cursor(self):
         return self._cur
@@ -118,20 +146,30 @@ class ConexionFalsa:
 def corre(cur, fuente='ledger', con=None):
     """Devuelve (resultado, lineas escritas, conexion)."""
     con = con if con is not None else ConexionFalsa(cur)
-    salida = []
-    r = refrescar_vistas(con, fuente, escribir=salida.append)
-    return r, '\n'.join(salida), con
+    lineas = []
+    r = refrescar_vistas(con, fuente, escribir=lambda t: lineas.append(str(t)))
+    return r, '\n'.join(lineas), con
+
+
+def refrescos(cur):
+    return [e for e in cur.ejecutadas if 'refresh materialized view' in e.lower()]
+
+
+def pos_trackeador(cur):
+    for i, e in enumerate(cur.ejecutadas):
+        if 'fn_trackeador_refrescar' in e.lower():
+            return i
+    return -1
 
 
 print('== 1) EL CAMINO BUENO ==')
 c = CursorFalso()
 r, txt, con = corre(c)
 eq('(1) devuelve True', r, True)
-eq('(1) ha refrescado de verdad',
-   any('refresh materialized view' in e.lower() for e in c.ejecutadas), True)
+eq('(1) ha refrescado de verdad', len(refrescos(c)) > 0, True)
 # 🔒 Sin el indice unico esto bloquearia a quien este leyendo la pantalla.
 eq('(1) … sin bloquear a los lectores',
-   any('concurrently' in e.lower() for e in c.ejecutadas), True)
+   all('concurrently' in e.lower() for e in refrescos(c)), True)
 # 🔴 Anclado en el ROTULO de esa linea, no en el valor: `postgres` sale TAMBIEN en la
 #    linea del dueno, asi que buscarlo daba verde con la linea borrada. Cazado
 #    rompiendolo. Es el patron de siempre: un assert que busca algo que aparece en dos
@@ -139,19 +177,28 @@ eq('(1) … sin bloquear a los lectores',
 eq('(1) 🔴 registra current_user SIEMPRE, no solo al fallar', 'conectado como' in txt, True)
 eq('(1) … y dice cuanto tardo', 'ms' in txt, True)
 eq('(1) 🔒 avisa a la app', '/api/cache/invalidar' in txt, True)
-eq('(1) 🔒 y deja el autocommit como estaba', con.autocommit, False)
+# 🔴 CADA COPIA EN SU PROPIA TRANSACCION: sin commit por copia, un REFRESH fallido
+#    abortaria la transaccion entera y todo lo de detras reventaria con "current
+#    transaction is aborted". Anclado sobre el RECUENTO, no sobre "hubo algun commit".
+# Uno por el sondeo inicial, uno por cada copia, y uno del trackeador. EXACTO, no
+# ">=": con un solo commit al final el ">=" salia verde igual (medido rompiendolo).
+eq('(1) 🔴 confirma cada copia por separado', con.commits, len(refrescos(c)) + 2)
+eq('(1) 🔒 y no deshace nada', con.rollbacks, 0)
 
 print('\n== 2) LA MV NO EXISTE TODAVIA (la migracion no se ha aplicado) ==')
 c = CursorFalso(existe=False)
 r, txt, _ = corre(c)
 eq('(2) 🔴 devuelve False', r, False)
-eq('(2) 🔴 … y NO intenta refrescar',
-   any('refresh materialized view' in e.lower() for e in c.ejecutadas), False)
+eq('(2) 🔴 … y NO intenta refrescar', len(refrescos(c)), 0)
 eq('(2) … diciendo que la migracion falta', 'no se ha aplicado' in txt.lower(), True)
 # 🔴 Y lo que NO tiene que decir: que la carga haya fallado. El informe ya esta escrito.
 eq('(2) 🔒 … y aclarando que la carga SI esta hecha',
    'el informe ya esta escrito' in txt.lower(), True)
 eq('(2) 🔴 NO avisa a la app', '/api/cache/invalidar' in txt, False)
+# 🔴 UNA COPIA QUE FALTA NO PUEDE LLEVARSE POR DELANTE AL TRACKEADOR. Es la razon de
+#    ser del commit por copia: si compartieran transaccion, este caso la dejaria
+#    abortada y el trackeador ni se intentaria.
+eq('(2) 🔴 … pero el trackeador SI se refresca igual', pos_trackeador(c) >= 0, True)
 
 print('\n== 3) NO ES DUENO: REFRESH exige propiedad, no permisos ==')
 c = CursorFalso(quien='otro_usuario', dueno='postgres',
@@ -164,7 +211,9 @@ eq('(3) 🔴 … y QUIEN es el dueno', 'postgres' in txt, True)
 eq('(3) … y el error exacto', 'must be owner' in txt, True)
 eq('(3) 🔒 … y como se arregla', 'SECURITY' in txt, True)
 eq('(3) 🔴 NO avisa a la app', '/api/cache/invalidar' in txt, False)
-eq('(3) 🔒 y deja el autocommit como estaba', con.autocommit, False)
+# 🔴 El REFRESH fallido se DESHACE, para no dejar la transaccion abortada detras.
+eq('(3) 🔴 deshace la suya y sigue', con.rollbacks >= 1, True)
+eq('(3) 🔴 … y el trackeador se refresca igual', pos_trackeador(c) >= 0, True)
 
 print('\n== 3b) UN FALLO INESPERADO NO PUEDE TUMBAR LA CORRIDA ==')
 # 🔴 EL DANO DE VERDAD NO ES QUE FALLE EL REFRESCO: es que el workflow salga ROJO.
@@ -201,63 +250,45 @@ eq('(3b) … diciendo que ha reventado', 'REVENTADO' in txt, True)
 eq('(3b) 🔴 … y que la CARGA no se ve afectada', 'NO se ve afectada' in txt, True)
 eq('(3b) 🔒 … y que NO se vuelva a subir el informe', 'NO vuelvas a subir' in txt, True)
 eq('(3b) 🔴 NO avisa a la app', '/api/cache/invalidar' in txt, False)
-eq('(3b) 🔒 y deja el autocommit como estaba', con.autocommit, False)
 
 print('\n== 3c) LLAMADO CON UNA TRANSACCION ABIERTA ==')
-# 🔴 EL BUG DEL 25-ago, y el sexto assert del dia que debia ser rojo y salio verde.
-#    `con.autocommit = True` estaba FUERA del try. psycopg2 lanza `set_session cannot
-#    be used inside a transaction` si hay una transaccion abierta, asi que la garantia
-#    de "se traga cualquier excepcion y no tumba la carga" era FALSA en la propia linea
-#    que la daba. Lo encontro un rojo del workflow de diagnostico, no esta mesa: la
-#    conexion de mentira llegaba SIEMPRE a esa linea en estado limpio.
-# 🔒 Y no se da por hecho que el caller llame justo despues del commit: es verdad en el
-#    camino que se escribio y falso en cualquier otro (basta un SELECT despues).
+# 🔴 EL MOTIVO CAMBIO EL 25-ago-2026 Y ES MAS FUERTE QUE EL DE ANTES. Antes se decia
+#    "refrescar exige salir de la transaccion", y era FALSO: `REFRESH ... CONCURRENTLY`
+#    corre dentro de un BEGIN sin problema (lo que se vio entonces fue una queja de
+#    psycopg2 al cambiar el modo de la sesion, no de Postgres al refrescar).
+#    El motivo bueno es que aqui dentro hay `commit()`, y una transaccion abierta
+#    significa que quien llamo tenia trabajo SIN CONFIRMAR: ese commit se lo
+#    confirmaria por la espalda. Peor todavia que el rollback que ya se descarto.
+# 🔑 La conservadora es la misma: gritar, devolver False y no tocar NADA.
 c = CursorFalso()
 con_sucia = ConexionFalsa(c, estado=psycopg2.extensions.TRANSACTION_STATUS_INTRANS)
 r, txt, con_sucia = corre(c, con=con_sucia)
 eq('(3c) 🔴 con transaccion abierta NO revienta', r is not None, True)
-eq('(3c) 🔴 … y RENUNCIA al refresco (devuelve False)', r, False)
-# 🔴 EL ASSERT QUE MAS IMPORTA DE ESTE BLOQUE, y viene de una correccion de Fernando:
-#    aqui hubo un `con.rollback()` "para dejar la conexion limpia". Era un error. Una
-#    transaccion abierta significa que quien llamo tenia trabajo SIN CONFIRMAR, y
-#    hacerle rollback SE LO DESTRUYE. La justificacion --"si solo se leyo, no deshace
-#    nada"-- daba por hecho justo lo que no se puede saber en ese punto.
-#    Lo que se pierde renunciando es que la copia se quede vieja, y ESO LO CAZA EL
-#    CENTINELA. Lo que perderia un rollback no lo caza nadie.
-eq('(3c) 🔴 … SIN tocar la transaccion de quien llamo', con_sucia.rollbacks, 0)
+eq('(3c) 🔴 … y RENUNCIA (devuelve False)', r, False)
+eq('(3c) 🔴 … SIN confirmar trabajo ajeno', con_sucia.commits, 0)
+eq('(3c) 🔴 … y SIN deshacerlo tampoco', con_sucia.rollbacks, 0)
 eq('(3c) … diciendo por que', 'TRANSACCION ABIERTA' in txt, True)
 eq('(3c) … y que la copia se queda vieja', 'centinela' in txt, True)
 eq('(3c) 🔴 NO avisa a la app', '/api/cache/invalidar' in txt, False)
-eq('(3c) 🔒 y deja el autocommit como estaba', con_sucia.autocommit, False)
-eq('(3c) 🔒 … y ni siquiera intento refrescar',
-   any('refresh materialized view' in e.lower() for e in c.ejecutadas), False)
-
-print('\n== 3d) SI ASIGNAR autocommit REVIENTA, TAMPOCO TUMBA LA CARGA ==')
-# 🔴 La misma excepcion exacta, pero por un camino que el rollback no arregla. La
-#    garantia tiene que aguantar igual: devolver False, no propagar, y NO avisar.
-c = CursorFalso()
-con_mala = ConexionFalsa(c, autocommit_revienta=True)
-tumbo = False
-try:
-    r, txt, con_mala = corre(c, con=con_mala)
-except Exception:
-    tumbo = True
-    r, txt = None, ''
-eq('(3d) 🔴 NO deja subir la excepcion', tumbo, False)
-eq('(3d) 🔴 … y devuelve False', r, False)
-eq('(3d) … nombrando el error de psycopg2', 'set_session' in txt, True)
-eq('(3d) 🔴 … y que la CARGA no se ve afectada', 'NO se ve afectada' in txt, True)
-eq('(3d) 🔴 NO avisa a la app', '/api/cache/invalidar' in txt, False)
+eq('(3c) 🔒 … y no ha tocado la base', c.ejecutadas, [])
 
 print('\n== 4) UNA FUENTE QUE NO TIENE MATERIALIZADAS ==')
+# 🔴 ESTE CASO CAMBIO DE SIGNO EL 25-ago-2026, Y ES LO QUE HACE QUE EL TRACKEADOR VEA
+#    EL KEEPA DE LA MANANA. Antes se salia CALLADO por la puerta de atras. Pero
+#    `v_trackeador_pantalla` bebe de nueve tablas --entre ellas keepa_escaparate--, o
+#    sea de informes que NO tienen materializada propia. Si el gancho se saltase esas
+#    fuentes, su pestana seguiria ensenando la foto de ayer.
 c = CursorFalso()
-r, txt, _ = corre(c, fuente='keepa')
-eq('(4) devuelve True (no hay nada que hacer)', r, True)
-eq('(4) 🔒 y esta CALLADO: ni una linea', txt, '')
-eq('(4) 🔒 … y no ha tocado la base', c.ejecutadas, [])
+r, txt, con = corre(c, fuente='keepa')
+eq('(4) 🔴 el trackeador se refresca IGUAL', pos_trackeador(c) >= 0, True)
+eq('(4) 🔒 … pero no refresca ninguna materializada nuestra', len(refrescos(c)), 0)
+eq('(4) devuelve True', r, True)
+# 🔒 Y no avisa de NADA a la app: esta fuente no tiene etiquetas porque no tiene copias.
+eq('(4) 🔒 avisa sin etiquetas nuestras',
+   'inventario' in txt or 'ventas' in txt or 'rentabilidad' in txt, False)
 
 print('\n== 5) EL MAPA FUENTE -> MATERIALIZADAS ==')
-# 🔴 Anclado sobre lo que tiene que estar: las dos fuentes de v_ventas_ventanas.
+# 🔴 Anclado sobre lo que tiene que estar: las tres fuentes de v_ventas_ventanas.
 #    Si alguien anade una mv y olvida su fuente, el refresco no corre y no chilla
 #    nadie -- este assert es el unico sitio donde eso se ve.
 eq('(5) el ledger refresca las ventanas',
@@ -303,13 +334,41 @@ eq('(5b) … y tambien del inventario', 'inventario' in txt_tx, True)
 eq('(5b) 🔴 el ledger NO avisa de la rentabilidad', 'rentabilidad' in txt_led, False)
 eq('(5b) 🔒 … pero si avisa de lo suyo', 'inventario' in txt_led, True)
 
-print('\n== 6) LOS DOS PROCESADORES LO LLAMAN DE VERDAD ==')
+print('\n== 5c) EL TRACKEADOR: AL FINAL, Y SU FALLO NO ES MUDO ==')
+c = CursorFalso()
+_, txt, _ = corre(c, fuente='transacciones')
+# 🔴 DESPUES de las nuestras, no antes: su vista lee las mismas tablas, asi que
+#    ponerla primero la dejaria mirando la foto anterior. Aqui el ORDEN es lo que se
+#    esta probando, asi que compararlo por posicion es lo correcto.
+eq('(5c) 🔴 va DESPUES de todas las nuestras',
+   pos_trackeador(c) > max(c.ejecutadas.index(e) for e in refrescos(c)), True)
+eq('(5c) 🔒 … y en modo "no relances" (false)',
+   'false' in c.ejecutadas[pos_trackeador(c)].lower(), True)
+eq('(5c) dice cuanto tardo y que devolvio', 'trackeador refrescado en' in txt, True)
+
+# 🔴 LA MITAD QUE SE OLVIDA: con `false`, la funcion SE TRAGA su excepcion y devuelve
+#    'ERROR: ...' COMO VALOR NORMAL. Mirar solo "no ha lanzado" daria verde sobre un
+#    refresco fallido -- una comprobacion que no puede fallar.
+c = CursorFalso(trackeador='ERROR: refresco sospechoso: solo 3 filas')
+r, txt, _ = corre(c, fuente='transacciones')
+eq('(5c) 🔴 un ERROR devuelto como TEXTO cuenta como fallo', r, False)
+eq('(5c) … y se ve el motivo', 'solo 3 filas' in txt, True)
+eq('(5c) 🔴 … y NO avisa a la app', '/api/cache/invalidar' in txt, False)
+
+# 🔒 Y si revienta de verdad, tampoco tumba la corrida ni se lleva a las nuestras.
+c = CursorFalso(trackeador_revienta=psycopg2.errors.InsufficientPrivilege(
+    'permission denied for function fn_trackeador_refrescar'))
+r, txt, con = corre(c, fuente='transacciones')
+eq('(5c) 🔒 si revienta, devuelve False sin tumbar nada', r, False)
+eq('(5c) 🔒 … diciendo el error', 'permission denied' in txt, True)
+eq('(5c) 🔒 … y las nuestras SI se habian refrescado', len(refrescos(c)), 2)
+
+print('\n== 6) LOS PROCESADORES LO LLAMAN DE VERDAD ==')
 # 🔴 Un CI verde no prueba que una feature este viva. `refrescar_vistas` puede estar
 #    perfecta y no ejecutarse nunca.
 # ⚠️ Sobre el codigo SIN comentarios: la cabecera del gancho NOMBRA la funcion, asi
 #    que un grep sobre el fichero crudo daria verde con la llamada borrada.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scripts'))
-from censo_migraciones import sin_comentarios  # noqa: E402
 
 
 def sin_almohadillas(texto):
@@ -318,7 +377,8 @@ def sin_almohadillas(texto):
 
 for fichero, fuente in (('procesador_ledger.py', 'ledger'),
                         ('procesador_transacciones.py', 'transacciones'),
-                        ('procesador_all_listings.py', 'listings')):
+                        ('procesador_all_listings.py', 'listings'),
+                        ('procesador_keepa_escaparate.py', 'keepa')):
     with open(fichero, encoding='utf-8') as fh:
         codigo = sin_almohadillas(fh.read())
     eq('(6) %s llama al refresco con su fuente' % fichero,
@@ -338,10 +398,10 @@ for fichero, fuente in (('procesador_ledger.py', 'ledger'),
        'refrescar_vistas(' in rama_aplicar, True)
     # 🔒 Anclado sobre lo que NO debe haber: ni una llamada fuera de esa rama.
     eq('(6) 🔒 … y NO hay ninguna otra llamada suelta',
-       codigo.count('refrescar_vistas(') , 1)
+       codigo.count('refrescar_vistas('), 1)
 
 print('')
 if fallos:
     print('%d FALLOS: %s' % (len(fallos), ', '.join(fallos)))
     sys.exit(1)
-print('TODO OK · gancho del refresco de materializadas')
+print('TODO OK · gancho del refresco de copias')

@@ -52,7 +52,7 @@ from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
 from foto_comun import (Aborta, conectar_bd, listar_buzon, descargar_buzon, guarda_anti_encogimiento, guarda_no_retroceder, claves_previas,
-                        barrer_sobrantes, resumen_foto, archivar_foto)
+                        barrer_sobrantes, resumen_foto, archivar_foto, refrescar_vistas)
 
 # ---------------------------------------------------------------------------
 # 0) Configuración (secrets de GitHub; jamás credenciales en el código)
@@ -1121,6 +1121,21 @@ def main():
     # --- Escritura (o no) ---
     if MODO == 'aplicar':
         con.commit()
+        # 🔒 Despues del commit y SOLO en `aplicar`: en `ensayo` no se ha escrito nada y
+        #    refrescar seria copiar un estado que se acaba de deshacer. Un ensayo con
+        #    efectos secundarios deja de ser un ensayo.
+        # ⚠️ AQUI PONIA "fuera de la transaccion", Y ESA CAUSA ERA FALSA: `REFRESH ...
+        #    CONCURRENTLY` corre dentro de un BEGIN sin problema. Lo que se vio aquel dia
+        #    fue una queja de PSYCOPG2 al cambiar el modo de la sesion, no de Postgres al
+        #    refrescar. Va DESPUES DEL COMMIT por el motivo bueno: no tener la transaccion
+        #    de carga abierta durante los segundos que tarda.
+        # 🔴 KEEPA NO TIENE MATERIALIZADA PROPIA, Y AUN ASI SE ENGANCHA. Lo que pone al
+        #    dia esta llamada es la copia del TRACKEADOR: `v_trackeador_pantalla` bebe de
+        #    `keepa_escaparate` --precio, buy box, rank, competencia--, o sea que sin esto
+        #    su pestana ensena la foto de AYER hasta que corra su cron de las 19:45. Es
+        #    justo el caso que el gancho se saltaba cuando salia callado por la puerta de
+        #    "esta fuente no tiene copias".
+        refrescar_vistas(con, 'keepa')
         print(f"\n✅ APLICADO en {ENTORNO}: {len(filas)} filas en keepa_escaparate "
               f"(tabla y vista listas, RLS activo sin políticas).")
     else:
