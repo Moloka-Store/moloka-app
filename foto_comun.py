@@ -641,8 +641,17 @@ def resumen_foto(tabla, ambito, previas, nuevas, altas, borradas, modo):
 REFRESCOS_POR_FUENTE = {
     # fuente que cambia  ->  materializadas que dependen de ella
     'ledger':        ('mv_ventas_ventanas',),
-    'transacciones': ('mv_ventas_ventanas',),
+    'transacciones': ('mv_ventas_ventanas', 'mv_rentabilidad_sku'),
     'listings':      ('mv_ventas_ventanas',),
+}
+
+# Que hay que tirar de la cache de la app cuando una materializada se pone al dia.
+# 🔑 Va por MATERIALIZADA y no por fuente: un informe de ledger no toca la
+#    rentabilidad, y mandar su etiqueta seria invalidar una cache que estaba bien.
+#    Sobra-invalidar no da un dato falso, pero si da trabajo que nadie pidio.
+ETIQUETAS_POR_VISTA = {
+    'mv_ventas_ventanas':  ('inventario', 'ventas'),
+    'mv_rentabilidad_sku': ('rentabilidad',),
 }
 
 
@@ -779,7 +788,8 @@ def refrescar_vistas(con, fuente, escribir=print):
     # 🔒 AVISAR SOLO SI FUE BIEN. Ver la cabecera: al reves se cachea dato viejo
     #    con sello nuevo.
     if todo_bien:
-        avisar_a_la_app(('inventario', 'ventas'), escribir=escribir)
+        etiquetas = tuple(sorted({e for v in vistas for e in ETIQUETAS_POR_VISTA.get(v, ())}))
+        avisar_a_la_app(etiquetas, escribir=escribir)
     else:
         escribir("   · aviso a la app: NO se manda, porque el refresco no ha ido bien. "
                  "Tirar la cache ahora releeria la copia vieja y la sellaria como fresca.")
