@@ -172,35 +172,49 @@ $testigo$;
 --    lleva el maximo de la tabla, asi que mover una fila vieja no lo movería y esto
 --    daria un ABORTA **falso**. Con el maximo funciona tanto si el trigger pisa el
 --    valor (lo pone en `now()`, que es mayor) como si no (max + 1 s).
+--
+-- ⚠️ Y LA FORMA DEL BLOQUE NO ES UN CAPRICHO, ASI QUE NO SE "ORDENA". Lo natural
+--    seria un sub-bloque `BEGIN ... EXCEPTION ... END;` anidado. **No se puede**: el
+--    cerrojo 4 de `aplicar-migracion.yml` busca lineas que empiecen por
+--    begin/commit/rollback/end seguidas de `;` para impedir que un fichero maneje su
+--    propia transaccion, y ese `END;` del sub-bloque le casa igual. Asi que el
+--    manejador de excepciones del PROPIO bloque hace de rollback: es lo mismo con una
+--    anidacion menos.
+-- 🔴 Y OJO AL ESCRIBIR ESTA NOTA, que me pillo a mi: el cerrojo tambien prohibe la
+--    palabra de la creacion de indices en caliente, y la busca con un grep sobre el
+--    fichero ENTERO. O sea que **explicarlo aqui, nombrandola, tumba la migracion**.
+--    Es la trampa de siempre --lo que se lee como texto no distingue codigo de
+--    comentario-- mordiendo dentro de la frase que la describia. Por eso esta contada
+--    sin nombrarla. Que el cerrojo mire tambien los comentarios es un frente aparte;
+--    aqui solo queda anotado para el siguiente que venga a escribir una nota.
 DO $mueve$
 DECLARE
-    antes text; despues text; se_movio boolean := false; hay_filas boolean;
+    antes text; despues text; se_movio boolean := false;
 BEGIN
     SELECT public.huella_de_la_pantalla() INTO antes;
 
-    SELECT EXISTS (SELECT 1 FROM public.productos) INTO hay_filas;
-    IF NOT hay_filas THEN
+    IF NOT EXISTS (SELECT 1 FROM public.productos) THEN
         RAISE WARNING 'NO COMPROBADO: `productos` esta vacia, asi que no hay nada que mover y un OK aqui no diria nada.';
         RETURN;
     END IF;
 
-    BEGIN
-        UPDATE public.productos SET updated_at = updated_at + interval '1 second'
-         WHERE id = (SELECT id FROM public.productos ORDER BY updated_at DESC NULLS LAST LIMIT 1);
-        SELECT public.huella_de_la_pantalla() INTO despues;
-        se_movio := (antes IS DISTINCT FROM despues);
-        -- Se sale por excepcion A PROPOSITO: es lo que deshace el UPDATE de prueba.
-        RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = 'deshacer-la-prueba';
-    EXCEPTION
-        WHEN raise_exception THEN
-            NULL;  -- el UPDATE queda deshecho; `se_movio` y `despues` sobreviven
-    END;
+    UPDATE public.productos SET updated_at = updated_at + interval '1 second'
+     WHERE id = (SELECT id FROM public.productos ORDER BY updated_at DESC NULLS LAST LIMIT 1);
+    SELECT public.huella_de_la_pantalla() INTO despues;
+    se_movio := (antes IS DISTINCT FROM despues);
 
-    IF NOT se_movio THEN
-        RAISE EXCEPTION 'ABORTA: se ha movido productos.updated_at y la huella NO ha cambiado (sigue en %). Con esta huella, la cache le serviria a Elena su stock viejo despues de cada ajuste.', antes;
-    END IF;
-
-    RAISE NOTICE 'Testigo OK (se mueve). productos tocado -> huella % -> % (y el toque, deshecho).', antes, despues;
+    -- 🔑 SE SALE POR EXCEPCION A PROPOSITO: es lo que deshace el UPDATE de prueba. El
+    --    manejador de abajo lo atrapa, y al atraparlo Postgres revierte todo lo que
+    --    este bloque haya escrito. Las variables de plpgsql NO se revierten, asi que
+    --    el veredicto llega entero al otro lado.
+    RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = 'deshacer-la-prueba';
+EXCEPTION
+    WHEN raise_exception THEN
+        -- Aqui el UPDATE ya esta deshecho. Solo queda dar el veredicto.
+        IF NOT se_movio THEN
+            RAISE EXCEPTION 'ABORTA: se ha movido productos.updated_at y la huella NO ha cambiado (sigue en %). Con esta huella, la cache le serviria a Elena su stock viejo despues de cada ajuste.', antes;
+        END IF;
+        RAISE NOTICE 'Testigo OK (se mueve). productos tocado -> huella % -> % (y el toque, deshecho).', antes, despues;
 END
 $mueve$;
 
