@@ -371,6 +371,14 @@ eq('(5) 🔒 … y nadie mas',
    sorted(f for f, vs in REFRESCOS_POR_FUENTE.items() if 'mv_velocidad_ventas_paneu' in vs),
    ['listings', 'transacciones'])
 
+# 🔴 LA SEPTIMA COPIA, Y CIERRA EL ULTIMO HUECO DEL GANCHO: hasta hoy
+#    `procesador_custom_analytics.py` no llamaba a `refrescar_vistas` en absoluto.
+eq('(5) 🔴 custom_analytics refresca la demanda',
+   'mv_demanda_asin_ultima' in REFRESCOS_POR_FUENTE.get('custom_analytics', ()), True)
+eq('(5) 🔒 … y nadie mas',
+   sorted(f for f, vs in REFRESCOS_POR_FUENTE.items() if 'mv_demanda_asin_ultima' in vs),
+   ['custom_analytics'])
+
 print('\n== 5b) LAS ETIQUETAS DEL AVISO SALEN DE LO QUE SE REFRESCO ==')
 # 🔴 LAS DOS DIRECCIONES, y la segunda es la que importa: que la etiqueta APAREZCA
 #    cuando toca y que NO aparezca cuando no toca. Una lista fija de etiquetas pasaria
@@ -430,7 +438,8 @@ def sin_almohadillas(texto):
 for fichero, fuente in (('procesador_ledger.py', 'ledger'),
                         ('procesador_transacciones.py', 'transacciones'),
                         ('procesador_all_listings.py', 'listings'),
-                        ('procesador_keepa_escaparate.py', 'keepa')):
+                        ('procesador_keepa_escaparate.py', 'keepa'),
+                        ('procesador_custom_analytics.py', 'custom_analytics')):
     with open(fichero, encoding='utf-8') as fh:
         codigo = sin_almohadillas(fh.read())
     eq('(6) %s llama al refresco con su fuente' % fichero,
