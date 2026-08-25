@@ -676,11 +676,30 @@ def refrescar_vistas(con, fuente, escribir=print):
     if not vistas:
         return True
 
+    # 🔴 TODO LO QUE PUEDE FALLAR VA DENTRO DEL `try`, Y `con.autocommit = True` PUEDE
+    #    FALLAR. Aqui vivio un bug que hacia FALSA la garantia de la linea de abajo: esa
+    #    asignacion estaba FUERA, y con una transaccion abierta psycopg2 lanza
+    #    `ProgrammingError: set_session cannot be used inside a transaction`. En un
+    #    procesador real eso habria TUMBADO LA CARGA DEL INFORME -- exactamente lo que
+    #    este arreglo existe para impedir. Y la mesa de pruebas no lo cazo porque la
+    #    conexion de mentira siempre llegaba a esa linea en estado limpio.
+    #
+    # 🔒 Y NO SE DA POR HECHO QUE EL CALLER LLAME JUSTO DESPUES DEL COMMIT. Es verdad en
+    #    el camino que se escribio y falso en cualquier otro: basta con que alguien haga
+    #    un SELECT despues del commit para que psycopg2 abra una transaccion implicita.
+    #    Se deja la conexion limpia AQUI, con un rollback --que sobre una transaccion de
+    #    solo lectura no deshace nada, y sobre una con escritura sin confirmar es la
+    #    opcion conservadora: no persiste nada que el caller no haya confirmado el--.
     antes = con.autocommit
-    con.autocommit = True
-    cur = con.cursor()
+    cur = None
     todo_bien = True
     try:
+        if not antes and con.info.transaction_status != psycopg2.extensions.TRANSACTION_STATUS_IDLE:
+            escribir("   · (habia una transaccion abierta al entrar; se cierra con rollback "
+                     "antes de refrescar -- si solo se habia leido, no deshace nada)")
+            con.rollback()
+        con.autocommit = True
+        cur = con.cursor()
         cur.execute("SELECT current_user")
         quien = cur.fetchone()[0]
         escribir(f"\n--- REFRESCO DE MATERIALIZADAS (fuente: {fuente}) ---")
@@ -716,8 +735,6 @@ def refrescar_vistas(con, fuente, escribir=print):
             ms = (time.time() - t0) * 1000
             escribir(f"   · {vista} refrescada en {ms:.0f} ms (dueno: {dueno})")
 
-        con.autocommit = antes
-        cur.close()
     except Exception as e:
         # 🔴 NO SE DEJA SUBIR LA EXCEPCION, NUNCA. El commit ya paso: el informe esta
         #    escrito y a salvo. Si esto tumbara la corrida, el workflow saldria ROJO y
@@ -726,17 +743,26 @@ def refrescar_vistas(con, fuente, escribir=print):
         # 🔒 Y es seguro hacerlo asi precisamente porque el centinela de la pantalla ya
         #    esta desplegado: si el refresco se cae callado, la pantalla lo DICE. Sin ese
         #    centinela, tragarse el fallo aqui seria esconderlo.
-        con.autocommit = antes
-        try:
-            cur.close()
-        except Exception:
-            pass
         escribir(f"   · ❌ EL REFRESCO HA REVENTADO: {type(e).__name__}: {str(e).strip()}")
         escribir(f"        La CARGA DEL INFORME NO se ve afectada: el commit ya se hizo y")
         escribir(f"        el dato esta escrito. NO vuelvas a subir el informe.")
         escribir(f"        Lo que queda viejo es la copia materializada, y la pantalla lo")
         escribir(f"        dira por su cuenta (centinela de frescura).")
         return False
+    finally:
+        # 🔒 SE RESTAURA SIEMPRE, tambien si reventamos: dejar la conexion en autocommit
+        #    cambiaria el comportamiento del procesador que nos llamo -- sus siguientes
+        #    escrituras se confirmarian solas, sin transaccion. Y el propio restablecer
+        #    puede fallar (conexion caida), asi que tampoco puede propagar.
+        try:
+            if cur is not None:
+                cur.close()
+        except Exception:
+            pass
+        try:
+            con.autocommit = antes
+        except Exception:
+            pass
 
     # 🔒 AVISAR SOLO SI FUE BIEN. Ver la cabecera: al reves se cachea dato viejo
     #    con sello nuevo.

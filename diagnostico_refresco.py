@@ -95,6 +95,14 @@ def main():
               f"igual: el catalogo dice lo que esta escrito, y lo que decide es "
               f"ejercerlo.", flush=True)
 
+    # 🔴 CERRAR LA TRANSACCION QUE ABRIERON MIS PROPIOS SELECT. psycopg2 abre una
+    #    transaccion implicita en la primera sentencia, asi que los `SELECT` de arriba
+    #    han dejado una abierta. `refrescar_vistas()` ya se defiende de eso --lo aprendio
+    #    aqui, con un rojo de este mismo workflow-- pero el que ensucia debe limpiar:
+    #    si este diagnostico le pasa una conexion sucia, esta midiendo su propio desorden
+    #    y no la pregunta que dice medir. Rollback y no commit: aqui solo se ha leido.
+    con.rollback()
+
     # --- Y ahora la prueba de verdad: intentarlo ---
     t0 = time.time()
     ok = refrescar_vistas(con, FUENTE)
