@@ -1,0 +1,78 @@
+name: Moloka - Diagnostico del refresco de materializadas
+
+# 🔴 QUE CONTESTA. `REFRESH MATERIALIZED VIEW` no se resuelve con permisos: EXIGE
+#    SER DUENO. La mv nace con dueno `postgres`, pero quien la refresca es el
+#    PROCESADOR, que se conecta con el `DB_URL` del entorno. Nadie habia
+#    comprobado que ese usuario sea el dueno o miembro suyo, y ningun testigo de
+#    la migracion puede hacerlo: corren dentro de la migracion, con el rol de la
+#    migracion, no con el del procesador.
+#
+#    Si no cuadrara, el fallo seria MUDO: migracion limpia, todos los verdes
+#    verdes, y el primer informe que entre no refresca nada. Copia congelada y
+#    pantalla con ventas viejas.
+#
+# 🔒 SE PUEDE LANZAR CUANDO SEA, tambien contra produccion: refrescar una
+#    materializada que ya esta al dia NO CAMBIA NI UN DATO. Lo unico que produce
+#    es el log.
+#
+# 🔴 AQUI EL FALLO ES RUIDOSO, Y ES LO CONTRARIO DE LO QUE HACE EL PROCESADOR.
+#    Dentro de la cañeria, `refrescar_vistas()` se traga la excepcion y devuelve
+#    False a proposito: el commit ya paso y tumbar la corrida haria que alguien
+#    volviera a subir el informe. AQUI NO HAY CARGA QUE PROTEGER, asi que si
+#    devuelve False el job sale en ROJO: un verde que no ha refrescado no vale
+#    para nada.
+#
+# 🔒 A MANO Y NADA MAS. Sin `schedule`: esto se lanza cuando alguien quiere saber
+#    la respuesta, no todos los dias. Una alarma diaria cuya unica accion posible
+#    es la misma se deja de leer en dos semanas.
+#
+# 🔒 NUNCA SE IMPRIME `DB_URL` NI UN TROZO DE ELLA -- los logs de Actions se ven.
+#    `current_user` si: es justo el dato que se busca.
+on:
+  workflow_dispatch:
+    inputs:
+      entorno:
+        description: 'Base de datos contra la que se diagnostica'
+        type: choice
+        options: ['produccion', 'staging']
+        default: 'produccion'
+      fuente:
+        description: 'Que fuente se simula (decide que materializadas se refrescan)'
+        type: choice
+        options: ['ledger', 'transacciones', 'listings']
+        default: 'ledger'
+
+# ⚠️ Las opciones y los defaults van ENTRECOMILLADOS: en YAML un `no` suelto es el
+#    BOOLEANO false (el problema de Noruega). Aqui no hay ninguno, pero la regla
+#    de la casa es entrecomillar siempre.
+
+concurrency:
+  # Por entorno, para no pisar un refresco con otro. Nunca se cancela a medias.
+  group: diagnostico-refresco-${{ inputs.entorno }}
+  cancel-in-progress: false
+
+jobs:
+  diagnosticar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install --quiet psycopg2-binary
+
+      # 🔒 La mesa de pruebas del gancho corre ANTES: si `refrescar_vistas` esta
+      #    rota, el diagnostico diria "no puede refrescar" y la culpa no seria del
+      #    usuario sino del codigo. Primero se descarta eso.
+      - name: Mesa de pruebas del refresco de materializadas
+        run: python -u test_refrescar_vistas.py
+
+      - name: Diagnosticar
+        env:
+          ENTORNO: ${{ inputs.entorno }}
+          FUENTE: ${{ inputs.fuente }}
+          DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
+        run: python -u diagnostico_refresco.py
