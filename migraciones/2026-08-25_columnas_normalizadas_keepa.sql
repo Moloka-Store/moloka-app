@@ -265,7 +265,13 @@ BEGIN
     -- 🔴 LA COMPARACION QUE VALE EN CUALQUIER ENTORNO: contra la foto tomada al empezar,
     --    sobre los MISMOS datos. Si esto cuadra, la migracion no ha movido nada -- aqui,
     --    en staging, y en produccion.
-    SELECT huella, filas INTO h_antes, n_antes FROM _salud_fba_antes;
+    -- 🔒 Cualificadas con el alias, y NO es un detalle de estilo: plpgsql no
+    --    distingue mayusculas, asi que la columna `huella` y la constante `HUELLA`
+    --    son el MISMO identificador. Sin el alias da
+    --    `column reference "huella" is ambiguous` -- que al menos es ruidoso; lo
+    --    peligroso de este choque es cuando resuelve a favor de la variable y
+    --    compara una cosa consigo misma.
+    SELECT a.huella, a.filas INTO h_antes, n_antes FROM _salud_fba_antes a;
     IF n_antes IS NULL THEN
         RAISE EXCEPTION 'ABORTA: no se tomo la foto de antes. Sin ella esto no comprueba nada.';
     END IF;
