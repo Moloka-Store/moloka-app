@@ -70,18 +70,54 @@ class CursorFalso:
         pass
 
 
+class InfoFalsa:
+    def __init__(self, estado):
+        self.transaction_status = estado
+
+
 class ConexionFalsa:
-    def __init__(self, cur):
+    """🔴 Sabe de `transaction_status`, de `rollback()` y de que asignar `autocommit`
+    PUEDE FALLAR -- las tres cosas que la version anterior NO sabia, y por eso no cazo
+    el bug del 25-ago: `con.autocommit = True` estaba fuera del try y con una
+    transaccion abierta psycopg2 lanza `set_session cannot be used inside a
+    transaction`. En un procesador real eso habria tumbado la carga del informe.
+    Una conexion de mentira que solo sabe el camino feliz no prueba el infeliz."""
+
+    def __init__(self, cur, estado=psycopg2.extensions.TRANSACTION_STATUS_IDLE,
+                 autocommit_revienta=False):
         self._cur = cur
-        self.autocommit = False
+        self._autocommit = False
+        self._estado = estado
+        self.autocommit_revienta = autocommit_revienta
+        self.rollbacks = 0
+
+    @property
+    def info(self):
+        return InfoFalsa(self._estado)
+
+    @property
+    def autocommit(self):
+        return self._autocommit
+
+    @autocommit.setter
+    def autocommit(self, valor):
+        # psycopg2 lanza ProgrammingError si hay una transaccion abierta.
+        if self.autocommit_revienta and valor:
+            raise psycopg2.ProgrammingError(
+                'set_session cannot be used inside a transaction')
+        self._autocommit = valor
+
+    def rollback(self):
+        self.rollbacks += 1
+        self._estado = psycopg2.extensions.TRANSACTION_STATUS_IDLE
 
     def cursor(self):
         return self._cur
 
 
-def corre(cur, fuente='ledger'):
-    """Devuelve (resultado, lineas escritas)."""
-    con = ConexionFalsa(cur)
+def corre(cur, fuente='ledger', con=None):
+    """Devuelve (resultado, lineas escritas, conexion)."""
+    con = con if con is not None else ConexionFalsa(cur)
     salida = []
     r = refrescar_vistas(con, fuente, escribir=salida.append)
     return r, '\n'.join(salida), con
@@ -166,6 +202,40 @@ eq('(3b) 🔴 … y que la CARGA no se ve afectada', 'NO se ve afectada' in txt,
 eq('(3b) 🔒 … y que NO se vuelva a subir el informe', 'NO vuelvas a subir' in txt, True)
 eq('(3b) 🔴 NO avisa a la app', '/api/cache/invalidar' in txt, False)
 eq('(3b) 🔒 y deja el autocommit como estaba', con.autocommit, False)
+
+print('\n== 3c) LLAMADO CON UNA TRANSACCION ABIERTA ==')
+# 🔴 EL BUG DEL 25-ago, y el sexto assert del dia que debia ser rojo y salio verde.
+#    `con.autocommit = True` estaba FUERA del try. psycopg2 lanza `set_session cannot
+#    be used inside a transaction` si hay una transaccion abierta, asi que la garantia
+#    de "se traga cualquier excepcion y no tumba la carga" era FALSA en la propia linea
+#    que la daba. Lo encontro un rojo del workflow de diagnostico, no esta mesa: la
+#    conexion de mentira llegaba SIEMPRE a esa linea en estado limpio.
+# 🔒 Y no se da por hecho que el caller llame justo despues del commit: es verdad en el
+#    camino que se escribio y falso en cualquier otro (basta un SELECT despues).
+c = CursorFalso()
+con_sucia = ConexionFalsa(c, estado=psycopg2.extensions.TRANSACTION_STATUS_INTRANS)
+r, txt, con_sucia = corre(c, con=con_sucia)
+eq('(3c) 🔴 con transaccion abierta NO revienta, refresca', r, True)
+eq('(3c) 🔴 … porque la cierra el mismo antes de tocar autocommit', con_sucia.rollbacks, 1)
+eq('(3c) … y lo dice', 'transaccion abierta' in txt, True)
+eq('(3c) 🔒 y deja el autocommit como estaba', con_sucia.autocommit, False)
+
+print('\n== 3d) SI ASIGNAR autocommit REVIENTA, TAMPOCO TUMBA LA CARGA ==')
+# 🔴 La misma excepcion exacta, pero por un camino que el rollback no arregla. La
+#    garantia tiene que aguantar igual: devolver False, no propagar, y NO avisar.
+c = CursorFalso()
+con_mala = ConexionFalsa(c, autocommit_revienta=True)
+tumbo = False
+try:
+    r, txt, con_mala = corre(c, con=con_mala)
+except Exception:
+    tumbo = True
+    r, txt = None, ''
+eq('(3d) 🔴 NO deja subir la excepcion', tumbo, False)
+eq('(3d) 🔴 … y devuelve False', r, False)
+eq('(3d) … nombrando el error de psycopg2', 'set_session' in txt, True)
+eq('(3d) 🔴 … y que la CARGA no se ve afectada', 'NO se ve afectada' in txt, True)
+eq('(3d) 🔴 NO avisa a la app', '/api/cache/invalidar' in txt, False)
 
 print('\n== 4) UNA FUENTE QUE NO TIENE MATERIALIZADAS ==')
 c = CursorFalso()
