@@ -276,8 +276,6 @@ DECLARE
     dias       int;
     hasta      date;
     huella_hoy text;
-    n_anon     bigint;
-    n_auth     bigint;
 BEGIN
     SELECT count(*) INTO n_mv FROM mv_ventas_ventanas;
     SELECT count(*) INTO n_vista FROM v_ventas_ventanas;
@@ -425,30 +423,49 @@ BEGIN
     --       Las dos mitades, en las dos direcciones. La de `authenticated` no es
     --       menos importante: protege a Elena de un REVOKE demasiado ancho, y su
     --       fallo seria mudo (pantalla vacia con el testigo diciendo que bien).
-    BEGIN
-        SET LOCAL ROLE anon;
-        EXECUTE 'SELECT count(*) FROM public.mv_ventas_ventanas' INTO n_anon;
-        RESET ROLE;
-        RAISE EXCEPTION 'ABORTA: anon ha LEIDO mv_ventas_ventanas y ha contado % filas. La puerta esta abierta, y ningun catalogo te lo iba a decir.', n_anon;
-    EXCEPTION
-        WHEN insufficient_privilege THEN
-            RESET ROLE;   -- lo esperado: rebota
-    END;
+    RAISE NOTICE 'Testigo OK (contrato). mv=% filas, vista=% filas, 17 columnas, dias_desde_ultimo_dato VIVA (=%), huella %, indice unico puesto.', n_mv, n_vista, dias, huella_hoy;
+END
+$testigo$;
 
-    -- Y la mitad que se olvida: que la puerta buena SI se abre.
-    BEGIN
-        SET LOCAL ROLE authenticated;
-        EXECUTE 'SELECT count(*) FROM public.mv_ventas_ventanas' INTO n_auth;
-        RESET ROLE;
-    EXCEPTION
-        WHEN insufficient_privilege THEN
-            RESET ROLE;
-            RAISE EXCEPTION 'ABORTA: authenticated NO puede leer mv_ventas_ventanas. La app se quedaria sin datos y la pantalla vacia.';
-    END;
+-- -- TESTIGO DE LA PUERTA · en bloques PROPIOS, y no por gusto ---------------
+-- 🔴 CADA MITAD EN SU `DO`, porque un `BEGIN ... EXCEPTION ... END;` anidado deja
+--    una linea `END;` suelta, y el cerrojo 4 del workflow la RECHAZA: fuera de
+--    PL/pgSQL, `END;` es sinonimo de `COMMIT;` y ese cerrojo existe para que
+--    ningun fichero cierre la transaccion por su cuenta. No puede distinguir un
+--    `END;` de PL/pgSQL de uno de SQL, y hace bien en no fiarse.
+--    Un `DO $x$ ... END $x$;` no deja esa linea. Mismo testigo, sin falso positivo.
+--    (Cazado al subir la escalera, no leyendo el fichero.)
+DO $puerta_anon$
+DECLARE
+    n_anon bigint;
+BEGIN
+    SET LOCAL ROLE anon;
+    EXECUTE 'SELECT count(*) FROM public.mv_ventas_ventanas' INTO n_anon;
+    RESET ROLE;
+    RAISE EXCEPTION 'ABORTA: anon ha LEIDO mv_ventas_ventanas y ha contado % filas. La puerta esta abierta, y ningun catalogo te lo iba a decir.', n_anon;
+EXCEPTION
+    WHEN insufficient_privilege THEN
+        RESET ROLE;   -- lo esperado: rebota
+        RAISE NOTICE 'Testigo OK (puerta). anon REBOTA al leer mv_ventas_ventanas.';
+END
+$puerta_anon$;
+
+DO $puerta_auth$
+DECLARE
+    n_auth bigint;
+    n_mv   bigint;
+BEGIN
+    SELECT count(*) INTO n_mv FROM mv_ventas_ventanas;
+    SET LOCAL ROLE authenticated;
+    EXECUTE 'SELECT count(*) FROM public.mv_ventas_ventanas' INTO n_auth;
+    RESET ROLE;
     IF n_auth <> n_mv THEN
         RAISE EXCEPTION 'ABORTA: authenticated ve % filas y la mv tiene %.', n_auth, n_mv;
     END IF;
-
-    RAISE NOTICE 'Testigo OK. mv=% filas, vista=% filas, 16 columnas, dias_desde_ultimo_dato VIVA (=%), huella del contrato INTACTA (%), indice unico puesto, anon rebota y authenticated ve las % filas.', n_mv, n_vista, dias, huella_hoy, n_auth;
+    RAISE NOTICE 'Testigo OK (puerta). authenticated ve las % filas.', n_auth;
+EXCEPTION
+    WHEN insufficient_privilege THEN
+        RESET ROLE;
+        RAISE EXCEPTION 'ABORTA: authenticated NO puede leer mv_ventas_ventanas. La app se quedaria sin datos y la pantalla vacia.';
 END
-$testigo$;
+$puerta_auth$;
