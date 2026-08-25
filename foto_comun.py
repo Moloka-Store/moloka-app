@@ -643,8 +643,10 @@ _NL = chr(10)
 REFRESCOS_POR_FUENTE = {
     # fuente que cambia  ->  materializadas que dependen de ella
     'ledger':        ('mv_ventas_ventanas', 'mv_presencia_pais'),
-    'transacciones': ('mv_ventas_ventanas', 'mv_rentabilidad_sku', 'mv_asin_con_pedido'),
-    'listings':      ('mv_ventas_ventanas', 'mv_asin_con_pedido'),
+    'transacciones': ('mv_ventas_ventanas', 'mv_rentabilidad_sku', 'mv_asin_con_pedido',
+                      'mv_velocidad_ventas_paneu'),
+    'listings':      ('mv_ventas_ventanas', 'mv_asin_con_pedido',
+                      'mv_velocidad_ventas_paneu'),
     'keepa':         ('mv_keepa_asin_visto',),
 }
 
@@ -658,6 +660,7 @@ ETIQUETAS_POR_VISTA = {
     'mv_presencia_pais':   ('inventario',),
     'mv_asin_con_pedido':  ('inventario',),
     'mv_keepa_asin_visto': ('inventario',),
+    'mv_velocidad_ventas_paneu': ('inventario', 'ventas'),
 }
 
 
