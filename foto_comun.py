@@ -643,8 +643,8 @@ _NL = chr(10)
 REFRESCOS_POR_FUENTE = {
     # fuente que cambia  ->  materializadas que dependen de ella
     'ledger':        ('mv_ventas_ventanas', 'mv_presencia_pais'),
-    'transacciones': ('mv_ventas_ventanas', 'mv_rentabilidad_sku'),
-    'listings':      ('mv_ventas_ventanas',),
+    'transacciones': ('mv_ventas_ventanas', 'mv_rentabilidad_sku', 'mv_asin_con_pedido'),
+    'listings':      ('mv_ventas_ventanas', 'mv_asin_con_pedido'),
 }
 
 # Que hay que tirar de la cache de la app cuando una materializada se pone al dia.
@@ -655,6 +655,7 @@ ETIQUETAS_POR_VISTA = {
     'mv_ventas_ventanas':  ('inventario', 'ventas'),
     'mv_rentabilidad_sku': ('rentabilidad',),
     'mv_presencia_pais':   ('inventario',),
+    'mv_asin_con_pedido':  ('inventario',),
 }
 
 
