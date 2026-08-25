@@ -645,6 +645,7 @@ REFRESCOS_POR_FUENTE = {
     'ledger':        ('mv_ventas_ventanas', 'mv_presencia_pais'),
     'transacciones': ('mv_ventas_ventanas', 'mv_rentabilidad_sku', 'mv_asin_con_pedido'),
     'listings':      ('mv_ventas_ventanas', 'mv_asin_con_pedido'),
+    'keepa':         ('mv_keepa_asin_visto',),
 }
 
 # Que hay que tirar de la cache de la app cuando una materializada se pone al dia.
@@ -656,6 +657,7 @@ ETIQUETAS_POR_VISTA = {
     'mv_rentabilidad_sku': ('rentabilidad',),
     'mv_presencia_pais':   ('inventario',),
     'mv_asin_con_pedido':  ('inventario',),
+    'mv_keepa_asin_visto': ('inventario',),
 }
 
 
