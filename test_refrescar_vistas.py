@@ -330,6 +330,20 @@ eq('(5) 🔒 … y NADIE MAS la refresca',
    sorted(f for f, vs in REFRESCOS_POR_FUENTE.items() if 'mv_presencia_pais' in vs),
    ['ledger'])
 
+# 🔴 LA CUARTA COPIA, Y ES LA UNICA QUE NO ES UNA VISTA ENTERA: `mv_asin_con_pedido`
+#    guarda SOLO la rama cara de v_nunca_enviado_fba (el 97% del coste). Bebe de DOS
+#    fuentes, y `listings` no es adorno: es el mapa SKU->ASIN. Sin refrescarla al
+#    entrar un informe de listings, un SKU que cambia de ASIN deja de contar como
+#    "tuvo pedido" y su ficha aparece como NUNCA ENVIADA.
+eq('(5) 🔴 las transacciones refrescan la lista de ASIN con pedido',
+   'mv_asin_con_pedido' in REFRESCOS_POR_FUENTE.get('transacciones', ()), True)
+eq('(5) 🔴 … y listings TAMBIEN (es el mapa SKU->ASIN)',
+   'mv_asin_con_pedido' in REFRESCOS_POR_FUENTE.get('listings', ()), True)
+# 🔒 Anclado sobre lo que NO debe aparecer: el ledger no la toca.
+eq('(5) 🔒 … y el ledger NO la refresca',
+   sorted(f for f, vs in REFRESCOS_POR_FUENTE.items() if 'mv_asin_con_pedido' in vs),
+   ['listings', 'transacciones'])
+
 print('\n== 5b) LAS ETIQUETAS DEL AVISO SALEN DE LO QUE SE REFRESCO ==')
 # 🔴 LAS DOS DIRECCIONES, y la segunda es la que importa: que la etiqueta APAREZCA
 #    cuando toca y que NO aparezca cuando no toca. Una lista fija de etiquetas pasaria
@@ -372,7 +386,7 @@ c = CursorFalso(trackeador_revienta=psycopg2.errors.InsufficientPrivilege(
 r, txt, con = corre(c, fuente='transacciones')
 eq('(5c) 🔒 si revienta, devuelve False sin tumbar nada', r, False)
 eq('(5c) 🔒 … diciendo el error', 'permission denied' in txt, True)
-eq('(5c) 🔒 … y las nuestras SI se habian refrescado', len(refrescos(c)), 2)   # transacciones: ventanas + rentabilidad
+eq('(5c) 🔒 … y las nuestras SI se habian refrescado', len(refrescos(c)), 3)   # transacciones: ventanas + rentabilidad + asin_con_pedido
 
 print('\n== 6) LOS PROCESADORES LO LLAMAN DE VERDAD ==')
 # 🔴 Un CI verde no prueba que una feature este viva. `refrescar_vistas` puede estar
