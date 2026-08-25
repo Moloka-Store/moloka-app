@@ -273,13 +273,18 @@ eq('(3c) 🔴 NO avisa a la app', '/api/cache/invalidar' in txt, False)
 eq('(3c) 🔒 … y no ha tocado la base', c.ejecutadas, [])
 
 print('\n== 4) UNA FUENTE QUE NO TIENE MATERIALIZADAS ==')
+# ⚠️ Aqui ponia `fuente='keepa'`, y dejo de valer el 25-ago: keepa PASO A TENER copia
+#    propia (`mv_keepa_asin_visto`), asi que este caso ya no probaba lo que dice --
+#    probaba el camino normal con otro nombre, y salia verde. Es la trampa de anclar
+#    un test en un valor que puede CAMBIAR DE SIGNIFICADO. Ahora usa un nombre que no
+#    existe a proposito, que es lo unico que no puede dejar de cumplirse.
 # 🔴 ESTE CASO CAMBIO DE SIGNO EL 25-ago-2026, Y ES LO QUE HACE QUE EL TRACKEADOR VEA
 #    EL KEEPA DE LA MANANA. Antes se salia CALLADO por la puerta de atras. Pero
 #    `v_trackeador_pantalla` bebe de nueve tablas --entre ellas keepa_escaparate--, o
 #    sea de informes que NO tienen materializada propia. Si el gancho se saltase esas
 #    fuentes, su pestana seguiria ensenando la foto de ayer.
 c = CursorFalso()
-r, txt, con = corre(c, fuente='keepa')
+r, txt, con = corre(c, fuente='una_fuente_sin_copias')
 eq('(4) 🔴 el trackeador se refresca IGUAL', pos_trackeador(c) >= 0, True)
 eq('(4) 🔒 … pero no refresca ninguna materializada nuestra', len(refrescos(c)), 0)
 eq('(4) devuelve True', r, True)
@@ -343,6 +348,17 @@ eq('(5) 🔴 … y listings TAMBIEN (es el mapa SKU->ASIN)',
 eq('(5) 🔒 … y el ledger NO la refresca',
    sorted(f for f, vs in REFRESCOS_POR_FUENTE.items() if 'mv_asin_con_pedido' in vs),
    ['listings', 'transacciones'])
+
+# 🔴 LA QUINTA COPIA, Y ES LA QUE ESTRENA UNA FUENTE. Hasta hoy `keepa` no tenia copia
+#    propia y solo movia la del Trackeador. `mv_keepa_asin_visto` es la vista entera
+#    --un UNION de dos tablas, sin nada volatil--, y sus DOS anclas son una por tabla
+#    aunque las escriba el mismo procesador: la foto se reescribe entera cada vez y el
+#    archivo solo crece, asi que una puede quedarse atras sin la otra.
+eq('(5) 🔴 keepa refresca su lista de ASIN vistos',
+   'mv_keepa_asin_visto' in REFRESCOS_POR_FUENTE.get('keepa', ()), True)
+eq('(5) 🔒 … y NADIE MAS la refresca',
+   sorted(f for f, vs in REFRESCOS_POR_FUENTE.items() if 'mv_keepa_asin_visto' in vs),
+   ['keepa'])
 
 print('\n== 5b) LAS ETIQUETAS DEL AVISO SALEN DE LO QUE SE REFRESCO ==')
 # 🔴 LAS DOS DIRECCIONES, y la segunda es la que importa: que la etiqueta APAREZCA
