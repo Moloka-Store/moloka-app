@@ -99,36 +99,60 @@ DECLARE
 BEGIN
     SELECT count(*) INTO n_total FROM ledger_movimientos;
 
-    SET LOCAL ROLE authenticated;
-    PERFORM set_config('request.jwt.claims',
-                       '{"sub":"00000000-0000-0000-0000-000000000001","role":"authenticated"}',
-                       true);
+    -- 🔴 ESTE ENTORNO, ¿PUEDE SIQUIERA CORRER EL TESTIGO DE ROL? Se pregunta ANTES
+    --    de intentarlo, y no es una cortesia: sin esto la migracion se pone ROJA
+    --    en staging por una causa que NO tiene nada que ver con lo que mide --
+    --    justo la clase de guarda que CLAUDE.md seccion 3 llama ruido futuro.
+    --
+    --    EL MOTIVO, medido el 25-ago-2026: `backup-bd.yml` vuelca con
+    --    `--no-privileges`, asi que el dump NO lleva ni un GRANT y
+    --    `restaurar-staging.yml` no los repone. Resultado real:
+    --      produccion  ledger_movimientos -> {postgres, authenticated, service_role}
+    --      staging     ledger_movimientos -> {postgres, service_role}
+    --    En staging el rol `authenticated` existe pero no tiene SELECT, asi que un
+    --    `SET ROLE authenticated` choca con «permission denied» antes de medir nada.
+    --
+    -- 🔒 Y NO SE APAGA EN SILENCIO: se GRITA con el motivo y se deja dicho que la
+    --    verificacion de verdad es EN PRODUCCION, despues de aplicar. Es la misma
+    --    regla del ACL (seccion 4) y la de la vista que confiesa lo que no puede ver.
+    IF NOT has_table_privilege('authenticated', 'public.ledger_movimientos', 'SELECT') THEN
+        RAISE WARNING 'TESTIGO DE ROL NO EJECUTADO EN ESTE ENTORNO: el rol authenticated no tiene SELECT sobre ledger_movimientos (acl=%). No es un fallo de la migracion: el backup va con --no-privileges y staging nace sin GRANTs. Lo que este ensayo NO ha comprobado: que las filas visibles no cambien y que el plan traiga InitPlan. ESO SE VERIFICA EN PRODUCCION, DESPUES DE APLICAR, con SET ROLE authenticated.',
+            (SELECT coalesce(relacl::text, '(sin acl)') FROM pg_class WHERE oid = 'public.ledger_movimientos'::regclass);
+    ELSE
+        SET LOCAL ROLE authenticated;
+        PERFORM set_config('request.jwt.claims',
+                           '{"sub":"00000000-0000-0000-0000-000000000001","role":"authenticated"}',
+                           true);
 
-    SELECT count(*) INTO n_auth FROM ledger_movimientos;
+        SELECT count(*) INTO n_auth FROM ledger_movimientos;
 
-    FOR linea IN EXECUTE 'EXPLAIN (ANALYZE, COSTS OFF) SELECT count(*) FROM public.ledger_movimientos' LOOP
-        plan_txt := plan_txt || linea || chr(10);
-    END LOOP;
+        FOR linea IN EXECUTE 'EXPLAIN (ANALYZE, COSTS OFF) SELECT count(*) FROM public.ledger_movimientos' LOOP
+            plan_txt := plan_txt || linea || chr(10);
+        END LOOP;
 
-    RESET ROLE;
+        RESET ROLE;
 
-    -- 1) EL MISMO CONJUNTO DE FILAS. Es la mitad que importa: una politica mas
-    --    rapida que ademas cambia lo que se ve no es una optimizacion.
-    IF n_auth <> n_total THEN
-        RAISE EXCEPTION 'ABORTA: como authenticated se ven % filas y la tabla tiene %. La reescritura ha cambiado QUE se ve, no solo cuanto tarda.', n_auth, n_total;
+        -- 1) EL MISMO CONJUNTO DE FILAS. Es la mitad que importa: una politica mas
+        --    rapida que ademas cambia lo que se ve no es una optimizacion.
+        IF n_auth <> n_total THEN
+            RAISE EXCEPTION 'ABORTA: como authenticated se ven % filas y la tabla tiene %. La reescritura ha cambiado QUE se ve, no solo cuanto tarda.', n_auth, n_total;
+        END IF;
+        IF n_auth = 0 THEN
+            RAISE EXCEPTION 'ABORTA: 0 filas visibles como authenticated. Sin filas este testigo no comprueba nada, y ademas la pantalla se quedaria vacia.';
+        END IF;
+
+        -- 2) EL PLAN. Con el SELECT, la funcion se resuelve en un InitPlan una sola
+        --    vez; sin el, se evalua en el Filter de cada fila. Se ancla sobre la
+        --    marca que SOLO existe en la forma nueva.
+        IF position('InitPlan' in plan_txt) = 0 THEN
+            RAISE EXCEPTION 'ABORTA: el plan como authenticated NO trae InitPlan, o sea que auth.uid() se sigue evaluando por fila. El ALTER no ha surtido efecto donde importa. Plan: %', plan_txt;
+        END IF;
+
+        RAISE NOTICE 'Testigo de rol OK. % filas visibles como authenticated (= las % de la tabla) y el plan trae InitPlan.', n_auth, n_total;
     END IF;
-    IF n_auth = 0 THEN
-        RAISE EXCEPTION 'ABORTA: 0 filas visibles como authenticated. Sin filas este testigo no comprueba nada, y ademas la pantalla se quedaria vacia.';
-    END IF;
 
-    -- 2) EL PLAN. Con el SELECT, la funcion se resuelve en un InitPlan una sola
-    --    vez; sin el, se evalua en el Filter de cada fila. Se ancla sobre la
-    --    marca que SOLO existe en la forma nueva.
-    IF position('InitPlan' in plan_txt) = 0 THEN
-        RAISE EXCEPTION 'ABORTA: el plan como authenticated NO trae InitPlan, o sea que auth.uid() se sigue evaluando por fila. El ALTER no ha surtido efecto donde importa. Plan: %', plan_txt;
-    END IF;
-
-    -- 3) La forma nueva, anclada sobre lo que ya NO debe aparecer.
+    -- 3) La forma nueva, anclada sobre lo que ya NO debe aparecer. Esta parte SI
+    --    corre en los dos entornos: no depende de ningun GRANT.
     SELECT qual INTO q FROM pg_policies
      WHERE schemaname = 'public' AND tablename = 'ledger_movimientos'
        AND policyname = 'inventario_read_authenticated';
@@ -136,6 +160,6 @@ BEGIN
         RAISE EXCEPTION 'ABORTA: la politica sigue con la forma vieja. El ALTER no ha hecho efecto.';
     END IF;
 
-    RAISE NOTICE 'Testigo OK. % filas visibles como authenticated (= las % de la tabla), plan con InitPlan, politica [%].', n_auth, n_total, q;
+    RAISE NOTICE 'Politica reescrita: [%]. Tabla con % filas.', q, n_total;
 END
 $testigo$;
