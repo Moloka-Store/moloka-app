@@ -79,7 +79,11 @@ CONSULTA_PELADA = """
 SELECT * FROM public.salud_fba WHERE marketplace = 'ES'
 """
 
-# 🔴 EL LATERAL AISLADO, QUE ES DONDE ESTA EL 99,8% DEL COSTE. Las dos versiones son
+# 🔴 EL LATERAL AISLADO, QUE ES DONDE ESTA EL 99,8% DEL COSTE.
+#    🔒 La columna es `ke.rank`, y va copiada de `pg_get_viewdef('salud_fba')`, no de
+#       la memoria: la primera version puso `ke.sales_rank` --que es como se llama en
+#       la VISTA-- y los tres casos reventaron con "column does not exist". El nombre
+#       de una columna se lee, no se recuerda. Las dos versiones son
 #    la MISMA consulta salvo en una cosa: si el cruce lleva `btrim`/`lower` o va crudo.
 #    Con eso se contesta, ANTES de tocar nada, si el arreglo funciona.
 # 🔒 Y el `count(*)` de las dos tiene que salir IGUAL: si no, no son la misma consulta y
@@ -87,10 +91,10 @@ SELECT * FROM public.salud_fba WHERE marketplace = 'ES'
 #    (0 filas cambian sobre 1.653 + 362), pero aqui se vuelve a mirar en la misma
 #    corrida -- una comparacion entre dos cosas que devuelven distinto no mide nada.
 LATERAL_CON_ENVOLTORIOS = """
-SELECT count(k.sales_rank) AS casan
+SELECT count(k.rank) AS casan
   FROM public.inventario_fba i
   LEFT JOIN LATERAL (
-    SELECT ke.sales_rank
+    SELECT ke.rank
       FROM public.keepa_escaparate ke
      WHERE btrim(ke.asin) = btrim(i.asin) AND lower(ke.dominio) = 'es'
      ORDER BY ke.fecha_foto DESC
@@ -98,10 +102,10 @@ SELECT count(k.sales_rank) AS casan
 """
 
 LATERAL_CRUDO = """
-SELECT count(k.sales_rank) AS casan
+SELECT count(k.rank) AS casan
   FROM public.inventario_fba i
   LEFT JOIN LATERAL (
-    SELECT ke.sales_rank
+    SELECT ke.rank
       FROM public.keepa_escaparate ke
      WHERE ke.asin = i.asin AND ke.dominio = 'es'
      ORDER BY ke.fecha_foto DESC
