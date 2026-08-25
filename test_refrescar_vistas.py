@@ -275,6 +275,34 @@ eq('(5) 🔒 v_ventas_ventanas se refresca desde sus TRES fuentes',
    sorted(f for f, vs in REFRESCOS_POR_FUENTE.items() if 'mv_ventas_ventanas' in vs),
    ['ledger', 'listings', 'transacciones'])
 
+# 🔴 LA SEGUNDA MATERIALIZADA, Y SU FUENTE ES **UNA SOLA**. `mv_rentabilidad_sku`
+#    agrega `transacciones_movimientos` y nada mas: `productos` --el pvd, el
+#    producto_id, el con_ficha-- se cruza EN VIVO en las vistas de encima, asi que
+#    cambiar una ficha NO necesita refresco. Ese es justamente el motivo del reparto.
+eq('(5) 🔴 las transacciones refrescan TAMBIEN la rentabilidad',
+   'mv_rentabilidad_sku' in REFRESCOS_POR_FUENTE.get('transacciones', ()), True)
+# 🔒 Anclado sobre lo que NO debe aparecer, que es la mitad que se mueve: si alguien
+#    la colgara de ledger o de listings estaria refrescando de mas por un evento que
+#    no la toca, y nadie lo notaria porque el dato saldria bien igual.
+eq('(5) 🔒 … y NADIE MAS la refresca',
+   sorted(f for f, vs in REFRESCOS_POR_FUENTE.items() if 'mv_rentabilidad_sku' in vs),
+   ['transacciones'])
+
+print('\n== 5b) LAS ETIQUETAS DEL AVISO SALEN DE LO QUE SE REFRESCO ==')
+# 🔴 LAS DOS DIRECCIONES, y la segunda es la que importa: que la etiqueta APAREZCA
+#    cuando toca y que NO aparezca cuando no toca. Una lista fija de etiquetas pasaria
+#    la primera mitad SIEMPRE, mida lo que mida.
+#    Un informe de ledger no toca la rentabilidad: mandar su etiqueta seria tirar una
+#    cache que estaba bien. No da un dato falso, pero es trabajo que nadie pidio.
+c = CursorFalso()
+_, txt_tx, _ = corre(c, fuente='transacciones')
+c = CursorFalso()
+_, txt_led, _ = corre(c, fuente='ledger')
+eq('(5b) transacciones avisa de la RENTABILIDAD', 'rentabilidad' in txt_tx, True)
+eq('(5b) … y tambien del inventario', 'inventario' in txt_tx, True)
+eq('(5b) 🔴 el ledger NO avisa de la rentabilidad', 'rentabilidad' in txt_led, False)
+eq('(5b) 🔒 … pero si avisa de lo suyo', 'inventario' in txt_led, True)
+
 print('\n== 6) LOS DOS PROCESADORES LO LLAMAN DE VERDAD ==')
 # 🔴 Un CI verde no prueba que una feature este viva. `refrescar_vistas` puede estar
 #    perfecta y no ejecutarse nunca.
