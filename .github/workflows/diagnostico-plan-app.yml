@@ -1,0 +1,57 @@
+name: Moloka - El plan de la consulta, TAL COMO LA PAGA LA APP
+
+# 🔴 QUE AGUJERO CIERRA. Hasta hoy no habia forma de ver el plan real de la pantalla.
+#    El MCP de lectura entra como `supabase_read_only_user`, que tiene
+#    `pg_read_all_data` y SALTA LA RLS: sus EXPLAIN miden otra consulta. La diferencia
+#    medida el 25-ago-2026 sobre `salud_fba` es de 177x (1.185 buffers contra ~210.000).
+#
+# 🔑 Y SI HAY VIA: `postgres` tiene `rolbypassrls` POR ATRIBUTO DE ROL, pero en cuanto
+#    hace `SET ROLE authenticated` el rol EFECTIVO es otro y la RLS aplica. Lo que no
+#    se puede es hacerlo desde el MCP, porque `supabase_read_only_user` no es miembro
+#    de `authenticated`.
+#
+# 🔒 ES DE SOLO LECTURA Y SE DESHACE: todo va dentro de una transaccion que termina en
+#    ROLLBACK. `EXPLAIN ANALYZE` ejecuta la consulta, pero son SELECT.
+#
+# ⚠️ LO QUE SI CUESTA, Y POR ESO NO LLEVA RELOJ: la consulta que se mide lee ~1,6 GB y
+#    la base tiene 224 MB de `shared_buffers`. O sea que VACIA LA CACHE. Correrlo deja
+#    a Elena unos segundos con la base fria. Se lanza a mano, cuando alguien quiere
+#    saber la respuesta, y no todos los dias.
+#
+# 🔒 NUNCA SE IMPRIME `DB_URL` NI UN TROZO -- los logs de Actions se ven. `current_user`
+#    si: es parte del dato que se busca.
+on:
+  workflow_dispatch:
+    inputs:
+      entorno:
+        description: 'Base de datos contra la que se mide'
+        type: choice
+        options: ['produccion', 'staging']
+        default: 'produccion'
+
+# ⚠️ Las opciones y los defaults van ENTRECOMILLADOS: en YAML un `no` suelto es el
+#    BOOLEANO false (el problema de Noruega). Aqui no hay ninguno, pero la regla de la
+#    casa es entrecomillar siempre.
+
+concurrency:
+  group: diagnostico-plan-app-${{ inputs.entorno }}
+  cancel-in-progress: false
+
+jobs:
+  medir:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install --quiet psycopg2-binary
+
+      - name: Medir el plan
+        env:
+          ENTORNO: ${{ inputs.entorno }}
+          DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
+        run: python -u diagnostico_plan_app.py
