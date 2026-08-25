@@ -642,7 +642,7 @@ _NL = chr(10)
 
 REFRESCOS_POR_FUENTE = {
     # fuente que cambia  ->  materializadas que dependen de ella
-    'ledger':        ('mv_ventas_ventanas',),
+    'ledger':        ('mv_ventas_ventanas', 'mv_presencia_pais'),
     'transacciones': ('mv_ventas_ventanas', 'mv_rentabilidad_sku'),
     'listings':      ('mv_ventas_ventanas',),
 }
@@ -654,6 +654,7 @@ REFRESCOS_POR_FUENTE = {
 ETIQUETAS_POR_VISTA = {
     'mv_ventas_ventanas':  ('inventario', 'ventas'),
     'mv_rentabilidad_sku': ('rentabilidad',),
+    'mv_presencia_pais':   ('inventario',),
 }
 
 

@@ -166,7 +166,7 @@ print('== 1) EL CAMINO BUENO ==')
 c = CursorFalso()
 r, txt, con = corre(c)
 eq('(1) devuelve True', r, True)
-eq('(1) ha refrescado de verdad', len(refrescos(c)) > 0, True)
+eq('(1) ha refrescado de verdad', len(refrescos(c)), 2)   # ledger: ventanas + presencia
 # 🔒 Sin el indice unico esto bloquearia a quien este leyendo la pantalla.
 eq('(1) … sin bloquear a los lectores',
    all('concurrently' in e.lower() for e in refrescos(c)), True)
@@ -319,6 +319,17 @@ eq('(5) 🔒 … y NADIE MAS la refresca',
    sorted(f for f, vs in REFRESCOS_POR_FUENTE.items() if 'mv_rentabilidad_sku' in vs),
    ['transacciones'])
 
+# 🔴 LA TERCERA COPIA. `mv_presencia_pais` agrega SOLO `ledger_movimientos`: ni un
+#    join, ni una funcion, ni CURRENT_DATE. Una sola fuente y una sola ancla.
+eq('(5) 🔴 el ledger refresca TAMBIEN la presencia por pais',
+   'mv_presencia_pais' in REFRESCOS_POR_FUENTE.get('ledger', ()), True)
+# 🔒 Anclado sobre lo que NO debe aparecer: colgarla de transacciones o de listings
+#    seria refrescar por un evento que no la toca, y el dato saldria bien igual --
+#    o sea que nadie lo notaria.
+eq('(5) 🔒 … y NADIE MAS la refresca',
+   sorted(f for f, vs in REFRESCOS_POR_FUENTE.items() if 'mv_presencia_pais' in vs),
+   ['ledger'])
+
 print('\n== 5b) LAS ETIQUETAS DEL AVISO SALEN DE LO QUE SE REFRESCO ==')
 # 🔴 LAS DOS DIRECCIONES, y la segunda es la que importa: que la etiqueta APAREZCA
 #    cuando toca y que NO aparezca cuando no toca. Una lista fija de etiquetas pasaria
@@ -361,7 +372,7 @@ c = CursorFalso(trackeador_revienta=psycopg2.errors.InsufficientPrivilege(
 r, txt, con = corre(c, fuente='transacciones')
 eq('(5c) 🔒 si revienta, devuelve False sin tumbar nada', r, False)
 eq('(5c) 🔒 … diciendo el error', 'permission denied' in txt, True)
-eq('(5c) 🔒 … y las nuestras SI se habian refrescado', len(refrescos(c)), 2)
+eq('(5c) 🔒 … y las nuestras SI se habian refrescado', len(refrescos(c)), 2)   # transacciones: ventanas + rentabilidad
 
 print('\n== 6) LOS PROCESADORES LO LLAMAN DE VERDAD ==')
 # 🔴 Un CI verde no prueba que una feature este viva. `refrescar_vistas` puede estar
