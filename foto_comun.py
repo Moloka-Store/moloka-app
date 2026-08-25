@@ -648,6 +648,7 @@ REFRESCOS_POR_FUENTE = {
     'listings':      ('mv_ventas_ventanas', 'mv_asin_con_pedido',
                       'mv_velocidad_ventas_paneu'),
     'keepa':         ('mv_keepa_asin_visto',),
+    'custom_analytics': ('mv_demanda_asin_ultima',),
 }
 
 # Que hay que tirar de la cache de la app cuando una materializada se pone al dia.
@@ -661,6 +662,7 @@ ETIQUETAS_POR_VISTA = {
     'mv_asin_con_pedido':  ('inventario',),
     'mv_keepa_asin_visto': ('inventario',),
     'mv_velocidad_ventas_paneu': ('inventario', 'ventas'),
+    'mv_demanda_asin_ultima':    ('inventario',),
 }
 
 

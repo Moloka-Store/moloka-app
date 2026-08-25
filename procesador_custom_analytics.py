@@ -86,7 +86,7 @@ import openpyxl
 # Del patrón común solo se reutiliza lo de FOTO que aplica: Aborta y las lecturas de
 # Storage con reintento. NO barrer_sobrantes/archivar_foto (esto es FOTO POR VENTANA,
 # no FOTO: el borrado es por ventana exacta, no "lo que no viene en el fichero").
-from foto_comun import Aborta, conectar_bd, listar_buzon, descargar_buzon
+from foto_comun import Aborta, conectar_bd, listar_buzon, descargar_buzon, refrescar_vistas
 
 # ---------------------------------------------------------------------------
 # 0) Configuración (secrets de GitHub; jamás credenciales en el código)
@@ -1811,6 +1811,15 @@ def main():
 
     if MODO == 'aplicar':
         con.commit()
+        # 🔒 Despues del commit y SOLO en `aplicar`: en `ensayo` no se ha escrito nada
+        #    y refrescar seria copiar un estado que se acaba de deshacer. Un ensayo con
+        #    efectos secundarios deja de ser un ensayo.
+        # 🔴 ESTE PROCESADOR NO TENIA GANCHO HASTA HOY, y era el unico hueco: la copia
+        #    `mv_demanda_asin_ultima` no se pondria al dia sola, asi que la pantalla
+        #    ensenaria la demanda ANTERIOR con toda naturalidad. Y de paso ahora esta
+        #    corrida tambien pone al dia la copia del Trackeador, que tambien mira la
+        #    demanda.
+        refrescar_vistas(con, 'custom_analytics')
         print(f"\n✅ APLICADO en {ENTORNO}: {insertadas} filas de {PAIS} · lectura {leido_at} en "
               f"demanda_asin (lectura recerrada por igualdad; el resto de la serie intacto; RLS "
               f"activo sin políticas; sello escrito).")
