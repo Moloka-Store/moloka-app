@@ -39,7 +39,7 @@ on:
       fuente:
         description: 'Que fuente se simula (decide que materializadas se refrescan)'
         type: choice
-        options: ['ledger', 'transacciones', 'listings', 'keepa']
+        options: ['ledger', 'transacciones', 'listings', 'keepa', 'custom_analytics']
         default: 'ledger'
 
 # ⚠️ Las opciones y los defaults van ENTRECOMILLADOS: en YAML un `no` suelto es el
