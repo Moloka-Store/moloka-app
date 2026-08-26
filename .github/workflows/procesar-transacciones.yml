@@ -21,7 +21,7 @@ on:
         options: [ensayo, aplicar]
         default: ensayo
       pais:
-        description: 'País del fichero (LO MANDA EL SELECTOR, no se deduce del fichero). Sube a informes/transacciones/ el CSV de ESE país. ⚠️ DE: la primera carga ABORTA a propósito e imprime la cabecera real — ver el aviso del procesador.'
+        description: 'País del fichero (LO MANDA EL SELECTOR, no se deduce del fichero). Sube a informes/transacciones/ el CSV de ESE país. DE ya está medido (26-ago): entra como ES/IT/FR.'
         type: choice
         # 🔒 Entrecomilladas por el «problema de Noruega»: en YAML un `NO` suelto es el
         #    BOOLEANO false, no la cadena «NO». Aquí ninguna de las cuatro lo dispara, pero
