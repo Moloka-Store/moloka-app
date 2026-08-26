@@ -101,7 +101,7 @@ SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')   # llave de servicio: LEER el
 DB_URL       = os.environ.get('DB_URL', '')         # postgres del ENTORNO (staging o prod)
 MODO         = os.environ.get('MODO', 'ensayo').strip().lower()       # ensayo | aplicar
 ENTORNO      = os.environ.get('ENTORNO', 'staging').strip().lower()   # staging | produccion
-PAIS         = os.environ.get('PAIS', '').strip().upper()             # ES | IT | FR (selector)
+PAIS         = os.environ.get('PAIS', '').strip().upper()             # ES | IT | FR | DE (selector)
 FICHERO      = os.environ.get('FICHERO', '').strip()                  # nombre EXACTO; vacío = más reciente
 
 BUCKET, CARPETA = 'informes', 'transacciones'
@@ -179,20 +179,31 @@ COLS_ALIAS = {
         'estado':           ['statut de la transaction'],
         'fecha_liberacion': ['date de sortie de la transaction'],
     },
-    # 🔴 ALEMANIA VA VACÍA A PROPÓSITO, Y NO ES UN OLVIDO.
-    #
-    #    Las cabeceras de los otros tres están MEDIDAS contra los ficheros reales (28-jul).
-    #    Del alemán no hay fichero todavía, así que aquí no hay nada que medir — y la regla
-    #    de la casa es que un mapa de columnas no se traduce a ojo. No es escrupulosidad:
-    #    la resolución acepta coincidencia POR PREFIJO, así que un alias inventado puede
-    #    casar con la columna de al lado y meter el importe equivocado en una columna de
-    #    dinero. Eso no daría error: cargaría cifras falsas con aspecto de buenas.
-    #
-    # 🔑 POR ESO LA PRIMERA CARGA ALEMANA ES UNA MEDICIÓN, no un intento fallido: la
-    #    Guarda 2 aborta ANTES de tocar nada e imprime la cabecera real del fichero. Con
-    #    esa línea se rellena este mapa con valores medidos y la segunda carga entra.
-    #    Un `ensayo` basta: no hace falta arriesgar un `aplicar`.
-    'DE': {},
+    # 🇩🇪 ALEMANIA — MEDIDO el 26-ago-2026 contra el fichero REAL de amazon.de
+    #    (2026Jan1-2026Aug25CustomTransaction.csv, cabecera en la línea 10, utf-8-sig).
+    #    Ejecutado contra el fichero: las 10 columnas OBLIGATORIAS resuelven y las 68 filas
+    #    parsean sin descartar ninguna. Aliases normalizados (sin acentos, minúsculas).
+    #    🔒 'andere' (otro) queda separado de 'andere transaktionsgebuhren' (tarifa_otras)
+    #    por el exacto-primero de _resolver_columna, igual que autre/autres en FR.
+    'DE': {
+        'fecha':             ['datum/uhrzeit'],
+        'tipo':              ['typ'],
+        'numero_pedido':     ['bestellnummer'],
+        'identificador_pago': ['abrechnungsnummer'],
+        'sku':               ['sku'],
+        'descripcion':       ['beschreibung'],
+        'cantidad':          ['menge'],
+        'marketplace':       ['marketplace'],
+        'ventas_producto':   ['umsatze'],
+        'impuesto_producto': ['produktumsatzsteuer'],
+        'tarifa_venta':      ['verkaufsgebuhren'],
+        'tarifa_fba':        ['gebuhren zu versand durch amazon'],
+        'tarifa_otras':      ['andere transaktionsgebuhren'],
+        'otro':              ['andere'],
+        'total':             ['gesamt'],
+        'estado':            ['transaktionsstatus'],
+        'fecha_liberacion':  ['freigabedatum der transaktion'],
+    },
 }
 
 # Columnas cuya AUSENCIA aborta (las que la vista PR-C necesita para la fórmula).
@@ -233,6 +244,18 @@ TIPO_CANON = {
     'Frais de transaction Expédié par Amazon': 'tarifa_transaccion_fba',
     'Tarifa de prestación de servicio': 'tarifa_servicio',
     'Saldo descubierto': 'saldo', 'Saldo negativo': 'saldo', 'Solde négatif': 'saldo',
+    # 🇩🇪 Alemán — MEDIDO 26-ago contra el fichero real (recuentos: 43·7·6·5·2).
+    #    'Bestellung' es lo que ENCIENDE vendo_30d (la vista filtra tipo_norm='pedido').
+    #    'Anpassung' es indemnización de inventario CON SKU ("Im Lager verloren") → mismo
+    #    canon que 'Ajuste' en ES. 'Verbindlichkeit' (5 filas, "Kontoübergreifender
+    #    Schuldenausgleich") se deja SIN canon A PROPÓSITO: es compensación entre cuentas
+    #    (tesorería net-zero), decisión contable de Fernando, y NO afecta a vendo_30d. Entra
+    #    igual y la GRITA el resumen, como las de ES (Reversión/Corrección/Cargo retroactivo).
+    'Bestellung': 'pedido',
+    'Übertrag': 'transferencia',
+    'Versand durch Amazon Lagergebühr': 'tarifa_inventario',
+    'Transaktionsgebühren für Versand durch Amazon': 'tarifa_transaccion_fba',
+    'Anpassung': 'reembolso_inventario',
 }
 
 # Columnas tipadas de la tabla, en el orden del INSERT (id IDENTITY y procesado_at aparte).
@@ -289,9 +312,21 @@ def ent_o_null(v):
     return int(f) if f is not None else None
 
 def parse_fecha_pais(s, pais):
-    """'31 dic 2025 23:21:47 UTC' / '7 avr. 2026 ...' / '8 gen 2026 ...' → date. None si no casa."""
+    """'31 dic 2025 23:21:47 UTC' / '7 avr. 2026 ...' / '8 gen 2026 ...' → date. None si no casa.
+    🇩🇪 DE es APARTE: la fecha es NUMÉRICA 'DD.MM.YYYY' (no mes en texto), medido 26-ago.
+    Sin esta rama, PAIS='DE' caía en el 'else' (meses FRANCESES) y la Guarda 3 abortaba en
+    la 1ª fila. Va aquí y no toca ES/IT/FR."""
     if not s:
         return None
+    if pais == 'DE':
+        md = re.match(r'(\d{1,2})\.(\d{1,2})\.(\d{4})', str(s).strip())
+        if not md:
+            return None
+        d_de, m_de, a_de = md.groups()
+        try:
+            return date(int(a_de), int(m_de), int(d_de))
+        except ValueError:
+            return None
     m = re.match(r'(\d+)\s+([^\s]+)\s+(\d{4})', str(s).strip())
     if not m:
         return None
@@ -315,9 +350,18 @@ def parse_fecha_pais(s, pais):
         return None
 
 def parse_fecha_hora(s, pais):
-    """La misma cadena con hora: → datetime (UTC). None si no hay hora. Leniente."""
+    """La misma cadena con hora: → datetime (UTC). None si no hay hora. Leniente.
+    🇩🇪 DE: 'DD.MM.YYYY HH:MM:SS UTC' (numérica, medido 26-ago)."""
     if not s:
         return None
+    if pais == 'DE':
+        mh = re.match(r'(\d{1,2})\.(\d{1,2})\.(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})', str(s).strip())
+        d = parse_fecha_pais(s, pais)
+        if not mh or not d:
+            return None
+        from datetime import timezone
+        return datetime(d.year, d.month, d.day, int(mh.group(4)), int(mh.group(5)),
+                        int(mh.group(6)), tzinfo=timezone.utc)
     m = re.match(r'(\d+)\s+([^\s]+)\s+(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})', str(s).strip())
     d = parse_fecha_pais(s, pais)
     if not m or not d:
@@ -576,7 +620,7 @@ def main():
     if ENTORNO not in ('staging', 'produccion'):
         sys.exit(f"ENTORNO desconocido: {ENTORNO!r} (usa 'staging' o 'produccion')")
     if PAIS not in PAISES_VALIDOS:
-        sys.exit(f"PAIS desconocido: {PAIS!r}. El país lo manda el selector (ES/IT/FR) y NO "
+        sys.exit(f"PAIS desconocido: {PAIS!r}. El país lo manda el selector (ES/IT/FR/DE) y NO "
                  f"se asume: sin país no se carga (§3.1).")
     if not SUPABASE_KEY or not DB_URL:
         sys.exit("Faltan credenciales (SUPABASE_KEY / DB_URL). Revisa los secrets del workflow.")
@@ -592,7 +636,7 @@ def main():
                  "primer paso: es el orden, no un fallo.)")
     csvs.sort(key=lambda o: (o.get('updated_at') or o.get('created_at') or ''), reverse=True)
 
-    # Con ES/IT/FR en la misma carpeta, "el más reciente" es una lotería (subes dos,
+    # Con ES/IT/FR/DE en la misma carpeta, "el más reciente" es una lotería (subes dos,
     # lanzas PAIS=ES y te coge el italiano). Por eso el catálogo v2 pasa el nombre
     # EXACTO por el input FICHERO. Igual que salud_fba/keepa: si se pide, tiene que
     # estar; NO se cae al más reciente (cargaría otro fichero sin avisar).
