@@ -159,14 +159,36 @@ $sigue$;
 -- 🔒 Una columna nueva HEREDA el ACL de su tabla, asi que no hay nada que conceder. Pero
 --    eso se MIDE, no se supone: si `authenticated` no pudiera leerla, la pantalla se
 --    quedaria sin fotos en cuanto la app dejara de pedir `imagenes`.
+--
+-- ⚠️ Y ANTES DE MIRARLA, SE MIRA SI HAY ALGO QUE MIRAR. En staging el volcado va con
+--    `--no-privileges`, asi que alli `authenticated` NO tiene SELECT **sobre la tabla
+--    entera** -- ni sobre `asin`, ni sobre `imagenes`, ni sobre nada. Medido el
+--    26-ago-2026 en las dos bases: en staging el ACL de `keepa_escaparate` es
+--    `{postgres, service_role}`; en produccion, `{postgres, anon, authenticated,
+--    service_role}`.
+--    🔴 Comprobar la columna NUEVA sin comprobar antes la TABLA da un rojo que dice
+--       «falta un permiso en mi columna» cuando lo que pasa es que no hay permisos de
+--       nada. Es una guarda que salta por una causa distinta de la que dice medir, o sea
+--       ruido futuro -- y la primera version de este bloque tumbo el ensayo por eso.
+--    🔑 Se parte en dos: si la tabla no es legible, esto NO SE PUEDE COMPROBAR aqui y se
+--       GRITA; si lo es, la columna nueva tiene que heredarlo y ahi si se ABORTA. El ACL
+--       de verdad se verifica EN PRODUCCION al aplicar.
 DO $puerta$
-DECLARE puede boolean;
+DECLARE tabla boolean; columna boolean;
 BEGIN
-    SELECT has_column_privilege('authenticated', 'public.keepa_escaparate', 'imagen_principal', 'SELECT')
-      INTO puede;
-    IF NOT puede THEN
-        RAISE EXCEPTION 'ABORTA: authenticated NO puede leer imagen_principal. La pantalla se quedaria sin fotos.';
+    SELECT has_table_privilege('authenticated', 'public.keepa_escaparate', 'SELECT'),
+           has_column_privilege('authenticated', 'public.keepa_escaparate', 'imagen_principal', 'SELECT')
+      INTO tabla, columna;
+
+    IF NOT tabla THEN
+        RAISE WARNING 'PUERTA NO COMPROBADA EN ESTE ENTORNO: `authenticated` no tiene SELECT sobre keepa_escaparate ENTERA, asi que la columna nueva no dice nada. Pasa porque el volcado va con --no-privileges; NO dice nada sobre produccion.';
+        RETURN;
     END IF;
-    RAISE NOTICE 'Testigo OK (puerta). authenticated puede leer imagen_principal.';
+
+    -- Aqui si: la tabla se lee, o sea que la columna nueva DEBE heredarlo.
+    IF NOT columna THEN
+        RAISE EXCEPTION 'ABORTA: la tabla es legible por authenticated pero la columna imagen_principal NO. Eso si es un permiso que falta, y la pantalla se quedaria sin fotos.';
+    END IF;
+    RAISE NOTICE 'Testigo OK (puerta). authenticated lee la tabla y tambien imagen_principal.';
 END
 $puerta$;
