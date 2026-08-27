@@ -706,6 +706,12 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   Un worktree que sobrevive a su PR es un clon fantasma más donde alguien leerá el código
   equivocado. Nunca se borra la carpeta a mano —eso deja el registro de `git worktree list`
   mintiendo—: `git worktree remove <ruta>` y, al terminar la tanda, `git worktree prune`.
+- 🔴 **AL TERMINAR UN TRABAJO, EL PARTE SE DEJA EN LA BANDEJA.** Además del PR, se escribe
+  una copia del informe en `G:\Mi unidad\Moloka\bandeja\` con el nombre
+  **`AAAA-MM-DD-HHMM-tema.md`** (hora española). **Primera línea del fichero: quién lo lee y
+  cuándo.** Sin esa copia, el trabajo solo existe dentro del repo y Fernando tiene que hacer de
+  correveidile entre Code y los chats. La bandeja es lo que lo evita, y **no depende de que
+  nadie se acuerde de pedirlo en el encargo**.
 - 🔴 **ANTES DE ENSAYAR UNA MIGRACIÓN EN STAGING, SE RESTAURA STAGING.** Se lanza
   `restaurar-staging.yml` y se espera a que salga en VERDE. La escalera entera es:
   **restaurar staging → staging ensayo → staging aplicar → verificación SQL → producción ensayo →
