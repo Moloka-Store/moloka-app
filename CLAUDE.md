@@ -702,6 +702,10 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
 ## 5. CÓMO SE TRABAJA AQUÍ
 
 - **UN PR, UNA COSA.** Sin excepciones.
+- 🔴 **AL FUSIONAR UN PR, QUIEN CREÓ EL WORKTREE LO RETIRA CON `git worktree remove`.**
+  Un worktree que sobrevive a su PR es un clon fantasma más donde alguien leerá el código
+  equivocado. Nunca se borra la carpeta a mano —eso deja el registro de `git worktree list`
+  mintiendo—: `git worktree remove <ruta>` y, al terminar la tanda, `git worktree prune`.
 - 🔴 **ANTES DE ENSAYAR UNA MIGRACIÓN EN STAGING, SE RESTAURA STAGING.** Se lanza
   `restaurar-staging.yml` y se espera a que salga en VERDE. La escalera entera es:
   **restaurar staging → staging ensayo → staging aplicar → verificación SQL → producción ensayo →
