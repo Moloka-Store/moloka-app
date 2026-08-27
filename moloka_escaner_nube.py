@@ -516,7 +516,7 @@ assert round(_COM_FR * ISD_PAIS['FR']['pct'], 2) != _ISD_REAL, (
 # 🔒 Y que ES no lleve la FBA en su base: si algun dia se igualan las cuatro, esto lo dice.
 assert round(_isd_de('ES', _COM_FR, _FBA_FR), 4) == round(_COM_FR * 0.03, 4), (
     'ES: la base ha dejado de ser solo la comision. Francia es la excepcion, no la norma.')
-print(f">>> FORMULA OK <<<  (ISD FR cuadrado con la factura: {_isd_con_fba:.4f} = {_ISD_REAL})")
+print(f">>> FORMULA OK <<<  (ISD FR cuadrado con la factura: {_isd_fr:.4f} = {_ISD_REAL})")
 
 # ============================================================
 # Funciones de EAN
