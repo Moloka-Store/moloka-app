@@ -22,9 +22,15 @@
 #   `salud_fba` (verificado por SQL en producción: sum(inbound_shipped)=143 en 9
 #   filas, snapshot 16-ago).
 #
-# 🔒 ESTO **AÑADE** UNA FUENTE. No quita ninguna: `procesador_salud_fba.py` no
-#    se toca (ni su salvaguarda anti-omisión ni sus guardas), ni se toca ninguna
-#    tabla existente. Nadie lee `inventario_fba` todavía.
+# 🔒 ESTO NACIÓ COMO UNA FUENTE DE MÁS, Y HOY ES LA ÚNICA. Aquí ponía que
+#    «`procesador_salud_fba.py` no se toca» y que «nadie lee `inventario_fba`
+#    todavía». Las dos frases eran ciertas al escribirlas y dejaron de serlo el
+#    **23-ago-2026**, el mismo día:
+#      · `procesador_salud_fba.py` se BORRÓ del repo (se jubiló el informe);
+#      · `salud_fba` pasó a ser una VISTA que lee de esta tabla, y de ella penden
+#        `v_salud_asin`, `v_salud_fba_cruce`, `v_keepa_cruce` y `v_incidencias_ultima`;
+#      · y la app v2 lee `inventario_fba` directamente.
+#    O sea que esta carga ya NO es aditiva: si falla, se nota aguas abajo.
 #
 # ----------------------------------------------------------------------------
 # EL CAJÓN: **FOTO** (§1.6 de CLAUDE.md). Contesta "¿cómo está esto AHORA?", así
