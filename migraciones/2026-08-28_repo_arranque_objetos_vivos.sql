@@ -43,6 +43,21 @@
 --       porque sin el GRANT no se llega ni a evaluar la RLS. Medido en produccion
 --       por Fernando el 28-ago-2026.
 --
+--    ✅ **CERRADO EL 28-ago-2026, unas horas despues de escribir esto.** Fernando
+--       decidio, con la medicion delante, **retirar el GRANT en vez de abrir
+--       `doctrina_madres`**: se cierra la promesa falsa, no se ensancha el
+--       acceso. Lo hizo `2026-08-28_cerrar_execute_public_y_grant_falso.sql`.
+--       Verificado en produccion: las dos vistas quedan con
+--       `postgres=arwdDxtm | service_role=arwdDxtm`, sin `authenticated`.
+--
+--    ⚠️ Y POR ESO ESTA FOTO SE ACTUALIZO. **No es que estuviera mal: es que el
+--       sistema cambio debajo.** Reaplicarla con el `grant select ... to
+--       authenticated` habria devuelto la promesa falsa **en silencio y sin
+--       error**. Esas dos lineas se han quitado; las otras tres vistas
+--       conservan el suyo, que sigue vivo.
+--       🔑 Una foto caduca en cuanto alguien cambia lo fotografiado: no basta
+--          con cambiar la realidad, hay que venir aqui y ponerla al dia.
+--
 --    La consulta que lo demuestra, objeto a objeto de la cadena:
 --
 --        select 'doctrina_madres'  as fuente,
@@ -205,7 +220,12 @@ SELECT orden,
 
 revoke all on public.v_doctrina_arranque from public, anon, authenticated;
 grant all    on public.v_doctrina_arranque to service_role;
-grant select on public.v_doctrina_arranque to authenticated;
+-- 🔴 AQUI IBA UN `grant select ... to authenticated`, Y SE FUE EL 28-ago-2026.
+--    No es que la foto estuviera mal: es que el sistema cambio debajo. Ese GRANT
+--    prometia un acceso que daba 42501 --la vista es security_invoker y lee
+--    `doctrina_madres`, donde `authenticated` no tiene SELECT--, y la migracion
+--    `2026-08-28_cerrar_execute_public_y_grant_falso.sql` lo retiro. Una foto que
+--    siguiera concediendolo devolveria la promesa falsa al reaplicarse.
 
 create or replace view public.v_sondas_arranque with (security_invoker = true) as
 SELECT codigo,
@@ -267,7 +287,12 @@ WITH piezas AS (
 
 revoke all on public.v_arranque_coste from public, anon, authenticated;
 grant all    on public.v_arranque_coste to service_role;
-grant select on public.v_arranque_coste to authenticated;
+-- 🔴 AQUI IBA UN `grant select ... to authenticated`, Y SE FUE EL 28-ago-2026.
+--    No es que la foto estuviera mal: es que el sistema cambio debajo. Ese GRANT
+--    prometia un acceso que daba 42501 --la vista es security_invoker y lee
+--    `doctrina_madres`, donde `authenticated` no tiene SELECT--, y la migracion
+--    `2026-08-28_cerrar_execute_public_y_grant_falso.sql` lo retiro. Una foto que
+--    siguiera concediendolo devolveria la promesa falsa al reaplicarse.
 
 -- -- TESTIGOS ----------------------------------------------------------------
 DO $testigo$
