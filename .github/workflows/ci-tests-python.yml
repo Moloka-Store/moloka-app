@@ -1,4 +1,4 @@
-name: Moloka - CI (tests de Python)
+name: Moloka - CI (tests de Python y de JS)
 
 # ============================================================================
 # POR QUE EXISTE. Hasta hoy este repo NO tenia ni un solo workflow que corriera
@@ -141,7 +141,15 @@ jobs:
       - name: 17) test_guarda_no_retroceder.py
         run: python -u test_guarda_no_retroceder.py
 
-      - name: 18) Censo - ningun test se queda sin correr
+      # ── Los de JavaScript ───────────────────────────────────────────────
+      # `test_disparar.mjs` entro con el PR #247 -- 202 lineas, 13 casos -- y no
+      # lo ejecutaba NADIE: ni un workflow, ni un `package.json`. Era el mismo
+      # agujero que este fichero vino a cerrar, en otro idioma. Node ya viene en
+      # el runner, asi que correrlo no cuesta ni una instalacion.
+      - name: 18) test_disparar.mjs
+        run: node test_disparar.mjs
+
+      - name: 19) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
         #    demas se lee como si lo cubriera. Aqui registrar un test es un paso
@@ -165,10 +173,17 @@ jobs:
             test_transacciones_pais.py
             test_tsv_quote_none.py
             test_guarda_no_retroceder.py
+            test_disparar.mjs
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).
-          mapfile -t EN_REPO < <(git ls-files | grep -E '(^|/)test_.*\.py$' | sort)
+          #
+          # 🔴 .py Y .mjs. Cuando esto solo miraba `.py`, `test_disparar.mjs`
+          #    entro en main y el censo lo dio por bueno: un censo que no mira
+          #    tu idioma dice que no falta nada. Si manana aparece un test en
+          #    otra extension, esta linea es la que hay que ampliar -- y hasta
+          #    entonces ese test tampoco existe.
+          mapfile -t EN_REPO < <(git ls-files | grep -E '(^|/)test_.*\.(py|mjs)$' | sort)
           huerfanos=""
           for t in "${EN_REPO[@]}"; do
             encontrado=0
