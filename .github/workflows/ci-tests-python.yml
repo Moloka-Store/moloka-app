@@ -1,0 +1,187 @@
+name: Moloka - CI (tests de Python)
+
+# ============================================================================
+# POR QUE EXISTE. Hasta hoy este repo NO tenia ni un solo workflow que corriera
+# en `pull_request`: 52 ficheros en .github/workflows y cero disparados por un
+# PR (medido el 28-ago-2026). Los unicos checks que aparecian eran los de
+# Vercel, y ademas decian "Canceled by Ignored Build Step" -- o sea que ni
+# construian. Ese verde NO PODIA PONERSE ROJO: no es una comprobacion, es un
+# adorno que tranquiliza. Lo unico real era `MERGEABLE`, y con eso el NameError
+# del #174 se paso SIETE DIAS pareciendo listo para fusionar.
+#
+# 🔴 EL CRITERIO DE ESTE FICHERO, Y ES EL QUE IMPORTA: tiene que poder ponerse
+#    ROJO. Si falta una dependencia, si un test desaparece, si un import
+#    revienta -> ROJO. Nunca un `exit 0` disfrazado de verde. Por eso aqui no
+#    hay ni un `continue-on-error`, ni un `|| true`, ni un `set +e`.
+#
+# 🔴 Y SIN FILTRO DE RUTAS, A PROPOSITO. Un workflow que no arranca por un
+#    filtro no deja rojo: no deja NADA, y un PR sin checks se lee igual que un
+#    PR aprobado. Correr un minuto de mas es mas barato que un verde que en
+#    realidad es un hueco.
+#
+# LO QUE ESTO NO ES: no toca ninguna base de datos, no necesita secretos y no
+# despliega nada. Importa los modulos y ejecuta los tests que ya viven en el
+# repo. Compilar no es ejecutar, y leer tampoco.
+# ============================================================================
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-tests-python-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    env:
+      # En ubuntu la salida ya es UTF-8, pero se fija explicito: estos tests
+      # imprimen flechas y emojis, y el dia que el runner cambie de locale el
+      # fallo seria un UnicodeEncodeError que no tiene nada que ver con el
+      # codigo que se esta probando. (Medido: en la consola de Windows, con
+      # cp1252, los tres revientan por esto y por nada mas.)
+      PYTHONIOENCODING: utf-8
+
+    steps:
+      - name: 1) Checkout
+        uses: actions/checkout@v4
+
+      - name: 2) Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          # 3.11 es la que usan 40 de los 52 workflows de este repo.
+          python-version: '3.11'
+
+      - name: 3) Dependencias (las MINIMAS medidas, no requirements.txt entero)
+        # Salen del CIERRE DE IMPORTS de los doce tests, calculado con ast sobre
+        # el grafo entero (test -> modulo local -> modulo local -> ...), no de
+        # mirar los imports de un fichero.
+        #
+        # 🔴 ESTA LINEA YA ESTUVO MAL UNA VEZ, Y ASI ES COMO SE SUPO. La primera
+        #    version instalaba solo psycopg2 y openpyxl: se habia comprobado que
+        #    `foto_comun` no importa supabase, y se generalizo de ahi a los doce
+        #    tests sin medirlos. En la maquina donde se probo, supabase ESTABA
+        #    instalado, asi que el verde local no podia detectar que faltaba.
+        #    El primer run honesto lo caso: `test_inventario_fba.py` ->
+        #    `procesador_inventario_fba` -> `from supabase import create_client`
+        #    -> ModuleNotFoundError (run 33152833303). Un runner limpio es lo
+        #    unico que distingue "no hace falta" de "ya lo tenias puesto".
+        #
+        # requirements.txt no lleva psycopg2, asi que va aparte -- que es lo que
+        # hacen ya los otros workflows del repo. Las versiones, fijadas como en
+        # requirements.txt: sin `==` el runner instala lo ultimo cada manana.
+        # httpx no se pone: lo trae supabase con la version que le sirve, y
+        # fijarlo por libre es pedir un conflicto.
+        run: pip install --quiet psycopg2-binary openpyxl==3.1.5 supabase==2.31.0
+
+      - name: 4) Los modulos importan
+        # Va ANTES de los tests para que un fallo de dependencia se lea como lo
+        # que es y no como un test roto. Si falta algo, aqui se ve el nombre.
+        #
+        # Estan los CUATRO que los tests alcanzan por su grafo de imports, no
+        # solo los dos obvios: `procesador_inventario_fba` es el que trajo
+        # supabase a la lista, y no se veia desde `foto_comun`.
+        run: |
+          python -u -c "
+          import sys; sys.path.insert(0, 'scripts')
+          import foto_comun, procesador_custom_analytics, procesador_inventario_fba
+          import anti_cero, censo_migraciones
+          print('importan: foto_comun, procesador_custom_analytics, procesador_inventario_fba, anti_cero, censo_migraciones')
+          "
+
+      # ── Los tres del encargo ────────────────────────────────────────────
+      - name: 5) test_guarda_614.py
+        run: python -u test_guarda_614.py
+
+      - name: 6) test_reintento_conexion.py
+        run: python -u test_reintento_conexion.py
+
+      - name: 7) test_reintento_storage.py
+        run: python -u test_reintento_storage.py
+
+      # ── Los otros nueve ─────────────────────────────────────────────────
+      # El encargo pedia tres. Al ir a declarar por que los demas quedaban
+      # fuera hubo que medirlo, y resulto que LOS NUEVE pasan igual: sin base
+      # de datos, sin secretos y con codigo 0. Dejarlos fuera habria sido el
+      # mismo agujero con otro nombre, y sin ninguna razon que escribir.
+      - name: 8) test_anti_cero.py
+        run: python -u test_anti_cero.py
+
+      - name: 9) test_archivar_foto.py
+        run: python -u test_archivar_foto.py
+
+      - name: 10) test_censo_migraciones.py
+        run: python -u test_censo_migraciones.py
+
+      - name: 11) test_inventario_fba.py
+        run: python -u test_inventario_fba.py
+
+      - name: 12) test_inventario_tipadas.py
+        run: python -u test_inventario_tipadas.py
+
+      - name: 13) test_paneu_pendiente.py
+        run: python -u test_paneu_pendiente.py
+
+      - name: 14) test_refrescar_vistas.py
+        run: python -u test_refrescar_vistas.py
+
+      - name: 15) test_transacciones_pais.py
+        run: python -u test_transacciones_pais.py
+
+      - name: 16) test_tsv_quote_none.py
+        run: python -u test_tsv_quote_none.py
+
+      - name: 17) Censo - ningun test se queda sin correr
+        # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
+        #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
+        #    demas se lee como si lo cubriera. Aqui registrar un test es un paso
+        #    aparte de escribirlo, asi que este censo es la red.
+        #
+        # Se ancla en lo que NO debe aparecer (un fichero que no este en la
+        # lista), que es la mitad que se mueve. Preguntar "¿estan los 12?"
+        # saldria verde con 12 de 40.
+        run: |
+          declare -a CUBIERTOS=(
+            test_guarda_614.py
+            test_reintento_conexion.py
+            test_reintento_storage.py
+            test_anti_cero.py
+            test_archivar_foto.py
+            test_censo_migraciones.py
+            test_inventario_fba.py
+            test_inventario_tipadas.py
+            test_paneu_pendiente.py
+            test_refrescar_vistas.py
+            test_transacciones_pais.py
+            test_tsv_quote_none.py
+          )
+          # Los que existen en el repo, segun git (no segun un `ls`, que ve
+          # tambien lo que no esta versionado).
+          mapfile -t EN_REPO < <(git ls-files | grep -E '(^|/)test_.*\.py$' | sort)
+          huerfanos=""
+          for t in "${EN_REPO[@]}"; do
+            encontrado=0
+            for c in "${CUBIERTOS[@]}"; do
+              if [ "$t" = "$c" ]; then encontrado=1; break; fi
+            done
+            if [ "$encontrado" -eq 0 ]; then huerfanos="$huerfanos $t"; fi
+          done
+          # Y al reves: uno declarado que ya no exista. Si alguien renombra un
+          # test, el paso que lo lanza fallaria -- pero si alguien lo BORRA y
+          # ademas quita su paso, esto lo caza.
+          faltan=""
+          for c in "${CUBIERTOS[@]}"; do
+            if [ ! -f "$c" ]; then faltan="$faltan $c"; fi
+          done
+          echo "tests en el repo: ${#EN_REPO[@]} | declarados aqui: ${#CUBIERTOS[@]}"
+          if [ -n "$huerfanos" ]; then
+            echo "::error::Hay tests en el repo que este workflow NO ejecuta:$huerfanos"
+            echo "Anade su paso arriba y su nombre a CUBIERTOS. Un test que no corre no es un test que falla: es un test que no existe."
+            exit 1
+          fi
+          if [ -n "$faltan" ]; then
+            echo "::error::Declarados en CUBIERTOS pero no estan en el repo:$faltan"
+            exit 1
+          fi
+          echo "Censo OK: los ${#EN_REPO[@]} tests del repo tienen su paso."
