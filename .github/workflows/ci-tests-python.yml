@@ -54,20 +54,40 @@ jobs:
           python-version: '3.11'
 
       - name: 3) Dependencias (las MINIMAS medidas, no requirements.txt entero)
-        # Medido el 28-ago-2026: los tests solo necesitan psycopg2 (lo importa
-        # `foto_comun`) y openpyxl (lo importa `procesador_custom_analytics`).
-        # `foto_comun` NO importa supabase en ningun sitio -- comprobado, no
-        # supuesto. requirements.txt no lleva psycopg2, asi que va aparte, que
-        # es lo que hacen ya los otros workflows del repo.
-        run: pip install --quiet psycopg2-binary openpyxl==3.1.5
+        # Salen del CIERRE DE IMPORTS de los doce tests, calculado con ast sobre
+        # el grafo entero (test -> modulo local -> modulo local -> ...), no de
+        # mirar los imports de un fichero.
+        #
+        # 🔴 ESTA LINEA YA ESTUVO MAL UNA VEZ, Y ASI ES COMO SE SUPO. La primera
+        #    version instalaba solo psycopg2 y openpyxl: se habia comprobado que
+        #    `foto_comun` no importa supabase, y se generalizo de ahi a los doce
+        #    tests sin medirlos. En la maquina donde se probo, supabase ESTABA
+        #    instalado, asi que el verde local no podia detectar que faltaba.
+        #    El primer run honesto lo caso: `test_inventario_fba.py` ->
+        #    `procesador_inventario_fba` -> `from supabase import create_client`
+        #    -> ModuleNotFoundError (run 33152833303). Un runner limpio es lo
+        #    unico que distingue "no hace falta" de "ya lo tenias puesto".
+        #
+        # requirements.txt no lleva psycopg2, asi que va aparte -- que es lo que
+        # hacen ya los otros workflows del repo. Las versiones, fijadas como en
+        # requirements.txt: sin `==` el runner instala lo ultimo cada manana.
+        # httpx no se pone: lo trae supabase con la version que le sirve, y
+        # fijarlo por libre es pedir un conflicto.
+        run: pip install --quiet psycopg2-binary openpyxl==3.1.5 supabase==2.31.0
 
       - name: 4) Los modulos importan
         # Va ANTES de los tests para que un fallo de dependencia se lea como lo
         # que es y no como un test roto. Si falta algo, aqui se ve el nombre.
+        #
+        # Estan los CUATRO que los tests alcanzan por su grafo de imports, no
+        # solo los dos obvios: `procesador_inventario_fba` es el que trajo
+        # supabase a la lista, y no se veia desde `foto_comun`.
         run: |
           python -u -c "
-          import foto_comun, procesador_custom_analytics
-          print('foto_comun y procesador_custom_analytics importan')
+          import sys; sys.path.insert(0, 'scripts')
+          import foto_comun, procesador_custom_analytics, procesador_inventario_fba
+          import anti_cero, censo_migraciones
+          print('importan: foto_comun, procesador_custom_analytics, procesador_inventario_fba, anti_cero, censo_migraciones')
           "
 
       # ── Los tres del encargo ────────────────────────────────────────────
