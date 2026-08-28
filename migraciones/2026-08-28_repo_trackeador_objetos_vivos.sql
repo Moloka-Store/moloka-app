@@ -9,11 +9,48 @@
 -- tocar una coma.
 --
 -- 🔴 NO SE ARREGLA NADA AQUI, Y ES DELIBERADO. Dos de las funciones son
---    SECURITY DEFINER con EXECUTE para PUBLIC, y `v_sondas_pendientes` (que va
---    en la migracion hermana) no lleva security_invoker. Eso choca con la
---    seccion 4, esta anotado como frente propio y se arregla en SU PR. Si esta
---    migracion los escribiera "arreglados" dejaria de reproducir produccion, y
---    el dia que se aplicara cambiaria el comportamiento sin que nadie lo espere.
+--    SECURITY DEFINER, y `v_sondas_pendientes` (que va en la migracion hermana)
+--    no lleva security_invoker. Eso choca con la seccion 4, esta anotado como
+--    frente propio y se arregla en SU PR. Si esta migracion los escribiera
+--    "arreglados" dejaria de reproducir produccion, y el dia que se aplicara
+--    cambiaria el comportamiento sin que nadie lo espere.
+--
+-- ============================================================================
+-- 🔴 LA FOTO SE ACTUALIZO EL 28-ago-2026, Y ESTO ES LO QUE HAY QUE ENTENDER
+-- ----------------------------------------------------------------------------
+-- **NO ES QUE LA FOTO ESTUVIERA MAL: ES QUE EL SISTEMA CAMBIO DEBAJO.**
+--
+-- Cuando este fichero se escribio, `fn_fee_override_refresh()` y
+-- `fn_trackeador_refrescar(boolean)` tenian EXECUTE para PUBLIC, y la foto lo
+-- reproducia porque eso era la verdad. Unas horas despues, la migracion
+-- `2026-08-28_cerrar_execute_public_y_grant_falso.sql` se lo quito -- decision
+-- de Fernando con la medicion delante: el censo por uso demostro que solo
+-- `postgres` las llama.
+--
+-- ⚠️ Desde ese momento, esta foto pasaba a ser una TRAMPA: reaplicarla habria
+--    devuelto el `grant execute ... to public` **en silencio y sin error**,
+--    deshaciendo el cierre. Se han quitado esas dos lineas.
+--
+-- 🔑 LA REGLA DE LA QUE ESTO ES UN CASO: **una foto caduca en cuanto alguien
+--    cambia lo fotografiado.** No basta con cambiar la realidad: hay que ir a
+--    la foto y ponerla al dia, o queda un fichero que promete devolver un
+--    estado que ya se decidio abandonar. Y lo devolveria sin quejarse.
+--
+-- 📌 UNA TERCERA FUNCION CONSERVA PUBLIC, y no es una inconsistencia:
+--    `fn_trackeador_frescura` **NO es SECURITY DEFINER** (es invoker), asi que
+--    nunca entro en aquel cierre. Su ACL vivo sigue siendo
+--    `postgres=X | service_role=X | =X`, medido el 28-ago. La foto la refleja.
+--
+-- 📌 Y HAY UNA CUARTA `SECURITY DEFINER` EN `public` QUE SIGUE ABIERTA A `anon`,
+--    fuera de esta migracion y a proposito: **`salud_stock_moloka()`**. Su
+--    `anon=X` es EXPLICITO (no viene de PUBLIC) y es una **decision escrita de
+--    Fernando del 30-jul-2026**: es el centinela del stock derivado, la llama
+--    `salud-derivada.yml` de `moloka-app-v2` por PostgREST con la clave
+--    `publishable` -- que entra como `anon`--, y la clave ya viaja en el
+--    `index.html` de un repo publico, asi que no anade exposicion nueva.
+--    Revocarsela apagaria la vigilancia. Se anota aqui para que el proximo
+--    censo de `prosecdef` no la lea como un olvido.
+-- ============================================================================
 --
 -- POR QUE IMPORTA, dicho con precision. El volcado de `backup-bd.yml` es
 -- `pg_dump --schema=public`, asi que un restore SI devuelve estos objetos: se
@@ -2159,7 +2196,11 @@ begin
 end $function$;
 
 revoke all on function public.fn_fee_override_refresh() from public, anon, authenticated;
-grant execute on function public.fn_fee_override_refresh() to public;
+-- 🔴 AQUI IBA UN `grant execute ... to public`, Y SE FUE EL 28-ago-2026.
+--    No es que la foto estuviera mal: es que el sistema cambio debajo. La
+--    migracion `2026-08-28_cerrar_execute_public_y_grant_falso.sql` le quito
+--    PUBLIC a esta funcion, y una foto que siguiera concediendolo lo devolveria
+--    al reaplicarse, en silencio y sin error.
 grant execute on function public.fn_fee_override_refresh() to service_role;
 
 CREATE OR REPLACE FUNCTION public.fn_trackeador_frescura(p_horas_refresco numeric DEFAULT 26, p_dias_normal integer DEFAULT 2, p_dias_demanda integer DEFAULT 14, p_dias_compra integer DEFAULT 120, p_dias_copia integer DEFAULT 0)
@@ -2226,6 +2267,10 @@ AS $function$
 $function$;
 
 revoke all on function public.fn_trackeador_frescura(numeric, integer, integer, integer, integer) from public, anon, authenticated;
+-- ⚠️ ESTA SI CONSERVA PUBLIC, y no es una inconsistencia: `fn_trackeador_frescura`
+--    NO es SECURITY DEFINER (es invoker), asi que no entraba en el cierre del
+--    28-ago. Medido ese dia: su ACL vivo sigue siendo
+--    `postgres=X | service_role=X | =X`. La foto la refleja como esta.
 grant execute on function public.fn_trackeador_frescura(numeric, integer, integer, integer, integer) to public;
 grant execute on function public.fn_trackeador_frescura(numeric, integer, integer, integer, integer) to service_role;
 
@@ -2295,7 +2340,11 @@ begin
 end $function$;
 
 revoke all on function public.fn_trackeador_refrescar(boolean) from public, anon, authenticated;
-grant execute on function public.fn_trackeador_refrescar(boolean) to public;
+-- 🔴 AQUI IBA UN `grant execute ... to public`, Y SE FUE EL 28-ago-2026.
+--    No es que la foto estuviera mal: es que el sistema cambio debajo. La
+--    migracion `2026-08-28_cerrar_execute_public_y_grant_falso.sql` le quito
+--    PUBLIC a esta funcion, y una foto que siguiera concediendolo lo devolveria
+--    al reaplicarse, en silencio y sin error.
 grant execute on function public.fn_trackeador_refrescar(boolean) to service_role;
 
 -- -- TESTIGOS ----------------------------------------------------------------
