@@ -322,5 +322,26 @@ $puerta_anon$;
 -- | `v_reglas_arranque` | `80c5efe6d418474c1749cdc51c5f2171` | 871 |
 -- | `v_doctrina_arranque` | `1e6ad5908460f8ca4638b8c823a1cdf9` | 542 |
 -- | `v_sondas_arranque` | `b4f164b054a8169baecb17e080e3635c` | 479 |
--- | `v_arranque_coste` | `3c33ce292563114bee1759c85642ebc8` | 1898 |
+-- | `v_arranque_coste` | `bc2e65814ea23d3784e3976936ed025e` | 1922 |
+--
+-- ⚠️ OJO CON ESA ULTIMA, QUE NO ES LA QUE MIDIO PRODUCCION EL 28-ago-2026.
+--    Produccion daba `3c33ce292563114bee1759c85642ebc8` (1.898) y esta migracion,
+--    aplicada, deja `bc2e65814ea23d3784e3976936ed025e` (1.922). NO es una
+--    transcripcion mal hecha: es que POSTGRES RE-RENDERIZA. Al recrear la vista
+--    desde su propio texto, anade `AS text` a las ramas 2, 3 y 4 del `UNION ALL`:
+--
+--        -  SELECT 'reglas · indice de 43'::text,
+--        +  SELECT 'reglas · indice de 43'::text AS text,
+--
+--    Tres veces por 8 caracteres = los 24 exactos de diferencia. Es inerte: los
+--    nombres de columna de un UNION los fija la PRIMERA rama, y el dato no cambia.
+--    Y `bc2e6581...` es PUNTO FIJO -- comprobado recreando la vista dos veces desde
+--    su propio texto: da siempre lo mismo. Aplicar esto a produccion cambiaria ese
+--    md5 UNA vez y despues se quedaria quieto.
+--
+--    Se anota aqui el valor de DESPUES, no el de antes, para que el proximo que
+--    compare no se lleve un susto por nada. El de antes queda escrito arriba para
+--    que se sepa de donde viene.
+-- 🔬 Medido el 28-ago-2026 en el ensayo de staging (runs 33165975056 y siguientes),
+--    con `diff` contra el texto capturado de produccion, no a ojo.
 -- ============================================================================
