@@ -167,6 +167,47 @@ def sin_comentarios(texto):
     return '\n'.join(l for l in fuera.split('\n') if not l.lstrip().startswith('--'))
 
 
+def sql_de_nivel_superior(texto):
+    """Deja solo el SQL que la migracion EJECUTA, quitando lo que es texto.
+
+    🔴 POR QUE EXISTE, con fecha. `aplicar-migracion.yml` avisaba por escrito de un
+    falso positivo: "el dia que una migracion cree una funcion plpgsql con `END;` a
+    solo en su linea antes del `$$;`, esto bloqueara". **Ese dia fue el 28-ago-2026**,
+    con `2026-08-28_repo_trackeador_objetos_vivos.sql`, y no vino solo: el cerrojo
+    tambien casaba `CONCURRENTLY` cuatro veces -- dos en comentarios, una dentro del
+    cuerpo de la funcion y otra dentro de un mensaje de `RAISE EXCEPTION`--. La
+    migracion no ejecuta ningun CONCURRENTLY: solo DEFINE una funcion que lo menciona.
+
+    🔑 El arreglo no es un regex mas listo -- eso seria el mismo error otra vez. Un
+    cerrojo que lee SQL tiene que saber que es SQL de nivel superior y que es texto
+    dentro de un literal, y eso se hace QUITANDO el texto antes de mirar.
+
+    Se quita, en este orden y el orden importa:
+      1. comentarios (`sin_comentarios`, la misma funcion de siempre: una sola
+         implementacion por regla),
+      2. los cuerpos entre `$etiqueta$ ... $etiqueta$` -- `$$`, `$function$`,
+         `$guardas$`, `$testigo$`...--, que es donde vive el plpgsql,
+      3. las cadenas entre comillas simples, con `''` escapado dentro.
+
+    Va DESPUES de los comentarios a proposito: una cabecera en castellano lleva
+    apostrofes, y si se parsearan las comillas primero se descuadraria el conteo.
+
+    ⚠️ LO QUE NO QUITA, dicho para que nadie lo suponga: los comentarios `--` que van
+    DETRAS de codigo en la misma linea. `sin_comentarios` solo tira las lineas que
+    EMPIEZAN por `--`. Se queda asi a proposito: quitarlos bien exige saber si ese
+    `--` esta dentro de una cadena, y equivocarse ahi abriria el cerrojo en vez de
+    cerrarlo. Falla CERRADO -- un `-- concurrently` al final de una linea de codigo
+    seguira bloqueando, que es el lado bueno del error.
+    """
+    fuera = sin_comentarios(texto)
+    # Cuerpos con comilla de dolar. `\w*` casa tambien la etiqueta vacia (`$$`), y el
+    # backreference obliga a que cierre la MISMA etiqueta con la que abrio.
+    fuera = re.sub(r'\$(\w*)\$.*?\$\1\$', ' ', fuera, flags=re.S)
+    # Cadenas normales, con '' escapado dentro.
+    fuera = re.sub(r"'(?:[^']|'')*'", " ", fuera)
+    return fuera
+
+
 #: Solo estos tipos tienen un cuerpo que pueda quedarse viejo. Una columna o un indice
 #: existen o no existen: no hay version antigua que distinguir.
 TIPOS_CON_CUERPO = ('vista', 'funcion')

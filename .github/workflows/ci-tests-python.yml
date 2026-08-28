@@ -146,10 +146,15 @@ jobs:
       # lo ejecutaba NADIE: ni un workflow, ni un `package.json`. Era el mismo
       # agujero que este fichero vino a cerrar, en otro idioma. Node ya viene en
       # el runner, asi que correrlo no cuesta ni una instalacion.
-      - name: 18) test_disparar.mjs
+      # El banco del despojador del cerrojo 4 (28-ago-2026). Una regla que se
+      # convierte en funcion necesita su test, o vuelve a ser una nota.
+      - name: 18) test_cerrojo4_nivel_superior.py
+        run: python -u test_cerrojo4_nivel_superior.py
+
+      - name: 19) test_disparar.mjs
         run: node test_disparar.mjs
 
-      - name: 19) Censo - ningun test se queda sin correr
+      - name: 20) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
         #    demas se lee como si lo cubriera. Aqui registrar un test es un paso
@@ -173,6 +178,7 @@ jobs:
             test_transacciones_pais.py
             test_tsv_quote_none.py
             test_guarda_no_retroceder.py
+            test_cerrojo4_nivel_superior.py
             test_disparar.mjs
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
