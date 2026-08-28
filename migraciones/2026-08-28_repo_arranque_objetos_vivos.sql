@@ -26,11 +26,43 @@
 --    seccion 4 y se transcriben tal cual porque el encargo es reproducir, no
 --    mejorar. Frente propio, con su PR.
 --
--- ⚠️ Y UN EFECTO MEDIDO QUE CONVIENE SABER: `doctrina_madres` tiene RLS activo
---    y CERO politicas. `v_doctrina_arranque` es security_invoker, asi que un
---    `authenticated` que la lea vera CERO filas -- no porque no haya, sino
---    porque no puede verlas. Es el caso de "0 filas por RLS no es 0 filas
---    porque no hay". Se transcribe como esta; queda apuntado.
+-- 🔴 LEER ANTES DE APLICAR A PRODUCCION: `v_doctrina_arranque` Y `v_arranque_coste`
+--    YA ESTAN ROTAS EN PRODUCCION PARA UN USUARIO LOGUEADO, Y ESTA MIGRACION LAS
+--    METE EN EL REPO TAL CUAL. No lo causa la migracion -- es el estado de hoy--,
+--    pero quien aplique tiene que saberlo ANTES, no despues.
+--
+--    Las dos son `security_invoker=true` y tienen `authenticated=r`. Con
+--    security_invoker hace falta el permiso en CADA objeto de la cadena, y
+--    `authenticated` NO tiene SELECT sobre `doctrina_madres`. Asi que no dan
+--    "cero filas": dan **42501 permission denied**. `v_arranque_coste` cae con
+--    ellas porque lee a `v_doctrina_arranque`.
+--
+--    ⚠️ Una version anterior de esta nota decia que `authenticated` veria "CERO
+--       filas" por la RLS sin politicas. ERA INEXACTO, y la diferencia importa:
+--       cero filas es un resultado, 42501 es un error. Lo segundo es lo que pasa,
+--       porque sin el GRANT no se llega ni a evaluar la RLS. Medido en produccion
+--       por Fernando el 28-ago-2026.
+--
+--    La consulta que lo demuestra, objeto a objeto de la cadena:
+--
+--        select 'doctrina_madres'  as fuente,
+--               has_table_privilege('authenticated','public.doctrina_madres','SELECT')  as puede
+--        union all
+--        select 'monitor_doctrina',
+--               has_table_privilege('authenticated','public.monitor_doctrina','SELECT');
+--        -- y la prueba de verdad, que es ejercerlo:
+--        --   set role authenticated; select * from public.v_doctrina_arranque limit 1; reset role;
+--
+--    🔒 ESTA MIGRACION NO LO ARREGLA, Y ES DELIBERADO. Anadir aqui un GRANT sobre
+--       `doctrina_madres` seria decidir por Fernando una apertura de permisos en
+--       produccion. Hay dos salidas y las dos se defienden -- abrir
+--       `doctrina_madres` a `authenticated`, o quitarles el GRANT a esas dos
+--       vistas, que hoy prometen un acceso que no funciona--. Es su decision y
+--       va en su propio PR. Esto es una FOTO: reproduce lo que hay, roto incluido.
+--
+--    Y no muerde hoy: ningun codigo de los dos repos lee las cuatro `*_arranque`
+--    (medido). Las que si lee la app son las tres del Trackeador, que van en la
+--    migracion hermana.
 --
 -- ORDEN: doctrina_madres -> v_sondas_pendientes -> v_reglas_arranque ->
 --        v_doctrina_arranque -> v_sondas_arranque -> v_arranque_coste
