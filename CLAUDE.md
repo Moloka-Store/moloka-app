@@ -47,12 +47,24 @@ Cada uno responde **una** pregunta y son universos distintos:
 
 | Informe | Es | Responde |
 |---|---|---|
-| **INTERNACIONAL** | El INVENTARIO (replica la pantalla del Seller) | ¿Cuánto tengo y dónde? |
-| **SALUD_FBA** | GESTIÓN (rotación, alertas). Solo ES. Llega ~10 días tarde con altas | ¿Cómo de sano está? |
+| **INTERNACIONAL** | El INVENTARIO por país (replica la pantalla del Seller) | ¿Cuánto tengo y dónde? |
+| **INVENTARIO_FBA** | El informe de gestión de inventario FBA. Nació por **lo que viene DE CAMINO**, que es lo que nadie más contesta. Relevó a SALUD_FBA el 23-ago | ¿Cuánto hay en tránsito? |
 | **PANEU_APTOS** | La dimensión Pan-EU. Es película: cambia en horas | ¿Qué me deja Amazon? |
-| **LEDGER** | El EXTRACTO. Libro append, no foto | ¿De dónde salió y a dónde fue? |
+| **LEDGER** | El EXTRACTO de UNIDADES. Libro append, no foto | ¿De dónde salió y a dónde fue? |
+| **TRANSACCIONES** | El EXTRACTO de EUROS. Uno por marketplace (ES/IT/FR/DE) | ¿Cuánto he cobrado y qué me han cobrado? |
+| **CUSTOM_ANALYTICS** | La DEMANDA por ASIN (visitas, sesiones, conversión). **Contador acumulado**: cada carga apila UNA LECTURA (**Película de lecturas**, §1.6) | ¿Cuánta gente lo mira? |
 | **ALL_LISTINGS** | La identidad (ASIN/SKU) | ¿Qué tengo listado? |
 | **KEEPA (CSV)** | Mercado, fotos, competencia | ¿Qué pasa fuera? |
+
+⚰️ **SALUD_FBA estuvo aquí y se jubiló el 23-ago-2026** (`migraciones/2026-08-23_jubilar_salud_fba.sql`).
+Amazon servía ficheros truncados; lo relevó INVENTARIO_FBA. `procesador_salud_fba.py` **ya no existe**
+en el repo. ⚠️ Pero **la palabra `salud_fba` sigue viva como VISTA de compatibilidad** sobre
+`inventario_fba` — lo que se jubiló es el INFORME, no el nombre: si lo ves en una consulta, no es un
+fantasma. Y `salud_fba_historico` **no se borra a propósito**: es memoria congelada del 16-ago que lee
+`v_nunca_enviado_fba` (por eso, cualquier cifra que salga de ahí necesita su fecha pegada, §1.4).
+
+📌 `procesador_canal_amazon_es.py` **no está en la tabla y no es un descuido**: no lee ningún informe.
+Recalcula comisión y logística desde TRANSACCIONES, ya cargado. Es derivado, no una fuente.
 
 Si tu código suma dos de estos, está mal. Si dos discrepan, **no promedies ni lo achaques al
 desfase: es un dato, y hay que explicarlo al dígito.**
@@ -71,9 +83,15 @@ había, y los cajones no se mezclan:
 
 | Cajón | Qué se hace con lo viejo | Quién vive aquí |
 |---|---|---|
-| **FOTO** | **Se tira la hoja vieja.** Lo que no viene en el fichero se **BORRA** | `salud_fba`, `listings_amazon`, `keepa_escaparate`, `paneu_aptos` + `paneu_oferta_pais`, custom analytics |
-| **PELÍCULA** | **Se apila. NUNCA se borra** | `movimientos`, el ledger |
+| **FOTO** | **Se tira la hoja vieja.** Lo que no viene en el fichero se **BORRA** | `inventario_fba`, `inventario_internacional`, `listings_amazon`, `keepa_escaparate`, `paneu_aptos` + `paneu_oferta_pais` |
+| **PELÍCULA** | **Se apila. NUNCA se borra** | `movimientos`, el ledger, `transacciones_movimientos`, y `demanda_asin` (custom analytics) como **película de LECTURAS** |
 | **MAESTRO** | **Se MARCA. Ni se borra ni se sustituye** | `productos` |
+
+⚠️ **`custom analytics` estaba en la fila FOTO y ahí no va.** Cambió de cajón el **10-ago-2026**, y
+lo dice su propio procesador en la cabecera (*«EL CAJÓN: PELÍCULA DE LECTURAS»*): cada carga **apila
+una lectura** del contador, no sustituye la anterior. El cuadro se quedó con el cajón de antes.
+⚰️ Y `salud_fba` sale de la fila FOTO porque su informe se jubiló el 23-ago (§1.3); lo relevó
+`inventario_fba`, que sí es Foto.
 
 - Una **FOTO** contesta *"¿cómo está esto AHORA?"*. Una fila que sobrevive a su fichero es un
   fantasma que descuadra el cruce. La memoria histórica **no vive aquí**: vive en la Película.
@@ -100,12 +118,16 @@ el histórico y no hay de dónde recuperarlo.
   nombre del fichero).
 - **Cada fichero tiene SU encoding. No lo copies entre procesadores: mídelo contra el fichero real.**
   Lo que hay medido hoy, según el procesador de cada uno:
-  - **PANEU_APTOS, SALUD_FBA y KEEPA → traen BOM** (`utf-8-sig`, con `cp1252` de reserva).
+  - **PANEU_APTOS y KEEPA → traen BOM** (`utf-8-sig`, con `cp1252` de reserva). *(SALUD_FBA estaba
+    en esta lista y se jubiló el 23-ago; su medición se fue con su procesador. Lo que lo relevó,
+    INVENTARIO_FBA, tiene la SUYA propia, más abajo — no se hereda.)*
   - **ALL_LISTINGS → no consta medido.** Su procesador solo decodifica de forma tolerante; que no
     reviente no demuestra que el fichero lleve BOM.
-  - **INTERNACIONAL → sin BOM** (medido en el PR #2; hoy solo vive como comentario en
-    `procesador_paneu_aptos.py`). **LEDGER → no consta.** Ninguno de los dos tiene procesador en
-    este repo todavía: cuando lo tengan, se mide, no se hereda de aquí.
+  - **INTERNACIONAL → sin BOM** (medido en el PR #2). **LEDGER → no consta medido.**
+    ⚠️ Aquí ponía que *«ninguno de los dos tiene procesador en este repo todavía»*: **los dos lo
+    tienen** —`procesador_internacional.py` y `procesador_ledger.py`—, así que esa frase caducó
+    cuando nacieron. Lo que sigue valiendo es la regla: el encoding **se mide contra el fichero
+    real de cada informe**, no se hereda de la lista de al lado.
   - **INVENTARIO_FBA → sin BOM y en CRLF** (medido el 23-ago-2026 sobre `50632020686.txt`: los
     seis primeros bytes son `b'sku\tfn'`). Se decodifica con `utf-8-sig` igualmente —decodifica
     bien con BOM y sin él— y `cp1252` de reserva. Los CRLF los resuelve el propio `csv`.
@@ -228,8 +250,19 @@ el histórico y no hay de dónde recuperarlo.
   `for fila in filas: cur.execute(...)` de 3.806 filas = **5 m 48 s esperando a la red** (PanEU,
   medido en el run #14); el mismo volcado con `psycopg2.extras.execute_values` baja a **<10 s** y la
   ventana de locks sobre la tabla de Elena de ~6 min a segundos. Los cinco que iban fila a fila
-  (paneu, internacional, salud_fba, all_listings, keepa) ya están por lotes; el patrón está calcado
-  de `procesador_ledger.py`, que nació así. **Si mañana nace un procesador nuevo, nace por lotes.**
+  entonces (paneu, internacional, salud_fba, all_listings, keepa) se pasaron a lotes. **Hoy TODO
+  VOLCADO DE FICHERO va por lotes** (medido el 28-ago recorriendo el árbol, no el texto). `salud_fba`
+  ya no está en esa lista: su procesador se jubiló el 23-ago. El patrón está calcado de
+  `procesador_ledger.py`, que nació así. **Si mañana nace un procesador nuevo, nace por lotes.**
+  📌 Dos cosas quedan fuera del patrón, y conviene saber cuál es cuál:
+  - `procesador_canal_amazon_es.py` **no es una excepción, es mejor**: escribe con un solo
+    `INSERT … SELECT FROM v_canal_amazon_es`, o sea que las filas nunca salen de la base. Cero
+    viajes. Si un día alguien «lo arregla» pasándolo a `execute_values`, lo **empeora**.
+  - ⚠️ **La curación de SKU de `all_listings` SÍ sigue fila a fila**: un `cur.execute` de `UPDATE`
+    sobre `productos` por cada ficha curable, dentro de un `for`. Es exactamente el patrón que este
+    apartado prohíbe. Hoy no duele porque son pocas fichas, pero **paga los ~90 ms por fila como
+    todo lo demás**, así que si un día crece, ahí está. *(Se encontró el 28-ago al comprobar una
+    frase de este mismo párrafo que decía «ya no queda ninguno». No la había: quedaba ésta.)*
   🔴 **La trampa del lote:** con `execute_values` todas las filas van en UN comando, así que dos con
   la misma clave del `ON CONFLICT` abortan con `ON CONFLICT DO UPDATE command cannot affect row a
   second time` (fila a fila no saltaba: la segunda pisaba a la primera en silencio). Qué significa un
@@ -660,20 +693,31 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   un `DELETE` anónimo. La clave publicable viaja en el JavaScript de la app por diseño, así que esto
   no es teórico.
 
-  🔴 **PERO NO SE CIERRA A CIEGAS, y esta es la parte que hay que resolver ANTES:** hay que saber con
-  qué clave escribe el trackeador. Medido en el repo: sus scripts hacen
-  `os.environ.get('SUPABASE_SERVICE_KEY') or os.environ['SUPABASE_KEY']` (y `moloka_tracker_snapshot.py`
-  usa **solo** `SUPABASE_KEY`, sin alternativa), y **sus dos workflows —`tracker-app.yml` y
-  `tracker-cerebro.yml`— inyectan ÚNICAMENTE `secrets.SUPABASE_KEY`**, no la de servicio. O sea que
-  el `or` cae siempre al mismo lado: **el trackeador corre con `SUPABASE_KEY`**.
-  ⚠️ Lo que falta por saber es **qué contiene ese secret**: si es la publicable (`anon`), cerrar estas
-  políticas **rompe el trackeador el día que vuelva a arrancar** — y está parado desde el 11-jul, así
-  que el fallo no se vería hasta entonces, que es la peor forma de encontrarlo. Que los dos secrets
-  existan por separado apunta a que son distintas, pero **no se ha comprobado y no se supone**.
-  Lo mira Fernando (GitHub → Settings → Secrets); no se toca la BD hasta tenerlo.
+  ✅ **EL PASO PREVIO QUE ESTO EXIGÍA YA ESTÁ DADO** (11-ago-2026, `ef6e72e`, PR #153 — *«El
+  trackeador deja de escribir como anon»*). Aquí vivía un párrafo que decía que los dos workflows
+  del trackeador *«inyectan ÚNICAMENTE `secrets.SUPABASE_KEY`»* y que por tanto no se podía cerrar
+  nada hasta saber qué contenía ese secreto. **Era cierto cuando se escribió y dejó de serlo el
+  11-ago**; la nota siguió en pie 17 días. Lo que hay hoy, medido en el repo:
+  - `tracker-app.yml:45` y `tracker-cerebro.yml:53` **inyectan las DOS**, incluida
+    `SUPABASE_SERVICE_KEY`.
+  - Los scripts que esos workflows lanzan —`moloka_tracker_snapshot_nube.py` y
+    `moloka_tracker_cerebro.py`— hacen
+    `os.environ.get('SUPABASE_SERVICE_KEY') or os.environ['SUPABASE_KEY']`, así que el `or` cae del
+    lado de la **de servicio**.
+  - ⚠️ `moloka_tracker_snapshot.py` (sin `_nube`) sí usa **solo** `SUPABASE_KEY`, sin alternativa —
+    pero **no lo lanza ningún workflow**: es la versión **CLI**, la que se corre a mano con
+    `--fba/--keepa`, y en Actions entra solo como motor importado. No confundirla con el `_nube`,
+    que es el que corre de verdad.
 
-  Cuando se sepa: si es `anon`, el arreglo es darle al trackeador la clave de servicio (que salta la
-  RLS por `rolbypassrls`) y solo DESPUÉS quitar las políticas de `anon`. En ese orden, nunca al revés.
+  🔒 **Lo que NO cambia, y es lo que hay que llevarse:** las políticas de la tabla de arriba **siguen
+  ahí** — ninguna migración del repo las toca (comprobado el 28-ago). Que el trackeador ya no dependa
+  de `anon` quita el motivo por el que esto estaba parado, **no cierra las políticas**.
+  📌 **Y cerrarlas NO se decide aquí: está APARCADO hasta jubilar la v1**, junto con `productos` y
+  `escaner_memoria`. Decisión cerrada de Fernando; este apartado la registra, no la reabre.
+
+  ⚠️ El trackeador sigue **parado desde el 11-jul-2026** (última ejecución de los dos workflows).
+  Cuando se retome, el día que se toque esto: primero se comprueba que arranca con la de servicio,
+  y solo DESPUÉS se quitan las políticas de `anon`. En ese orden, nunca al revés.
   ⚠️ Y `productos` sigue con **455 filas legibles por `anon`** (§6 ya lo señalaba): mismo frente.
 - 🔴 **PENDIENTE — NO EXISTE UNA LISTA FIABLE DE QUÉ MIGRACIONES SE HAN APLICADO A PRODUCCIÓN.**
   `supabase_migrations.schema_migrations` existe y tiene **37 registros, el último
@@ -792,8 +836,12 @@ La v2 ("el bicho") se construye con **patrón estrangulador**: nace al lado de l
 Supabase, y Elena se muda pestaña a pestaña. **Los datos no se mudan: se curan.** Una BD nueva serían
 dos verdades y un descuadre garantizado.
 
-**Fase 0 (la capa de datos) va PRIMERO** y está a medias. De la app v2 en sí (repo, pantallas, Auth)
-no hay nada todavía, y está bien.
+**Fase 0 (la capa de datos) va PRIMERO** y está a medias. ⚠️ Aquí ponía que *«de la app v2 en sí
+(repo, pantallas, Auth) no hay nada todavía»*: eso era cierto al arrancar el proyecto y **hoy no lo
+es**. La app existe en el repo `moloka-app-v2`, se despliega en Vercel, tiene Auth por
+`@supabase/ssr`, y su Inventario está en marcha — hasta el punto de que un workflow lo comprueba cada
+mañana laborable «antes de que entre Elena». Lo que sigue siendo verdad es el orden: la capa de datos
+va primero.
 
 Orden de mudanza acordado: Inventario → Inicio → Alertas → Movimientos → Rotación+Rentabilidad →
 *(frontera lectura/escritura)* → Entrada → Facturas → Envío FBA → Motores.
