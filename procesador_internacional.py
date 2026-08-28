@@ -331,7 +331,14 @@ def main():
                                            ambito=AMBITO, etiqueta='anti-encogimiento')
         # No-retroceder: una foto más vieja que la ya cargada no entra (un informe
         # caducado no da información incompleta, da información FALSA, §1.4).
-        # PERMITIR_RETROCESO=1 la salta para una recarga deliberada.
+        #
+        # 🔑 SI SALTA Y LA RECARGA ES LEGÍTIMA, EL RODEO ES VOLVER A SUBIR EL FICHERO
+        #    al buzón. El aborto ofrece `PERMITIR_RETROCESO=1`, pero esa variable no
+        #    la cablea NINGÚN workflow —ni éste ni los otros cuatro—, así que desde
+        #    el dispatch no se puede poner: tal cual, es una palanca que no está.
+        #    Re-subir sí funciona, y funciona AQUÍ precisamente porque la fecha sale
+        #    del sello de subida: el fichero vuelve a entrar con fecha de hoy. (En
+        #    `all_listings` o `keepa` ese rodeo no valdría: allí sale del nombre.)
         #
         # ⚠️ QUÉ CAZA Y QUÉ NO, porque aquí la fecha NO la trae el fichero. Este
         #    informe no viene fechado por ningún lado —ni columna dentro ni fecha en
@@ -343,11 +350,14 @@ def main():
         #    quedó con un fichero anterior, o un entorno que ya iba más adelantado.
         #    🔬 Y no es una rareza de este procesador, que era lo que parecía: de los
         #    cinco que llevan esta guarda, TRES sacan la fecha de la subida
-        #    (`paneu_aptos`:494, `inventario_fba`:569 y este) y solo dos la sacan del
-        #    fichero (`all_listings` del nombre, `keepa` del nombre/dato). Los dos
-        #    primeros llevan meses en producción con esta misma guarda y este mismo
-        #    alcance. Aquí faltaba, y esta tabla BORRA lo que no viene en el fichero
-        #    (el barrido, más abajo): es justo donde más falta hacía.
+        #    (`paneu_aptos`, `inventario_fba` y este, los tres por
+        #    `fecha_del_dato_por_subida`) y solo dos la sacan del fichero
+        #    (`all_listings` del nombre, `keepa` del nombre/dato). Precedente MEDIDO,
+        #    y corto: paneu_aptos la lleva desde el 24-jul-2026 (76dd943) e
+        #    inventario_fba desde el 23-ago (03e29a9) — cinco días. No es «lleva
+        #    meses funcionando», es «hay dos hermanos con el mismo alcance».
+        #    Aquí faltaba, y esta tabla BORRA lo que no viene en el fichero (el
+        #    barrido, más abajo): es justo donde más falta hacía.
         guarda_no_retroceder(cur, 'inventario_internacional', 'fecha_foto',
                              info['fecha_foto'], ambito=AMBITO)
     except Aborta as e:
