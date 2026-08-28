@@ -48,7 +48,100 @@ No muerde hoy: ningún código de los dos repos lee las cuatro `*_arranque`.
 
 ---
 
-## 2. Los pasos, en orden
+## 2. VERIFICACIÓN PREVIA — lo que se mide ANTES de tocar
+
+> Medido por Fernando el 28-ago-2026 comparando **staging después de aplicar** contra
+> **producción antes**. Esto es lo que convierte «creo que es inocuo» en «está medido».
+> Si alguna de las tres no da lo esperado, **para**: la migración dejaría de ser un no-op.
+
+### 2.1 · Las firmas: `create or replace` REEMPLAZA, no añade una segunda función
+
+🔴 El riesgo real: **cambiar la firma de una función no la reemplaza, añade una sobrecarga
+y la vieja se queda viva**. Pasó de verdad en staging antes del restore, con
+`fn_trackeador_frescura` de 3 argumentos y `fn_trackeador_refrescar` sin ninguno.
+
+```sql
+select p.proname, pg_get_function_identity_arguments(p.oid) as firma
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'public'
+   and (p.proname like 'fn_trackeador%' or p.proname = 'fn_fee_override_refresh')
+ order by 1, 2;
+```
+
+Tiene que dar **cinco filas, una por nombre** (ningún nombre repetido):
+
+| función | firma |
+|---|---|
+| `fn_fee_override_refresh` | *(sin argumentos)* |
+| `fn_trackeador_frescura` | `p_horas_refresco numeric, p_dias_normal integer, p_dias_demanda integer, p_dias_compra integer, p_dias_copia integer` |
+| `fn_trackeador_refrescar` | `p_relanzar boolean` |
+| `fn_trackeador_salud` | *(sin argumentos)* |
+| `fn_trackeador_snapshot` | `p_fecha date, p_edad_max interval` |
+
+Son **idénticas** a las que la migración deja en staging. ⇒ el `create or replace` reemplaza
+en sitio. **Si aquí apareciera un nombre dos veces, para**: significaría que la migración va a
+dejar dos funciones vivas y el llamador elegiría por resolución de tipos, no por lo que se quiso.
+
+*(`fn_trackeador_salud` y `fn_trackeador_snapshot` no las toca esta migración. Están en la
+consulta a propósito: si el `like` no las devolviera, sabrías que estás mirando otra base.)*
+
+### 2.2 · El `security_invoker` no se pierde en el `create or replace`
+
+🔴 El riesgo: un `CREATE OR REPLACE VIEW` **sin** la cláusula `WITH` **borra el
+`security_invoker` sin error y sin salir en ningún diff**, y la vista pasa a correr como su
+dueño. En staging las **nueve** vistas se crearon **de cero** y salieron con `security_invoker=true`
+—y `v_sondas_pendientes` **sin** él, igual que producción—: eso prueba que el DDL lleva la
+cláusula dentro.
+
+```sql
+select c.relname,
+       exists (select 1 from unnest(coalesce(c.reloptions,'{}')) o
+                where lower(split_part(o,'=',1)) = 'security_invoker'
+                  and lower(split_part(o,'=',2)) in ('true','on','yes','1')) as es_invoker
+  from pg_class c join pg_namespace n on n.oid = c.relnamespace
+ where n.nspname = 'public'
+   and c.relname in ('v_trackeador_precio_pais','v_trackeador_precio_pais_full',
+       'v_trackeador_pantalla','v_trackeador_frescura','v_sondas_pendientes',
+       'v_reglas_arranque','v_doctrina_arranque','v_sondas_arranque','v_arranque_coste')
+ order by 1;
+```
+
+Ocho a `true` y **`v_sondas_pendientes` a `false`**, que es la foto.
+
+⚠️ **Se lee POR OPCIÓN, nunca con un `like '%security_invoker=true%'`.** Postgres guarda
+literalmente lo que se escribió y acepta sinónimos: `=on` significa lo mismo y un `like`
+contaría esas vistas como definer. Ese error ya se cometió aquí dos veces, por separado, y
+las dos dieron el mismo recuento equivocado.
+
+### 2.3 · Los cuatro índices ya existen: los `if not exists` son cuatro no-ops
+
+```sql
+select indexname, indexdef from pg_indexes
+ where schemaname = 'public' and tablename = 'mv_trackeador_pantalla'
+ order by indexname;
+```
+
+`mv_tp_accion` · `mv_tp_asin` · `mv_tp_orden` · **`mv_tp_pk` (UNIQUE sobre `asin, dominio`)**.
+
+⇒ **Ni construcción de índice ni lock largo.** Si faltara alguno, la migración lo crearía —y
+entonces sí habría trabajo real y un lock que medir—, así que conviene saberlo antes.
+
+### 2.4 · El recuento de la materializada: apúntalo, y no lo leas como descuadre
+
+```sql
+select count(*) as filas from public.mv_trackeador_pantalla;
+```
+
+**Producción va por 1.740 filas y staging por 1.708.** ⚠️ **Eso es VOLUMEN, no descuadre**:
+staging viene del volcado de anoche y producción ha seguido viviendo. Sin decirlo, alguien lo
+leerá como un fallo.
+
+Lo que importa: **este número tiene que ser el MISMO antes y después de aplicar**, porque la
+materializada es un no-op. Apúntalo ahora.
+
+---
+
+## 3. Los pasos, en orden
 
 Los dos ficheros están **en `main`** y **ensayados y aplicados en staging**.
 
@@ -56,9 +149,9 @@ Los dos ficheros están **en `main`** y **ensayados y aplicados en staging**.
 |---|---|---|
 | 1 | Avisar a Elena y esperar a estar fuera de su horario | — |
 | 2 | **Ensayo en producción** de la migración del Trackeador | `aplicar-migracion.yml` · `entorno=produccion` · `fichero=2026-08-28_repo_trackeador_objetos_vivos.sql` · `modo=ensayo` |
-| 3 | Leer el log: tienen que salir las **cinco** líneas del punto 4 | — |
+| 3 | Leer el log: tienen que salir las **cinco** líneas de la sección 4 | — |
 | 4 | **Aplicar** esa misma | igual, `modo=aplicar` + escribir el nombre del fichero en `confirmacion` |
-| 5 | **Verificación por SQL** (sección 4 de abajo) | el log NO es la prueba |
+| 5 | **Verificación por SQL** (sección 5 de abajo) | el log NO es la prueba |
 | 6 | Repetir 2→5 con `2026-08-28_repo_arranque_objetos_vivos.sql` | — |
 
 ⚠️ **El orden entre las dos migraciones da igual: son independientes.** La del Trackeador no toca nada de arranque y al revés. Se hace primero la del Trackeador porque es la que afecta a Elena, y así se sabe pronto.
@@ -67,7 +160,7 @@ Los dos ficheros están **en `main`** y **ensayados y aplicados en staging**.
 
 ---
 
-## 3. Lo que tiene que decir el log (no es la prueba, pero si falta algo, para)
+## 4. Lo que tiene que decir el log (no es la prueba, pero si falta algo, para)
 
 **Trackeador** — las cinco:
 ```
@@ -84,7 +177,7 @@ Testigo OK (grant, que no puerta). authenticated tiene SELECT sobre las dos vist
 
 ---
 
-## 4. LA VERIFICACIÓN POR SQL — esto sí es la prueba
+## 5. LA VERIFICACIÓN POR SQL — esto sí es la prueba
 
 Se corre **después de aplicar**, contra producción.
 
@@ -168,7 +261,7 @@ Los **cuatro**: `mv_tp_accion`, `mv_tp_asin`, `mv_tp_orden` y `mv_tp_pk`, este �
 
 🔴 **Sin `mv_tp_pk` el `REFRESH ... CONCURRENTLY` no arranca**, y ése es el que corre en cada carga de cada informe desde `foto_comun.py`. Si falta, para.
 
-El recuento tiene que ser **el mismo de antes de aplicar** (la materializada es un no-op). Apúntalo antes.
+El recuento tiene que ser **el mismo** que apuntaste en la sección 2.4 (la materializada es un no-op). Producción va por 1.740 y staging por 1.708: eso es volumen, no descuadre.
 
 ### 4.4 · La prueba de verdad: ejercer, no leer el catálogo
 
@@ -195,7 +288,7 @@ reset role;
 
 ---
 
-## 5. Si algo va mal
+## 6. Si algo va mal
 
 - **En `ensayo`**: el workflow hace `rollback`. La base se queda como estaba. Se lee el error y se decide.
 - **En `aplicar`**: corre con `--single-transaction`, así que un error deja la base **exactamente como estaba**. El propio workflow avisa aparte si detectase `no transaction in progress`, que sería el único caso en que quedaría a medias.
@@ -204,7 +297,7 @@ reset role;
 
 ---
 
-## 6. Lo que este guion NO cubre
+## 7. Lo que este guion NO cubre
 
 - ❌ Que la **pantalla del Trackeador se vea bien** en la app. Eso se abre y se mira. Aquí solo hay base de datos.
 - ❌ Los frentes de permisos que la foto reproduce **a propósito**: `SECURITY DEFINER` con `EXECUTE` a PUBLIC en dos funciones, `v_sondas_pendientes` sin `security_invoker`, y las dos vistas rotas de la sección 1. **Cada uno su PR.**
