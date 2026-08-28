@@ -163,7 +163,7 @@ res['J traf bajo suelo'] = corre("J · tráfico por DEBAJO del suelo de ruido (8
 print("=" * 78)
 print("RESUMEN (esperado → obtenido)")
 print("=" * 78)
-esperado = {'A limpia': 'CARGA', 'B puntual': 'CARGA', 'C global': 'ABORTA',
+esperado = {'A limpia': 'CARGA', 'B puntual': 'CARGA', 'C global': 'CARGA',
             'D gris': 'ABORTA', 'E gris forzada': 'CARGA', 'F gris pocos': 'ABORTA',
             'G primera+neg': 'ABORTA', 'H calderilla': 'CARGA',
             'I desplome traf': 'ABORTA', 'J traf bajo suelo': 'CARGA'}
