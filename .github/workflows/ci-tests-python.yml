@@ -132,7 +132,16 @@ jobs:
       - name: 16) test_tsv_quote_none.py
         run: python -u test_tsv_quote_none.py
 
-      - name: 17) Censo - ningun test se queda sin correr
+      # 🔒 El banco de `guarda_no_retroceder`: ejecuta el main() REAL de
+      #    procesador_internacional con un cursor de mentira que GRABA cada
+      #    sentencia, y comprueba que al abortar no sale ni un DELETE ni un
+      #    INSERT. Es el unico sitio donde esa guarda se ve ROJA sin una base
+      #    delante: por el camino del dispatch la fecha es monotona y su rama
+      #    de aborto no se alcanza nunca.
+      - name: 17) test_guarda_no_retroceder.py
+        run: python -u test_guarda_no_retroceder.py
+
+      - name: 18) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
         #    demas se lee como si lo cubriera. Aqui registrar un test es un paso
@@ -155,6 +164,7 @@ jobs:
             test_refrescar_vistas.py
             test_transacciones_pais.py
             test_tsv_quote_none.py
+            test_guarda_no_retroceder.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).
