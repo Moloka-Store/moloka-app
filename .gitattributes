@@ -1,0 +1,18 @@
+# Las migraciones se aplican BYTE A BYTE contra una base de datos, asi que sus
+# finales de linea no son cosmetica: forman parte del objeto que crean.
+#
+# El caso medido (28-ago-2026, `v_reglas_arranque` y `v_sondas_arranque`): su
+# definicion lleva un CR (0x0D) LITERAL dentro de una cadena -- el '[<LF><CR>]+'
+# de un regexp_replace. Con la conversion de finales de linea activada
+# (core.autocrlf=true, que es lo que hay en la maquina de Fernando), un checkout
+# en Windows convierte el LF de delante en CRLF y la cadena pasa de
+# [<LF><CR>] a [<CR><LF><CR>]: otra vista, sin que nada avise.
+#
+# Y lo mismo por otro camino en cualquier migracion con funciones: si el cuerpo
+# de un `$function$ ... $function$` se guarda con CRLF, el `prosrc` que queda en
+# la base lleva CRLF y su md5 ya no cuadra con el de produccion -- que es
+# justamente la comprobacion con la que se da por buena una migracion.
+#
+# `-text` = git no convierte nada, ni al guardar ni al sacar. Es lo unico que
+# hace que el fichero que se aplica sea el fichero que se escribio.
+migraciones/*.sql -text
