@@ -432,16 +432,91 @@ print(f"{PROVEEDOR} | Marca {MARCA} | Rank max {RANK_MAXIMO} | Modo {MODO}")
 # ============================================================
 # Celda 0 - formula de rentabilidad (validada al centimo)
 # ============================================================
-def calc_rentabilidad(precio_venta, pa, ref_pct, fee_fba, iva, almacen=0.15, com_digitales=1.03):
-    base       = precio_venta / (1 + iva)
-    com_amazon = precio_venta * (ref_pct/100) * com_digitales
+# ------------------------------------------------------------
+# EL RECARGO POR SERVICIOS DIGITALES (ISD), por PAIS.
+#
+# 🔴 EL x1,03 PLANO NO CUADRA CON LA FACTURA EN FRANCIA. Cuadrado contra un pedido REAL de
+#    Amazon en `transacciones_movimientos` -- `404-7912092-2024339`, SKU `82-4ME9-NOPN`, FR:
+#        comision (tarifa_venta)  1,82 EUR
+#        tarifa FBA (tarifa_fba)  5,29 EUR
+#        ISD que Amazon COBRO     0,21 EUR   <- tarifa_otras
+#      · 3 % x (1,82 + 5,29) = 0,2133  -> la base francesa INCLUYE la tarifa FBA  ✅
+#      · 3 % x 1,82          = 0,0546  -> lo que daba el x1,03 plano              ❌
+#    El escaner se dejaba el 3 % de la tarifa FBA: ~0,97 puntos de margen de MAS en Francia
+#    (medido sobre las 1.800 filas francesas con margen de `escaner_detalle`). OPTIMISTA.
+#
+# 🔬 Los porcentajes estan MEDIDOS sobre los pedidos reales: ES 2,91 % (13.266 pedidos),
+#    IT 3,00 % (603), FR 2,97 % sobre comision + FBA (391). Alemania es un SUPUESTO por
+#    prudencia de Fernando (no hay ni una venta alemana contra la que contrastar) y su base
+#    es la comision, como ES e IT -- Francia es la excepcion, no la norma.
+#
+# 🔒 Estos mismos valores viven tambien en `lib/inventory/build.ts` del repo de la app
+#    (`ISD_PAIS`). NO se comparte codigo entre los dos repos: lo que ata a los dos es que
+#    CADA UNO cuadra contra esta misma factura por su lado -- aqui abajo, y alli en
+#    `tests/isd-frances.test.mjs`.
+ISD_PAIS = {
+    'ES': {'pct': 0.03, 'incluye_fba': False},
+    'IT': {'pct': 0.03, 'incluye_fba': False},
+    'FR': {'pct': 0.03, 'incluye_fba': True},   # <- la excepcion, medida
+    'DE': {'pct': 0.03, 'incluye_fba': False},  # <- supuesto por prudencia
+}
+
+# 🔴 "CALCULA CON LA CUENTA VIEJA, Y LO SE." Un parametro opcional cuya omision devuelve la
+#    cuenta OPTIMISTA es una trampa con fecha: alguien llama desde un sitio nuevo, no lo
+#    pasa, y se lleva el margen inflado sin que nada falle. Asi hay que ESCRIBIRLO.
+SIN_ISD_HISTORICO = object()
+
+
+def calc_rentabilidad(precio_venta, pa, ref_pct, fee_fba, iva, almacen=0.15,
+                      com_digitales=1.03, isd=SIN_ISD_HISTORICO):
+    base = precio_venta / (1 + iva)
+    if isd is SIN_ISD_HISTORICO:
+        # La cuenta de siempre: el recargo va dentro del x1,03 de la comision. Se conserva
+        # para poder REPRODUCIR lo que `escaner_detalle` guardo antes de la correccion.
+        com_amazon = precio_venta * (ref_pct/100) * com_digitales
+    else:
+        com = precio_venta * (ref_pct/100)
+        com_amazon = com + (com + (fee_fba if isd['incluye_fba'] else 0)) * isd['pct']
     beneficio  = base - pa - com_amazon - fee_fba - almacen
     roi        = beneficio / pa if pa else 0
     margen     = beneficio / precio_venta if precio_venta else 0
     return dict(base=base, com_amazon=com_amazon, beneficio=beneficio, roi=roi, margen=margen)
 
+
+# ------------------------------------------------------------
+# AUTOCOMPROBACION DE ARRANQUE. Aborta: una formula de dinero que no cuadra no se ejecuta.
+# ------------------------------------------------------------
 _r = calc_rentabilidad(15.99, 8.12, 15, 3.51, 0.21)
-print(">>> FORMULA OK <<<" if abs(_r['beneficio']+1.04)<0.01 and abs(_r['com_amazon']-2.47)<0.01 else ">>> REVISAR FORMULA <<<")
+assert abs(_r['beneficio'] + 1.04) < 0.01 and abs(_r['com_amazon'] - 2.47) < 0.01,     'La formula historica (x1,03 plano) ya no reproduce su caso canonico.'
+
+# 🔴 EL CUADRE CONTRA LA FACTURA, que es lo que hace que este numero no sea una opinion.
+#    Pedido `404-7912092-2024339`, SKU `82-4ME9-NOPN` (FR): Amazon cobro 0,21 EUR de ISD.
+_COM_FR, _FBA_FR, _ISD_REAL = 1.82, 5.29, 0.21
+
+# ⚠️ EL ISD SE CALCULA LEYENDO LA TABLA, NO SUMANDO LA FBA A MANO. La primera version de
+#    este assert hacia `(_COM_FR + _FBA_FR) * pct` directamente, asi que `incluye_fba` podia
+#    valer False y el assert seguia cuadrando: una comprobacion que NO PODIA FALLAR. Se cazo
+#    poniendo la tabla a False a proposito y viendo que no saltaba nada.
+def _isd_de(pais, comision, fee_fba):
+    cfg = ISD_PAIS[pais]
+    return (comision + (fee_fba if cfg['incluye_fba'] else 0)) * cfg['pct']
+
+_isd_fr = _isd_de('FR', _COM_FR, _FBA_FR)
+assert round(_isd_fr, 2) == _ISD_REAL, (
+    f'FR: la tabla ISD_PAIS da {_isd_fr:.4f} de recargo y Amazon cobro {_ISD_REAL} en el '
+    f'pedido 404-7912092-2024339. O ha cambiado el impuesto, o la base ya no es esa, o '
+    f'alguien ha tocado ISD_PAIS[FR]: PARAR y mirar la factura.')
+
+# 🔒 Y QUE EL CASO SIGA DISTINGUIENDO LAS DOS BASES. Si la de solo-comision tambien cuadrara,
+#    este pedido habria dejado de probar nada y habria que buscar otro.
+assert round(_COM_FR * ISD_PAIS['FR']['pct'], 2) != _ISD_REAL, (
+    'FR: la base de solo-comision tambien cuadra con esta factura, asi que el caso ya no '
+    'distingue las dos bases. Buscar otro pedido antes de fiarse del assert de arriba.')
+
+# 🔒 Y que ES no lleve la FBA en su base: si algun dia se igualan las cuatro, esto lo dice.
+assert round(_isd_de('ES', _COM_FR, _FBA_FR), 4) == round(_COM_FR * 0.03, 4), (
+    'ES: la base ha dejado de ser solo la comision. Francia es la excepcion, no la norma.')
+print(f">>> FORMULA OK <<<  (ISD FR cuadrado con la factura: {_isd_fr:.4f} = {_ISD_REAL})")
 
 # ============================================================
 # Funciones de EAN
@@ -1652,7 +1727,8 @@ for item in infos:
         d = item['paises'].get(dom)
         if d and d.get('precio') and pa and d.get('ref_pct') is not None and d.get('fee') is not None:
             r = calc_rentabilidad(d['precio'], pa, d['ref_pct'], d['fee'], iva[dom],
-                                  almacen=ALMACEN, com_digitales=COM_DIGITALES)
+                                  almacen=ALMACEN, com_digitales=COM_DIGITALES,
+                                  isd=ISD_PAIS[dom])
             paises_out[dom] = {**d,'iva':iva[dom],'beneficio':r['beneficio'],
                                'roi':r['roi'],'margen':r['margen'],'decision':decision_de(r['margen'])}
             if dom == 'ES': margen_es = r['margen']
@@ -1818,7 +1894,8 @@ for item in registros:
         if not d or not d.get('precio') or d.get('ref_pct') is None or d.get('fee') is None:
             continue
         rr = calc_rentabilidad(d['precio'], pa_lote, d['ref_pct'], d['fee'], d['iva'],
-                               almacen=ALMACEN, com_digitales=COM_DIGITALES)
+                               almacen=ALMACEN, com_digitales=COM_DIGITALES,
+                               isd=ISD_PAIS[dom])
         filas_lote.append([
             item['nombre'], item['ean'], item['asin'], item['marca'], dom,
             round(d['precio'], 2),
