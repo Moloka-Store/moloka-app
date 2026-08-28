@@ -56,7 +56,7 @@ from supabase import create_client
 
 # El patrón de carga de FOTO, común a las cañerías de la Fase 0.
 from foto_comun import (Aborta, conectar_bd, listar_buzon, descargar_buzon, fecha_del_dato_por_subida, guarda_anti_encogimiento,
-                        claves_previas, barrer_sobrantes, resumen_foto)
+                        guarda_no_retroceder, claves_previas, barrer_sobrantes, resumen_foto)
 
 # ---------------------------------------------------------------------------
 # 0) Configuración (secrets de GitHub; jamás credenciales en el código)
@@ -323,10 +323,43 @@ def main():
     # 🔒 ÁMBITO DE LA FOTO: ninguno. El informe trae todos los países de una vez.
     AMBITO = None
 
-    # Guarda 3 (foto_comun): anti-encogimiento. Corre ANTES de borrar y de escribir.
+    # Guardas de foto (foto_comun): anti-encogimiento y no-retroceder. Las dos
+    # corren ANTES de borrar y de escribir, en la misma transacción: si saltan, no
+    # se ha tocado nada.
     try:
         previas = guarda_anti_encogimiento(cur, 'inventario_internacional', len(filas),
                                            ambito=AMBITO, etiqueta='anti-encogimiento')
+        # No-retroceder: una foto más vieja que la ya cargada no entra (un informe
+        # caducado no da información incompleta, da información FALSA, §1.4).
+        #
+        # 🔑 SI SALTA Y LA RECARGA ES LEGÍTIMA, EL RODEO ES VOLVER A SUBIR EL FICHERO
+        #    al buzón. El aborto ofrece `PERMITIR_RETROCESO=1`, pero esa variable no
+        #    la cablea NINGÚN workflow —ni éste ni los otros cuatro—, así que desde
+        #    el dispatch no se puede poner: tal cual, es una palanca que no está.
+        #    Re-subir sí funciona, y funciona AQUÍ precisamente porque la fecha sale
+        #    del sello de subida: el fichero vuelve a entrar con fecha de hoy. (En
+        #    `all_listings` o `keepa` ese rodeo no valdría: allí sale del nombre.)
+        #
+        # ⚠️ QUÉ CAZA Y QUÉ NO, porque aquí la fecha NO la trae el fichero. Este
+        #    informe no viene fechado por ningún lado —ni columna dentro ni fecha en
+        #    el nombre, que es un ID de Amazon—, así que su `fecha_foto` es la de
+        #    SUBIDA al buzón (`fecha_del_dato_por_subida`, arriba). Consecuencia, y
+        #    conviene saberla para no confiarse: subir HOY un informe de la semana
+        #    pasada entra con fecha de hoy y esta guarda ni lo ve. Lo que sí para es
+        #    que la carga quede por detrás de la última registrada — un buzón que se
+        #    quedó con un fichero anterior, o un entorno que ya iba más adelantado.
+        #    🔬 Y no es una rareza de este procesador, que era lo que parecía: de los
+        #    cinco que llevan esta guarda, TRES sacan la fecha de la subida
+        #    (`paneu_aptos`, `inventario_fba` y este, los tres por
+        #    `fecha_del_dato_por_subida`) y solo dos la sacan del fichero
+        #    (`all_listings` del nombre, `keepa` del nombre/dato). Precedente MEDIDO,
+        #    y corto: paneu_aptos la lleva desde el 24-jul-2026 (76dd943) e
+        #    inventario_fba desde el 23-ago (03e29a9) — cinco días. No es «lleva
+        #    meses funcionando», es «hay dos hermanos con el mismo alcance».
+        #    Aquí faltaba, y esta tabla BORRA lo que no viene en el fichero (el
+        #    barrido, más abajo): es justo donde más falta hacía.
+        guarda_no_retroceder(cur, 'inventario_internacional', 'fecha_foto',
+                             info['fecha_foto'], ambito=AMBITO)
     except Aborta as e:
         print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
