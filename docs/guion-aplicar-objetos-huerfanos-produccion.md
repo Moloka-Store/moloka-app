@@ -1,7 +1,15 @@
 # Guion — aplicar a PRODUCCIÓN las dos migraciones del #244
 
-> **Lo ejecuta Fernando, con él delante. Escrito el 28-ago-2026 tras el ensayo completo en staging.**
-> Este fichero no aplica nada. Es la lista de pasos y, sobre todo, **la verificación por SQL de después**.
+> **Escrito el 28-ago-2026 tras el ensayo completo en staging. Este fichero no aplica nada.**
+>
+> **QUIÉN HACE QUÉ, que es lo que se confundió tres veces mientras se escribía esto:**
+> · **Fernando decide CUÁNDO**, está delante mientras pasa y puede pararlo en cualquier momento.
+>   *«Con él delante» significa presente, no con las manos en el teclado.* No aplica migraciones,
+>   no tiene por qué conocer la mecánica y no se le pide que la aprenda.
+> · **La sesión ejecuta los pasos**: lanza los workflows, lee los logs y corre la verificación
+>   por SQL. Lo único que necesita de Fernando en el momento es su **«adelante»**.
+> · **Lo que NO decide la sesión** y sigue pendiente: los permisos de `doctrina_madres`
+>   (sección 1). Esa es de Fernando y de nadie más.
 
 ---
 
@@ -139,7 +147,52 @@ leerá como un fallo.
 Lo que importa: **este número tiene que ser el MISMO antes y después de aplicar**, porque la
 materializada es un no-op. Apúntalo ahora.
 
+
 ---
+
+## 2 bis. LA FOTO DE PRODUCCIÓN **ANTES** DE APLICAR — criterio de aceptación
+
+> Medida por SQL en producción el 28-ago-2026, justo antes de disparar. **Esto es el antes
+> contra el que se juzga el después.** Sin una foto del antes, el después no prueba nada:
+> restar dos lecturas sólo significa algo si sabes cuál era la primera.
+
+**Vistas y materializada** — `md5(pg_get_viewdef(oid, true))`:
+
+| objeto | md5 ANTES | largo | opciones |
+|---|---|---|---|
+| `mv_trackeador_pantalla` | `ca8e0c1c319d916a51acfd651f311383` | 2070 | *(ninguna)* |
+| `v_arranque_coste` | `3c33ce292563114bee1759c85642ebc8` | 1898 | `security_invoker=true` |
+| `v_doctrina_arranque` | `1e6ad5908460f8ca4638b8c823a1cdf9` | 542 | `security_invoker=true` |
+| `v_reglas_arranque` | `80c5efe6d418474c1749cdc51c5f2171` | 871 | `security_invoker=true` |
+| `v_sondas_arranque` | `b4f164b054a8169baecb17e080e3635c` | 479 | `security_invoker=true` |
+| `v_sondas_pendientes` | `a92d435f77895df2e2c531009f87b9b8` | 549 | *(ninguna)* — es la foto |
+| `v_trackeador_frescura` | `d1f613c471881da9ffa9bf3083f04c70` | 831 | `security_invoker=true` |
+
+**Funciones** — `md5(prosrc)`:
+
+| función | md5 ANTES | largo |
+|---|---|---|
+| `fn_fee_override_refresh()` | `54ef7e432e687adb0d9a3f1402f231c8` | 1094 |
+| `fn_trackeador_frescura(5 args)` | `3f9741b060abe2352d437c8ae59c9477` | 3954 |
+| `fn_trackeador_refrescar(boolean)` | `3a6351e01be5d37ffaeb03d282fff5a1` | 1638 |
+
+### 🔴 EL CRITERIO, y no admite interpretación
+
+Tras aplicar, **EXACTAMENTE UN md5 debe cambiar**: `v_arranque_coste`, de `3c33ce29…` a
+`bc2e6581…`. Los otros seis y las tres funciones, **idénticos**.
+
+| Qué se ve | Qué significa | Qué se hace |
+|---|---|---|
+| **exactamente 1 cambia** (`v_arranque_coste`) | lo esperado | seguir |
+| **cambia alguno más** | la migración ha movido algo que no debía | 🔴 **PARAR** |
+| **no cambia ninguno** | la migración **no se aplicó** | 🔴 **PARAR** — un verde mudo |
+
+🔑 **El tercer caso es el que se olvida.** «Ningún cambio» se lee como «todo bien» y es
+exactamente lo contrario: si ni siquiera `v_arranque_coste` se movió, el fichero no llegó a
+correr y el verde no vale nada.
+
+---
+
 
 ## 3. Los pasos, en orden
 
@@ -158,7 +211,61 @@ Los dos ficheros están **en `main`** y **ensayados y aplicados en staging**.
 
 📌 **El id del run se toma de la URL que imprime el dispatch**, nunca de `gh run list --limit 1`: el run recién creado tarda unos segundos en registrarse y «el último» puede ser el anterior.
 
+
 ---
+
+## 3 bis. LISTO PARA DISPARAR — los cuatro comandos, en orden
+
+> Nada de esto se ha lanzado. Estan escritos para ejecutarse tal cual, uno detras de otro,
+> **leyendo el resultado de cada uno antes de pasar al siguiente**.
+
+🔴 **El id del run sale de la URL que imprime el dispatch, NUNCA de `gh run list --limit 1`.**
+El run recien creado tarda unos segundos en registrarse, asi que «el ultimo de la lista» puede
+ser el ANTERIOR — y como ese suele estar en `success`, se daria por bueno un trabajo que aun no
+ha empezado. Por eso los cuatro capturan el id de la URL.
+
+```bash
+URL=$(gh workflow run aplicar-migracion.yml -f entorno=produccion -f fichero=2026-08-28_repo_trackeador_objetos_vivos.sql -f modo=ensayo 2>&1 | head -1); ID=${URL##*/}; gh run watch $ID
+```
+
+```bash
+URL=$(gh workflow run aplicar-migracion.yml -f entorno=produccion -f fichero=2026-08-28_repo_trackeador_objetos_vivos.sql -f modo=aplicar -f confirmacion=2026-08-28_repo_trackeador_objetos_vivos.sql 2>&1 | head -1); ID=${URL##*/}; gh run watch $ID
+```
+
+```bash
+URL=$(gh workflow run aplicar-migracion.yml -f entorno=produccion -f fichero=2026-08-28_repo_arranque_objetos_vivos.sql -f modo=ensayo 2>&1 | head -1); ID=${URL##*/}; gh run watch $ID
+```
+
+```bash
+URL=$(gh workflow run aplicar-migracion.yml -f entorno=produccion -f fichero=2026-08-28_repo_arranque_objetos_vivos.sql -f modo=aplicar -f confirmacion=2026-08-28_repo_arranque_objetos_vivos.sql 2>&1 | head -1); ID=${URL##*/}; gh run watch $ID
+```
+
+⚠️ **El `confirmacion` no es burocracia.** El cerrojo 6 exige que sea **identico** al nombre del
+fichero cuando `entorno=produccion` y `modo=aplicar`, y aborta si no lo es. Esta puesto para que
+alguien lea lo que va a escribir en la base de Elena.
+
+### El orden completo, con lo que va entre medias
+
+| | Que | Quien |
+|---|---|---|
+| 1 | Elena avisada, y fuera de su horario | Fernando |
+| 2 | Su **«adelante»** | Fernando |
+| 3 | **Verificacion PREVIA** (seccion 2) — las cuatro consultas, y apuntar el recuento | la sesion |
+| 4 | Comando 1 (Trackeador, `ensayo`) y leer las **cinco** lineas de la seccion 4 | la sesion |
+| 5 | Comando 2 (Trackeador, `aplicar`) | la sesion |
+| 6 | **Verificacion POSTERIOR** (seccion 5) | la sesion |
+| 7 | Comandos 3 y 4 (arranque), con su verificacion | la sesion |
+| 8 | Parte a la bandeja con lo medido | la sesion |
+
+🔑 **Entre el paso 5 y el 6 no se salta nada:** el log dice `APLICADO`, pero **el log no es la
+prueba**. La prueba es la seccion 5.
+
+⏱️ **Se puede parar en cualquier punto.** Hasta el paso 5 no se ha escrito nada (el `ensayo` hace
+`rollback`), y el `aplicar` corre con `--single-transaction`: si falla, la base se queda
+exactamente como estaba.
+
+---
+
 
 ## 4. Lo que tiene que decir el log (no es la prueba, pero si falta algo, para)
 
