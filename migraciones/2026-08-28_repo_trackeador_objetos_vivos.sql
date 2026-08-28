@@ -2156,7 +2156,7 @@ begin
     and k.tarifa_fba is not null;
   get diagnostics n = row_count;
   return n;
-end $function$
+end $function$;
 
 revoke all on function public.fn_fee_override_refresh() from public, anon, authenticated;
 grant execute on function public.fn_fee_override_refresh() to public;
@@ -2223,7 +2223,7 @@ AS $function$
          a.vivo_stock, a.dias_stock_detras,
          (cardinality(a.avisos) > 0), nullif(array_to_string(a.avisos, ' · '), '')
   from a;
-$function$
+$function$;
 
 revoke all on function public.fn_trackeador_frescura(numeric, integer, integer, integer, integer) from public, anon, authenticated;
 grant execute on function public.fn_trackeador_frescura(numeric, integer, integer, integer, integer) to public;
@@ -2292,7 +2292,7 @@ begin
     if p_relanzar then raise; end if;
     return 'ERROR: ' || sqlerrm;
   end;
-end $function$
+end $function$;
 
 revoke all on function public.fn_trackeador_refrescar(boolean) from public, anon, authenticated;
 grant execute on function public.fn_trackeador_refrescar(boolean) to public;
