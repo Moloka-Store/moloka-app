@@ -61,6 +61,41 @@
 --       `fn_fee_override_refresh` no aparece llamada: la invoca la otra.
 --
 -- ----------------------------------------------------------------------------
+-- 🔴 SON CUATRO, NO TRES -- Y LA CUARTA SE QUEDA ABIERTA A PROPOSITO
+-- ----------------------------------------------------------------------------
+-- Censo de TODAS las `prosecdef` de `public` en produccion (28-ago-2026): **11
+-- funciones**, de las cuales **4 alcanzables por `anon`**. Las tres de arriba...
+-- y `salud_stock_moloka()`.
+--
+-- ⚠️ A ESA NO LA TOCA ESTE REVOKE, y no por descuido: su ACL es
+--    `postgres=X | anon=X | authenticated=X | service_role=X`. **El `anon=X` es
+--    EXPLICITO**, no viene de PUBLIC, asi que un `revoke ... from public` pasa de
+--    largo. Si alguien creyera que este fichero cierra "las SECURITY DEFINER
+--    abiertas a anon", se equivocaria: cierra las que lo estaban POR PUBLIC.
+--
+-- 🔒 Y NO SE CIERRA, porque medido es lo contrario de las otras tres:
+--    · Es **STABLE** (no escribe). Devuelve dos numeros agregados:
+--      `trigger_activo` y `fichas_desincronizadas`.
+--    · Es el **centinela del stock derivado**: contesta *"¿sigue puesto el
+--      trigger `trg_sync_stock_moloka`?"*. Si alguien lo tira, `stock_moloka`
+--      deja de derivarse EN SILENCIO y media app lee un numero muerto.
+--    · Es DEFINER **para eso**: para que el numero no pueda ser un cero enganoso
+--      por RLS.
+--    · Y `anon` SI la llama: **3 llamadas** en `pg_stat_statements` (las otras
+--      tres: cero). Quien llama es `salud-derivada.yml` de **moloka-app-v2**, por
+--      PostgREST contra `/rest/v1/rpc/salud_stock_moloka` con la clave
+--      `publishable`, que entra como `anon`.
+--    · El `grant execute ... to anon` es una **decision escrita de Fernando del
+--      30-jul-2026**, con su razon en el propio workflow: la clave
+--      `sb_publishable_` ya esta en el `index.html` de `moloka-app`, que es un
+--      repo PUBLICO, asi que concederla a `anon` no anade exposicion nueva.
+--
+-- ⇒ Revocarle `anon` **apagaria el centinela**. Se queda, documentada aqui para
+--   que la proxima vez que alguien haga este censo no la lea como un olvido.
+--   *(Lo unico bueno del caso: el workflow no fallaria en silencio -- comprueba
+--   el HTTP y dice "puede que falte el grant a anon". Pero dejaria de vigilar.)*
+--
+-- ----------------------------------------------------------------------------
 -- 🔴 CONFLICTO CONOCIDO CON LA MIGRACION FOTO -- LEER ANTES DE REAPLICAR NADA
 -- ----------------------------------------------------------------------------
 -- `2026-08-28_repo_arranque_objetos_vivos.sql` lleva dentro
@@ -139,8 +174,9 @@ revoke select on public.v_arranque_coste    from authenticated;
 -- -- TESTIGOS ----------------------------------------------------------------
 DO $testigo$
 DECLARE
-    n int;
-    r record;
+    n         int;
+    n_secdef  int;
+    abiertas  text;
 BEGIN
     -- A) Ninguno de los tres roles de la app puede ya ejecutar las funciones...
     SELECT count(*) INTO n
@@ -152,6 +188,30 @@ BEGIN
     IF n <> 0 THEN
         RAISE EXCEPTION 'ABORTA: despues del revoke, anon o authenticated todavia pueden ejecutar % de las 6 combinaciones.', n;
     END IF;
+
+    -- 🔴 EL CENSO DE VERDAD: TODAS las `prosecdef` de public, no solo las tres.
+    --    Un testigo que solo mira lo que ya sabes no es un censo: saldria VERDE
+    --    con una cuarta funcion abierta. Y de hecho la HAY -- y no se cierra:
+    --    `salud_stock_moloka()` tiene `anon=X` EXPLICITO, no por PUBLIC, asi que
+    --    ningun `revoke ... from public` la toca. Es la excepcion documentada de
+    --    la cabecera.
+    --
+    --    Se ancla en el CONJUNTO esperado, no en un recuento: si aparece una
+    --    quinta, o si desaparece la que debe quedar, aqui se ve con su nombre.
+    SELECT string_agg(f.firma, ', ' ORDER BY f.firma) INTO abiertas
+      FROM (SELECT p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' AS firma
+              FROM pg_proc p JOIN pg_namespace ns ON ns.oid = p.pronamespace
+             WHERE ns.nspname = 'public' AND p.prosecdef
+               AND has_function_privilege('anon', p.oid, 'EXECUTE')) f;
+
+    IF coalesce(abiertas, '(ninguna)') <> 'salud_stock_moloka()' THEN
+        RAISE EXCEPTION 'ABORTA: las SECURITY DEFINER de public alcanzables por anon son [%] y se esperaba EXACTAMENTE [salud_stock_moloka()]. Si hay de mas, este revoke se ha quedado corto; si falta esa, alguien ha apagado el centinela del stock derivado.', coalesce(abiertas, 'ninguna');
+    END IF;
+
+    SELECT count(*) INTO n_secdef
+      FROM pg_proc p JOIN pg_namespace ns ON ns.oid = p.pronamespace
+     WHERE ns.nspname = 'public' AND p.prosecdef;
+    RAISE NOTICE 'Censo OK. % funciones SECURITY DEFINER en public; alcanzable por anon queda 1, y es salud_stock_moloka() a proposito.', n_secdef;
 
     -- ...y el dueno y service_role SI, que es lo que hace que no se rompa nada.
     -- Se ancla en las DOS mitades: quitar de mas es tan fallo como quitar de menos.
