@@ -181,20 +181,61 @@ jobs:
           # ⚠️ Falso positivo conocido y aceptado: el dia que una migracion cree una
           #   funcion plpgsql con `END;` a solo en su linea antes del `$$;`, esto
           #   bloqueara. Falla CERRADO (no escribe) y se arregla escribiendo `END$$;`.
+          #
+          # 🔴 ESE DIA LLEGO: 28-ago-2026, con `2026-08-28_repo_trackeador_objetos_vivos.sql`.
+          #   Y no vino solo. El cerrojo abortaba por DOS motivos, los dos falsos:
+          #     · el `end;` de un bloque `begin...exception...end` DENTRO del cuerpo de
+          #       `fn_trackeador_refrescar` (linea 2294): es plpgsql, no una transaccion;
+          #     · `CONCURRENTLY` cuatro veces -- dos en comentarios, una dentro del cuerpo
+          #       de esa funcion y otra dentro de un mensaje de `RAISE EXCEPTION`.
+          #   Esa migracion NO ejecuta ningun CONCURRENTLY: solo DEFINE una funcion que lo
+          #   menciona. Se anota aqui con fecha porque un aviso que se cumple y no se
+          #   anota se vuelve a escribir dentro de seis meses.
+          #
+          # 🔑 EL ARREGLO NO ES UN REGEX MAS LISTO -- eso seria el mismo error otra vez.
+          #   Los regex de abajo NO se han tocado: siguen siendo los mismos, con las
+          #   mismas 14 variantes de control de transaccion. Lo que cambia es SOBRE QUE
+          #   miran: antes miraban el fichero crudo; ahora miran el SQL DE NIVEL SUPERIOR,
+          #   despues de quitar comentarios, cuerpos `$etiqueta$...$etiqueta$` y cadenas.
+          #   Un cerrojo que lee SQL tiene que saber que es SQL y que es texto dentro de
+          #   un literal.
+          # 🔒 UNA SOLA IMPLEMENTACION POR REGLA: el despojado NO se reescribe aqui. Se
+          #   llama a `sql_de_nivel_superior()` de scripts/censo_migraciones.py, que se
+          #   apoya en el mismo `sin_comentarios()` que ya usan el censo y
+          #   test_inventario_fba.py. Dos parseos que miden lo mismo son dos verdades
+          #   esperando a discrepar.
+          # ⚠️ El fichero que se APLICA sigue siendo el original, entero y sin tocar.
+          #   `_cerrojo4.sql` existe solo para mirarlo y no se usa para nada mas.
+          python3 - "$RUTA" > _cerrojo4.sql <<'PY'
+          import sys, os
+          sys.path.insert(0, 'scripts')
+          from censo_migraciones import sql_de_nivel_superior
+          with open(sys.argv[1], encoding='utf-8', newline='') as fh:
+              sys.stdout.write(sql_de_nivel_superior(fh.read()))
+          PY
+          if [ ! -s _cerrojo4.sql ]; then
+            echo "::error::El despojado de migraciones/$FICHERO ha dado un fichero VACIO."
+            echo "::error::No se mira la nada y se da por buena: eso seria el verde mudo que"
+            echo "::error::este cerrojo existe para evitar. Revisa el .sql o el despojador."
+            exit 1
+          fi
+          echo "SQL de nivel superior: $(wc -l < _cerrojo4.sql) lineas de $(wc -l < "$RUTA") del fichero."
           RE_TX='^[[:space:]]*(begin|commit|rollback|abort|end)[[:space:]]*(work|transaction)?[[:space:]]*(and[[:space:]]+(no[[:space:]]+)?chain[[:space:]]*)?;|^[[:space:]]*start[[:space:]]+transaction'
-          if grep -qiE "$RE_TX" "$RUTA"; then
+          if grep -qiE "$RE_TX" _cerrojo4.sql; then
             echo "::error::$RUTA maneja su propia transaccion (BEGIN/COMMIT/ROLLBACK/END/ABORT)."
             echo "::error::Este workflow envuelve el fichero entero en UNA transaccion, y las dos"
             echo "::error::cosas se pelean: en modo ensayo el fichero ESCRIBIRIA de verdad."
             echo "::error::Quita el control de transaccion del .sql y relanza."
-            grep -niE "$RE_TX" "$RUTA" | head -10
+            echo "--- lineas del SQL de nivel superior (sin comentarios, cuerpos ni cadenas):"
+            grep -niE "$RE_TX" _cerrojo4.sql | head -10
             exit 1
           fi
-          if grep -qiE '\bconcurrently\b' "$RUTA"; then
-            echo "::error::$RUTA usa CONCURRENTLY, que Postgres NO admite dentro de una transaccion."
+          if grep -qiE '\bconcurrently\b' _cerrojo4.sql; then
+            echo "::error::$RUTA ejecuta CONCURRENTLY, que Postgres NO admite dentro de una transaccion."
             echo "::error::Esta migracion no puede ir por este workflow. Para y decidelo: lo que NO"
             echo "::error::se hace es quitar el --single-transaction para que quepa."
-            grep -niE '\bconcurrently\b' "$RUTA" | head -10
+            echo "--- lineas del SQL de nivel superior (sin comentarios, cuerpos ni cadenas):"
+            grep -niE '\bconcurrently\b' _cerrojo4.sql | head -10
             exit 1
           fi
           echo "Cerrojo OK: el fichero se deja envolver en una transaccion."
