@@ -33,9 +33,13 @@
 #   nombre no se sabe de qué día ni de qué país es → si el nombre no casa con el
 #   patrón, se ABORTA.
 #
-# Precedente a imitar: procesador_salud_fba.py y procesador_all_listings.py
-# (ya en producción). Misma escalera (ENTORNO staging|produccion,
-# MODO ensayo|aplicar), misma disciplina de guardas.
+# Precedente a imitar: procesador_all_listings.py (ya en producción). Misma
+# escalera (ENTORNO staging|produccion, MODO ensayo|aplicar), misma disciplina
+# de guardas.
+# ⚠️ Aquí citaba también procesador_salud_fba.py: se BORRÓ el 23-ago-2026 al
+#    jubilarse su informe. Quien lo buscara como «precedente» no lo encontraría.
+#    NO se pone paneu_aptos en su lugar: nació DESPUÉS que este fichero (el
+#    mismo día, tres horas más tarde), así que no pudo ser precedente de nada.
 #
 # 🔒 LA REGLA QUE MATÓ AL PR #26: ningún encabezado se conjetura. Los
 #   encabezados tipados están copiados LITERALMENTE del fichero real. Si al
