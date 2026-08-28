@@ -12,7 +12,7 @@
 //    1) que se ponga ROJO: se deshace el arreglo a mano (volver a poner
 //       `if (DISPARO_SECRET && secreto !== DISPARO_SECRET)` y quitar el 500) y el
 //       caso 1 tiene que FALLAR. Si sigue verde, el test no prueba nada.
-//    2) que este CALLADO cuando todo esta bien: con el fichero como esta, los 11
+//    2) que este CALLADO cuando todo esta bien: con el fichero como esta, los 13
 //       casos en verde y ni un aviso.
 //    Hecho el 28-ago-2026, las dos.
 //
@@ -95,6 +95,17 @@ console.log('=== TEST api/disparar.js ===\n');
   });
   comprobar('1a · sin DISPARO_SECRET -> 500', res.codigo === 500, `devolvio ${res.codigo}`);
   comprobar('1b · sin DISPARO_SECRET -> NO se llama a api.github.com', f.aGitHub() === 0, `hizo ${f.aGitHub()} llamadas`);
+}
+{
+  // La variable PUESTA pero VACIA. En Vercel es lo que pasa al borrar el valor sin
+  // borrar la variable, y era el mismo agujero: '' es falsy, asi que la condicion
+  // vieja se cortaba igual y disparaba. Ausente y vacia tienen que valer lo mismo.
+  const { res, f } = await pedir({
+    env: { GH_TOKEN: 'gh-de-mentira', DISPARO_SECRET: '' },
+    body: { secreto: SECRETO, workflow: 'actualizar-app.yml' },
+  });
+  comprobar('1c · DISPARO_SECRET vacio -> 500', res.codigo === 500, `devolvio ${res.codigo}`);
+  comprobar('1d · DISPARO_SECRET vacio -> NO se llama a api.github.com', f.aGitHub() === 0, `hizo ${f.aGitHub()} llamadas`);
 }
 {
   const { res, f } = await pedir({
@@ -184,7 +195,7 @@ console.log('=== TEST api/disparar.js ===\n');
 
 console.log('');
 if (fallos === 0) {
-  console.log('TODO OK — 11 casos, 0 fallos');
+  console.log('TODO OK — 13 casos, 0 fallos');
 } else {
   console.log(`ROJO — ${fallos} comprobacion(es) fallidas`);
   process.exitCode = 1;
