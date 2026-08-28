@@ -147,7 +147,52 @@ leerá como un fallo.
 Lo que importa: **este número tiene que ser el MISMO antes y después de aplicar**, porque la
 materializada es un no-op. Apúntalo ahora.
 
+
 ---
+
+## 2 bis. LA FOTO DE PRODUCCIÓN **ANTES** DE APLICAR — criterio de aceptación
+
+> Medida por SQL en producción el 28-ago-2026, justo antes de disparar. **Esto es el antes
+> contra el que se juzga el después.** Sin una foto del antes, el después no prueba nada:
+> restar dos lecturas sólo significa algo si sabes cuál era la primera.
+
+**Vistas y materializada** — `md5(pg_get_viewdef(oid, true))`:
+
+| objeto | md5 ANTES | largo | opciones |
+|---|---|---|---|
+| `mv_trackeador_pantalla` | `ca8e0c1c319d916a51acfd651f311383` | 2070 | *(ninguna)* |
+| `v_arranque_coste` | `3c33ce292563114bee1759c85642ebc8` | 1898 | `security_invoker=true` |
+| `v_doctrina_arranque` | `1e6ad5908460f8ca4638b8c823a1cdf9` | 542 | `security_invoker=true` |
+| `v_reglas_arranque` | `80c5efe6d418474c1749cdc51c5f2171` | 871 | `security_invoker=true` |
+| `v_sondas_arranque` | `b4f164b054a8169baecb17e080e3635c` | 479 | `security_invoker=true` |
+| `v_sondas_pendientes` | `a92d435f77895df2e2c531009f87b9b8` | 549 | *(ninguna)* — es la foto |
+| `v_trackeador_frescura` | `d1f613c471881da9ffa9bf3083f04c70` | 831 | `security_invoker=true` |
+
+**Funciones** — `md5(prosrc)`:
+
+| función | md5 ANTES | largo |
+|---|---|---|
+| `fn_fee_override_refresh()` | `54ef7e432e687adb0d9a3f1402f231c8` | 1094 |
+| `fn_trackeador_frescura(5 args)` | `3f9741b060abe2352d437c8ae59c9477` | 3954 |
+| `fn_trackeador_refrescar(boolean)` | `3a6351e01be5d37ffaeb03d282fff5a1` | 1638 |
+
+### 🔴 EL CRITERIO, y no admite interpretación
+
+Tras aplicar, **EXACTAMENTE UN md5 debe cambiar**: `v_arranque_coste`, de `3c33ce29…` a
+`bc2e6581…`. Los otros seis y las tres funciones, **idénticos**.
+
+| Qué se ve | Qué significa | Qué se hace |
+|---|---|---|
+| **exactamente 1 cambia** (`v_arranque_coste`) | lo esperado | seguir |
+| **cambia alguno más** | la migración ha movido algo que no debía | 🔴 **PARAR** |
+| **no cambia ninguno** | la migración **no se aplicó** | 🔴 **PARAR** — un verde mudo |
+
+🔑 **El tercer caso es el que se olvida.** «Ningún cambio» se lee como «todo bien» y es
+exactamente lo contrario: si ni siquiera `v_arranque_coste` se movió, el fichero no llegó a
+correr y el verde no vale nada.
+
+---
+
 
 ## 3. Los pasos, en orden
 
