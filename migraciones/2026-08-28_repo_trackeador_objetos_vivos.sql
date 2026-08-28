@@ -2373,19 +2373,54 @@ EXCEPTION
 END
 $puerta_anon$;
 
+-- 🔴 ESTE TESTIGO EJERCE SOLO LA MATERIALIZADA, Y NO ES UN RECORTE: ES LO UNICO
+--    QUE ESTA MIGRACION CONTROLA. La primera version tambien leia
+--    `v_trackeador_pantalla` y `v_trackeador_frescura` como `authenticated`, y
+--    ABORTABA EN STAGING (run 33173121233). Medido el 28-ago-2026: alli
+--    `authenticated` no tiene SELECT en NINGUNA de las nueve tablas fuente
+--    --`productos`, `keepa_escaparate`, `listings_amazon`, `inventario_fba`,
+--    `inventario_internacional`, `paneu_oferta_pais`, `compras`,
+--    `transacciones_movimientos`, `escaner_memoria`: las nueve a false--, porque
+--    el volcado se hace con `--no-privileges`. Esas dos son `security_invoker`,
+--    asi que leerlas exige permiso sobre las fuentes: en staging NO PUEDEN
+--    pasar, haga lo que haga esta migracion.
+--    Una comprobacion que se pone roja por una causa distinta de la que dice
+--    medir no es una guarda: es ruido, y se deja de mirar en dos semanas.
+--
+--    La materializada SI vale aqui: no es `security_invoker`, no tiene RLS, y su
+--    `grant select to authenticated` lo hace ESTA migracion tres lineas mas
+--    arriba. Es tambien la que lee la pantalla del Trackeador.
+--
+-- ⚠️ LO QUE ESTO DEJA SIN PROBAR, dicho para que nadie lo suponga: que
+--    `authenticated` pueda leer de verdad las dos vistas `security_invoker`.
+--    Eso depende de los ACL de las nueve tablas fuente, que en staging no son
+--    los de produccion. **Se verifica EN PRODUCCION, despues de aplicar**, con
+--    `SET ROLE authenticated` y leyendolas. En staging no se puede saber.
 DO $puerta_auth$
-DECLARE n bigint;
+DECLARE
+    n         bigint;
+    sin_grant text;
 BEGIN
     SET LOCAL ROLE authenticated;
     EXECUTE 'SELECT count(*) FROM (SELECT 1 FROM public.mv_trackeador_pantalla LIMIT 1) z' INTO n;
-    EXECUTE 'SELECT count(*) FROM (SELECT * FROM public.v_trackeador_pantalla LIMIT 0) z' INTO n;
-    EXECUTE 'SELECT count(*) FROM (SELECT * FROM public.v_trackeador_frescura LIMIT 0) z' INTO n;
     RESET ROLE;
-    RAISE NOTICE 'Testigo OK (puerta). authenticated entra en la materializada, en la vista y en la frescura.';
+    RAISE NOTICE 'Testigo OK (puerta). authenticated LEE mv_trackeador_pantalla, que es la que alimenta la pantalla.';
+
+    -- De las dos vistas invoker no se puede ejercer aqui, pero si se comprueba
+    -- que esta migracion les ha dejado el GRANT puesto. Es mas debil que
+    -- ejercerlo --el permiso no es la puerta-- y por eso se dice cual de las dos
+    -- cosas se esta midiendo.
+    SELECT string_agg(x.n, ', ' ORDER BY x.n) INTO sin_grant
+      FROM (VALUES ('v_trackeador_pantalla'), ('v_trackeador_frescura')) x(n)
+     WHERE NOT has_table_privilege('authenticated', 'public.' || x.n, 'SELECT');
+    IF sin_grant IS NOT NULL THEN
+        RAISE EXCEPTION 'ABORTA: authenticated se ha quedado sin el GRANT SELECT en %. La pantalla del Trackeador se quedaria vacia.', sin_grant;
+    END IF;
+    RAISE NOTICE 'Testigo OK (grant, que no puerta). authenticated tiene SELECT sobre las dos vistas invoker; que pueda leerlas de verdad se comprueba EN PRODUCCION.';
 EXCEPTION
     WHEN insufficient_privilege THEN
         RESET ROLE;
-        RAISE EXCEPTION 'ABORTA: authenticated NO puede leer. La pantalla del Trackeador se quedaria vacia.';
+        RAISE EXCEPTION 'ABORTA: authenticated NO puede leer mv_trackeador_pantalla. La pantalla del Trackeador se quedaria vacia.';
 END
 $puerta_auth$;
 
