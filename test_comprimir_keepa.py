@@ -161,6 +161,70 @@ eq('(I) el fichero crudo SI habla de aplicar (en el comentario)',
 eq('(I) 🔴 … y en el despojado solo queda como opcion del menu MANUAL',
    _wf.count('aplicar'), 2)   # medido: la `description:` y el `options:` del input `modo`
 
+# --- (J) 🔴 LOS DE «0 FILAS» VAN A SU TANDA, Y NO A LA PRIMERA ---------------
+# El caso es REAL y con nombres reales: el orden del script es por nombre, y el
+# fichero del 16-jul -- que el historico NO cita -- es EL PRIMERO DE LOS 67. O
+# sea que la primera tanda supervisada (LIMITE=3) habria empezado por el unico
+# cuyo UPDATE toca 0 filas, que es justo el que no se puede distinguir de un
+# fallo silencioso mirandolo. Medido el 29-ago-2026.
+CERO_16 = 'KeepaExport-2026-07-16-ResumenDelVendedor-9-X.csv'
+CERO_20 = 'KeepaExport-2026-07-20-ResumenDelVendedor-9-X.csv'
+REALES = [obj(CERO_16, 40), obj(CERO_20, 40),
+          obj('KeepaExport-2026-07-20-ResumenDelVendedor-3-X.csv', 40),
+          obj('KeepaExport-2026-07-20-ResumenDelVendedor-4-X.csv', 40),
+          obj('KeepaExport-2026-07-20-ResumenDelVendedor-8-X.csv', 40)]
+SIN_H = {CERO_16, CERO_20}
+
+# La direccion ROJA primero, que es la que enseña el problema: sin posponer, la
+# primera tanda de 3 SE LLEVA al del 16-jul, que es el de 0 filas.
+elegidos_mal, _ = seleccionar_antiguos(REALES, set(), AHORA, dias=2, limite=3,
+                                       sin_hist=SIN_H, posponer_sin_hist=False)
+eq('(J) 🔴 (el problema) sin posponer, la tanda de 3 empieza por el de 0 filas',
+   elegidos_mal[0], CERO_16)
+
+# Y con la guarda puesta: los tres que salen son los que Fernando aprobo.
+elegidos, descartes = seleccionar_antiguos(REALES, set(), AHORA, dias=2, limite=3,
+                                           sin_hist=SIN_H, posponer_sin_hist=True)
+eq('(J) 🔴 posponiendo, la tanda de 3 son los CITADOS, en orden',
+   elegidos, ['KeepaExport-2026-07-20-ResumenDelVendedor-3-X.csv',
+              'KeepaExport-2026-07-20-ResumenDelVendedor-4-X.csv',
+              'KeepaExport-2026-07-20-ResumenDelVendedor-8-X.csv'])
+eq('(J) 🔴 … y NINGUNO de los de 0 filas se cuela',
+   sorted(set(elegidos) & SIN_H), [])
+eq('(J) el motivo dice que estan fuera A PROPOSITO, no por descuido',
+   'FUERA DEL PLAN A PROPOSITO' in dict(descartes)[CERO_16], True)
+
+# La tanda final: `incluir` es lo que los saca, y son solo ellos.
+solo_ceros = [obj(CERO_16, 40), obj(CERO_20, 40)]
+elegidos_fin, _ = seleccionar_antiguos(solo_ceros, set(), AHORA, dias=2, limite=0,
+                                       sin_hist=SIN_H, posponer_sin_hist=False)
+eq('(J) la tanda final los coge a los dos', sorted(elegidos_fin), sorted([CERO_16, CERO_20]))
+elegidos_nada, _ = seleccionar_antiguos(solo_ceros, set(), AHORA, dias=2, limite=0,
+                                        sin_hist=SIN_H, posponer_sin_hist=True)
+eq('(J) 🔴 … y con posponer no quedaria ninguno (no es un silencio: es la guarda)',
+   elegidos_nada, [])
+
+# 🔒 Y el defecto por defecto: sin decir nada, se POSPONE. Un default permisivo
+#    aqui es justo lo que Fernando pidio que no pasara.
+elegidos_def, _ = seleccionar_antiguos(REALES, set(), AHORA, dias=2, limite=3,
+                                       sin_hist=SIN_H)
+eq('(J) 🔴 el defecto es POSPONER, no incluir', sorted(set(elegidos_def) & SIN_H), [])
+
+# --- (K) 🔴 Y EL WORKFLOW TAMPOCO PUEDE CAER EN `incluir` --------------------
+# La decision de Fernando (29-ago-2026) es que los 3 se quedan en .csv PARA
+# SIEMPRE, porque son los unicos reprocesables y el procesador filtra por
+# `.endswith('.csv')`. `posponer` no es un "de momento": es el modo permanente.
+# Se ancla en el fichero SIN COMENTARIOS, que es donde el motivo esta escrito
+# largo y contaria como codigo en un grep crudo.
+eq('(K) el input nace en posponer', _wf.count('default: posponer'), 1)
+eq('(K) 🔴 y sin input (disparo automatico) tambien',
+   _wf.count("SIN_HIST: ${{ github.event.inputs.sin_hist || 'posponer' }}"), 1)
+eq('(K) 🔴 ningun respaldo a incluir en el CODIGO', _wf.count("|| 'incluir'"), 0)
+# La otra mitad del ancla: el fichero crudo SI nombra `incluir` (en el motivo
+# escrito). Sin esto, el 0 de arriba podria ser verde por no mencionarse nunca.
+eq('(K) el crudo SI habla de incluir (el motivo, en los comentarios)',
+   'incluir' in _wf_crudo, True)
+
 print()
 if fallos:
     print(f'❌ {len(fallos)} FALLOS: ' + ', '.join(fallos))

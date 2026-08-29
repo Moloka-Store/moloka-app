@@ -72,6 +72,9 @@ BUCKET, CARPETA = 'informes', 'keepa_escaparate'
 MODO   = os.environ.get('MODO', 'ensayo').strip().lower()
 DIAS   = int(os.environ.get('DIAS', '2'))
 LIMITE = int(os.environ.get('LIMITE', '0'))          # 0 = sin limite (tandas)
+# `posponer` (por defecto) deja para el final los ficheros que el historico NO
+# cita; `incluir` es la tanda propia y anunciada de esos. Ver seleccionar_antiguos().
+SIN_HIST = os.environ.get('SIN_HIST', 'posponer').strip().lower()
 
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
@@ -102,7 +105,8 @@ def es_comprimible(nombre):
     return n.endswith('.csv') and not n.endswith('.gz')
 
 
-def seleccionar_antiguos(objetos, citados_en_viva, ahora, dias=2, limite=0):
+def seleccionar_antiguos(objetos, citados_en_viva, ahora, dias=2, limite=0,
+                         sin_hist=frozenset(), posponer_sin_hist=True):
     """Decide QUE ficheros entran en la pasada. Devuelve (elegidos, descartes).
 
     `objetos`        : [{'name','updated_at'|'created_at'}, ...] tal cual los da
@@ -113,6 +117,28 @@ def seleccionar_antiguos(objetos, citados_en_viva, ahora, dias=2, limite=0):
                        historico en la proxima pasada del procesador).
     `ahora`          : datetime con tz. Se pasa, no se lee del reloj, para que
                        el test pueda fijarlo.
+    `sin_hist`       : nombres a los que el historico NO cita, o sea aquellos
+                       cuyo UPDATE tocaria 0 filas.
+    `posponer_sin_hist`: si True (por defecto), esos se dejan para el final.
+
+    🔴 LOS DE «0 FILAS» SE QUEDAN EN .csv PARA SIEMPRE. Decidido por Fernando el
+       29-ago-2026, y `posponer` es por tanto el modo PERMANENTE, no un "de
+       momento". El plan son 64 ficheros, no 67.
+       · Son los 3 `ResumenDelVendedor-9` (España) del 16, 20 y 23 de julio, los
+         unicos del buzon que el historico no cita.
+       · Y son los unicos candidatos REALES a reprocesarse: el `-9` del 20-jul
+         es el que taparia el hueco de `es` de esa fecha en el historico. Como
+         el procesador filtra por `.endswith('.csv')`, comprimirlos cerraria la
+         unica puerta por la que ese hueco se puede tapar. Se gana 2,82 MB y se
+         pierde el arreglo: no hay color. El motivo largo, en el workflow.
+       · Y ademas, aunque no fuera permanente, su 0 no se puede mezclar: un
+         UPDATE de 0 filas es CORRECTO aqui -- el script lo da por bueno porque
+         compara contra lo contado antes, no contra "mas de 0" -- pero entre
+         otros se lee igual que un fallo silencioso. Es "o GRITA o no pinta
+         veredicto" aplicado a la ausencia.
+       🔬 Y el orden natural -- por nombre -- ponia uno de ellos EL PRIMERO DE
+          TODOS: la primera tanda supervisada habria empezado justo por el caso
+          ambiguo. Por eso esto es una guarda y no una preferencia.
 
     `descartes` lleva el motivo de cada exclusion: una pasada que dice "he
     tocado 40" sin decir por que dejo 31 no se puede auditar.
@@ -128,6 +154,10 @@ def seleccionar_antiguos(objetos, citados_en_viva, ahora, dias=2, limite=0):
             continue
         if nombre in citados_en_viva:
             descartes.append((nombre, 'CITADO EN LA TABLA VIVA keepa_escaparate'))
+            continue
+        if posponer_sin_hist and nombre in sin_hist:
+            descartes.append((nombre, 'FUERA DEL PLAN A PROPOSITO: el historico no lo cita y '
+                                      'se queda en .csv (es reprocesable; ver el workflow)'))
             continue
         cuando = _fecha_de(o)
         if cuando is None:
@@ -224,6 +254,11 @@ def correr_guarda(cur):
 def main():
     if MODO not in ('ensayo', 'aplicar', 'guarda'):
         sys.exit(f"MODO desconocido: {MODO!r} (usa 'ensayo', 'aplicar' o 'guarda')")
+    # 🔒 Un valor raro NO cae al comportamiento permisivo: se para. Si alguien
+    #    escribe SIN_HIST=incluri, la pasada no puede decidir por su cuenta
+    #    meter los de 0 filas en una tanda que no los esperaba.
+    if SIN_HIST not in ('posponer', 'incluir'):
+        sys.exit(f"SIN_HIST desconocido: {SIN_HIST!r} (usa 'posponer' o 'incluir')")
 
     from foto_comun import conectar_bd, listar_buzon, descargar_buzon
 
@@ -251,12 +286,42 @@ def main():
     cur.execute("select distinct fichero from public.keepa_escaparate where fichero is not null;")
     citados_viva = {r[0] for r in cur.fetchall()}
 
-    ahora = datetime.now(timezone.utc)
-    elegidos, descartes = seleccionar_antiguos(objetos, citados_viva, ahora, DIAS, LIMITE)
+    # Filas del historico por fichero. Sirve para DOS cosas: saber cuales tienen
+    # 0 (y posponerlos) y poder imprimir el plan con lo que cada UPDATE debe tocar.
+    cur.execute("select fichero, count(*) from public.keepa_escaparate_hist "
+                "where fichero is not null group by fichero;")
+    filas_por_fichero = dict(cur.fetchall())
+    nombres = {(o.get('name') or '') for o in objetos}
+    sin_hist = {n for n in nombres if n and n not in filas_por_fichero}
 
-    print(f"\n--- ALCANCE (MODO={MODO}, DIAS={DIAS}, LIMITE={LIMITE or 'sin limite'}) ---", flush=True)
+    ahora = datetime.now(timezone.utc)
+    elegidos, descartes = seleccionar_antiguos(
+        objetos, citados_viva, ahora, DIAS, LIMITE,
+        sin_hist=sin_hist, posponer_sin_hist=(SIN_HIST == 'posponer'))
+
+    print(f"\n--- ALCANCE (MODO={MODO}, DIAS={DIAS}, LIMITE={LIMITE or 'sin limite'}, "
+          f"SIN_HIST={SIN_HIST}) ---", flush=True)
     print(f"    en el buzon: {len(objetos)} · se tocan: {len(elegidos)} · se dejan: {len(descartes)}", flush=True)
     print(f"    citados en la tabla viva (excluidos siempre): {sorted(citados_viva)}", flush=True)
+
+    # 🔴 EL PLAN: LO QUE SE VA A TOCAR, EN ORDEN. Antes esto solo imprimia lo que
+    #    se DEJABA, y el ensayo existe justo para lo contrario: enseñar la lista
+    #    ANTES de actuar. La primera tanda supervisada hubo que sacarla por SQL
+    #    porque el ensayo no la decia (29-ago-2026). Un modo "en seco" que no
+    #    enseña lo que haria no sirve para autorizarlo.
+    tam = {(o.get('name') or ''): (o.get('metadata') or {}).get('size') for o in objetos}
+    print(f"\n--- LO QUE SE VA A TOCAR ({len(elegidos)}), EN ORDEN ---", flush=True)
+    if not elegidos:
+        print("    (nada)", flush=True)
+    for i, n in enumerate(elegidos, 1):
+        esperadas = filas_por_fichero.get(n, 0)
+        aviso = '   ← 0 filas: NO CITADO por el historico' if esperadas == 0 else ''
+        print(f"    {i:>3}. {n}  ·  {tam.get(n, '?')} B  ·  UPDATE debe tocar "
+              f"{esperadas} fila(s){aviso}", flush=True)
+    print(f"    TOTAL a reapuntar en el historico: "
+          f"{sum(filas_por_fichero.get(n, 0) for n in elegidos)} fila(s)", flush=True)
+
+    print(f"\n--- LO QUE SE DEJA ({len(descartes)}) ---", flush=True)
     for n, motivo in descartes:
         print(f"      · SE DEJA  {n}  ({motivo})", flush=True)
 
