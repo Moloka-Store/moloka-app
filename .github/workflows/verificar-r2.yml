@@ -1,0 +1,151 @@
+name: Moloka - Verificar la copia en R2
+
+# ============================================================================
+# 🔴 POR QUE EXISTE: LA COPIA A R2 NUNCA SE HA VERIFICADO CONTRA NADA
+#   `backup-bd.yml` sube `informes` y `facturas-pdfs` a R2 cada noche y sale en
+#   verde. Pero su verde prueba que el SYNC no dio error -- no que los ficheros
+#   esten alli. Nadie ha comparado nunca la lista de R2 contra la lista de
+#   Supabase. Es el mismo pecado que ese fichero vino a cerrar en la BD, un
+#   escalon mas abajo: "una copia incompleta que dice OK es peor que no tener
+#   copia".
+#
+#   Y deja de ser teorico en cuanto se borre el primer original: en el plan free
+#   de Supabase no hay papelera. Si vamos a comprimir los CSV antiguos de Keepa
+#   y borrar los originales, la unica red es R2, y una red que no se ha mirado
+#   nunca no es una red: es una suposicion.
+#
+# 🔒 ESTO NO ESCRIBE NADA, EN NINGUN SITIO. Un `select` a `storage.objects` y un
+#    `aws s3 ls`. Ni sube, ni borra, ni toca la base. Se puede lanzar las veces
+#    que haga falta y a cualquier hora.
+#
+# 🔴 FALLA CERRADO, y esa es la gracia. Sale ROJO si:
+#      · falta en R2 aunque sea UN fichero de los que hay en Supabase, o
+#      · alguno esta en R2 con un tamano distinto, o
+#      · la consulta a Postgres no devuelve nada (porque entonces no se ha
+#        comprobado nada, y "cero problemas encontrados" se leeria como bien).
+#    Un verificador que sale verde cuando no ha podido mirar es justo el adorno
+#    del que se queja `ci-tests-python.yml`.
+#
+# 🔑 R2 PUEDE TENER MAS FICHEROS QUE SUPABASE, Y ESO NO ES UN FALLO. El sync va
+#    SIN `--delete` a proposito: lo que se borro en Supabase sobrevive en R2.
+#    Por eso aqui solo se comprueba una direccion -- que no falte nada -- y los
+#    que sobran se cuentan y se dicen, sin poner nada en rojo.
+# ============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      carpeta:
+        description: 'Carpeta de `informes` a verificar (vacio = el bucket entero)'
+        default: 'keepa_escaparate'
+      detalle:
+        description: 'Listar fichero a fichero con su fecha en R2'
+        type: boolean
+        default: true
+
+concurrency:
+  group: verificar-r2
+  cancel-in-progress: false
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1) Cliente Postgres 17 (la BD es 17.6)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common >/dev/null
+          yes '' | sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh >/dev/null 2>&1 || true
+          sudo apt-get install -y -qq postgresql-client-17 >/dev/null
+
+      - name: 2) Lo que dice SUPABASE que hay
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          CARPETA: ${{ github.event.inputs.carpeta }}
+        run: |
+          set -euo pipefail
+          PREFIJO="informes/${CARPETA:+$CARPETA/}"
+          echo "PREFIJO=$PREFIJO" >> "$GITHUB_ENV"
+          # `name` y tamano. Se excluye el marcador de carpeta vacia, que el
+          # backup tampoco copia (mismo criterio que backup-bd.yml).
+          PATRON="${CARPETA:+$CARPETA/}%"
+          /usr/lib/postgresql/17/bin/psql "$SUPABASE_DB_URL" -At -F $'\t' -c \
+            "select name, coalesce((metadata->>'size')::bigint, 0)
+               from storage.objects
+              where bucket_id = 'informes'
+                and name like '$PATRON'
+                and name not like '%.emptyFolderPlaceholder'
+              order by name;" > supabase.tsv
+          N=$(wc -l < supabase.tsv)
+          echo "Supabase dice: $N fichero(s) en $PREFIJO"
+          # 🔴 Cero filas NO es "todo bien": es que no hemos comprobado nada.
+          if [ "$N" -eq 0 ]; then
+            echo "::error::La consulta no devolvio ni una fila. O la carpeta esta vacia o algo falla; en cualquier caso, esta verificacion no ha comprobado NADA. Sale en rojo a proposito."
+            exit 1
+          fi
+
+      - name: 3) Lo que hay de verdad en R2
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID:         ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          # 🔒 El nombre va AL FINAL y lleva espacios y parentesis (los export de
+          #    Keepa se llaman "... (1).csv"). Por eso no se corta por columnas:
+          #    se toman los tres primeros campos y el resto ENTERO es la clave.
+          aws s3 ls "s3://moloka-backups/storage/${PREFIJO}" --recursive \
+              --endpoint-url "$EP" --region auto \
+            | awk '{ fecha=$1" "$2; tam=$3; $1=""; $2=""; $3=""; sub(/^ +/, "");
+                     print $0 "\t" tam "\t" fecha }' > r2_bruto.tsv
+          # La clave de R2 trae delante `storage/informes/`; se quita para poder
+          # compararla con el `name` de storage.objects, que no lo lleva.
+          awk -F'\t' -v OFS='\t' '{ sub(/^storage\/informes\//, "", $1); print }' \
+              r2_bruto.tsv > r2.tsv
+          echo "R2 tiene: $(wc -l < r2.tsv) objeto(s) bajo storage/$PREFIJO"
+
+      - name: 4) El careo
+        env:
+          DETALLE: ${{ github.event.inputs.detalle }}
+        run: |
+          set -euo pipefail
+          awk -F'\t' -v detalle="$DETALLE" '
+            FNR==NR { r2_tam[$1]=$2; r2_fecha[$1]=$3; next }
+            {
+              n++
+              if (!($1 in r2_tam)) { faltan[++nf]=$1; next }
+              presentes++
+              if (r2_tam[$1]+0 != $2+0) {
+                descuadre[++nd] = $1 " (Supabase " $2 " B / R2 " r2_tam[$1] " B)"
+              } else if (detalle == "true") {
+                printf "  OK  %-72s %s\n", substr($1,1,72), r2_fecha[$1]
+              }
+            }
+            END {
+              print ""
+              print "=========================================================="
+              printf "  en Supabase ....... %d\n", n
+              printf "  encontrados en R2 . %d\n", presentes
+              printf "  NO estan en R2 .... %d\n", nf
+              printf "  con otro tamano ... %d\n", nd
+              extra = 0
+              for (k in r2_tam) extra++
+              printf "  (en R2 hay %d objeto(s) bajo el prefijo; que sobren es NORMAL:\n", extra
+              print  "   el sync va sin --delete, asi que R2 conserva lo ya borrado)"
+              print "=========================================================="
+              if (nf) {
+                print ""
+                print "🔴 ESTOS NO ESTAN EN LA COPIA. No se puede borrar su original:"
+                for (i=1;i<=nf;i++) print "     · " faltan[i]
+              }
+              if (nd) {
+                print ""
+                print "🔴 ESTOS ESTAN EN R2 CON OTRO TAMANO:"
+                for (i=1;i<=nd;i++) print "     · " descuadre[i]
+              }
+              if (nf || nd) exit 1
+              print ""
+              print "✅ Los " n " ficheros estan en R2 y pesan lo mismo."
+            }
+          ' r2.tsv supabase.tsv
