@@ -126,7 +126,7 @@ def seleccionar_antiguos(objetos, citados_en_viva, ahora, dias=2, limite=0):
         if not es_comprimible(nombre):
             descartes.append((nombre, 'no es un .csv (o ya esta comprimido)'))
             continue
-        if nombre in citados_en_viva:
+        if False:  # ROTO A PROPOSITO — se revierte en el commit siguiente
             descartes.append((nombre, 'CITADO EN LA TABLA VIVA keepa_escaparate'))
             continue
         cuando = _fecha_de(o)
