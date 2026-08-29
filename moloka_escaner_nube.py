@@ -1363,6 +1363,22 @@ def _guardar_rankcache():
 # Celda 6 - FASE 1: filtro de rank (Keepa ES, 1 token)
 # ============================================================
 IDX_RANK, IDX_NEW, IDX_BBOX_LAND = 3, 1, 18   # 18 = BUY_BOX_SHIPPING (buy box CON envio = aterrizada, como el v1)
+# 🆕 §8.1 · El precio de AMAZON como vendedor (indice 0 de stats.current). Se añade para
+#    `sondeo_keepa.amazon_precio`: saber si Amazon esta en la oferta cambia la decision,
+#    porque contra Amazon bajar precio no gana. Es el MISMO array que ya se pide con
+#    `stats=90`, asi que no cuesta ni un token mas.
+IDX_AMAZON = 0
+
+def _precio_keepa(v):
+    """Un precio de Keepa -> euros, o None.
+
+    🔒 Keepa da los precios en CENTIMOS y usa -1 para «no hay dato». Esta funcion hace
+       las dos cosas a la vez, y por eso existe en vez de escribir `/100` suelto: un -1
+       sin filtrar entraria en la tabla como -0,01 EUR y pasaria por un precio de verdad.
+    🔑 Y devuelve None, no 0: «no consta» y «vale cero» no son lo mismo, y en `sondeo_keepa`
+       un 0 se leeria como un producto regalado.
+    """
+    return (v / 100) if (v is not None and v > 0) else None
 candidatos, ambiguos = {}, []
 cands_por_ean = {}        # ein -> [todos los candidatos] (para el cotejo). candidatos guarda solo el ganador por rank.
 cotejo_info = {}          # ein -> veredicto del cotejo (se rellena mas abajo; declarado aqui para que exista aunque filas este vacio)
@@ -1395,6 +1411,46 @@ if filas:
             # señales de identidad para sondeo_keepa (#85), gratis en la respuesta de Fase 1.
             cand['rank_drops_30d'] = st.get('salesRankDrops30')
             cand['listed_since']   = prod.get('listedSince')
+            # ── §8.1 · LA ECONOMIA DEL CANDIDATO, para sondeo_keepa ────────────────────
+            #
+            # 🔴 EL PROBLEMA QUE CIERRA: `sondeo_keepa` tiene 4.204 filas y resuelve el ASIN
+            #    en 4.150, pero `bb_precio`, `amazon_precio`, `nuevo_precio`, `monthly_sold`
+            #    y `n_ofertas` estan a CERO filas desde que existe la tabla. Las columnas se
+            #    crearon y nunca se rellenaron: el sondeo traia IDENTIDAD y no ECONOMIA.
+            #    ⇒ Sin precio no se puede decir si un producto parado es rentable, y por eso
+            #      93 fichas con 8.028 EUR a coste llevan meses sin poder decidirse.
+            #
+            # 🟢 Y NO CUESTA UN TOKEN MAS. La Fase 1 ya pide `stats=90` (ver keepa_query de
+            #    arriba), asi que `stats.current[]` YA VUELVE LLENO en esta misma respuesta —
+            #    lo unico que se hacia era leer el indice 3 (rank) y tirar el resto. Esto es
+            #    leer lo que ya se pago.
+            #    🔬 Los indices son los MISMOS que usa la Fase 2 (IDX_NEW=1, IDX_BBOX_LAND=18)
+            #       y los mismos que el v1 en produccion. No se inventa ninguno.
+            #
+            # ⚠️ LO QUE SI TIENE UN MATIZ, y va dicho porque cambia el resultado: la Fase 1
+            #    NO pide `buybox=True` (la Fase 2 si). Sin ese parametro, `current[18]`
+            #    (BUY_BOX_SHIPPING) puede venir vacio. Por eso `bb_precio` se rellena con la
+            #    MISMA cascada que la Fase 2 —aterrizada, luego pelada— y si las dos faltan
+            #    se queda a None: NO se sustituye por el precio «nuevo», que es otra cosa.
+            #    Un None aqui dice «no lo se»; poner el nuevo en su lugar diria una mentira
+            #    con formato de dato. Si Fernando quiere la buy box SIEMPRE, se añade
+            #    `buybox=True` a la llamada de la Fase 1 — y ESO si cuesta tokens.
+            #
+            # 🔒 Keepa da los precios en CENTIMOS y usa -1 para «no hay dato». `_precio_keepa`
+            #    (definida arriba, con los indices) hace las dos cosas a la vez: /100 y
+            #    -1 -> None. Sin eso, un -1 entraria en la tabla como -0,01 EUR y pasaria
+            #    por un precio.
+            _bb_land = cur[IDX_BBOX_LAND] if len(cur) > IDX_BBOX_LAND else None
+            _bb_pel  = st.get('buyBoxPrice')
+            cand['bb_precio']     = _precio_keepa(_bb_land) or _precio_keepa(_bb_pel)
+            cand['amazon_precio'] = _precio_keepa(cur[IDX_AMAZON] if len(cur) > IDX_AMAZON else None)
+            cand['nuevo_precio']  = _precio_keepa(cur[IDX_NEW] if len(cur) > IDX_NEW else None)
+            # `monthlySold` y `totalOfferCount` son CANTIDADES, no precios: ni /100 ni -1.
+            # 🔒 `totalOfferCount` si usa -1 como «no lo se», asi que se filtra igual que en
+            #    la Fase 2 (`_pos`); `monthlySold` simplemente no viene cuando no lo hay.
+            _nof = st.get('totalOfferCount')
+            cand['n_ofertas']     = _nof if (_nof is not None and _nof >= 0) else None
+            cand['monthly_sold']  = prod.get('monthlySold')
             cands_por_ean.setdefault(ein, []).append(cand)      # <- se guardan TODOS (para el cotejo)
             if ein in candidatos:
                 prev = candidatos[ein]
@@ -2207,11 +2263,28 @@ try:
                 'rank': _rk if (_rk or 0) > 0 else None,   # r_act llega -1 cuando no hay rank
                 'rank_drops_30d': _cd.get('rank_drops_30d'),
                 'listado_desde': _km_a_fecha(_cd.get('listed_since')),
+                # 🆕 §8.1 · LA ECONOMIA. Las cinco columnas existen en `sondeo_keepa` desde
+                #    que se creo la tabla y estaban a CERO filas: el sondeo traia identidad
+                #    y no economia, y sin precio no se puede decir si un producto parado es
+                #    rentable. Salen de la MISMA respuesta de Keepa que ya se pagaba.
+                # 🔒 `None` donde Keepa no da el dato, nunca 0: un 0 aqui se leeria como
+                #    «vale cero euros» o «no tiene ofertas», y lo que pasa es que no consta.
+                'bb_precio':     _cd.get('bb_precio'),
+                'amazon_precio': _cd.get('amazon_precio'),
+                'nuevo_precio':  _cd.get('nuevo_precio'),
+                'monthly_sold':  _cd.get('monthly_sold'),
+                'n_ofertas':     _cd.get('n_ofertas'),
                 'fecha_sondeo': _fecha_snd,
                 'fichero': _lote_snd,
+                # 🔒 El crudo guarda TAMBIEN los precios, y no es redundante: el dia que una
+                #    columna se rellene mal, el crudo es lo unico que permite saber si el
+                #    fallo fue de Keepa o del mapeo de aqui.
                 'crudo': {'asin': _asin_c, 'title': _cd.get('title'), 'r_act': _cd.get('r_act'),
                           'r_90': _cd.get('r_90'), 'ean_in': _cd.get('ean_in'), 'propio': _cd.get('propio'),
-                          'rank_drops_30d': _cd.get('rank_drops_30d'), 'listedSince': _cd.get('listed_since')},
+                          'rank_drops_30d': _cd.get('rank_drops_30d'), 'listedSince': _cd.get('listed_since'),
+                          'bb_precio': _cd.get('bb_precio'), 'amazon_precio': _cd.get('amazon_precio'),
+                          'nuevo_precio': _cd.get('nuevo_precio'), 'monthly_sold': _cd.get('monthly_sold'),
+                          'n_ofertas': _cd.get('n_ofertas')},
             })
     # 🔴 CENTINELA: por cada EAN que Keepa NO devolvio (esta en no_encontrados) una fila con
     #    asin_candidato = NULL. "Se pregunto y no habia" es un dato; el silencio no. Es lo que el
@@ -2226,6 +2299,12 @@ try:
             'lote': _lote_snd, 'ean_consultado': _ein, 'dominio': 'es',
             'asin_candidato': None, 'posicion': None, 'titulo': None, 'rank': None,
             'rank_drops_30d': None, 'listado_desde': None,
+            # 🔒 §8.1 · El centinela declara los cinco huecos EXPLICITAMENTE, en vez de
+            #    omitir las claves. Es la misma razon por la que el centinela existe: «se
+            #    pregunto y no habia» es un dato, y una columna ausente del dict se lee
+            #    igual que una que nadie penso — y son cosas distintas.
+            'bb_precio': None, 'amazon_precio': None, 'nuevo_precio': None,
+            'monthly_sold': None, 'n_ofertas': None,
             'fecha_sondeo': _fecha_snd, 'fichero': _lote_snd,
             'crudo': {'centinela': True, 'motivo': _ne.get('Motivo')},
         })
