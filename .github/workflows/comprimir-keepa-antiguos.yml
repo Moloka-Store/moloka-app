@@ -70,7 +70,21 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PYTHONIOENCODING: utf-8
-      MODO:   ${{ github.event.inputs.modo   || 'aplicar' }}
+      # 🔴 EL DISPARO AUTOMATICO NO BORRA NUNCA. `workflow_run` corre SIEMPRE en
+      #    ensayo y deja su informe; la pasada de verdad solo sale de un
+      #    `workflow_dispatch` MANUAL. Un borrado en produccion desatendido no
+      #    pasa en esta casa: lo decide Fernando y se ejecuta con el delante.
+      #
+      #    La primera version de este fichero cayo en `github.event.inputs.modo`
+      #    a secas con respaldo al modo de aplicar: en `workflow_run` no hay
+      #    inputs, asi que el respaldo ganaba y la NOCHE SIGUIENTE A FUSIONAR
+      #    habria borrado su primera tanda sin que nadie mirase. Lo caza
+      #    test_comprimir_keepa.py, seccion (I), para que no vuelva.
+      #
+      #    La forma `A && B || C` de GitHub: si el evento no es dispatch, la
+      #    izquierda es falsa y queda 'ensayo'. Y si es dispatch pero el input
+      #    llega vacio, tambien queda 'ensayo'. Falla CERRADO por los dos lados.
+      MODO:   ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.modo || 'ensayo' }}
       DIAS:   ${{ github.event.inputs.dias   || '2' }}
       LIMITE: ${{ github.event.inputs.limite || '20' }}
 

@@ -131,6 +131,36 @@ eq('(H) y cruza contra el bucket correcto',
 eq('(H) con el prefijo de la carpeta a los dos lados',
    _sql.count("'keepa_escaparate/' ||"), 2)
 
+# --- (I) 🔴 EL DISPARO AUTOMATICO NO PUEDE APLICAR ---------------------------
+# El fallo que esto caza es REAL y estuvo en el fichero: la primera version
+# resolvia MODO con `github.event.inputs.modo` y un respaldo al modo de aplicar.
+# En `workflow_run` no hay inputs, asi que ganaba el respaldo: la noche siguiente
+# a fusionar, el workflow habria BORRADO su primera tanda en produccion sin que
+# nadie mirase. Compila, pasa el YAML y no lo cazaba ningun test.
+#
+# 🔒 Y se mira el fichero SIN COMENTARIOS, que es la regla de la casa: el
+#    comentario que hay ahi arriba EXPLICA el fallo, y un grep sobre el texto
+#    crudo contaria esa explicacion como si fuera codigo. Es la trampa del 440px.
+import io                                                            # noqa: E402
+
+with io.open('.github/workflows/comprimir-keepa-antiguos.yml', encoding='utf-8') as fh:
+    _wf_crudo = fh.read()
+_wf = '\n'.join(l for l in _wf_crudo.split('\n') if not l.lstrip().startswith('#'))
+
+_LINEA_MODO = ("MODO:   ${{ github.event_name == 'workflow_dispatch' "
+               "&& github.event.inputs.modo || 'ensayo' }}")
+eq('(I) 🔴 el MODO por defecto es ensayo, y va guardado por el evento',
+   _wf.count(_LINEA_MODO), 1)
+eq('(I) 🔴 (el fallo que hubo) ningun respaldo a aplicar en el CODIGO',
+   _wf.count("|| 'aplicar'"), 0)
+# Y que el ancla del despojado sirve de algo: el fichero crudo SI menciona la
+# palabra en su comentario, el despojado no. Sin esto, el 0 de arriba podria
+# estar saliendo verde simplemente porque nadie escribio nunca esa palabra.
+eq('(I) el fichero crudo SI habla de aplicar (en el comentario)',
+   'aplicar' in _wf_crudo, True)
+eq('(I) 🔴 … y en el despojado solo queda como opcion del menu MANUAL',
+   _wf.count('aplicar'), 2)   # medido: la `description:` y el `options:` del input `modo`
+
 print()
 if fallos:
     print(f'❌ {len(fallos)} FALLOS: ' + ', '.join(fallos))
