@@ -50,6 +50,11 @@ on:
       limite:
         description: 'Maximo de ficheros en esta tanda (0 = sin limite)'
         default: '20'
+      sin_hist:
+        description: 'Los que el historico NO cita (UPDATE de 0 filas): posponer = a su tanda final · incluir = ESTA es esa tanda'
+        type: choice
+        options: [posponer, incluir]
+        default: posponer
 
 concurrency:
   # 🔒 Nunca dos pasadas a la vez sobre el mismo buzon: la segunda veria un
@@ -87,6 +92,10 @@ jobs:
       MODO:   ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.modo || 'ensayo' }}
       DIAS:   ${{ github.event.inputs.dias   || '2' }}
       LIMITE: ${{ github.event.inputs.limite || '20' }}
+      # Sin input (o sea, en el disparo automatico) -> `posponer`, que es el lado
+      # conservador: los de 0 filas nunca entran por accidente en una tanda que
+      # no los esperaba.
+      SIN_HIST: ${{ github.event.inputs.sin_hist || 'posponer' }}
 
     steps:
       - name: 1) Checkout
