@@ -151,10 +151,17 @@ jobs:
       - name: 18) test_cerrojo4_nivel_superior.py
         run: python -u test_cerrojo4_nivel_superior.py
 
-      - name: 19) test_disparar.mjs
+      # El banco de la pasada que comprime los CSV antiguos del buzon de Keepa.
+      # Prueba a quien toca y -- lo que importa -- a quien NO: el fichero que
+      # cita la tabla viva `keepa_escaparate`, que el procesador copiara al
+      # historico en su proxima pasada. Cada guarda se prueba tambien ROTA.
+      - name: 19) test_comprimir_keepa.py
+        run: python -u test_comprimir_keepa.py
+
+      - name: 20) test_disparar.mjs
         run: node test_disparar.mjs
 
-      - name: 20) Censo - ningun test se queda sin correr
+      - name: 21) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
         #    demas se lee como si lo cubriera. Aqui registrar un test es un paso
@@ -180,6 +187,7 @@ jobs:
             test_guarda_no_retroceder.py
             test_cerrojo4_nivel_superior.py
             test_disparar.mjs
+            test_comprimir_keepa.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).

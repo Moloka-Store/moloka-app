@@ -1,0 +1,141 @@
+name: Moloka - Comprimir CSV antiguos de Keepa
+
+# ============================================================================
+# 🔴 POR QUE CUELGA DEL BACKUP Y NO DE UN CRON PROPIO
+#   Este workflow BORRA originales. La unica red que hay debajo es la copia en
+#   Cloudflare R2 que deja `backup-bd.yml` (paso 6), y esa copia se hace
+#   `aws s3 sync` SIN `--delete` a proposito -- o sea que lo que ya subio a R2
+#   sobrevive aunque se borre en Supabase.
+#
+#   Encadenarlo por `workflow_run` a que el backup TERMINE EN VERDE convierte
+#   esa red en una precondicion en vez de en una suposicion: no se comprime
+#   nada que no acabe de copiarse a R2 esta misma noche. Un cron independiente
+#   podria correr la noche que el backup fallo, que es justo la noche en la que
+#   no hay que borrar nada.
+#
+# 🔒 Y POR ESO NO VA DENTRO DE backup-bd.yml. Si esto se cayera, no puede
+#    arrastrar al backup: la copia es mas importante que el espacio. Workflows
+#    separados, uno depende del otro, y el que manda es el backup.
+#
+# 🔒 TAMPOCO VA PEGADO A procesar-keepa-escaparate.yml, que era la otra opcion
+#    obvia. Ese corre cuando Fernando sube un export -- justo cuando hay un
+#    fichero recien llegado y el buzon esta en su momento mas delicado. La
+#    ventana de DIAS ya lo protege, pero no hay ninguna razon para acercar un
+#    borrado al momento de la carga.
+#
+# LA VENTANA. DIAS=2: el procesador coge "el mas reciente" y filtra por
+# `.endswith('.csv')`, asi que un `.csv.gz` desaparece de su listado. Dos dias
+# es margen de sobra para que la pasada nunca alcance a un fichero en juego.
+# (Y ademas el script excluye SIEMPRE lo que cite la tabla viva; ver su cabecera.)
+#
+# LIMITE=20 en la corrida automatica: por tandas, no porque no quepa -- los 67
+# ficheros en alcance ocupan 16,2 MB comprimidos y hay ~151 MiB libres -- sino
+# porque una tanda corta hace barato el arreglo si algo sale mal.
+# ============================================================================
+
+on:
+  workflow_run:
+    workflows: ["Moloka - Backup BD"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: 'ensayo = solo dice que haria · aplicar = comprime y borra · guarda = solo el chequeo'
+        type: choice
+        options: [ensayo, aplicar, guarda]
+        default: ensayo
+      dias:
+        description: 'Antiguedad minima para tocar un fichero (dias)'
+        default: '2'
+      limite:
+        description: 'Maximo de ficheros en esta tanda (0 = sin limite)'
+        default: '20'
+
+concurrency:
+  # 🔒 Nunca dos pasadas a la vez sobre el mismo buzon: la segunda veria un
+  #    estado a medias (un .gz subido y su .csv todavia vivo) y podria decidir
+  #    sobre el. `cancel-in-progress: false` a proposito: una pasada a medio
+  #    hacer se termina, no se corta.
+  group: comprimir-keepa-antiguos
+  cancel-in-progress: false
+
+jobs:
+  comprimir:
+    # 🔴 Solo si el backup de esta noche acabo BIEN. Un `completed` incluye
+    #    `failure` y `cancelled`: sin este `if`, la noche que el backup se cae
+    #    seria exactamente la noche en la que borrariamos sin red.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      PYTHONIOENCODING: utf-8
+      # 🔴 EL DISPARO AUTOMATICO NO BORRA NUNCA. `workflow_run` corre SIEMPRE en
+      #    ensayo y deja su informe; la pasada de verdad solo sale de un
+      #    `workflow_dispatch` MANUAL. Un borrado en produccion desatendido no
+      #    pasa en esta casa: lo decide Fernando y se ejecuta con el delante.
+      #
+      #    La primera version de este fichero cayo en `github.event.inputs.modo`
+      #    a secas con respaldo al modo de aplicar: en `workflow_run` no hay
+      #    inputs, asi que el respaldo ganaba y la NOCHE SIGUIENTE A FUSIONAR
+      #    habria borrado su primera tanda sin que nadie mirase. Lo caza
+      #    test_comprimir_keepa.py, seccion (I), para que no vuelva.
+      #
+      #    La forma `A && B || C` de GitHub: si el evento no es dispatch, la
+      #    izquierda es falsa y queda 'ensayo'. Y si es dispatch pero el input
+      #    llega vacio, tambien queda 'ensayo'. Falla CERRADO por los dos lados.
+      MODO:   ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.modo || 'ensayo' }}
+      DIAS:   ${{ github.event.inputs.dias   || '2' }}
+      LIMITE: ${{ github.event.inputs.limite || '20' }}
+
+    steps:
+      - name: 1) Checkout
+        uses: actions/checkout@v4
+
+      - name: 2) Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 3) Dependencias
+        # Las mismas que los procesadores: `supabase` para Storage y psycopg2
+        # para el UPDATE del historico. requirements.txt no lleva psycopg2.
+        run: pip install --quiet psycopg2-binary supabase==2.31.0
+
+      - name: 4) La guarda ANTES (si ya venimos rotos, no se toca nada)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          DB_URL:       ${{ secrets.SUPABASE_DB_URL }}
+          MODO: guarda
+        run: python -u comprimir_keepa_antiguos.py
+
+      - name: 5) La pasada
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          DB_URL:       ${{ secrets.SUPABASE_DB_URL }}
+        run: python -u comprimir_keepa_antiguos.py
+
+      - name: 6) La guarda DESPUES
+        # 🔒 El paso 5 ya la corre al final, pero se repite aqui como paso
+        #    SUELTO: si el 5 muriera a mitad por cualquier razon, su guarda
+        #    final no llegaria a ejecutarse y el workflow acabaria rojo sin
+        #    decir en que estado quedo el historico. Este paso lo dice.
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          DB_URL:       ${{ secrets.SUPABASE_DB_URL }}
+          MODO: guarda
+        run: python -u comprimir_keepa_antiguos.py
+
+      - name: 7) Telegram FALLO
+        if: failure()
+        env:
+          TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          curl -s "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="FALLO comprimir-keepa-antiguos - mirar GitHub Actions" >/dev/null
