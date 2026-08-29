@@ -28,9 +28,34 @@ name: Moloka - Comprimir CSV antiguos de Keepa
 # es margen de sobra para que la pasada nunca alcance a un fichero en juego.
 # (Y ademas el script excluye SIEMPRE lo que cite la tabla viva; ver su cabecera.)
 #
-# LIMITE=20 en la corrida automatica: por tandas, no porque no quepa -- los 67
-# ficheros en alcance ocupan 16,2 MB comprimidos y hay ~151 MiB libres -- sino
+# LIMITE=20 en la corrida automatica: por tandas, no porque no quepa -- los 64
+# ficheros en alcance ocupan 15,6 MB comprimidos y hay ~151 MiB libres -- sino
 # porque una tanda corta hace barato el arreglo si algo sale mal.
+#
+# ============================================================================
+# 🔴 SIN_HIST=incluir NO SE EJECUTA. NUNCA. Y NO ES UN DESCUIDO.
+# ----------------------------------------------------------------------------
+#   Decidido por Fernando el 29-ago-2026. Tres ficheros del buzon NO los cita el
+#   historico -- los `ResumenDelVendedor-9` (España) del 16, 20 y 23 de julio --
+#   y se quedan en `.csv` PARA SIEMPRE. El plan son 64 ficheros, no 67.
+#
+#   POR QUE, que es lo que hay que entender antes de "arreglarlo":
+#   · Son los unicos candidatos REALES a reprocesarse. En concreto, el `-9` del
+#     20-jul es el que taparia el hueco de España de esa fecha en
+#     `keepa_escaparate_hist` (medido: el 2026-07-20 tiene de/fr/it y le falta
+#     `es`). Reprocesar un fichero es subirlo al buzon y lanzar el procesador.
+#   · Y `procesador_keepa_escaparate.py` filtra por `.endswith('.csv')`: un
+#     `.csv.gz` DESAPARECE de su listado. O sea que comprimirlos es cerrar la
+#     unica puerta por la que ese hueco se puede tapar.
+#   · Lo que se gana comprimiendolos: 2,82 MB (3,49 MB -> 0,67 MB). Lo que se
+#     pierde: la posibilidad de arreglar el histórico. No hay color.
+#
+#   🔒 Por eso `posponer` no es un "de momento": es el modo PERMANENTE. La
+#      opcion `incluir` se deja en el menu por si algun dia se revisa la
+#      decision -- pero revisarla es una decision de Fernando, no una tarea de
+#      limpieza. Si estas leyendo esto porque te chirria que sobren tres CSV sin
+#      comprimir: sobran a proposito, y esta escrito aqui justamente para que no
+#      los toques.
 # ============================================================================
 
 on:
@@ -51,7 +76,7 @@ on:
         description: 'Maximo de ficheros en esta tanda (0 = sin limite)'
         default: '20'
       sin_hist:
-        description: 'Los que el historico NO cita (UPDATE de 0 filas): posponer = a su tanda final · incluir = ESTA es esa tanda'
+        description: 'DEJALO EN posponer. Los 3 que el historico no cita se quedan en .csv para siempre (ver la cabecera). incluir = NO SE USA'
         type: choice
         options: [posponer, incluir]
         default: posponer

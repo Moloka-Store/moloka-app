@@ -191,8 +191,8 @@ eq('(J) 🔴 posponiendo, la tanda de 3 son los CITADOS, en orden',
               'KeepaExport-2026-07-20-ResumenDelVendedor-8-X.csv'])
 eq('(J) 🔴 … y NINGUNO de los de 0 filas se cuela',
    sorted(set(elegidos) & SIN_H), [])
-eq('(J) el motivo dice que van a su tanda, y como pedirla',
-   'SIN_HIST=incluir' in dict(descartes)[CERO_16], True)
+eq('(J) el motivo dice que estan fuera A PROPOSITO, no por descuido',
+   'FUERA DEL PLAN A PROPOSITO' in dict(descartes)[CERO_16], True)
 
 # La tanda final: `incluir` es lo que los saca, y son solo ellos.
 solo_ceros = [obj(CERO_16, 40), obj(CERO_20, 40)]
@@ -209,6 +209,21 @@ eq('(J) 🔴 … y con posponer no quedaria ninguno (no es un silencio: es la gu
 elegidos_def, _ = seleccionar_antiguos(REALES, set(), AHORA, dias=2, limite=3,
                                        sin_hist=SIN_H)
 eq('(J) 🔴 el defecto es POSPONER, no incluir', sorted(set(elegidos_def) & SIN_H), [])
+
+# --- (K) 🔴 Y EL WORKFLOW TAMPOCO PUEDE CAER EN `incluir` --------------------
+# La decision de Fernando (29-ago-2026) es que los 3 se quedan en .csv PARA
+# SIEMPRE, porque son los unicos reprocesables y el procesador filtra por
+# `.endswith('.csv')`. `posponer` no es un "de momento": es el modo permanente.
+# Se ancla en el fichero SIN COMENTARIOS, que es donde el motivo esta escrito
+# largo y contaria como codigo en un grep crudo.
+eq('(K) el input nace en posponer', _wf.count('default: posponer'), 1)
+eq('(K) 🔴 y sin input (disparo automatico) tambien',
+   _wf.count("SIN_HIST: ${{ github.event.inputs.sin_hist || 'posponer' }}"), 1)
+eq('(K) 🔴 ningun respaldo a incluir en el CODIGO', _wf.count("|| 'incluir'"), 0)
+# La otra mitad del ancla: el fichero crudo SI nombra `incluir` (en el motivo
+# escrito). Sin esto, el 0 de arriba podria ser verde por no mencionarse nunca.
+eq('(K) el crudo SI habla de incluir (el motivo, en los comentarios)',
+   'incluir' in _wf_crudo, True)
 
 print()
 if fallos:

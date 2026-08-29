@@ -121,18 +121,24 @@ def seleccionar_antiguos(objetos, citados_en_viva, ahora, dias=2, limite=0,
                        cuyo UPDATE tocaria 0 filas.
     `posponer_sin_hist`: si True (por defecto), esos se dejan para el final.
 
-    🔴 POR QUE LOS DE «0 FILAS» VAN APARTE. Es de Fernando, 29-ago-2026, y la
-       razon es buena: su UPDATE toca 0 filas y eso es CORRECTO -- el script lo
-       da por bueno porque compara contra lo contado antes, no contra "mas de
-       0". Pero mezclado en una tanda con otros, ese 0 se lee igual que un
-       fallo silencioso: quien lo mira no puede saber si es lo esperado o es
-       que algo no caso. Sacandolos a una tanda propia y ANUNCIADA, su 0 pasa a
-       ser el resultado que se iba a buscar. Es "o GRITA o no pinta veredicto"
-       aplicado a la ausencia.
-       🔬 Medido ese dia: son 3 de los 67 (los ResumenDelVendedor-9 del 16, 20
-          y 23 de julio), y el orden natural del script -- por nombre -- ponia
-          uno de ellos EL PRIMERO DE TODOS. O sea que la primera tanda
-          supervisada habria empezado justo por el caso ambiguo.
+    🔴 LOS DE «0 FILAS» SE QUEDAN EN .csv PARA SIEMPRE. Decidido por Fernando el
+       29-ago-2026, y `posponer` es por tanto el modo PERMANENTE, no un "de
+       momento". El plan son 64 ficheros, no 67.
+       · Son los 3 `ResumenDelVendedor-9` (España) del 16, 20 y 23 de julio, los
+         unicos del buzon que el historico no cita.
+       · Y son los unicos candidatos REALES a reprocesarse: el `-9` del 20-jul
+         es el que taparia el hueco de `es` de esa fecha en el historico. Como
+         el procesador filtra por `.endswith('.csv')`, comprimirlos cerraria la
+         unica puerta por la que ese hueco se puede tapar. Se gana 2,82 MB y se
+         pierde el arreglo: no hay color. El motivo largo, en el workflow.
+       · Y ademas, aunque no fuera permanente, su 0 no se puede mezclar: un
+         UPDATE de 0 filas es CORRECTO aqui -- el script lo da por bueno porque
+         compara contra lo contado antes, no contra "mas de 0" -- pero entre
+         otros se lee igual que un fallo silencioso. Es "o GRITA o no pinta
+         veredicto" aplicado a la ausencia.
+       🔬 Y el orden natural -- por nombre -- ponia uno de ellos EL PRIMERO DE
+          TODOS: la primera tanda supervisada habria empezado justo por el caso
+          ambiguo. Por eso esto es una guarda y no una preferencia.
 
     `descartes` lleva el motivo de cada exclusion: una pasada que dice "he
     tocado 40" sin decir por que dejo 31 no se puede auditar.
@@ -150,8 +156,8 @@ def seleccionar_antiguos(objetos, citados_en_viva, ahora, dias=2, limite=0,
             descartes.append((nombre, 'CITADO EN LA TABLA VIVA keepa_escaparate'))
             continue
         if posponer_sin_hist and nombre in sin_hist:
-            descartes.append((nombre, 'SIN FILAS EN EL HISTORICO: va en su tanda propia, '
-                                      'anunciada (SIN_HIST=incluir)'))
+            descartes.append((nombre, 'FUERA DEL PLAN A PROPOSITO: el historico no lo cita y '
+                                      'se queda en .csv (es reprocesable; ver el workflow)'))
             continue
         cuando = _fecha_de(o)
         if cuando is None:
