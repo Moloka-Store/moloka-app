@@ -84,7 +84,7 @@ jobs:
       #    La forma `A && B || C` de GitHub: si el evento no es dispatch, la
       #    izquierda es falsa y queda 'ensayo'. Y si es dispatch pero el input
       #    llega vacio, tambien queda 'ensayo'. Falla CERRADO por los dos lados.
-      MODO:   ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.modo || 'ensayo' }}
+      MODO:   ${{ github.event.inputs.modo   || 'aplicar' }}   # ROTO A PROPOSITO: se revierte en el commit siguiente
       DIAS:   ${{ github.event.inputs.dias   || '2' }}
       LIMITE: ${{ github.event.inputs.limite || '20' }}
 
