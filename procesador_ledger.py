@@ -126,7 +126,11 @@ TIPADAS = [
 CABECERA_ESPERADA = [h for h, _ in TIPADAS]
 
 # Columnas de la tabla en el orden del INSERT (id IDENTITY y procesado_at aparte).
-COLS_DB = [c for _, c in TIPADAS] + ['fichero', 'crudo']
+COLS_DB = [c for _, c in TIPADAS] + ['fichero']
+# 🔴 SIN 'crudo' desde el encargo de almacenamiento (2-sep-2026): la columna sigue viva en
+#   la tabla (la quita una migración aparte, con Fernando delante), pero desde aquí ya no se
+#   escribe. Medido antes de tocarlo: ninguna vista ni función de public la lee, y ningún
+#   .py del repo la leía de vuelta (solo la escribían éste y procesador_transacciones.py).
 
 # Los 6 Event Type medidos; otro valor NO aborta, se GRITA (Guarda 6).
 EVENT_TYPES_CONOCIDOS = {'Shipments', 'WhseTransfers', 'Receipts',
@@ -258,10 +262,6 @@ def analizar(texto, fichero):
         if event_type and event_type not in EVENT_TYPES_CONOCIDOS:
             event_desconocidos[event_type] += 1
 
-        crudo = {}
-        for i, h in enumerate(cabecera):
-            crudo[h] = _clean(fila[i]) if i < len(fila) else ''
-
         movimientos.append({
             'fecha': fecha,
             'fnsku': txt(celda(fila, 'FNSKU')),
@@ -278,7 +278,6 @@ def analizar(texto, fichero):
             'reconciled_qty': ent_leniente(celda(fila, 'Reconciled Quantity')),
             'unreconciled_qty': ent_leniente(celda(fila, 'Unreconciled Quantity')),
             'fecha_hora': marca_tiempo(celda(fila, 'Date and Time')),
-            'crudo': crudo,
         })
 
     fecha_min = min(mv['fecha'] for mv in movimientos)
@@ -544,7 +543,7 @@ def main():
         [mv['fecha'], mv['fnsku'], mv['asin'], mv['msku'], mv['titulo'],
          mv['event_type'], mv['reference_id'], mv['quantity'], mv['fulfillment_center'],
          mv['disposition'], mv['reason'], mv['country'], mv['reconciled_qty'],
-         mv['unreconciled_qty'], mv['fecha_hora'], fichero, Json(mv['crudo'])]
+         mv['unreconciled_qty'], mv['fecha_hora'], fichero]
         for mv in movs_ef
     ]
     execute_values(

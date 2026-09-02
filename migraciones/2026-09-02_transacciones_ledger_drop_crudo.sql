@@ -1,0 +1,83 @@
+-- ============================================================================
+-- MIGRACIÓN 2026-09-02 · transacciones_movimientos y ledger_movimientos dejan de
+-- guardar `crudo`
+-- ----------------------------------------------------------------------------
+-- SEGUNDA mitad de "mover, no borrar" el crudo de estas dos tablas (encargo "que la
+-- base deje de crecer sin techo", PR B). La PRIMERA mitad (código, ya en `main` antes
+-- de esta migración) enseñó a procesador_transacciones.py y procesador_ledger.py a NO
+-- meter `crudo` en el INSERT. Con esa mitad puesta, las dos tablas ya NO reciben
+-- `crudo` en las filas nuevas. Esta migración quita la columna, ya inútil, de las
+-- filas VIEJAS.
+--
+-- 🔒 ORDEN OBLIGATORIO — CÓDIGO ANTES QUE MIGRACIÓN, igual que hizo
+--   2026-07-29_keepa_hist_drop_crudo.sql con keepa_escaparate_hist. Si este DROP se
+--   aplicara ANTES de fusionar el cambio de los procesadores, la siguiente carga de
+--   transacciones o de ledger fallaría: el INSERT nombra `crudo` en su lista de
+--   columnas (COLS_DB) y la columna ya no estaría.
+--
+-- 🔒 LA CONDICIÓN DE ESTE DROP — el fichero fuente de cada carga se CONSERVA. `crudo`
+--   era la fila entera del CSV (cabecera→valor) del Custom Transaction Report o del
+--   ledger; ese mismo CSV vive permanente en Storage (bucket `informes`, carpetas
+--   `transacciones/` y `ledger/` — BUCKET/CARPETA de cada procesador) y ese bucket
+--   está dentro del backup nocturno a R2 (backup-bd.yml, paso 5-6). No se pierde
+--   NADA que no se pudiera recuperar re-descargando y reprocesando el fichero
+--   original. Misma garantía que la migración del 29-jul para keepa_escaparate_hist,
+--   con el mismo riesgo: si algún día ese bucket dejara de respaldarse, este DROP
+--   dejaría de ser gratis. La regla que lo sostiene (backup-bd.yml cubre `informes`)
+--   sigue en CLAUDE.md.
+--
+-- 🔒 COMPROBADO ANTES DE ESCRIBIR ESTA MIGRACIÓN (2-sep-2026, producción):
+--   · Ninguna vista ni función de `public` lee `crudo` de ninguna de las dos tablas.
+--   · Ningún .py del repo (ni el único .ipynb que queda en scripts/legacy/, que no
+--     menciona ninguna de las dos tablas) lee `crudo` de vuelta: los únicos accesos
+--     por clave ('crudo') que mencionan transacciones_movimientos o
+--     ledger_movimientos eran las propias escrituras de procesador_transacciones.py
+--     y procesador_ledger.py (ya quitadas). Los otros hits de 'crudo' en ficheros que
+--     nombran alguna de las dos tablas (procesador_custom_analytics.py,
+--     moloka_escaner_nube.py) son de OTRAS tablas (demanda_asin, sondeo_keepa) que
+--     comparten el nombre de columna por coincidencia, no la misma columna.
+--   · `select tgname from pg_trigger where not tgisinternal and tgrelid in
+--     ('transacciones_movimientos'::regclass, 'ledger_movimientos'::regclass);` no
+--     devuelve ninguna fila: no hay disparadores sobre ninguna de las dos que
+--     pudieran depender de `crudo`.
+--   Sin ninguna de estas tres cosas, este DROP no se habría escrito: se habría
+--   entregado solo el PR de medición y se habría explicado en el parte.
+--
+-- 🔴 EL AIRE NO SE LIBERA CON ESTE DROP. Es metadata-only (marca la columna como
+--   borrada, NO reescribe la tabla): el espacio de los ~20 MB (transacciones) y
+--   ~9,4 MB (ledger) de `crudo` vivo medidos el 2-sep-2026 se queda como hueco
+--   reutilizable DENTRO de la tabla hasta que algo la reescriba. Reclamarlo de
+--   verdad es un `VACUUM FULL ANALYZE` por tabla, como paso SUELTO — nunca en esta
+--   migración: pide un lock exclusivo mientras reescribe la tabla entera, y aquí solo
+--   cabe DDL de metadata (lock_timeout corto). Va en
+--   .github/workflows/vacuum-full.yml, workflow_dispatch, con Fernando delante.
+--
+-- 🔒 NO SE APLICA EN ESTE ENCARGO. Queda escrita y lista; la aplica quien tenga
+--   delante a Fernando, por aplicar-migracion.yml (staging → verificación SQL →
+--   producción → verificación SQL), DESPUÉS de que una carga de transacciones y una
+--   de ledger hayan terminado bien con el código nuevo (así se ve que el INSERT sin
+--   `crudo` funciona ANTES de quitarle la columna a la tabla).
+--
+-- 🔒 IDEMPOTENTE (`IF EXISTS`): aplicarla dos veces no cambia nada.
+-- 🔒 lock_timeout corto (criterio DDL de la casa), al aplicar, no en el fichero:
+--       SET lock_timeout = '5s';
+--   DROP COLUMN pide AccessExclusiveLock, pero al ser metadata-only el lock es de
+--   milisegundos: aun así falla rápido en vez de encolar si Elena tiene la tabla
+--   ocupada (aunque a estas dos tablas solo escribe la carga nocturna/manual de
+--   transacciones y ledger, nunca la app).
+-- ============================================================================
+
+ALTER TABLE IF EXISTS transacciones_movimientos DROP COLUMN IF EXISTS crudo;
+ALTER TABLE IF EXISTS ledger_movimientos        DROP COLUMN IF EXISTS crudo;
+
+-- ── MEDIR EL RESULTADO tras aplicar (§3c del encargo, las mismas dos cifras):
+--   select 'transacciones_movimientos' as tabla,
+--          pg_total_relation_size('transacciones_movimientos') as disco_bytes,
+--          (select sum(pg_column_size(t.*)) from transacciones_movimientos t) as vivo_bytes,
+--          (select n_dead_tup from pg_stat_user_tables where relname='transacciones_movimientos') as n_dead_tup
+--   union all
+--   select 'ledger_movimientos',
+--          pg_total_relation_size('ledger_movimientos'),
+--          (select sum(pg_column_size(t.*)) from ledger_movimientos t),
+--          (select n_dead_tup from pg_stat_user_tables where relname='ledger_movimientos');
+--   -- disco_bytes NO habrá bajado todavía (ver arriba): el VACUUM FULL es aparte.

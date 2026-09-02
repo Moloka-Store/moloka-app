@@ -1,0 +1,202 @@
+name: Moloka - VACUUM FULL (con Fernando delante)
+
+# ============================================================================
+# QUÉ ES Y POR QUÉ EXISTE. Encargo "que la base deje de crecer sin techo" (§5, PR B).
+# La migración 2026-09-02_transacciones_ledger_drop_crudo.sql quita la columna
+# `crudo`, pero DROP COLUMN es metadata-only: NO reescribe la tabla, así que el
+# hueco NO se libera solo. Lo único que devuelve ese aire de verdad es un
+# VACUUM FULL — y VACUUM FULL no cabe en aplicar-migracion.yml (Postgres no lo
+# admite dentro de una transacción; el cerrojo 4 de ese workflow lo rechaza a
+# propósito). De ahí este workflow aparte, con sus propios cerrojos.
+#
+# 🔴 SOLO workflow_dispatch. Nunca cron, nunca workflow_run. VACUUM FULL:
+#   · pide un ACCESS EXCLUSIVE LOCK sobre la tabla mientras corre — nadie lee ni
+#     escribe esa tabla hasta que termina. Sobre transacciones_movimientos o
+#     ledger_movimientos eso es tolerable (solo escribe la carga manual/nocturna
+#     de esas dos, nunca la app), pero no es algo que deba disparar nadie sin
+#     saber que lo está haciendo.
+#   · REESCRIBE la tabla entera: pide temporalmente su tamaño en disco EXTRA
+#     (la copia vieja y la nueva conviven hasta el commit final). El paso 2 de
+#     abajo lo comprueba ANTES de tocar nada.
+#   · Se lanza FUERA de horas de carga y CON FERNANDO DELANTE (regla del
+#     encargo y de CLAUDE.md §6: nada se aplica ni se ejecuta en producción sin
+#     él). Este workflow no tiene manera de comprobar eso por código — lo
+#     garantiza quien lo despacha, igual que el aviso de aplicar-migracion.yml
+#     antes de escribir en producción.
+#
+# 🔴 SOLO PRODUCCIÓN. A diferencia de aplicar-migracion.yml, este workflow no
+#   tiene selector de entorno: staging se restaura cada noche desde el backup
+#   (restaurar-staging.yml) y vacuum-full.yml no aporta nada ahí. Un solo
+#   secreto, SUPABASE_DB_URL, igual que backup-bd.yml.
+#
+# 🔴 escaner_memoria NUNCA por defecto. Es la tabla del escáner (§6 del
+#   encargo: "escaner_memoria y todo lo del escáner" NO se toca en este
+#   encargo). El input `confirmar_escaner` existe para el día que alguien
+#   decida vaciarla de verdad y lo pida explícitamente — no para que este
+#   workflow lo haga solo porque alguien la escribió en la lista sin pensarlo.
+#
+# 🔒 LA LISTA DE TABLAS SE VALIDA CONTRA UN IDENTIFICADOR SEGURO antes de que
+#   una sola letra llegue a SQL. `psql` no admite parametrizar un NOMBRE de
+#   tabla como si fuera un valor (los `$1` solo bindan valores, no
+#   identificadores), así que la tabla se interpola en el texto del SQL. Sin
+#   esta guarda, un input como `x; drop table productos; --` sería inyección
+#   de SQL contra PRODUCCIÓN. Mismo criterio que el cerrojo 3 de
+#   aplicar-migracion.yml (el nombre del fichero de migración), aplicado aquí
+#   a nombres de tabla: solo minúsculas, dígitos y `_`, y no puede empezar por
+#   un dígito.
+# ============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      tablas:
+        description: 'Tablas a vaciar de verdad, separadas por comas (identificadores de public, sin comillas)'
+        type: string
+        default: 'transacciones_movimientos,ledger_movimientos'
+      confirmar_escaner:
+        description: 'Poner en true SOLO si la lista de arriba lleva escaner_memoria a propósito'
+        type: boolean
+        default: false
+
+concurrency:
+  # Una sola pasada a la vez: dos VACUUM FULL concurrentes sobre la misma base
+  # no se ayudan, se estorban (los dos quieren el disco que el otro está
+  # liberando). cancel-in-progress: false — un VACUUM a medio hacer no se corta.
+  group: vacuum-full
+  cancel-in-progress: false
+
+jobs:
+  vacuum:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1) Instalar cliente Postgres 17
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common >/dev/null
+          yes '' | sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh >/dev/null 2>&1 || true
+          sudo apt-get install -y -qq postgresql-client-17 >/dev/null
+
+      # ── 2) Cerrojo: la lista de tablas son identificadores seguros ──────────
+      - name: 2) Cerrojo - validar la lista de tablas (nada que no sea un identificador)
+        env:
+          TABLAS: ${{ inputs.tablas }}
+          CONFIRMAR_ESCANER: ${{ inputs.confirmar_escaner }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TABLAS// }" ]; then
+            echo "::error::La lista de tablas viene vacía."; exit 1
+          fi
+          IFS=',' read -ra CRUDAS <<< "$TABLAS"
+          VALIDAS=()
+          for t in "${CRUDAS[@]}"; do
+            # trim de espacios sueltos ("a, b" -> "a" y "b")
+            t="$(echo "$t" | xargs)"
+            [ -z "$t" ] && continue
+            if ! printf '%s' "$t" | grep -qE '^[a-z_][a-z0-9_]{0,62}$'; then
+              echo "::error::'$t' no es un identificador de tabla válido (solo minúsculas, dígitos y '_', y no puede empezar por un dígito). No se toca nada."
+              exit 1
+            fi
+            if [ "$t" = "escaner_memoria" ] && [ "$CONFIRMAR_ESCANER" != "true" ]; then
+              echo "::error::'escaner_memoria' está en la lista pero 'confirmar_escaner' no es true."
+              echo "::error::Esta tabla NO se toca en este encargo (CLAUDE.md / §6) salvo que lo pidas a propósito."
+              echo "::error::Si de verdad quieres vaciarla, relanza con confirmar_escaner=true."
+              exit 1
+            fi
+            VALIDAS+=("$t")
+          done
+          if [ "${#VALIDAS[@]}" -eq 0 ]; then
+            echo "::error::Ninguna tabla válida tras limpiar la lista."; exit 1
+          fi
+          echo "Tablas a procesar (${#VALIDAS[@]}): ${VALIDAS[*]}"
+          printf '%s\n' "${VALIDAS[@]}" > /tmp/tablas.txt
+
+      # ── 3) Cerrojo: sitio suficiente ANTES de tocar nada ────────────────────
+      # VACUUM FULL reescribe la tabla entera: la copia vieja y la nueva conviven
+      # hasta el commit final, así que el peor caso es la base de HOY más el
+      # tamaño en disco de la tabla MÁS GRANDE de la lista (se procesan una a
+      # una, nunca a la vez). Se compara contra el techo del plan gratuito
+      # (500 MB) con margen.
+      # ⚠️ ESTO ES UNA APROXIMACIÓN, dicho a la cara: Postgres no expone por SQL
+      #   cuánto disco FÍSICO le queda libre al servidor gestionado de Supabase
+      #   (no es un `df` al que se pueda preguntar). Lo que se compara es la
+      #   única cifra que SÍ se puede medir por SQL — el tamaño lógico de la
+      #   base — contra el techo conocido del plan. Antes de una pasada real,
+      #   mira también el panel de Supabase (Database → Disk usage): ese SÍ ve
+      #   el disco físico.
+      - name: 3) Cerrojo - comprobar que hay sitio (aproximado, contra el techo del plan)
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          TECHO_MB=500
+          MARGEN_MB=20
+          BASE_BYTES=$(psql "$SUPABASE_DB_URL" -At -c "select pg_database_size(current_database());")
+          echo "Base HOY: $((BASE_BYTES/1048576)) MB (techo del plan: ${TECHO_MB} MB)"
+          MAYOR_BYTES=0
+          while read -r t; do
+            [ -z "$t" ] && continue
+            EXISTE=$(psql "$SUPABASE_DB_URL" -At -c "select (to_regclass('public.$t') is not null);")
+            if [ "$EXISTE" != "t" ]; then
+              echo "::error::'public.$t' no existe. No se toca nada."; exit 1
+            fi
+            D=$(psql "$SUPABASE_DB_URL" -At -c "select pg_total_relation_size('$t');")
+            echo "  $t: $((D/1048576)) MB en disco hoy"
+            if [ "$D" -gt "$MAYOR_BYTES" ]; then MAYOR_BYTES=$D; fi
+          done < /tmp/tablas.txt
+          PICO_MB=$(( (BASE_BYTES + MAYOR_BYTES) / 1048576 ))
+          echo "Pico estimado durante el VACUUM (base + tabla más grande de la lista): ${PICO_MB} MB"
+          if [ "$PICO_MB" -gt "$((TECHO_MB - MARGEN_MB))" ]; then
+            echo "::error::El pico estimado (${PICO_MB} MB) pasa del techo del plan menos margen ($((TECHO_MB - MARGEN_MB)) MB)."
+            echo "::error::No se lanza el VACUUM. Libera espacio antes (o sube de plan) y vuelve a intentarlo."
+            exit 1
+          fi
+          echo "Cerrojo OK: margen suficiente para el peor caso estimado."
+
+      # ── 4) Medir ANTES, vaciar tabla a tabla, medir DESPUÉS ─────────────────
+      # 🔴 Nunca en una transacción ni en --single-transaction: Postgres NO admite
+      #   VACUUM dentro de un BEGIN. Cada VACUUM va en su propia sentencia (`-c`
+      #   suelto), autocommit.
+      - name: 4) VACUUM FULL ANALYZE, tabla a tabla, con medida antes/después
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          medir() {
+            psql "$SUPABASE_DB_URL" -At -F',' -c "
+              select pg_total_relation_size('$1'),
+                     coalesce((select sum(pg_column_size(t.*)) from $1 t), 0),
+                     coalesce((select n_dead_tup from pg_stat_user_tables where relname='$1'), 0);"
+          }
+          {
+            echo "| tabla | disco ANTES | vivo ANTES | dead_tup ANTES | disco DESPUÉS | vivo DESPUÉS | dead_tup DESPUÉS |"
+            echo "|---|---|---|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          while read -r t; do
+            [ -z "$t" ] && continue
+            echo "=== $t ==="
+            ANTES=$(medir "$t")
+            D0=$(echo "$ANTES" | cut -d',' -f1); V0=$(echo "$ANTES" | cut -d',' -f2); N0=$(echo "$ANTES" | cut -d',' -f3)
+            echo "  antes: disco=$((D0/1048576)) MB  vivo=$((V0/1048576)) MB  dead_tup=$N0"
+
+            echo "  lanzando VACUUM (FULL, ANALYZE) $t ..."
+            SECONDS=0
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "VACUUM (FULL, ANALYZE) $t;"
+            echo "  hecho en ${SECONDS}s"
+
+            DESPUES=$(medir "$t")
+            D1=$(echo "$DESPUES" | cut -d',' -f1); V1=$(echo "$DESPUES" | cut -d',' -f2); N1=$(echo "$DESPUES" | cut -d',' -f3)
+            echo "  después: disco=$((D1/1048576)) MB  vivo=$((V1/1048576)) MB  dead_tup=$N1"
+            echo "  aire devuelto: $(((D0-D1)/1048576)) MB"
+
+            echo "| $t | $((D0/1048576)) MB | $((V0/1048576)) MB | $N0 | $((D1/1048576)) MB | $((V1/1048576)) MB | $N1 |" >> "$GITHUB_STEP_SUMMARY"
+          done < /tmp/tablas.txt
+
+      - name: 5) Telegram FALLO (solo si algo peta)
+        if: failure()
+        env:
+          TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          curl -s "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="FALLO VACUUM FULL MOLOKA - mirar GitHub Actions (vacuum-full)" >/dev/null
