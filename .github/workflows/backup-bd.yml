@@ -154,7 +154,79 @@ jobs:
             echo "  storage/$B/: $N objeto(s)"
           done
 
-      - name: 7) Telegram OK
+      # --- LA SERIE DIARIA DEL TAMAÑO (encargo "que la base deje de crecer", PR A) --
+      # 🔴 VA DESPUÉS DE LA COPIA A PROPÓSITO: si esto fallara, la BD y el Storage ya
+      #   están a salvo en R2 (lo crítico). Si falla, el workflow se pone en ROJO (sin
+      #   `|| true` ni `continue-on-error`) y el Telegram de FALLO de abajo lo dice: un
+      #   `exit 0` silencioso aquí dejaría un hueco en la serie sin que nadie se entere.
+      # 🔒 Una fila por `fecha` (PK de medida_base): ON CONFLICT (fecha) DO UPDATE, así
+      #   que relanzar el mismo día a mano (workflow_dispatch) recierra esa fila en vez
+      #   de duplicarla.
+      # 🔴 `storage_bytes`/`storage_por_bucket` salen de `storage.objects.metadata->>
+      #   'size'`, TODOS los buckets — no solo los dos que este workflow respalda
+      #   (`facturas-pdfs`, `informes`). `fotos-fabrica` no se copia a R2 (decisión
+      #   aparte, ver el paso 5) pero SÍ cuenta contra el 1 GB de Storage del plan
+      #   gratuito, y aquí es donde se ve.
+      # 🔴 `vivo_bytes` (sum(pg_column_size(t.*))) es un barrido COMPLETO de cada una de
+      #   las 12 tablas más grandes: a los ~250 MB de hoy sale barato. Si la base pasa
+      #   de 1 GB, este paso hay que cambiarlo (ver el comentario en la migración).
+      - name: 7) Medir el tamaño de la base y guardar la fila del día (medida_base)
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          cat > /tmp/medida_base.sql <<'SQL'
+          DO $$
+          DECLARE
+            r record;
+            v_tablas jsonb := '[]'::jsonb;
+            v_vivo bigint;
+            v_filas bigint;
+          BEGIN
+            FOR r IN
+              SELECT c.relname,
+                     pg_total_relation_size(c.oid) AS disco_bytes,
+                     coalesce(s.n_dead_tup, 0) AS dead_tup
+              FROM pg_class c
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+              LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid
+              WHERE n.nspname = 'public' AND c.relkind = 'r'
+              ORDER BY pg_total_relation_size(c.oid) DESC
+              LIMIT 12
+            LOOP
+              EXECUTE format('SELECT count(*), coalesce(sum(pg_column_size(t.*)), 0) FROM %I t', r.relname)
+                INTO v_filas, v_vivo;
+              v_tablas := v_tablas || jsonb_build_object(
+                'nombre', r.relname,
+                'disco_bytes', r.disco_bytes,
+                'vivo_bytes', v_vivo,
+                'filas', v_filas,
+                'dead_tup', r.dead_tup
+              );
+            END LOOP;
+
+            INSERT INTO medida_base (fecha, base_bytes, storage_bytes, storage_por_bucket, tablas)
+            VALUES (
+              current_date,
+              pg_database_size(current_database()),
+              (SELECT sum(coalesce((metadata->>'size')::bigint, 0)) FROM storage.objects),
+              (SELECT coalesce(jsonb_object_agg(bucket_id, bytes), '{}'::jsonb)
+                 FROM (SELECT bucket_id, sum(coalesce((metadata->>'size')::bigint, 0)) AS bytes
+                         FROM storage.objects GROUP BY bucket_id) s),
+              v_tablas
+            )
+            ON CONFLICT (fecha) DO UPDATE SET
+              base_bytes         = excluded.base_bytes,
+              storage_bytes      = excluded.storage_bytes,
+              storage_por_bucket = excluded.storage_por_bucket,
+              tablas             = excluded.tablas,
+              creado_en          = now();
+          END $$;
+          SQL
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f /tmp/medida_base.sql
+          echo "Fila de hoy escrita en medida_base."
+
+      - name: 8) Telegram OK
         env:
           TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -166,7 +238,7 @@ jobs:
             -d chat_id="${TELEGRAM_CHAT_ID}" \
             -d text="OK Backup Moloka (${FECHA}) -> R2: BD ${MB} MB + ${STORAGE_OBJETOS:-0} ficheros de Storage (${SMB} MB)" >/dev/null
 
-      - name: 8) Telegram FALLO (solo si algo peta)
+      - name: 9) Telegram FALLO (solo si algo peta)
         if: failure()
         env:
           TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
