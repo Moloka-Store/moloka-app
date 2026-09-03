@@ -1890,6 +1890,14 @@ for item in registros:
         _isd = ISD_PAIS[dom]
         pct = pct_comision_celda(d['ref_pct'], _isd) if d.get('ref_pct') is not None else None
         div = (1+d['iva']) if d.get('iva') else None
+        # 🔴 LA HOJA SOLO ECHA LA CUENTA SI `_paises_calc` TAMBIEN LA ECHO. Misma
+        # condicion que la Celda 8, palabra por palabra. Hasta hoy la hoja pedia
+        # menos: si Keepa no daba la tarifa FBA (o faltaba el PA), la columna
+        # Decision decia 'Sin datos' y la fila de al lado ensenaba un Beneficio
+        # calculado con esa celda VACIA leida como 0 -- o sea, de mas. Dos cuentas
+        # en la misma fila otra vez, por el otro lado.
+        hay_cuenta = bool(div and d.get('precio') and pct is not None
+                          and d.get('fee') is not None and item['_pa_efectivo'])
         ws.append([
             item['nombre'], item['ean'], item['asin'], item['marca'], item['_pa_efectivo'], dom,
             d['rank_act'] if d['rank_act'] and d['rank_act']>0 else None,
@@ -1901,9 +1909,9 @@ for item in registros:
              f"+{L['ISD s/ Fee Log. (€)']}{r}") if pct is not None else None,
             d['fee'], ALMACEN, None,
             (f"=({L['Precio venta (€)']}{r}/{div})-{L['PA (€)']}{r}-{L['Com. Amazon (€)']}{r}"
-             f"-{L['Fee Logística (€)']}{r}-{L['Almacén (€)']}{r}") if (div and d['precio'] and pct is not None) else None,
-            f"={L['Beneficio (€)']}{r}/{L['PA (€)']}{r}" if (div and d['precio'] and pct is not None and item['pa']) else None,
-            f"={L['Beneficio (€)']}{r}/{L['Precio venta (€)']}{r}" if (div and d['precio'] and pct is not None) else None,
+             f"-{L['Fee Logística (€)']}{r}-{L['Almacén (€)']}{r}") if hay_cuenta else None,
+            f"={L['Beneficio (€)']}{r}/{L['PA (€)']}{r}" if hay_cuenta else None,
+            f"={L['Beneficio (€)']}{r}/{L['Precio venta (€)']}{r}" if hay_cuenta else None,
             d['decision'], en_bd, amb,
             item.get('titulo_amz',''), item.get('coincide','?'),
             _cot.get('veredicto','—'), _cot.get('detalle','—'),
