@@ -223,11 +223,13 @@ CATALOGO = (
     "Funko Pop Gizmo,0889698498883,4.50,Funko,12\n"
     "Funko Pop Luke Red 5,0889698851909,5.20,Funko,4\n"
     "CASO CANONICO FR,0889698000004,2.00,Funko,9\n"
-    "Ultra Pro Fundas 100,0074427811266,1.10,Ultra Pro,30\n")
+    "Ultra Pro Fundas 100,0074427811266,1.10,Ultra Pro,30\n"
+    "SIN FEE FBA EN ES,0889698000005,3.00,Funko,7\n")
 RECADO = {"proveedor": "MIS_COMPRAS", "marca": "TODAS", "modo": "todo",
           "rank_maximo": 200000, "incluir_sin_rank": False}
 ASIN = {'0889698498883': 'B0GIZMO', '0889698851909': 'B0LUKE5',
-        '0889698000004': 'B0CANON', '0074427811266': 'B0FUNDA'}
+        '0889698000004': 'B0CANON', '0074427811266': 'B0FUNDA',
+        '0889698000005': 'B0SINFEE'}
 # precio de venta, ref_pct, fee FBA, rank. La fila 'B0CANON'/FR es la factura:
 # 12,13 x 15% = 1,8195 de comision, fee 5,29 -> ISD (1,8195+5,29) x 3% = 0,2133.
 PAIS = {
@@ -239,6 +241,11 @@ PAIS = {
                 'FR': (12.13, 15.0, 5.29, 15000)},
     'B0FUNDA': {'ES': (4.20, 15.0, 2.70, 88000), 'IT': (4.60, 8.0, 2.75, 120000),
                 'FR': (4.95, 8.0, 2.80, 140000)},
+    # 🔴 fee = None en ES: Keepa a veces no trae `fbaFees.pickAndPackFee`. Es la fila
+    #    que enseñaba un Beneficio calculado con la celda de fee VACIA (leida como 0)
+    #    mientras la columna Decision decia 'Sin datos'.
+    'B0SINFEE': {'ES': (19.99, 15.0, None, 5000), 'IT': (19.99, 15.0, 3.60, 5000),
+                 'FR': (19.99, 15.0, 3.70, 5000)},
 }
 
 
@@ -270,7 +277,8 @@ class _FakeKeepa:
                      'stats': {'current': cur, 'avg90': a90, 'buyBoxIsFBA': True,
                                'totalOfferCount': 5, 'buyBoxPrice': int(round(precio * 100))},
                      'referralFeePercentage': ref,
-                     'fbaFees': {'pickAndPackFee': int(round(fee * 100))},
+                     'fbaFees': ({'pickAndPackFee': int(round(fee * 100))}
+                                 if fee is not None else {}),
                      'monthlySold': 40, 'images': ['x.jpg']}]
         out = []                                   # Fase 1: EAN -> ASIN + rank
         for cod in items:
@@ -448,6 +456,34 @@ if _canon:
          round(_com_cel - _comision, 2), 0.21, 0)
     casi('(C2) y la columna ISD s/ Fee Log. lleva el 3% de la fee',
          celda(NUEVA, _canon), _fee * 0.03, 1e-12)
+
+# (C4) 🔴 SIN TARIFA FBA, LA HOJA NO ECHA LA CUENTA. `Celda 8` exige `fee is not
+# None` para calcular, asi que deja el pais en 'Sin datos'; la hoja pedia menos y
+# escribia igual una formula de Beneficio con la celda de fee VACIA leida como 0.
+# Dos cuentas en la misma fila, por el otro lado. Aqui se comprueba que callan las dos.
+_sin_fee = [_r for _r in range(2, ws.max_row + 1)
+            if str(ws.cell(row=_r, column=IDX['EAN']).value or '') == '0889698000005'
+            and ws.cell(row=_r, column=IDX['País']).value == 'ES']
+eq('(C4) la fila sin tarifa FBA esta en el Excel', len(_sin_fee), 1)
+if _sin_fee:
+    _r = _sin_fee[0]
+    eq('(C4) Keepa no dio fee -> la celda de Fee Logística esta vacia',
+       ws.cell(row=_r, column=IDX['Fee Logística (€)']).value, None)
+    eq('(C4) y _paises_calc no calculo ese pais',
+       CALC[('0889698000005', 'ES')].get('beneficio'), None)
+    eq("(C4) la columna Decisión dice 'Sin datos'",
+       ws.cell(row=_r, column=IDX['Decisión']).value, 'Sin datos')
+    eq('(C4) 🔴 y la hoja NO escribe Beneficio / ROI / Margen',
+       [ws.cell(row=_r, column=IDX[c]).value for c in ('Beneficio (€)', 'ROI', 'Margen')],
+       [None, None, None])
+    # La otra mitad del ancla: los paises del MISMO producto que si tienen fee si
+    # se calculan. Si no, este caso pasaria por estar el producto entero fuera.
+    _con_fee = [_r2 for _r2 in range(2, ws.max_row + 1)
+                if str(ws.cell(row=_r2, column=IDX['EAN']).value or '') == '0889698000005'
+                and ws.cell(row=_r2, column=IDX['País']).value in ('IT', 'FR')]
+    eq('(C4) los paises del mismo producto que SI traen fee siguen calculandose',
+       [ws.cell(row=_r2, column=IDX['Beneficio (€)']).value is not None for _r2 in _con_fee],
+       [True, True])
 
 # (C3) Fuera de Francia la columna nueva es 0 (no un hueco), y la comision no cambia.
 _ceros = [celda(NUEVA, _r) for _r in range(2, ws.max_row + 1)
