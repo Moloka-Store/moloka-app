@@ -73,7 +73,12 @@ jobs:
         # requirements.txt: sin `==` el runner instala lo ultimo cada manana.
         # httpx no se pone: lo trae supabase con la version que le sirve, y
         # fijarlo por libre es pedir un conflicto.
-        run: pip install --quiet psycopg2-binary openpyxl==3.1.5 supabase==2.31.0
+        #
+        # 🔴 `pandas` entro el 3-sep-2026 con `test_escaner_excel_isd.py`, que corre
+        #    `moloka_escaner_nube.py` ENTERO (con dobles de keepa/supabase) para leer
+        #    el .xlsx que sale. El escaner importa pandas en la linea 24, asi que el
+        #    cierre de imports de los tests ya lo alcanza. Version, la de requirements.
+        run: pip install --quiet psycopg2-binary openpyxl==3.1.5 supabase==2.31.0 pandas==3.0.0
 
       - name: 4) Los modulos importan
         # Va ANTES de los tests para que un fallo de dependencia se lea como lo
@@ -165,10 +170,16 @@ jobs:
       - name: 20) test_escaner_memoria.py
         run: python -u test_escaner_memoria.py
 
-      - name: 21) test_disparar.mjs
+      # El banco de que la hoja de Excel y la columna Decision hagan LA MISMA
+      # cuenta. Corre el escaner de punta a punta con dobles en memoria: sin red,
+      # sin secretos y sin tocar produccion (perfil MIS_COMPRAS, efimero).
+      - name: 21) test_escaner_excel_isd.py
+        run: python -u test_escaner_excel_isd.py
+
+      - name: 22) test_disparar.mjs
         run: node test_disparar.mjs
 
-      - name: 22) Censo - ningun test se queda sin correr
+      - name: 23) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
         #    demas se lee como si lo cubriera. Aqui registrar un test es un paso
@@ -196,6 +207,7 @@ jobs:
             test_disparar.mjs
             test_comprimir_keepa.py
             test_escaner_memoria.py
+            test_escaner_excel_isd.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).
