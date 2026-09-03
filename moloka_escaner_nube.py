@@ -76,6 +76,61 @@ KEEPA_ESPERAS = [5, 15, 40, 90]   # segundos entre intentos (backoff)
 LOTES_PERDIDOS = []          # [{'fase','etiqueta','lote','n_codigos'}]
 EANS_NO_PREGUNTADOS = set()  # ean_in cuyo lote de Fase 1 se perdio
 PAISES_PERDIDOS = []         # [(asin, dominio)] de Fase 2
+MEMORIA_LOTES_FALLIDOS = []  # lotes de escaner_memoria que NO se pudieron grabar (ni tras reintento)
+
+# ============================================================
+# LAS GUARDAS, COMO FUNCIONES Y NO COMO NOTAS
+# ------------------------------------------------------------
+# 🔴 Las cuatro decisiones de abajo estaban escritas EN LINEA, repetidas (las
+# salidas del arranque, cuatro veces) o metidas dentro de un 'if' largo, y por
+# eso se pudieron torcer sin que nadie lo viera: el blindaje anti-vaciado
+# comparaba contra TODA la memoria (ausentes incluidos) y llevaba meses sin
+# dejar que HEO marcara un solo agotado.
+# Aqui viven UNA sola vez y son PURAS: no tocan red, ni disco, ni globales.
+# Tienen banco: test_escaner_memoria.py las saca de ESTE fichero con `ast` (por
+# estructura, no por texto) y las EJECUTA. Si cambian, el banco se pone rojo.
+# ============================================================
+
+def abortar(motivo):
+    """Un run que NO escanea no es verde: sale en ROJO y con una linea grepable.
+    Las cuatro salidas del arranque (recado ilegible, proveedor desconocido,
+    catalogo ausente, columnas no detectadas) hacian sys.exit(0), o sea que
+    GitHub pintaba el run en VERDE y nadie se enteraba de que no se escaneo
+    nada. Un fallo que se ve igual que un exito no es un fallo: es un silencio."""
+    print(f"ESCANEO_NO_EJECUTADO: {motivo}")
+    sys.exit(1)
+
+
+def presentes_en_memoria(mem):
+    """Cuantas fichas de la memoria estan PRESENTES, que son las unicas que un
+    catalogo a medias puede hacer desaparecer. Las ausentes ya estan marcadas:
+    no tienen nada que perder, y contarlas solo infla el umbral del blindaje."""
+    return sum(1 for info in mem.values() if info.get('presente'))
+
+
+def catalogo_parcial(n_crudo, n_presentes, umbral):
+    """Devuelve (salta, corte). El blindaje anti-vaciado SALTA si el catalogo
+    crudo trae menos filas que `umbral` x los PRESENTES en memoria -> huele a
+    descarga incompleta y NO se marcan agotados. Sin presentes no hay nada que
+    blindar, y sin N_CRUDO (catalogo que no se leyo) tampoco hay con que medir."""
+    if n_crudo is None or n_presentes <= 0:
+        return False, None
+    corte = umbral * n_presentes
+    return n_crudo < corte, corte
+
+
+def eans_con_pais_perdido(paises_perdidos, infos):
+    """Los ean_in de los productos con ALGUN par (asin, dominio) perdido en la
+    Fase 2. Se les da el mismo trato que a EANS_NO_PREGUNTADOS: NO se graban en
+    la memoria, para que el pase 'nuevos' vuelva a mirarlos manana. Si dos EAN
+    comparten ASIN se saltan los dos: dejar fuera de mas solo cuesta un reintento;
+    dejar fuera de menos condena a ese pais a no volver a mirarse nunca."""
+    asins = {a for a, _dom in paises_perdidos}
+    if not asins:
+        return set()
+    return {str(it.get('ean')) for it in infos
+            if it.get('asin') in asins and it.get('ean') is not None}
+
 
 def keepa_query(items, **kwargs):
     """Llama a api.query con reintentos. Devuelve la lista de productos, o None
@@ -110,7 +165,7 @@ SOLICITUD = {}
 catalogo_local = None
 catalogo_nombre = None
 N_CRUDO = None            # nº de filas del catalogo crudo (para el blindaje anti-vaciado)
-UMBRAL_PARCIAL = 0.35     # si el catalogo crudo trae <35% de lo que hay en memoria -> NO marcar agotados
+UMBRAL_PARCIAL = 0.35     # si el catalogo crudo trae <35% de los PRESENTES en memoria -> NO marcar agotados
 try:
     objs = sb.storage.from_(BUCKET).list(CARPETA_ESCANER) or []
     for o in objs:
@@ -191,8 +246,8 @@ def _relanzarme():
 
 # --- Guardados de arranque: sin recado o sin catalogo no se hace nada ---
 if not SOLICITUD or not PROVEEDOR:
-    print('Buzon del escaner SIN recado valido: nada que escanear. Fin.')
-    sys.exit(0)
+    abortar(f'recado ilegible o ausente en el buzon {BUCKET}/{CARPETA_ESCANER}/{RECADO} '
+            f'(proveedor={PROVEEDOR!r}): no hay nada que escanear')
 
 PERFILES = {
     'TCG': {
@@ -301,8 +356,7 @@ PERFILES = {
     'MOLOKA': {'tipo':'supabase'},   # inventario propio: se lee de la tabla productos
 }
 if PROVEEDOR not in PERFILES:
-    print(f'Proveedor desconocido: {PROVEEDOR}. Validos: {list(PERFILES)}. Fin.')
-    sys.exit(0)
+    abortar(f'proveedor desconocido {PROVEEDOR!r}. Validos: {list(PERFILES)}')
 PERFIL = PERFILES[PROVEEDOR]
 if PERFIL.get('efimero'):
     MODO = 'todo'   # las compras ad-hoc se escanean enteras (no hay memoria previa que filtre)
@@ -415,8 +469,8 @@ if PROVEEDOR == 'BEMS' and not catalogo_local:
     print(f">>> BEMS por API: {_n_bems} productos disponibles -> CSV temporal listo.")
 
 if PROVEEDOR != 'MOLOKA' and not catalogo_local:
-    print(f'Falta el catalogo de {PROVEEDOR} en el buzon. Sube el fichero y vuelve a lanzar. Fin.')
-    sys.exit(0)
+    abortar(f'falta el catalogo de {PROVEEDOR} en el buzon {BUCKET}/{CARPETA_ESCANER}. '
+            f'Sube el fichero y vuelve a lanzar')
 
 IVA_DEFAULT_ES, IVA_IT, IVA_FR = 0.21, 0.22, 0.20
 ALMACEN, COM_DIGITALES = 0.15, 1.03
@@ -1011,9 +1065,9 @@ else:
         print(f"Deteccion tolerante -> EAN={det['ean']!r} precio={det['precio']!r} "
               f"nombre={det['nombre']!r} marca={det['marca']!r} stock={det['stock']!r}")
         if not det['ean'] or not det['precio']:
-            print("ERROR: no pude detectar la columna de EAN o de precio en este fichero.")
-            print("Revisa el catalogo (o pasaselo a Claude para normalizarlo). Fin.")
-            sys.exit(0)
+            abortar(f'no pude detectar la columna de EAN o de precio en el catalogo '
+                    f'{catalogo_nombre!r} (EAN={det["ean"]!r}, precio={det["precio"]!r}). '
+                    f'Revisalo, o pasaselo a Claude para normalizarlo')
         cM, cE, cN, cP, cS = (det['marca'], det['ean'], det['nombre'] or det['ean'],
                               det['precio'], det['stock'])
         _tolerante = True
@@ -2252,6 +2306,12 @@ except Exception as _ex_snd:
 # ============================================================
 ahora = datetime.now(timezone.utc).isoformat()
 regs = []; vistos_up = set()
+# Se declaran ANTES del 'if' para que existan tambien con perfil EFIMERO: el
+# veredicto del final los lee siempre, y un NameError alli se comeria el aviso
+# de ESCANEO PARCIAL entero (que es justo lo que se viene a NO perder).
+_saltados_f1 = 0            # fichas fuera de la memoria por lote de Fase 1 perdido
+_saltados_f2 = 0            # fichas fuera de la memoria por pais de Fase 2 perdido
+_eans_pais_perdido = eans_con_pais_perdido(PAISES_PERDIDOS, infos)
 if PERFIL.get('efimero'):
     print(f"Perfil EFIMERO ({PROVEEDOR}): NO se escribe en escaner_memoria; ningun proveedor real se ve afectado.")
 else:
@@ -2260,10 +2320,17 @@ else:
     # PA de hoy, manana saldria 'sin_cambios' y el pase diario 'nuevos' lo
     # filtraria fuera para siempre. Dejandolo fuera, manana vuelve a salir
     # 'nuevo' y se reintenta. Un hipo de red no puede condenar a un producto.
-    _saltados_mem = 0
+    # 🔒 Y LO MISMO CON LA FASE 2, que se habia quedado fuera de esta regla. Un
+    # producto al que se le perdio algun pais por un fallo de red SI se grababa,
+    # con sus paises a medias: manana salia 'sin_cambios', el pase 'nuevos' lo
+    # filtraba fuera y ese pais no se volvia a mirar NUNCA. Mismo trato que el
+    # lote perdido de la Fase 1: no se graba, y manana vuelve a salir 'nuevo'.
     for f in filas_hoy:
         if f['ean_in'] in EANS_NO_PREGUNTADOS:
-            _saltados_mem += 1
+            _saltados_f1 += 1
+            continue
+        if str(f['ean_in']) in _eans_pais_perdido:
+            _saltados_f2 += 1
             continue
         k = (PROVEEDOR, norm(f['core']), bool(f['es_chase']))
         if k in vistos_up: continue
@@ -2273,11 +2340,37 @@ else:
                      'presente':True, 'fecha':ahora})
     # Agotados SOLO si el catalogo llego COMPLETO. Blindaje anti-vaciado:
     #  - catalogo vacio (0 filas) -> no marcar (fichero equivocado / marca inexistente)
-    #  - catalogo PARCIAL (crudo < UMBRAL_PARCIAL de lo que hay en memoria) -> no marcar
+    #  - catalogo PARCIAL (crudo < UMBRAL_PARCIAL de los PRESENTES) -> no marcar
     #    (descarga incompleta). Una REBAJA no reduce el nº de filas crudas -> NO salta aqui.
-    if _saltados_mem:
-        print(f"MEMORIA: {_saltados_mem} productos NO se graban (su lote se perdio y nunca se "
+    # 🔴 CONTRA LOS PRESENTES, NO CONTRA TODA LA MEMORIA. escaner_memoria es un
+    # MAESTRO: el ausente se MARCA, no se borra, asi que la tabla acumula los
+    # agotados de meses. Comparar el catalogo de hoy contra `len(mem)` hacia
+    # crecer el umbral cada dia con fichas que ya estaban marcadas -- productos
+    # que no se pueden volver a perder porque ya estan perdidos -- hasta que el
+    # blindaje no bajaba nunca y el escaneo dejaba de marcar agotados EN
+    # SILENCIO (el log decia lo mismo que un dia bueno).
+    # 🔬 Medido el 3-sep-2026 en produccion: HEO tenia 9.193 fichas en memoria,
+    # de ellas 2.471 presentes, y su catalogo trae ~1.838 filas.
+    #     contra la memoria entera: 1.838 < 0,35 x 9.193 = 3.217,6 -> SALTA (mal)
+    #     contra los presentes:     1.838 > 0,35 x 2.471 =   864,9 -> no salta (bien)
+    # 625 fichas de HEO llevaban 'presente' con la fecha vieja sin poder marcarse.
+    # ⚠️ El umbral nuevo es SIEMPRE menor o igual que el viejo (presentes <= memoria),
+    # asi que ningun proveedor que hoy marque agotados puede dejar de hacerlo.
+    if _saltados_f1:
+        print(f"MEMORIA: {_saltados_f1} productos NO se graban (su lote se perdio y nunca se "
               f"pregunto a Keepa). Manana volveran a salir 'nuevo' y se reintentaran.")
+    if _saltados_f2:
+        print(f"MEMORIA: {_saltados_f2} productos NO se graban (se perdio algun pais en la Fase 2: "
+              f"{len(PAISES_PERDIDOS)} pares ASIN/pais). Manana volveran a salir 'nuevo'.")
+    # 🔴 LAS TRES CIFRAS DEL BLINDAJE, SIEMPRE EN EL LOG: salte o no salte.
+    # Un blindaje que solo habla cuando salta no se puede auditar -- el dia que
+    # calla no se distingue "esta bien" de "no llego a mirar", y asi es como HEO
+    # paso meses sin marcar un agotado sin que el log dijera nada raro.
+    _n_pres_mem = presentes_en_memoria(mem)
+    _cat_parcial, _corte_mem = catalogo_parcial(N_CRUDO, _n_pres_mem, UMBRAL_PARCIAL)
+    print(f"BLINDAJE anti-vaciado [{PROVEEDOR}]: crudo={N_CRUDO} | presentes en memoria={_n_pres_mem}"
+          f" | umbral={('%.1f' % _corte_mem) if _corte_mem is not None else 'n/d'}"
+          f" ({int(UMBRAL_PARCIAL*100)}% de los presentes) -> {'SALTA' if _cat_parcial else 'no salta'}")
     if not filas_hoy:
         print("Catalogo vacio (0 productos): NO se marcan agotados (evita falso vaciado de la memoria).")
     elif EANS_NO_PREGUNTADOS:
@@ -2287,10 +2380,10 @@ else:
         # este bloque no salta y los agotados se marcan con normalidad.)
         print(f"BLINDAJE: {len(EANS_NO_PREGUNTADOS)} EAN sin preguntar tras el rescate -> escaneo "
               f"PARCIAL: NO se marcan agotados. La memoria queda intacta en esa parte.")
-    elif N_CRUDO is not None and len(mem) > 0 and N_CRUDO < UMBRAL_PARCIAL * len(mem):
-        print(f"BLINDAJE: catalogo PARCIAL ({N_CRUDO} filas crudas vs {len(mem)} en memoria, "
-              f"<{int(UMBRAL_PARCIAL*100)}%): NO se marcan agotados. Huele a descarga incompleta o "
-              f"fichero equivocado; la memoria queda intacta.")
+    elif _cat_parcial:
+        print(f"BLINDAJE: catalogo PARCIAL ({N_CRUDO} filas crudas vs {_n_pres_mem} PRESENTES en "
+              f"memoria, <{int(UMBRAL_PARCIAL*100)}%): NO se marcan agotados. Huele a descarga "
+              f"incompleta o fichero equivocado; la memoria queda intacta.")
     else:
         for (ean_norm, es_case), info in ausentes:
             k = (PROVEEDOR, ean_norm, es_case)
@@ -2303,16 +2396,38 @@ else:
     if not regs:
         print("Memoria sin cambios.")
     else:
+        # 🔒 CON REINTENTO, Y SI AUN ASI FALLA SE DEJA CONSTANCIA. Hasta hoy un
+        # lote perdido era un 'AVISO' en el log y el run seguia en VERDE: hasta
+        # 500 fichas se quedaban con el pa y la fecha del dia anterior sin que
+        # nadie lo supiera. Ahora se reintenta una vez y, si no, el run acaba en
+        # ROJO -- al FINAL del todo, con el Excel ya subido y el buzon ya
+        # limpio, que es lo unico que no se puede rehacer manana.
         n_ok = 0
+        _n_lotes = (len(regs) + 499) // 500
         for i2 in range(0, len(regs), 500):
             lote = regs[i2:i2+500]
-            try:
-                sb.table('escaner_memoria').upsert(lote, on_conflict='proveedor,ean,es_case').execute()
-                n_ok += len(lote)
-            except Exception as ex:
-                print(f"  AVISO lote memoria {i2//500+1}: {ex}")
+            _n = i2 // 500 + 1
+            _err = None
+            for _intento in (1, 2):
+                try:
+                    sb.table('escaner_memoria').upsert(lote, on_conflict='proveedor,ean,es_case').execute()
+                    n_ok += len(lote); _err = None
+                    break
+                except Exception as ex:
+                    _err = ex
+                    print(f"  AVISO lote memoria {_n}/{_n_lotes} (intento {_intento}/2): {ex}")
+                    if _intento == 1:
+                        time.sleep(5)
+            if _err is not None:
+                MEMORIA_LOTES_FALLIDOS.append({'lote': _n, 'fichas': len(lote), 'error': str(_err)})
         n_pres = sum(1 for x in regs if x['presente']); n_aus = len(regs) - n_pres
         print(f"Memoria actualizada: {n_ok}/{len(regs)} ({n_pres} presentes, {n_aus} agotados) [{PROVEEDOR}/{MARCA}]")
+        if MEMORIA_LOTES_FALLIDOS:
+            print(f"MEMORIA_INCOMPLETA: {len(MEMORIA_LOTES_FALLIDOS)}/{_n_lotes} lotes de "
+                  f"escaner_memoria NO se grabaron ni tras el reintento "
+                  f"({sum(x['fichas'] for x in MEMORIA_LOTES_FALLIDOS)} fichas) [{PROVEEDOR}/{MARCA}].")
+            for _x in MEMORIA_LOTES_FALLIDOS:
+                print(f"    - lote {_x['lote']} ({_x['fichas']} fichas): {_x['error']}")
 
 # ============================================================
 # LIMPIAR EL BUZON DEL ESCANER (recado + catalogo) - VERIFICADO
@@ -2423,6 +2538,7 @@ except Exception as _e_tg:
 # 🔒 El veredicto mira EANS_NO_PREGUNTADOS (lo que quedo sin preguntar DESPUES
 # del rescate), no LOTES_PERDIDOS: si un lote se cayo pero el rescate lo
 # recupero, el escaneo esta COMPLETO y no hay motivo para salir en rojo.
+_SALIDA_ROJA = False
 if LOTES_PERDIDOS and not EANS_NO_PREGUNTADOS:
     print(f"NOTA: {len(LOTES_PERDIDOS)} lotes se cayeron durante la corrida, pero la RONDA DE "
           f"RESCATE los recupero todos. Escaneo COMPLETO.")
@@ -2430,15 +2546,47 @@ if EANS_NO_PREGUNTADOS or PAISES_PERDIDOS:
     print("")
     print("=" * 64)
     print("!!! ESCANEO PARCIAL - NO TE FIES DE ESTE RESULTADO COMO COMPLETO")
+    # 🔴 EL TEXTO DICE, CASO A CASO, LO QUE DE VERDAD PASO CON LA MEMORIA. Antes
+    # habia UNA sola linea para los dos ("la memoria NO los ha marcado como
+    # vistos") y en el caso de la Fase 2 era MENTIRA: esos productos SI se
+    # grababan, con sus paises a medias. Ahora se dice el numero de fichas que
+    # se han dejado fuera a proposito, que es lo comprobable.
     if EANS_NO_PREGUNTADOS:
         print(f"  Fase 1: {len(EANS_NO_PREGUNTADOS)} EAN NUNCA preguntados a Keepa "
               f"(ni en la pasada normal ni en el rescate).")
         for _lp in LOTES_PERDIDOS:
             print(f"    - intento fallido: {_lp['etiqueta']} lote {_lp['lote']} ({_lp['n_codigos']} codigos)")
+        if PERFIL.get('efimero'):
+            print("    -> perfil EFIMERO: no se toca escaner_memoria (no hay nada que reintentar).")
+        else:
+            print(f"    -> {_saltados_f1} fichas se han dejado FUERA de la memoria a proposito: "
+                  f"manana vuelven a salir 'nuevo' y se reintentan.")
     if PAISES_PERDIDOS:
-        print(f"  Fase 2: {len(PAISES_PERDIDOS)} pares ASIN/pais perdidos.")
-    print("  La memoria NO los ha marcado como vistos: el proximo pase los reintenta.")
+        print(f"  Fase 2: {len(PAISES_PERDIDOS)} pares ASIN/pais perdidos "
+              f"({len(_eans_pais_perdido)} productos afectados).")
+        if PERFIL.get('efimero'):
+            print("    -> perfil EFIMERO: no se toca escaner_memoria (no hay nada que reintentar).")
+        else:
+            print(f"    -> {_saltados_f2} fichas se han dejado FUERA de la memoria a proposito: "
+                  f"manana vuelven a salir 'nuevo' y se reintentan.")
     print("  Relanza el escaneo cuando Keepa vaya fino.")
     print("=" * 64)
+    _SALIDA_ROJA = True
+# 🔒 LA MEMORIA A MEDIAS TAMBIEN SALE EN ROJO, y AQUI, no antes: el Excel ya
+# esta subido y el buzon ya limpio (eso no se puede rehacer manana; la memoria
+# si). Cortar arriba habria dejado el catalogo del buzon sin procesar y el
+# Excel sin subir por un fallo que no tiene nada que ver con el escaneo.
+if MEMORIA_LOTES_FALLIDOS:
+    print("")
+    print("=" * 64)
+    print(f"MEMORIA_INCOMPLETA: {len(MEMORIA_LOTES_FALLIDOS)} lote(s) de escaner_memoria no se "
+          f"grabaron ni tras el reintento "
+          f"({sum(x['fichas'] for x in MEMORIA_LOTES_FALLIDOS)} fichas) [{PROVEEDOR}/{MARCA}].")
+    print("  El Excel SI esta subido y el buzon SI se limpio: lo que falta es la MEMORIA.")
+    print("  Esas fichas conservan su estado ANTERIOR (pa y fecha viejos). No es un vaciado:")
+    print("  siguen contando como presentes, y el proximo escaneo las vuelve a grabar.")
+    print("=" * 64)
+    _SALIDA_ROJA = True
+if _SALIDA_ROJA:
     sys.exit(1)
-print("=== INTEGRIDAD OK: todo el catalogo se pregunto a Keepa. ===")
+print("=== INTEGRIDAD OK: todo el catalogo se pregunto a Keepa y la memoria se grabo entera. ===")

@@ -158,10 +158,17 @@ jobs:
       - name: 19) test_comprimir_keepa.py
         run: python -u test_comprimir_keepa.py
 
-      - name: 20) test_disparar.mjs
+      # El banco de las guardas de la memoria del escaner. No importa
+      # `moloka_escaner_nube.py` (crea el cliente de Keepa en la linea 46 y sale
+      # a la red): saca las funciones del fichero real con `ast` y las EJECUTA.
+      # Por eso no necesita ni secretos ni base de datos.
+      - name: 20) test_escaner_memoria.py
+        run: python -u test_escaner_memoria.py
+
+      - name: 21) test_disparar.mjs
         run: node test_disparar.mjs
 
-      - name: 21) Censo - ningun test se queda sin correr
+      - name: 22) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
         #    demas se lee como si lo cubriera. Aqui registrar un test es un paso
@@ -188,6 +195,7 @@ jobs:
             test_cerrojo4_nivel_superior.py
             test_disparar.mjs
             test_comprimir_keepa.py
+            test_escaner_memoria.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).
