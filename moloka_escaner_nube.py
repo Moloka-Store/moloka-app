@@ -537,6 +537,39 @@ def calc_rentabilidad(precio_venta, pa, ref_pct, fee_fba, iva, almacen=0.15,
     return dict(base=base, com_amazon=com_amazon, beneficio=beneficio, roi=roi, margen=margen)
 
 
+# ============================================================
+# LA MISMA CUENTA, TAMBIEN EN LAS CELDAS DEL EXCEL
+# ------------------------------------------------------------
+# 🔴 EL EXCEL LLEVABA OTRA CUENTA EN LA MISMA FILA. La columna Decision (y
+#    escaner_detalle) salen de calc_rentabilidad(..., isd=ISD_PAIS[dom]); las
+#    formulas VIVAS de la hoja calculaban la comision como ref_pct/100 x 1,03
+#    plano y el beneficio a partir de ahi. En ES e IT las dos cuentas coincidian
+#    POR CASUALIDAD (COM_DIGITALES = 1,03 y el ISD es el 3 %), pero en FR el
+#    recargo cae tambien sobre la tarifa FBA y la hoja se dejaba ese trozo:
+#    ~1 punto de margen de MAS, y encima con un semaforo al lado diciendo otra
+#    cosa. Dos cuentas en una fila es una fila que no se puede creer.
+#
+# 🔑 La descomposicion, que es lo que hace que quepa en celdas:
+#       com_amazon = com + (com + fba_si_FR) x pct
+#                  = com x (1 + pct)   +   fba_si_FR x pct
+#                    \____ % Comision ___/   \__ columna ISD s/ Fee Log. __/
+#    Por eso el % Comision sigue siendo un PORCENTAJE DEL PRECIO de verdad (se
+#    puede leer y editar) y el trozo frances, que no depende del precio, vive en
+#    su propia columna. Las dos salen de ISD_PAIS, no de COM_DIGITALES: hoy dan
+#    lo mismo en ES, pero si alguien toca la tabla, la hoja se entera.
+
+def pct_comision_celda(ref_pct, isd):
+    """El numero que va en la celda '% Comision': la tarifa de referencia MAS su
+    propio recargo ISD. Es el factor por el que se multiplica el precio."""
+    return (ref_pct / 100.0) * (1 + isd['pct'])
+
+
+def isd_sobre_fee(fee_fba, isd):
+    """La parte del ISD que cae sobre la tarifa FBA. Solo donde la base la
+    incluye (hoy: Francia, medido contra factura). Cero en el resto."""
+    return (fee_fba or 0) * isd['pct'] if isd['incluye_fba'] else 0.0
+
+
 # ------------------------------------------------------------
 # AUTOCOMPROBACION DE ARRANQUE. Aborta: una formula de dinero que no cuadra no se ejecuta.
 # ------------------------------------------------------------
@@ -570,7 +603,28 @@ assert round(_COM_FR * ISD_PAIS['FR']['pct'], 2) != _ISD_REAL, (
 # 🔒 Y que ES no lleve la FBA en su base: si algun dia se igualan las cuatro, esto lo dice.
 assert round(_isd_de('ES', _COM_FR, _FBA_FR), 4) == round(_COM_FR * 0.03, 4), (
     'ES: la base ha dejado de ser solo la comision. Francia es la excepcion, no la norma.')
-print(f">>> FORMULA OK <<<  (ISD FR cuadrado con la factura: {_isd_fr:.4f} = {_ISD_REAL})")
+
+# 🔴 Y QUE LA CUENTA DE LAS CELDAS SEA LA MISMA CUENTA, en los cuatro paises. Es la
+#    identidad que sostiene el Excel entero:
+#        precio x pct_comision_celda  +  isd_sobre_fee  ==  calc_rentabilidad(...)['com_amazon']
+#    Si alguien cambia una de las dos, esto aborta el escaner ANTES de generar nada.
+for _p in ISD_PAIS:
+    _cel = 24.99 * pct_comision_celda(15.0, ISD_PAIS[_p]) + isd_sobre_fee(5.29, ISD_PAIS[_p])
+    _fun = calc_rentabilidad(24.99, 8.12, 15.0, 5.29, 0.21, almacen=ALMACEN,
+                             com_digitales=COM_DIGITALES, isd=ISD_PAIS[_p])['com_amazon']
+    assert abs(_cel - _fun) < 1e-9, (
+        f'{_p}: la celda del Excel ({_cel:.6f}) y calc_rentabilidad ({_fun:.6f}) ya no hacen '
+        f'la misma cuenta. La hoja y la columna Decision dirian cosas distintas en la MISMA fila.')
+
+# 🔒 Y que el caso canonico frances se reproduzca EN LA CELDA, no solo en la funcion:
+#    pedido 404-7912092-2024339 -> comision 1,82 + FBA 5,29 -> ISD 0,21.
+_precio_fr = _COM_FR / (15.0 / 100.0)            # el precio del que sale una comision de 1,82
+_isd_celda_fr = (_precio_fr * pct_comision_celda(15.0, ISD_PAIS['FR']) - _COM_FR
+                 + isd_sobre_fee(_FBA_FR, ISD_PAIS['FR']))
+assert round(_isd_celda_fr, 2) == _ISD_REAL, (
+    f'FR: las celdas del Excel dan {_isd_celda_fr:.4f} de ISD y la factura dice {_ISD_REAL}.')
+print(f">>> FORMULA OK <<<  (ISD FR cuadrado con la factura: {_isd_fr:.4f} = {_ISD_REAL}; "
+      f"y las celdas del Excel hacen la misma cuenta en {len(ISD_PAIS)} paises)")
 
 # ============================================================
 # Funciones de EAN
@@ -1809,7 +1863,11 @@ COLS = ['Nombre','EAN','ASIN','Marca','PA (€)','País','Rank actual','Rank 90d
         'Precio venta (€)','Canal BB','Nº ofertas','% Comisión',
         'Com. Amazon (€)','Fee Logística (€)','Almacén (€)','Promo activa',
         'Beneficio (€)','ROI','Margen','Decisión','En mi BD','EAN ambiguo','Amazon (título)','Coincide',
-        'Cotejo','Cotejo (detalle)','Coherencia caja','OcioStock']
+        'Cotejo','Cotejo (detalle)','Coherencia caja','OcioStock',
+        # 🔴 AL FINAL, Y NO POR COMODIDAD: hay consumidores que leen la hoja por LETRA de
+        # columna. Metida en medio, 'ISD s/ Fee Log.' correria A..AB una posicion y el que
+        # leyera 'R' se llevaria otra cosa sin enterarse. Columna nueva -> al final, SIEMPRE.
+        'ISD s/ Fee Log. (€)']
 L = {name:get_column_letter(i+1) for i,name in enumerate(COLS)}
 DOM_AMZ = {'ES':'amazon.es','IT':'amazon.it','FR':'amazon.fr'}
 
@@ -1827,14 +1885,20 @@ for item in registros:
             d = {'rank_act':None,'rank90':None,'vendidos':None,'precio':None,'canal':'sin datos',
                  'n_of':None,'ref_pct':None,'fee':None,'iva':None,'decision':'Sin datos'}
         r += 1
-        pct = (d['ref_pct']/100*COM_DIGITALES) if d.get('ref_pct') is not None else None
+        # 🔴 DE ISD_PAIS, NO DE COM_DIGITALES. En ES los dos dan 1,03 y por eso el fallo
+        # se veia solo en Francia; leyendo la tabla, la hoja se entera de cualquier cambio.
+        _isd = ISD_PAIS[dom]
+        pct = pct_comision_celda(d['ref_pct'], _isd) if d.get('ref_pct') is not None else None
         div = (1+d['iva']) if d.get('iva') else None
         ws.append([
             item['nombre'], item['ean'], item['asin'], item['marca'], item['_pa_efectivo'], dom,
             d['rank_act'] if d['rank_act'] and d['rank_act']>0 else None,
             d['rank90'] if d['rank90'] and d['rank90']>0 else None,
             d['vendidos'], d['precio'], d['canal'], d['n_of'], pct,
-            f"={L['Precio venta (€)']}{r}*{L['% Comisión']}{r}" if pct is not None else None,
+            # com_amazon = precio x %Comision  +  ISD s/ Fee Log.  (el 2o sumando es 0 fuera
+            # de Francia). Exactamente lo que hace calc_rentabilidad con isd=ISD_PAIS[dom].
+            (f"={L['Precio venta (€)']}{r}*{L['% Comisión']}{r}"
+             f"+{L['ISD s/ Fee Log. (€)']}{r}") if pct is not None else None,
             d['fee'], ALMACEN, None,
             (f"=({L['Precio venta (€)']}{r}/{div})-{L['PA (€)']}{r}-{L['Com. Amazon (€)']}{r}"
              f"-{L['Fee Logística (€)']}{r}-{L['Almacén (€)']}{r}") if (div and d['precio'] and pct is not None) else None,
@@ -1844,12 +1908,20 @@ for item in registros:
             item.get('titulo_amz',''), item.get('coincide','?'),
             _cot.get('veredicto','—'), _cot.get('detalle','—'),
             item.get('coherencia_caja','') or '—',
-            ('Ver ficha ↗' if item.get('url') else '')])
+            ('Ver ficha ↗' if item.get('url') else ''),
+            # VIVA, como el resto de la hoja: si Elena corrige la fee, el ISD se recalcula.
+            # Fuera de Francia es un 0 escrito, no un hueco: un hueco se lee como "no lo se".
+            (f"={L['Fee Logística (€)']}{r}*{_isd['pct']}"
+             if (_isd['incluye_fba'] and d.get('fee') is not None) else 0)])
         cell = ws.cell(row=r, column=3)
         cell.hyperlink = f"https://www.{DOM_AMZ[dom]}/dp/{item['asin']}"
         cell.font = Font(color='0563C1', underline='single')
         if item.get('url'):
-            cocel = ws.cell(row=r, column=len(COLS))   # ultima columna = OcioStock
+            # 🔴 POR NOMBRE, NO POR len(COLS). OcioStock era la ultima columna y esto lo
+            # daba por hecho; al anadir 'ISD s/ Fee Log.' detras, el enlace habria caido en
+            # la columna equivocada. Un indice que significa "la ultima" es una bomba de
+            # relojeria con la fecha puesta en el dia que alguien anada una columna.
+            cocel = ws.cell(row=r, column=COLS.index('OcioStock') + 1)
             cocel.hyperlink = item['url']
             cocel.font = Font(color='0563C1', underline='single')
 
@@ -1858,7 +1930,8 @@ def fmt(colname, code):
     c = L[colname]
     for row in range(2,last+1):
         ws[f'{c}{row}'].number_format = code
-for nm in ['PA (€)','Precio venta (€)','Com. Amazon (€)','Fee Logística (€)','Almacén (€)','Beneficio (€)']:
+for nm in ['PA (€)','Precio venta (€)','Com. Amazon (€)','Fee Logística (€)','Almacén (€)',
+           'Beneficio (€)','ISD s/ Fee Log. (€)']:
     fmt(nm,'0.00')
 fmt('% Comisión','0.00%'); fmt('ROI','0.0%'); fmt('Margen','0.0%')
 
@@ -1866,7 +1939,7 @@ for c in range(1,len(COLS)+1):
     ws.cell(row=1,column=c).font = Font(bold=True)
 anchos = {'Nombre':50,'EAN':14,'ASIN':12,'Marca':12,'En mi BD':20,'Decisión':15,
           'Amazon (título)':50,'Coincide':11,'Cotejo':16,'Cotejo (detalle)':46,
-          'Coherencia caja':46,'OcioStock':13}
+          'Coherencia caja':46,'OcioStock':13,'ISD s/ Fee Log. (€)':17}
 for nm,w in anchos.items(): ws.column_dimensions[L[nm]].width = w
 
 ws.freeze_panes = 'A2'
