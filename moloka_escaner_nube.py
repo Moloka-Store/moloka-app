@@ -1325,36 +1325,89 @@ if aviso_caja:
 # ============================================================
 # Celda 5 - cruce con Supabase (productos propios + stock para 'En mi BD')
 # ============================================================
+# 🔴 SI EL CATALOGO PROPIO NO SE LEE, EL RUN NO ES VERDE. Esto era un
+# `except -> print("AVISO sin cruce Supabase")` y el escaneo SEGUIA con sup={}:
+# ninguna ficha de la casa se reconocia (es_propio() -> False para todas), el IVA
+# de ES caia al 21% por defecto en TODAS las filas, la columna 'En mi BD' salia
+# vacia y los propios dejaban de saltarse el filtro de rank. Un run asi se veia
+# EXACTAMENTE igual que uno bueno: verde, con su Excel y su fila en
+# escaner_resultados. Es el mismo silencio que el #265 cerro en el arranque, por
+# otra puerta.
+# 🔑 Y 0 FILAS ES FALLO, NO CATALOGO VACIO: medido en produccion el 3-sep-2026,
+#    `productos` tiene 498 fichas (473 activas, las 473 con iva_pct). Un 0 aqui
+#    solo puede venir de un filtro, un permiso o una tabla que no responde.
+# 🔒 DONDE ESTA: la Fase 1 (primera llamada a Keepa) va MAS ABAJO, asi que
+#    abortar aqui no gasta ni un token, y esta Celda 5 no escribe nada: es la
+#    primera lectura de Supabase que se cruza y no toca ni escaner_memoria ni
+#    escaner_resultados ni escaner_detalle.
 sup = {}
+_cat_error = None
+_rows_cat = []
 try:
-    _rows = []; _d = 0
+    _d = 0
     while True:
         res = sb.table('productos').select('ean,asin,iva_pct,stock_moloka,stock_fba').eq('activo',True).range(_d, _d+999).execute()
         if not res.data: break
-        _rows.extend(res.data)
+        _rows_cat.extend(res.data)
         if len(res.data) < 1000: break
         _d += 1000
-    for p in _rows:
-        if p.get('ean'): sup[norm(p['ean'])] = p
-    print(f"Supabase: {len(sup)} EANs propios")
 except Exception as ex:
-    print("AVISO sin cruce Supabase:", ex)
+    _cat_error = ex
+for p in _rows_cat:
+    if p.get('ean'): sup[norm(p['ean'])] = p
+print(f"Supabase: {len(sup)} EANs propios")
 
 def _sup(core):
     for v in [norm(core), core, '0'+core]:
         if v in sup: return sup[v]
     return None
-def iva_es_de(core):
+# 🔒 EL VALOR Y SU ORIGEN, EN LA MISMA FUNCION. Si la etiqueta de la hoja se
+# calculara aparte, podria decir 'ficha' en una fila cuyo IVA es el 21% asumido
+# -- dos cuentas en la misma fila, que es el pecado que cerro el #266 por el
+# lado del ISD. Aqui solo hay un sitio donde se decide, y devuelve las dos cosas.
+ORIGEN_IVA_FICHA = 'ficha'
+ORIGEN_IVA_ASUMIDO = f'asumido {IVA_DEFAULT_ES:.0%}'
+def iva_es_con_origen(core):
+    """(IVA de ES, de donde sale). 'ficha' = lo dice `productos.iva_pct` de esta
+    ficha; 'asumido 21%' = no hay ficha (o su iva_pct no es un numero) y se usa
+    IVA_DEFAULT_ES. Ojo: iva_pct se guarda como FRACCION (0.21), no como 21."""
     s = _sup(core)
     if s and s.get('iva_pct') not in (None,''):
-        try: return float(s['iva_pct'])
+        try: return float(s['iva_pct']), ORIGEN_IVA_FICHA
         except Exception: pass
-    return IVA_DEFAULT_ES
+    return IVA_DEFAULT_ES, ORIGEN_IVA_ASUMIDO
+def iva_es_de(core):
+    return iva_es_con_origen(core)[0]
+def origen_iva_fila(dom, iva, core):
+    """De donde sale el IVA de ESTA fila de la hoja (la columna 'Origen IVA').
+    IT y FR llevan el tipo GENERAL del pais, que no vive en la ficha: se rotula
+    con el numero que la fila ha usado de verdad, no con un texto fijo. Sin IVA
+    (el pais no dio datos) no hay nada que explicar: la fila calla."""
+    if iva is None: return '—'
+    if dom == 'ES': return iva_es_con_origen(core)[1]
+    return f'general {dom} {iva:.0%}'
 def es_propio(core): return _sup(core) is not None
 def en_bd_txt(core):
     s = _sup(core)
     if not s: return ''
     return f"OK Alm:{s.get('stock_moloka',0)} FBA:{s.get('stock_fba',0)}"
+
+# 🔴 LAS TRES CIFRAS AL LOG, SALGA O NO EL ABORTO. Sin ellas, "se leyo el
+# catalogo propio" no es comprobable en el log de un run pasado: el AVISO viejo
+# solo aparecia cuando fallaba, y el caso de 0 filas no imprimia nada de nada.
+# `propios_en_catalogo` es la tercera porque es la que de verdad se usa: cuantas
+# de las filas que se van a escanear son de la casa.
+if _cat_error is None:
+    print(f"CATALOGO_PROPIO: filas={len(_rows_cat)} "
+          f"| con_iva={sum(1 for p in _rows_cat if p.get('iva_pct') not in (None,''))} "
+          f"| propios_en_catalogo={sum(1 for f in filas if es_propio(f['core']))}")
+else:
+    print("CATALOGO_PROPIO: filas=ERROR | con_iva=ERROR | propios_en_catalogo=ERROR")
+    abortar(f'catalogo propio ilegible: la lectura de productos lanzo {type(_cat_error).__name__}: {_cat_error}')
+if not _rows_cat:
+    abortar('catalogo propio ilegible: productos devolvio 0 filas con activo=true. '
+            'No es un catalogo vacio (3-sep-2026: 498 fichas, 473 activas): huele a '
+            'filtro, permiso o tabla que no responde')
 
 # ============================================================
 # Celda 5b - memoria viva del proveedor (nuevos / reaparicion / cambio / agotado)
@@ -1867,7 +1920,13 @@ COLS = ['Nombre','EAN','ASIN','Marca','PA (€)','País','Rank actual','Rank 90d
         # 🔴 AL FINAL, Y NO POR COMODIDAD: hay consumidores que leen la hoja por LETRA de
         # columna. Metida en medio, 'ISD s/ Fee Log.' correria A..AB una posicion y el que
         # leyera 'R' se llevaria otra cosa sin enterarse. Columna nueva -> al final, SIEMPRE.
-        'ISD s/ Fee Log. (€)']
+        'ISD s/ Fee Log. (€)',
+        # Y esta detras de aquella, por lo mismo. Dice de donde sale el IVA con el que se
+        # ha dividido el precio de ESTA fila: 'ficha' (lo dice productos.iva_pct), 'asumido
+        # 21%' (no esta en el catalogo propio) o el tipo general de IT/FR. Sin ella, el 21%
+        # por defecto y un 21% de la ficha se leen igual, y no hay forma de saber si el
+        # catalogo propio se cruzo de verdad.
+        'Origen IVA']
 L = {name:get_column_letter(i+1) for i,name in enumerate(COLS)}
 DOM_AMZ = {'ES':'amazon.es','IT':'amazon.it','FR':'amazon.fr'}
 
@@ -1920,7 +1979,8 @@ for item in registros:
             # VIVA, como el resto de la hoja: si Elena corrige la fee, el ISD se recalcula.
             # Fuera de Francia es un 0 escrito, no un hueco: un hueco se lee como "no lo se".
             (f"={L['Fee Logística (€)']}{r}*{_isd['pct']}"
-             if (_isd['incluye_fba'] and d.get('fee') is not None) else 0)])
+             if (_isd['incluye_fba'] and d.get('fee') is not None) else 0),
+            origen_iva_fila(dom, d.get('iva'), item['core'])])
         cell = ws.cell(row=r, column=3)
         cell.hyperlink = f"https://www.{DOM_AMZ[dom]}/dp/{item['asin']}"
         cell.font = Font(color='0563C1', underline='single')
@@ -1947,7 +2007,8 @@ for c in range(1,len(COLS)+1):
     ws.cell(row=1,column=c).font = Font(bold=True)
 anchos = {'Nombre':50,'EAN':14,'ASIN':12,'Marca':12,'En mi BD':20,'Decisión':15,
           'Amazon (título)':50,'Coincide':11,'Cotejo':16,'Cotejo (detalle)':46,
-          'Coherencia caja':46,'OcioStock':13,'ISD s/ Fee Log. (€)':17}
+          'Coherencia caja':46,'OcioStock':13,'ISD s/ Fee Log. (€)':17,
+          'Origen IVA':14}
 for nm,w in anchos.items(): ws.column_dimensions[L[nm]].width = w
 
 ws.freeze_panes = 'A2'

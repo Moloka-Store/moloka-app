@@ -164,11 +164,15 @@ eq('(C) el motivo viaja entero', correr_abortar('falta el catalogo de TCG')[1],
 #    esta probando» (CLAUDE.md §3). Los tres asserts de abajo miran el ARBOL
 #    del fichero real: no que la funcion exista, sino que se USE donde toca.
 
-# (D1) Las CUATRO salidas del arranque llaman a abortar().
+# (D1) Las salidas que NO escanean llaman a abortar(). Cuatro son las del
+#      arranque de este encargo (recado ilegible, proveedor desconocido, catalogo
+#      ausente, columnas no detectadas). Las dos de la Celda 5 llegaron el
+#      3-sep-2026 con la guarda del catalogo propio (lectura fallida y 0 filas)
+#      y tienen su banco aparte, en test_escaner_catalogo_propio.py.
 _llamadas_abortar = [n for n in ast.walk(ARBOL)
                      if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
                      and n.func.id == 'abortar']
-eq('(D1) las 4 salidas del arranque van por abortar()', len(_llamadas_abortar), 4)
+eq('(D1) las 6 salidas sin escaneo van por abortar()', len(_llamadas_abortar), 6)
 
 # (D2) El bucle que graba la memoria salta los EAN con pais perdido.
 #      Se busca el `for f in filas_hoy:` en el arbol y se mira SU cuerpo.
