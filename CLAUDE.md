@@ -58,7 +58,11 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
 - **La verificación final es SQL contra la BD. NUNCA el log.**
 - **Compilar no es ejecutar.** `py_compile` pasa un script que redefine un built-in y peta en
   runtime. Ejecuta contra **el fichero real**.
+- **Los datos sintéticos no prueban nada.** Una vista se prueba con la tabla **poblada**.
+- **Escribe los números esperados ANTES de correr.** Si no salen, di lo que sale — no ajustes la
+  expectativa al resultado.
 - **Haz saltar las guardas a propósito** antes de dar un procesador por bueno.
+- **"Lo ha revisado un agente" NO es prueba.** Un revisor lee código, no lo ejecuta.
 - **Greps parciales no son lectura.** Si te preguntan "¿seguro que el código hace X?", lee el
   fichero entero.
 
