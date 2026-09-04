@@ -12,6 +12,31 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 2. El texto de destino es **idéntico carácter a carácter** al de origen.
 3. Lo único que no viaja son líneas **en blanco**; ninguna lleva texto.
 
+## Contra qué se coteja, que es la mitad que se puede falsear
+
+🔴 **LA BASE ES `0d1710a`, Y ES LA DE POR DEFECTO.** Es el último commit con el
+`CLAUDE.md` entero: **66.580 caracteres, 850 líneas, 796 con texto**. Se corre así,
+sin argumentos:
+
+```bash
+python docs/reglas/cotejo.py
+```
+
+⚠️ **Antes el defecto era `origin/main`, y el día que el recorte se fusionó ese defecto
+empezó a MENTIR.** Coge el `CLAUDE.md` de `main` —que ya es **el corto**— y comprueba que
+sus líneas siguen estando… en el corto. Sale verde siempre. *Medido el 4-sep-2026: decía
+«OK: las **107** líneas con texto del CLAUDE.md viejo siguen todas, literales», y las 107
+eran las del propio fichero que tenía que estar auditando.* Es la comprobación que no
+puede fallar: se comparan dos cosas que son iguales por construcción.
+
+🔒 **Por eso el script se pone en ROJO si el `CLAUDE.md` de la base tiene menos de 40.000
+caracteres**, se le pase la ref que se le pase. Con menos de eso ya no es el fichero
+entero, el cotejo no probaría nada y su verde sería de adorno. Se puede pasar otra ref
+—para cotejar contra un recorte intermedio, por ejemplo—, pero por debajo del listón no
+coteja: avisa y sale con **1**. El entero son 66.580 caracteres y el corto de hoy ronda
+los 8.200; el listón está a media distancia a propósito, porque no hay nada legítimo
+entre medias.
+
 | medida | valor |
 |---|---|
 | líneas del fichero viejo | 850 |
