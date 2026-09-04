@@ -31,21 +31,24 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 | 44-71 | `docs/reglas/informes-amazon.md` |
 | 72-73 | `CLAUDE.md` |
 | 74-79 | `docs/reglas/rentabilidad-amazon.md` |
-| 80-108 | `docs/reglas/tres-cajones.md` |
+| 80-83 | `docs/reglas/tres-cajones.md` |
+| 84-88 | `CLAUDE.md` |
+| 89-108 | `docs/reglas/tres-cajones.md` |
 | 109-233 | `docs/reglas/procesadores.md` |
 | 234-327 | `docs/reglas/trampas-medidas.md` |
 | 328-329 | `docs/reglas/tests-y-falsos-verdes.md` |
 | 330-331 | `CLAUDE.md` |
 | 332 | `docs/reglas/tests-y-falsos-verdes.md` |
 | 333-335 | `CLAUDE.md` |
-| 336-495 | `docs/reglas/tests-y-falsos-verdes.md` |
-| 496-499 | `CLAUDE.md` |
+| 336-498 | `docs/reglas/tests-y-falsos-verdes.md` |
+| 499 | `CLAUDE.md` |
 | 500-534 | `docs/reglas/guardas-y-ensayos.md` |
-| 535 | `CLAUDE.md` |
+| 535 | `docs/reglas/tests-y-falsos-verdes.md` |
 | 536-572 | `docs/reglas/censos-y-catalogos.md` |
 | 573-574 | `CLAUDE.md` |
 | 575-592 | `docs/reglas/huellas-y-cambios-inertes.md` |
-| 593-596 | `CLAUDE.md` |
+| 593-594 | `CLAUDE.md` |
+| 595-596 | `docs/reglas/gotchas-del-entorno.md` |
 | 597-599 | `docs/reglas/huellas-y-cambios-inertes.md` |
 | 600-601 | `docs/reglas/seguridad-permisos.md` |
 | 602-608 | `CLAUDE.md` |
@@ -133,29 +136,29 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 | 76 | 9 | `docs/reglas/rentabilidad-amazon.md` | Fernando: *"los míos son los buenos"*. Las fórmulas de rentabilidad, IVA y ale |
 | 77 | 10 | `docs/reglas/rentabilidad-amazon.md` | al céntimo y **no se reinterpretan**. 'estimated-cost-savings-*' de salud_fba  |
 | 78 | 11 | `docs/reglas/rentabilidad-amazon.md` | (prometía 10.747 € con un almacenamiento real de 94,86 €/mes): jamás usarlo co |
-| 80 | 7 | `docs/reglas/tres-cajones.md` | ### 1.6 Los TRES CAJONES: cada tabla se escribe de UNA manera |
-| 81 | 8 | `docs/reglas/tres-cajones.md` | Antes de escribir en una tabla, mira **en qué cajón está**. El cajón decide qu |
-| 82 | 9 | `docs/reglas/tres-cajones.md` | había, y los cajones no se mezclan: |
-| 84 | 11 | `docs/reglas/tres-cajones.md` | \| Cajón \| Qué se hace con lo viejo \| Quién vive aquí \| |
-| 85 | 12 | `docs/reglas/tres-cajones.md` | \|---\|---\|---\| |
-| 86 | 13 | `docs/reglas/tres-cajones.md` | \| **FOTO** \| **Se tira la hoja vieja.** Lo que no viene en el fichero se **B |
-| 87 | 14 | `docs/reglas/tres-cajones.md` | \| **PELÍCULA** \| **Se apila. NUNCA se borra** \| 'movimientos', el ledger, ' |
-| 88 | 15 | `docs/reglas/tres-cajones.md` | \| **MAESTRO** \| **Se MARCA. Ni se borra ni se sustituye** \| 'productos' \| |
-| 90 | 17 | `docs/reglas/tres-cajones.md` | ⚠️ **'custom analytics' estaba en la fila FOTO y ahí no va.** Cambió de cajón  |
-| 91 | 18 | `docs/reglas/tres-cajones.md` | lo dice su propio procesador en la cabecera (*«EL CAJÓN: PELÍCULA DE LECTURAS» |
-| 92 | 19 | `docs/reglas/tres-cajones.md` | una lectura** del contador, no sustituye la anterior. El cuadro se quedó con e |
-| 93 | 20 | `docs/reglas/tres-cajones.md` | ⚰️ Y 'salud_fba' sale de la fila FOTO porque su informe se jubiló el 23-ago (§ |
-| 94 | 21 | `docs/reglas/tres-cajones.md` | 'inventario_fba', que sí es Foto. |
-| 96 | 23 | `docs/reglas/tres-cajones.md` | - Una **FOTO** contesta *"¿cómo está esto AHORA?"*. Una fila que sobrevive a s |
-| 97 | 24 | `docs/reglas/tres-cajones.md` | fantasma que descuadra el cruce. La memoria histórica **no vive aquí**: vive e |
-| 98 | 25 | `docs/reglas/tres-cajones.md` | - Una **PELÍCULA** es un libro de asientos: append, jamás update destructivo.  |
-| 99 | 26 | `docs/reglas/tres-cajones.md` | ledger es falsificar el extracto. |
-| 100 | 27 | `docs/reglas/tres-cajones.md` | - Un **MAESTRO** es la identidad. Un producto que deja de venderse no se borra |
-| 101 | 28 | `docs/reglas/tres-cajones.md` | ('activo=false'). Borrarlo deja huérfanos los movimientos que lo citan. |
-| 103 | 30 | `docs/reglas/tres-cajones.md` | 🔴 **El error caro es tratar un cajón como si fuera otro.** Un upsert-sin-DELET |
-| 104 | 31 | `docs/reglas/tres-cajones.md` | en un collage de dos días (fue el caso real de salud_fba, §2); un DELETE en un |
-| 105 | 32 | `docs/reglas/tres-cajones.md` | el histórico y no hay de dónde recuperarlo. |
-| 107 | 34 | `docs/reglas/tres-cajones.md` | --- |
+| 80 | 11 | `docs/reglas/tres-cajones.md` | ### 1.6 Los TRES CAJONES: cada tabla se escribe de UNA manera |
+| 81 | 12 | `docs/reglas/tres-cajones.md` | Antes de escribir en una tabla, mira **en qué cajón está**. El cajón decide qu |
+| 82 | 13 | `docs/reglas/tres-cajones.md` | había, y los cajones no se mezclan: |
+| 84 | 45 | `CLAUDE.md` | \| Cajón \| Qué se hace con lo viejo \| Quién vive aquí \| |
+| 85 | 46 | `CLAUDE.md` | \|---\|---\|---\| |
+| 86 | 47 | `CLAUDE.md` | \| **FOTO** \| **Se tira la hoja vieja.** Lo que no viene en el fichero se **B |
+| 87 | 48 | `CLAUDE.md` | \| **PELÍCULA** \| **Se apila. NUNCA se borra** \| 'movimientos', el ledger, ' |
+| 88 | 49 | `CLAUDE.md` | \| **MAESTRO** \| **Se MARCA. Ni se borra ni se sustituye** \| 'productos' \| |
+| 90 | 16 | `docs/reglas/tres-cajones.md` | ⚠️ **'custom analytics' estaba en la fila FOTO y ahí no va.** Cambió de cajón  |
+| 91 | 17 | `docs/reglas/tres-cajones.md` | lo dice su propio procesador en la cabecera (*«EL CAJÓN: PELÍCULA DE LECTURAS» |
+| 92 | 18 | `docs/reglas/tres-cajones.md` | una lectura** del contador, no sustituye la anterior. El cuadro se quedó con e |
+| 93 | 19 | `docs/reglas/tres-cajones.md` | ⚰️ Y 'salud_fba' sale de la fila FOTO porque su informe se jubiló el 23-ago (§ |
+| 94 | 20 | `docs/reglas/tres-cajones.md` | 'inventario_fba', que sí es Foto. |
+| 96 | 22 | `docs/reglas/tres-cajones.md` | - Una **FOTO** contesta *"¿cómo está esto AHORA?"*. Una fila que sobrevive a s |
+| 97 | 23 | `docs/reglas/tres-cajones.md` | fantasma que descuadra el cruce. La memoria histórica **no vive aquí**: vive e |
+| 98 | 24 | `docs/reglas/tres-cajones.md` | - Una **PELÍCULA** es un libro de asientos: append, jamás update destructivo.  |
+| 99 | 25 | `docs/reglas/tres-cajones.md` | ledger es falsificar el extracto. |
+| 100 | 26 | `docs/reglas/tres-cajones.md` | - Un **MAESTRO** es la identidad. Un producto que deja de venderse no se borra |
+| 101 | 27 | `docs/reglas/tres-cajones.md` | ('activo=false'). Borrarlo deja huérfanos los movimientos que lo citan. |
+| 103 | 29 | `docs/reglas/tres-cajones.md` | 🔴 **El error caro es tratar un cajón como si fuera otro.** Un upsert-sin-DELET |
+| 104 | 30 | `docs/reglas/tres-cajones.md` | en un collage de dos días (fue el caso real de salud_fba, §2); un DELETE en un |
+| 105 | 31 | `docs/reglas/tres-cajones.md` | el histórico y no hay de dónde recuperarlo. |
+| 107 | 33 | `docs/reglas/tres-cajones.md` | --- |
 | 109 | 7 | `docs/reglas/procesadores.md` | ## 2. LOS PROCESADORES: EL PATRÓN |
 | 111 | 9 | `docs/reglas/procesadores.md` | **El procesador nuevo se tiene que parecer a los que ya están en producción. M |
 | 113 | 11 | `docs/reglas/procesadores.md` | - **NO HAY CABOS SUELTOS: el procesador no elige. O ABORTA o GRITA en el dato. |
@@ -371,11 +374,11 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 | 324 | 97 | `docs/reglas/trampas-medidas.md` | en las notas**. Si dudas del mapa, míralo en el fichero; si lo cambias, borra  |
 | 326 | 99 | `docs/reglas/trampas-medidas.md` | --- |
 | 328 | 7 | `docs/reglas/tests-y-falsos-verdes.md` | ## 3. VALIDACIÓN: QUÉ CUENTA COMO PRUEBA |
-| 330 | 47 | `CLAUDE.md` | 🔴 **PROHIBIDO TEORIZAR.** Si no lo puedes medir en esta respuesta, di **"no lo |
-| 331 | 48 | `CLAUDE.md` | fichero o consulta lo contestaría. No inventes explicaciones plausibles. |
-| 333 | 50 | `CLAUDE.md` | - **La verificación final es SQL contra la BD. NUNCA el log.** |
-| 334 | 51 | `CLAUDE.md` | - **Compilar no es ejecutar.** 'py_compile' pasa un script que redefine un bui |
-| 335 | 52 | `CLAUDE.md` | runtime. Ejecuta contra **el fichero real**. |
+| 330 | 55 | `CLAUDE.md` | 🔴 **PROHIBIDO TEORIZAR.** Si no lo puedes medir en esta respuesta, di **"no lo |
+| 331 | 56 | `CLAUDE.md` | fichero o consulta lo contestaría. No inventes explicaciones plausibles. |
+| 333 | 58 | `CLAUDE.md` | - **La verificación final es SQL contra la BD. NUNCA el log.** |
+| 334 | 59 | `CLAUDE.md` | - **Compilar no es ejecutar.** 'py_compile' pasa un script que redefine un bui |
+| 335 | 60 | `CLAUDE.md` | runtime. Ejecuta contra **el fichero real**. |
 | 336 | 10 | `docs/reglas/tests-y-falsos-verdes.md` | - 🔴 **UN TEST VERDE SOLO CUENTA SI HAS VISTO SU NOMBRE EN LA SALIDA.** El «✅ T |
 | 337 | 11 | `docs/reglas/tests-y-falsos-verdes.md` | **no demuestra que tu suite se haya ejecutado**: demuestra que no falló ningun |
 | 338 | 12 | `docs/reglas/tests-y-falsos-verdes.md` | corrieron. Si el tuyo no está en la lista, no ha corrido — y el runner no tien |
@@ -535,10 +538,10 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 | 493 | 167 | `docs/reglas/tests-y-falsos-verdes.md` | motivo la ve quien consulta, cuando consulta, sin saber nada de esto. |
 | 494 | 168 | `docs/reglas/tests-y-falsos-verdes.md` | ⚠️ Corolario, porque es el que se olvida: **las 20 tablas tapadas contaminan t |
 | 495 | 169 | `docs/reglas/tests-y-falsos-verdes.md` | se apoye en ellas.** Antes de cruzar con una tabla, mírala en 'sql/canario_rls |
-| 496 | 53 | `CLAUDE.md` | - **Los datos sintéticos no prueban nada.** Una vista se prueba con la tabla * |
-| 497 | 54 | `CLAUDE.md` | - **Escribe los números esperados ANTES de correr.** Si no salen, di lo que sa |
-| 498 | 55 | `CLAUDE.md` | expectativa al resultado. |
-| 499 | 56 | `CLAUDE.md` | - **Haz saltar las guardas a propósito** antes de dar un procesador por bueno. |
+| 496 | 170 | `docs/reglas/tests-y-falsos-verdes.md` | - **Los datos sintéticos no prueban nada.** Una vista se prueba con la tabla * |
+| 497 | 171 | `docs/reglas/tests-y-falsos-verdes.md` | - **Escribe los números esperados ANTES de correr.** Si no salen, di lo que sa |
+| 498 | 172 | `docs/reglas/tests-y-falsos-verdes.md` | expectativa al resultado. |
+| 499 | 61 | `CLAUDE.md` | - **Haz saltar las guardas a propósito** antes de dar un procesador por bueno. |
 | 500 | 7 | `docs/reglas/guardas-y-ensayos.md` | - 🔴 **UNA GUARDA COMPARA INVARIANTES, NO CIFRAS ABSOLUTAS** — y con más motivo |
 | 501 | 8 | `docs/reglas/guardas-y-ensayos.md` | el backup no copia. 'backup-bd.yml' vuelca con '--schema=public', así que 'sto |
 | 502 | 9 | `docs/reglas/guardas-y-ensayos.md` | todo lo demás **no están en la copia** y 'restaurar-staging.yml' no los repone |
@@ -574,7 +577,7 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 | 532 | 39 | `docs/reglas/guardas-y-ensayos.md` | NO prueba que funcione"*). **Sin abortar**: hay migraciones legítimamente idem |
 | 533 | 40 | `docs/reglas/guardas-y-ensayos.md` | se relanzan a propósito. Pero que un verde mudo no pueda hacerse pasar por una |
 | 534 | 41 | `docs/reglas/guardas-y-ensayos.md` | verificación. Va **detrás** del registro de migraciones de §4. |
-| 535 | 57 | `CLAUDE.md` | - **"Lo ha revisado un agente" NO es prueba.** Un revisor lee código, no lo ej |
+| 535 | 173 | `docs/reglas/tests-y-falsos-verdes.md` | - **"Lo ha revisado un agente" NO es prueba.** Un revisor lee código, no lo ej |
 | 536 | 7 | `docs/reglas/censos-y-catalogos.md` | - 🔴 **LAS OPCIONES DE UN OBJETO SE LEEN POR OPCIÓN, NUNCA CON UN 'like' SOBRE  |
 | 537 | 8 | `docs/reglas/censos-y-catalogos.md` | Postgres guarda en 'reloptions' **literalmente lo que se escribió**, y acepta  |
 | 538 | 9 | `docs/reglas/censos-y-catalogos.md` | 'security_invoker=true' y 'security_invoker=on' significan lo mismo y se almac |
@@ -612,8 +615,8 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 | 570 | 41 | `docs/reglas/censos-y-catalogos.md` | ⚠️ Y al revés también: que algo se ejecute **no** significa que esté en el rep |
 | 571 | 42 | `docs/reglas/censos-y-catalogos.md` | donde aparecen los consumidores no versionados, que es justo lo que un censo d |
 | 572 | 43 | `docs/reglas/censos-y-catalogos.md` | jubilación tiene que encontrar. |
-| 573 | 58 | `CLAUDE.md` | - **Greps parciales no son lectura.** Si te preguntan "¿seguro que el código h |
-| 574 | 59 | `CLAUDE.md` | fichero entero. |
+| 573 | 62 | `CLAUDE.md` | - **Greps parciales no son lectura.** Si te preguntan "¿seguro que el código h |
+| 574 | 63 | `CLAUDE.md` | fichero entero. |
 | 575 | 7 | `docs/reglas/huellas-y-cambios-inertes.md` | - 🔴 **"Es idéntico en efecto" es una hipótesis. Para demostrar que un cambio e |
 | 576 | 8 | `docs/reglas/huellas-y-cambios-inertes.md` | cambia nada: DOS RECORRIDOS COMPLETOS Y LAS MISMAS HUELLAS.** Estrenado el 9-a |
 | 577 | 9 | `docs/reglas/huellas-y-cambios-inertes.md` | 'search_path' explícito de 'aplicar-migracion.yml'. El método: |
@@ -630,19 +633,19 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 | 589 | 21 | `docs/reglas/huellas-y-cambios-inertes.md` | comparación empieza a mentir sin que nadie lo note. Es el hermano del 'LC_ALL= |
 | 590 | 22 | `docs/reglas/huellas-y-cambios-inertes.md` | ⚠️ Y sirve para lo contrario también: si las huellas que **deben** cambiar cam |
 | 591 | 23 | `docs/reglas/huellas-y-cambios-inertes.md` | **no** deben, no, eso demuestra que la migración hace lo que dice **y nada más |
-| 593 | 61 | `CLAUDE.md` | ### El estado vive en el repo, no en las notas |
-| 594 | 62 | `CLAUDE.md` | - Antes de afirmar el estado de cualquier pieza: **míralo**. Las notas de ayer |
-| 595 | 63 | `CLAUDE.md` | - 'raw.githubusercontent.com' tiene retraso de caché tras un commit. Para leer |
-| 596 | 64 | `CLAUDE.md` | **tarball por 'codeload.github.com'**. La API de GitHub sin token da 60 petici |
+| 593 | 65 | `CLAUDE.md` | ### El estado vive en el repo, no en las notas |
+| 594 | 66 | `CLAUDE.md` | - Antes de afirmar el estado de cualquier pieza: **míralo**. Las notas de ayer |
+| 595 | 36 | `docs/reglas/gotchas-del-entorno.md` | - 'raw.githubusercontent.com' tiene retraso de caché tras un commit. Para leer |
+| 596 | 37 | `docs/reglas/gotchas-del-entorno.md` | **tarball por 'codeload.github.com'**. La API de GitHub sin token da 60 petici |
 | 598 | 26 | `docs/reglas/huellas-y-cambios-inertes.md` | --- |
 | 600 | 7 | `docs/reglas/seguridad-permisos.md` | ## 4. SEGURIDAD |
-| 602 | 70 | `CLAUDE.md` | - 🔴 **Las credenciales NUNCA van en el código ni en un mensaje.** Viven en Git |
-| 603 | 71 | `CLAUDE.md` | y R2. Una llave que aparece en un chat está quemada y se regenera. |
-| 604 | 72 | `CLAUDE.md` | **Introducir credenciales no es algo que hagas tú: se lo pides a Fernando.** |
-| 605 | 73 | `CLAUDE.md` | - **Supabase es PRODUCCIÓN.** Desde una sesión: **solo lectura**. Toda escritu |
-| 606 | 74 | `CLAUDE.md` | rama → PR → Fernando aprueba → ensayo en staging → producción. |
-| 607 | 75 | `CLAUDE.md` | - **Todo lo NUEVO nace CERRADO:** RLS activo y 0 políticas. Vistas 'security_i |
-| 608 | 76 | `CLAUDE.md` | 'IMMUTABLE', sin 'SECURITY DEFINER'. |
+| 602 | 72 | `CLAUDE.md` | - 🔴 **Las credenciales NUNCA van en el código ni en un mensaje.** Viven en Git |
+| 603 | 73 | `CLAUDE.md` | y R2. Una llave que aparece en un chat está quemada y se regenera. |
+| 604 | 74 | `CLAUDE.md` | **Introducir credenciales no es algo que hagas tú: se lo pides a Fernando.** |
+| 605 | 75 | `CLAUDE.md` | - **Supabase es PRODUCCIÓN.** Desde una sesión: **solo lectura**. Toda escritu |
+| 606 | 76 | `CLAUDE.md` | rama → PR → Fernando aprueba → ensayo en staging → producción. |
+| 607 | 77 | `CLAUDE.md` | - **Todo lo NUEVO nace CERRADO:** RLS activo y 0 políticas. Vistas 'security_i |
+| 608 | 78 | `CLAUDE.md` | 'IMMUTABLE', sin 'SECURITY DEFINER'. |
 | 609 | 9 | `docs/reglas/seguridad-permisos.md` | - 🔴 **Pero "nace cerrado" NO es el estado por defecto: hay que REVOCAR antes d |
 | 610 | 10 | `docs/reglas/seguridad-permisos.md` | Medido el 30-jul-2026 en 'pg_default_acl' de las DOS bases: en 'public', toda  |
 | 611 | 11 | `docs/reglas/seguridad-permisos.md` | nueva nace con **'arwdDxtm' concedido a 'anon' Y a 'authenticated'**, y toda * |
@@ -663,12 +666,12 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 | 626 | 26 | `docs/reglas/seguridad-permisos.md` | con un 'revoke … from anon' en staging. |
 | 627 | 27 | `docs/reglas/seguridad-permisos.md` | Regla práctica: **si la migración lleva un 'drop', el 'revoke' va DESPUÉS del  |
 | 628 | 28 | `docs/reglas/seguridad-permisos.md` | migración, y se mide el ACL al terminar.** |
-| 629 | 77 | `CLAUDE.md` | - **La v1 tiene escritura anónima abierta** (deuda estructural). **No se toca  |
-| 630 | 78 | `CLAUDE.md` | se cierra en la v2 con Auth + RPC. El problema no es la llave 'publishable' (e |
-| 631 | 79 | `CLAUDE.md` | diseño): son las políticas. |
+| 629 | 79 | `CLAUDE.md` | - **La v1 tiene escritura anónima abierta** (deuda estructural). **No se toca  |
+| 630 | 80 | `CLAUDE.md` | se cierra en la v2 con Auth + RPC. El problema no es la llave 'publishable' (e |
+| 631 | 81 | `CLAUDE.md` | diseño): son las políticas. |
 | 632 | 29 | `docs/reglas/seguridad-permisos.md` | - **SP-API: jamás con credenciales de Moloka SL.** Decidido y cerrado. Las cue |
 | 633 | 30 | `docs/reglas/seguridad-permisos.md` | (Elena) y Fernando (autónomo) están separadas a nivel de credenciales. |
-| 634 | 80 | `CLAUDE.md` | - **Confirmar una factura SIEMPRE inyecta stock.** Nunca subir facturas antigu |
+| 634 | 82 | `CLAUDE.md` | - **Confirmar una factura SIEMPRE inyecta stock.** Nunca subir facturas antigu |
 | 635 | 7 | `docs/reglas/pendientes-backup-y-permisos.md` | - 🔴 **PENDIENTE — el backup NO copia los permisos: restaurar te deja la base A |
 | 636 | 8 | `docs/reglas/pendientes-backup-y-permisos.md` | 'backup-bd.yml' vuelca con '--no-privileges', así que el fichero **no contiene |
 | 637 | 9 | `docs/reglas/pendientes-backup-y-permisos.md` | 'REVOKE'**. Dicho en alto y sin adornos: **el día que haya que restaurar de ve |
@@ -772,17 +775,17 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 | 742 | 114 | `docs/reglas/pendientes-backup-y-permisos.md` | '--no-privileges'; se anota aquí para que no dependa de que alguien lo recuerd |
 | 744 | 116 | `docs/reglas/pendientes-backup-y-permisos.md` | --- |
 | 746 | 7 | `docs/reglas/como-se-trabaja.md` | ## 5. CÓMO SE TRABAJA AQUÍ |
-| 748 | 86 | `CLAUDE.md` | - **UN PR, UNA COSA.** Sin excepciones. |
+| 748 | 88 | `CLAUDE.md` | - **UN PR, UNA COSA.** Sin excepciones. |
 | 749 | 9 | `docs/reglas/como-se-trabaja.md` | - 🔴 **AL FUSIONAR UN PR, QUIEN CREÓ EL WORKTREE LO RETIRA CON 'git worktree re |
 | 750 | 10 | `docs/reglas/como-se-trabaja.md` | Un worktree que sobrevive a su PR es un clon fantasma más donde alguien leerá  |
 | 751 | 11 | `docs/reglas/como-se-trabaja.md` | equivocado. Nunca se borra la carpeta a mano —eso deja el registro de 'git wor |
 | 752 | 12 | `docs/reglas/como-se-trabaja.md` | mintiendo—: 'git worktree remove <ruta>' y, al terminar la tanda, 'git worktre |
-| 753 | 87 | `CLAUDE.md` | - 🔴 **AL TERMINAR UN TRABAJO, EL PARTE SE DEJA EN LA BANDEJA.** Además del PR, |
-| 754 | 88 | `CLAUDE.md` | una copia del informe en 'G:\Mi unidad\Moloka\bandeja\' con el nombre |
-| 755 | 89 | `CLAUDE.md` | **'AAAA-MM-DD-HHMM-tema.md'** (hora española). **Primera línea del fichero: qu |
-| 756 | 90 | `CLAUDE.md` | cuándo.** Sin esa copia, el trabajo solo existe dentro del repo y Fernando tie |
-| 757 | 91 | `CLAUDE.md` | correveidile entre Code y los chats. La bandeja es lo que lo evita, y **no dep |
-| 758 | 92 | `CLAUDE.md` | nadie se acuerde de pedirlo en el encargo**. |
+| 753 | 89 | `CLAUDE.md` | - 🔴 **AL TERMINAR UN TRABAJO, EL PARTE SE DEJA EN LA BANDEJA.** Además del PR, |
+| 754 | 90 | `CLAUDE.md` | una copia del informe en 'G:\Mi unidad\Moloka\bandeja\' con el nombre |
+| 755 | 91 | `CLAUDE.md` | **'AAAA-MM-DD-HHMM-tema.md'** (hora española). **Primera línea del fichero: qu |
+| 756 | 92 | `CLAUDE.md` | cuándo.** Sin esa copia, el trabajo solo existe dentro del repo y Fernando tie |
+| 757 | 93 | `CLAUDE.md` | correveidile entre Code y los chats. La bandeja es lo que lo evita, y **no dep |
+| 758 | 94 | `CLAUDE.md` | nadie se acuerde de pedirlo en el encargo**. |
 | 759 | 7 | `docs/reglas/escalera-de-migraciones.md` | - 🔴 **ANTES DE ENSAYAR UNA MIGRACIÓN EN STAGING, SE RESTAURA STAGING.** Se lan |
 | 760 | 8 | `docs/reglas/escalera-de-migraciones.md` | 'restaurar-staging.yml' y se espera a que salga en VERDE. La escalera entera e |
 | 761 | 9 | `docs/reglas/escalera-de-migraciones.md` | **restaurar staging → staging ensayo → staging aplicar → verificación SQL → pr |
@@ -813,13 +816,13 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 | 786 | 34 | `docs/reglas/escalera-de-migraciones.md` | 📌 La forma de saber si vuelve a tocar: **mirar el estado del destino antes de  |
 | 787 | 35 | `docs/reglas/escalera-de-migraciones.md` | fecha. Si lo que la migración necesita nació DESPUÉS del último volcado, resta |
 | 788 | 36 | `docs/reglas/escalera-de-migraciones.md` | suelo sobre el que se iba a ensayar; en cualquier otro caso, se restaura. |
-| 789 | 93 | `CLAUDE.md` | - **Antes de picar: lee cómo se hizo lo anterior.** Hay procesadores en produc |
-| 790 | 94 | `CLAUDE.md` | el siguiente se les tiene que parecer. Si algo se aparta del patrón, dilo y ex |
-| 791 | 95 | `CLAUDE.md` | - **Las dudas de diseño no se resuelven en caliente.** Se anotan en una línea  |
-| 792 | 96 | `CLAUDE.md` | - **Cuando Fernando dice "esto no me cuadra", PARA y baja al dato.** Acierta ~ |
-| 793 | 97 | `CLAUDE.md` | Casos reales: un bug oficial de la API de Amazon (FBA_CORE), un envío perdido  |
-| 794 | 98 | `CLAUDE.md` | borrado con 12 uds dentro. En los cuatro, la explicación cómoda era la equivoc |
-| 795 | 99 | `CLAUDE.md` | - **Darle la razón sin medir es fallarle.** Si tienes el dato y contradice lo  |
+| 789 | 95 | `CLAUDE.md` | - **Antes de picar: lee cómo se hizo lo anterior.** Hay procesadores en produc |
+| 790 | 96 | `CLAUDE.md` | el siguiente se les tiene que parecer. Si algo se aparta del patrón, dilo y ex |
+| 791 | 97 | `CLAUDE.md` | - **Las dudas de diseño no se resuelven en caliente.** Se anotan en una línea  |
+| 792 | 98 | `CLAUDE.md` | - **Cuando Fernando dice "esto no me cuadra", PARA y baja al dato.** Acierta ~ |
+| 793 | 99 | `CLAUDE.md` | Casos reales: un bug oficial de la API de Amazon (FBA_CORE), un envío perdido  |
+| 794 | 100 | `CLAUDE.md` | borrado con 12 uds dentro. En los cuatro, la explicación cómoda era la equivoc |
+| 795 | 101 | `CLAUDE.md` | - **Darle la razón sin medir es fallarle.** Si tienes el dato y contradice lo  |
 | 796 | 13 | `docs/reglas/como-se-trabaja.md` | - **Distingue "podría" de "está documentado".** Una hipótesis bien redactada n |
 | 797 | 14 | `docs/reglas/como-se-trabaja.md` | Si no lo has verificado ahora mismo, dilo. |
 | 798 | 15 | `docs/reglas/como-se-trabaja.md` | - **Antes de decir "no se puede":** eso es una hipótesis. Agota la búsqueda (d |
@@ -853,7 +856,7 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 | 827 | 33 | `docs/reglas/gotchas-del-entorno.md` | - **Los commits de este repo se firman con la dirección noreply de GitHub.** E |
 | 828 | 34 | `docs/reglas/gotchas-del-entorno.md` | no publiques correos reales en la historia. La identidad está en 'git config - |
 | 829 | 35 | `docs/reglas/gotchas-del-entorno.md` | '--global'. |
-| 831 | 37 | `docs/reglas/gotchas-del-entorno.md` | --- |
+| 831 | 39 | `docs/reglas/gotchas-del-entorno.md` | --- |
 | 833 | 8 | `docs/reglas/donde-esta-el-proyecto.md` | ## 6. DÓNDE ESTÁ EL PROYECTO AHORA |
 | 835 | 10 | `docs/reglas/donde-esta-el-proyecto.md` | La v2 ("el bicho") se construye con **patrón estrangulador**: nace al lado de  |
 | 836 | 11 | `docs/reglas/donde-esta-el-proyecto.md` | Supabase, y Elena se muda pestaña a pestaña. **Los datos no se mudan: se curan |
@@ -864,7 +867,7 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 | 842 | 17 | `docs/reglas/donde-esta-el-proyecto.md` | '@supabase/ssr', y su Inventario está en marcha — hasta el punto de que un wor |
 | 843 | 18 | `docs/reglas/donde-esta-el-proyecto.md` | mañana laborable «antes de que entre Elena». Lo que sigue siendo verdad es el  |
 | 844 | 19 | `docs/reglas/donde-esta-el-proyecto.md` | va primero. |
-| 846 | 105 | `CLAUDE.md` | Orden de mudanza acordado: Inventario → Inicio → Alertas → Movimientos → Rotac |
-| 847 | 106 | `CLAUDE.md` | *(frontera lectura/escritura)* → Entrada → Facturas → Envío FBA → Motores. |
-| 849 | 137 | `CLAUDE.md` | *Para el estado exacto de cada pieza: míralo en el repo y en la BD. No lo pong |
+| 846 | 107 | `CLAUDE.md` | Orden de mudanza acordado: Inventario → Inicio → Alertas → Movimientos → Rotac |
+| 847 | 108 | `CLAUDE.md` | *(frontera lectura/escritura)* → Entrada → Facturas → Envío FBA → Motores. |
+| 849 | 139 | `CLAUDE.md` | *Para el estado exacto de cada pieza: míralo en el repo y en la BD. No lo pong |
 

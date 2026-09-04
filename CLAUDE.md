@@ -40,6 +40,14 @@ Sin excepciones. Si una tabla necesita `stock_es`, `stock_it`, está mal diseña
 ### 1.4 Un informe caducado no da información incompleta: da información FALSA
 Hermano de: **una cifra sin la fecha del dato que la sostiene es una cifra que miente.**
 
+### Los tres cajones (§1.6)
+
+| Cajón | Qué se hace con lo viejo | Quién vive aquí |
+|---|---|---|
+| **FOTO** | **Se tira la hoja vieja.** Lo que no viene en el fichero se **BORRA** | `inventario_fba`, `inventario_internacional`, `listings_amazon`, `keepa_escaparate`, `paneu_aptos` + `paneu_oferta_pais` |
+| **PELÍCULA** | **Se apila. NUNCA se borra** | `movimientos`, el ledger, `transacciones_movimientos`, y `demanda_asin` (custom analytics) como **película de LECTURAS** |
+| **MAESTRO** | **Se MARCA. Ni se borra ni se sustituye** | `productos` |
+
 ---
 
 ## VALIDACIÓN: QUÉ CUENTA COMO PRUEBA
@@ -50,18 +58,12 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
 - **La verificación final es SQL contra la BD. NUNCA el log.**
 - **Compilar no es ejecutar.** `py_compile` pasa un script que redefine un built-in y peta en
   runtime. Ejecuta contra **el fichero real**.
-- **Los datos sintéticos no prueban nada.** Una vista se prueba con la tabla **poblada**.
-- **Escribe los números esperados ANTES de correr.** Si no salen, di lo que sale — no ajustes la
-  expectativa al resultado.
 - **Haz saltar las guardas a propósito** antes de dar un procesador por bueno.
-- **"Lo ha revisado un agente" NO es prueba.** Un revisor lee código, no lo ejecuta.
 - **Greps parciales no son lectura.** Si te preguntan "¿seguro que el código hace X?", lee el
   fichero entero.
 
 ### El estado vive en el repo, no en las notas
 - Antes de afirmar el estado de cualquier pieza: **míralo**. Las notas de ayer mienten hoy.
-- `raw.githubusercontent.com` tiene retraso de caché tras un commit. Para leer el repo desde fuera:
-  **tarball por `codeload.github.com`**. La API de GitHub sin token da 60 peticiones/hora por IP.
 
 ---
 
@@ -118,7 +120,7 @@ Cotejo, línea a línea, en [`COTEJO.md`](docs/reglas/COTEJO.md).
 | §1 | cruzas o escribes identidad | [`identidad.md`](docs/reglas/identidad.md) |
 | §1 | tocas un informe del Seller | [`informes-amazon.md`](docs/reglas/informes-amazon.md) |
 | §1 | calculas rentabilidad o IVA | [`rentabilidad-amazon.md`](docs/reglas/rentabilidad-amazon.md) |
-| §1 | vas a escribir en una tabla | [`tres-cajones.md`](docs/reglas/tres-cajones.md) |
+| §1 | dudas de qué cajón es una tabla | [`tres-cajones.md`](docs/reglas/tres-cajones.md) |
 | §2 | tocas o escribes un procesador | [`procesadores.md`](docs/reglas/procesadores.md) |
 | §2 | encoding, lotes, stock, FNSKU | [`trampas-medidas.md`](docs/reglas/trampas-medidas.md) |
 | §3 | escribes un test o ves un verde | [`tests-y-falsos-verdes.md`](docs/reglas/tests-y-falsos-verdes.md) |

@@ -167,3 +167,7 @@
   motivo la ve quien consulta, cuando consulta, sin saber nada de esto.
   ⚠️ Corolario, porque es el que se olvida: **las 20 tablas tapadas contaminan todo lo que
   se apoye en ellas.** Antes de cruzar con una tabla, mírala en `sql/canario_rls.sql`.
+- **Los datos sintéticos no prueban nada.** Una vista se prueba con la tabla **poblada**.
+- **Escribe los números esperados ANTES de correr.** Si no salen, di lo que sale — no ajustes la
+  expectativa al resultado.
+- **"Lo ha revisado un agente" NO es prueba.** Un revisor lee código, no lo ejecuta.

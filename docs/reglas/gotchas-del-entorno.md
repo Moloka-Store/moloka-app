@@ -33,5 +33,7 @@
 - **Los commits de este repo se firman con la dirección noreply de GitHub.** El repo es PÚBLICO:
   no publiques correos reales en la historia. La identidad está en `git config --local`, nunca
   `--global`.
+- `raw.githubusercontent.com` tiene retraso de caché tras un commit. Para leer el repo desde fuera:
+  **tarball por `codeload.github.com`**. La API de GitHub sin token da 60 peticiones/hora por IP.
 
 ---

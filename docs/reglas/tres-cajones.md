@@ -1,18 +1,17 @@
-# Los tres cajones, enteros
+# Los tres cajones: todo menos la tabla
 
 > Movido **literalmente** desde `CLAUDE.md` al acortarlo. Ni una palabra
 > cambiada, ni una regla nueva. Índice y cotejo línea a línea:
 > [`docs/reglas/COTEJO.md`](COTEJO.md) · vuelta: [`CLAUDE.md`](../../CLAUDE.md)
 
+> 🔑 **La TABLA de los tres cajones no vive aquí: vive en el**
+> **[`CLAUDE.md`](../../CLAUDE.md) corto**, que es donde tiene que verse
+> siempre. Aquí queda todo lo demás de §1.6.
+
 ### 1.6 Los TRES CAJONES: cada tabla se escribe de UNA manera
 Antes de escribir en una tabla, mira **en qué cajón está**. El cajón decide qué pasa con lo que ya
 había, y los cajones no se mezclan:
 
-| Cajón | Qué se hace con lo viejo | Quién vive aquí |
-|---|---|---|
-| **FOTO** | **Se tira la hoja vieja.** Lo que no viene en el fichero se **BORRA** | `inventario_fba`, `inventario_internacional`, `listings_amazon`, `keepa_escaparate`, `paneu_aptos` + `paneu_oferta_pais` |
-| **PELÍCULA** | **Se apila. NUNCA se borra** | `movimientos`, el ledger, `transacciones_movimientos`, y `demanda_asin` (custom analytics) como **película de LECTURAS** |
-| **MAESTRO** | **Se MARCA. Ni se borra ni se sustituye** | `productos` |
 
 ⚠️ **`custom analytics` estaba en la fila FOTO y ahí no va.** Cambió de cajón el **10-ago-2026**, y
 lo dice su propio procesador en la cabecera (*«EL CAJÓN: PELÍCULA DE LECTURAS»*): cada carga **apila
