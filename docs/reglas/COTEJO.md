@@ -1,4 +1,4 @@
-# Cotejo línea a línea: v1_original.md antes y después de acortarlo
+# Cotejo línea a línea: el CLAUDE.md de 0d1710a antes y después de acortarlo
 
 Este fichero es la **prueba** de que al acortar `CLAUDE.md` no se ha perdido
 ni reescrito ni una sola regla. El reparto se hizo **moviendo rangos de líneas**

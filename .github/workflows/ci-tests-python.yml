@@ -187,7 +187,18 @@ jobs:
       - name: 23) test_disparar.mjs
         run: node test_disparar.mjs
 
-      - name: 24) Censo - ningun test se queda sin correr
+      # El candado del CLAUDE.md: que no vuelva a engordar (techo 8.300
+      # caracteres) y que el indice del final no mienta en NINGUNO de los dos
+      # sentidos -- ni una fila que apunte a un docs/reglas/ que no existe, ni
+      # un fichero de docs/reglas/ sin fila. Solo lee ficheros: sin red, sin
+      # secretos y sin dependencias.
+      # Este workflow NO tiene filtro de rutas a proposito (ver la cabecera), asi
+      # que el candado corre tambien en los PR que solo tocan .md, que son justo
+      # los que engordan el fichero.
+      - name: 24) test_claude_md_candado.py
+        run: python -u test_claude_md_candado.py
+
+      - name: 25) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
         #    demas se lee como si lo cubriera. Aqui registrar un test es un paso
@@ -217,6 +228,7 @@ jobs:
             test_escaner_memoria.py
             test_escaner_excel_isd.py
             test_escaner_catalogo_propio.py
+            test_claude_md_candado.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).
