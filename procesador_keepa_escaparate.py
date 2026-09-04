@@ -868,6 +868,11 @@ def main():
     sb = create_client(SUPABASE_URL, SUPABASE_KEY)
     objs = listar_buzon(sb, BUCKET, CARPETA)  # reintenta cortes de red; aborta si no lo es
     csvs = [o for o in objs if (o.get('name') or '').lower().endswith('.csv')]
+    # 🔒 EL RECUENTO DEL BUZÓN, EN EL LOG Y PEGADO A "Export elegido". Sin él, el listado
+    #    es un número que nadie ve: el día en que `listar_buzon` volviera a devolver una lista
+    #    corta (paginación rota, permisos, prefijo mal), el log diría "Export elegido: X" con
+    #    la misma cara de siempre. Con el total al lado, un salto de 87 a 100 clavados canta.
+    print(f"Buzón {BUCKET}/{CARPETA}/: {len(objs)} objetos, {len(csvs)} .csv", flush=True)
     if not csvs:
         sys.exit(f"No hay ningún .csv en {BUCKET}/{CARPETA}/. "
                  "Sube el export 'Resumen del vendedor' de Keepa (.csv) y relanza.")

@@ -198,7 +198,16 @@ jobs:
       - name: 24) test_claude_md_candado.py
         run: python -u test_claude_md_candado.py
 
-      - name: 25) Censo - ningun test se queda sin correr
+      # El banco de la paginacion del listado del buzon. `listar_buzon` llamaba a
+      # `.list(carpeta)` a secas y storage3 corta en 100 por su cuenta, en silencio:
+      # con la carpeta ordenada por nombre --y el nombre lleva la fecha dentro-- lo
+      # que se caia del corte era LA COLA, o sea el export mas reciente. El doble de
+      # Storage imita al SDK (mismo DEFAULT_SEARCH_OPTIONS), asi que si alguien vuelve
+      # a la version sin paginar el test se pone rojo solo. Sin red y sin secretos.
+      - name: 25) test_paginacion_buzon.py
+        run: python -u test_paginacion_buzon.py
+
+      - name: 26) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
         #    demas se lee como si lo cubriera. Aqui registrar un test es un paso
@@ -229,6 +238,7 @@ jobs:
             test_escaner_excel_isd.py
             test_escaner_catalogo_propio.py
             test_claude_md_candado.py
+            test_paginacion_buzon.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).
