@@ -40,10 +40,10 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 | 330-331 | `CLAUDE.md` |
 | 332 | `docs/reglas/tests-y-falsos-verdes.md` |
 | 333-335 | `CLAUDE.md` |
-| 336-498 | `docs/reglas/tests-y-falsos-verdes.md` |
-| 499 | `CLAUDE.md` |
+| 336-495 | `docs/reglas/tests-y-falsos-verdes.md` |
+| 496-499 | `CLAUDE.md` |
 | 500-534 | `docs/reglas/guardas-y-ensayos.md` |
-| 535 | `docs/reglas/tests-y-falsos-verdes.md` |
+| 535 | `CLAUDE.md` |
 | 536-572 | `docs/reglas/censos-y-catalogos.md` |
 | 573-574 | `CLAUDE.md` |
 | 575-592 | `docs/reglas/huellas-y-cambios-inertes.md` |
@@ -538,10 +538,10 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 | 493 | 167 | `docs/reglas/tests-y-falsos-verdes.md` | motivo la ve quien consulta, cuando consulta, sin saber nada de esto. |
 | 494 | 168 | `docs/reglas/tests-y-falsos-verdes.md` | ⚠️ Corolario, porque es el que se olvida: **las 20 tablas tapadas contaminan t |
 | 495 | 169 | `docs/reglas/tests-y-falsos-verdes.md` | se apoye en ellas.** Antes de cruzar con una tabla, mírala en 'sql/canario_rls |
-| 496 | 170 | `docs/reglas/tests-y-falsos-verdes.md` | - **Los datos sintéticos no prueban nada.** Una vista se prueba con la tabla * |
-| 497 | 171 | `docs/reglas/tests-y-falsos-verdes.md` | - **Escribe los números esperados ANTES de correr.** Si no salen, di lo que sa |
-| 498 | 172 | `docs/reglas/tests-y-falsos-verdes.md` | expectativa al resultado. |
-| 499 | 61 | `CLAUDE.md` | - **Haz saltar las guardas a propósito** antes de dar un procesador por bueno. |
+| 496 | 61 | `CLAUDE.md` | - **Los datos sintéticos no prueban nada.** Una vista se prueba con la tabla * |
+| 497 | 62 | `CLAUDE.md` | - **Escribe los números esperados ANTES de correr.** Si no salen, di lo que sa |
+| 498 | 63 | `CLAUDE.md` | expectativa al resultado. |
+| 499 | 64 | `CLAUDE.md` | - **Haz saltar las guardas a propósito** antes de dar un procesador por bueno. |
 | 500 | 7 | `docs/reglas/guardas-y-ensayos.md` | - 🔴 **UNA GUARDA COMPARA INVARIANTES, NO CIFRAS ABSOLUTAS** — y con más motivo |
 | 501 | 8 | `docs/reglas/guardas-y-ensayos.md` | el backup no copia. 'backup-bd.yml' vuelca con '--schema=public', así que 'sto |
 | 502 | 9 | `docs/reglas/guardas-y-ensayos.md` | todo lo demás **no están en la copia** y 'restaurar-staging.yml' no los repone |
@@ -577,7 +577,7 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 | 532 | 39 | `docs/reglas/guardas-y-ensayos.md` | NO prueba que funcione"*). **Sin abortar**: hay migraciones legítimamente idem |
 | 533 | 40 | `docs/reglas/guardas-y-ensayos.md` | se relanzan a propósito. Pero que un verde mudo no pueda hacerse pasar por una |
 | 534 | 41 | `docs/reglas/guardas-y-ensayos.md` | verificación. Va **detrás** del registro de migraciones de §4. |
-| 535 | 173 | `docs/reglas/tests-y-falsos-verdes.md` | - **"Lo ha revisado un agente" NO es prueba.** Un revisor lee código, no lo ej |
+| 535 | 65 | `CLAUDE.md` | - **"Lo ha revisado un agente" NO es prueba.** Un revisor lee código, no lo ej |
 | 536 | 7 | `docs/reglas/censos-y-catalogos.md` | - 🔴 **LAS OPCIONES DE UN OBJETO SE LEEN POR OPCIÓN, NUNCA CON UN 'like' SOBRE  |
 | 537 | 8 | `docs/reglas/censos-y-catalogos.md` | Postgres guarda en 'reloptions' **literalmente lo que se escribió**, y acepta  |
 | 538 | 9 | `docs/reglas/censos-y-catalogos.md` | 'security_invoker=true' y 'security_invoker=on' significan lo mismo y se almac |
@@ -615,8 +615,8 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 | 570 | 41 | `docs/reglas/censos-y-catalogos.md` | ⚠️ Y al revés también: que algo se ejecute **no** significa que esté en el rep |
 | 571 | 42 | `docs/reglas/censos-y-catalogos.md` | donde aparecen los consumidores no versionados, que es justo lo que un censo d |
 | 572 | 43 | `docs/reglas/censos-y-catalogos.md` | jubilación tiene que encontrar. |
-| 573 | 62 | `CLAUDE.md` | - **Greps parciales no son lectura.** Si te preguntan "¿seguro que el código h |
-| 574 | 63 | `CLAUDE.md` | fichero entero. |
+| 573 | 66 | `CLAUDE.md` | - **Greps parciales no son lectura.** Si te preguntan "¿seguro que el código h |
+| 574 | 67 | `CLAUDE.md` | fichero entero. |
 | 575 | 7 | `docs/reglas/huellas-y-cambios-inertes.md` | - 🔴 **"Es idéntico en efecto" es una hipótesis. Para demostrar que un cambio e |
 | 576 | 8 | `docs/reglas/huellas-y-cambios-inertes.md` | cambia nada: DOS RECORRIDOS COMPLETOS Y LAS MISMAS HUELLAS.** Estrenado el 9-a |
 | 577 | 9 | `docs/reglas/huellas-y-cambios-inertes.md` | 'search_path' explícito de 'aplicar-migracion.yml'. El método: |
@@ -633,19 +633,19 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 | 589 | 21 | `docs/reglas/huellas-y-cambios-inertes.md` | comparación empieza a mentir sin que nadie lo note. Es el hermano del 'LC_ALL= |
 | 590 | 22 | `docs/reglas/huellas-y-cambios-inertes.md` | ⚠️ Y sirve para lo contrario también: si las huellas que **deben** cambiar cam |
 | 591 | 23 | `docs/reglas/huellas-y-cambios-inertes.md` | **no** deben, no, eso demuestra que la migración hace lo que dice **y nada más |
-| 593 | 65 | `CLAUDE.md` | ### El estado vive en el repo, no en las notas |
-| 594 | 66 | `CLAUDE.md` | - Antes de afirmar el estado de cualquier pieza: **míralo**. Las notas de ayer |
+| 593 | 69 | `CLAUDE.md` | ### El estado vive en el repo, no en las notas |
+| 594 | 70 | `CLAUDE.md` | - Antes de afirmar el estado de cualquier pieza: **míralo**. Las notas de ayer |
 | 595 | 36 | `docs/reglas/gotchas-del-entorno.md` | - 'raw.githubusercontent.com' tiene retraso de caché tras un commit. Para leer |
 | 596 | 37 | `docs/reglas/gotchas-del-entorno.md` | **tarball por 'codeload.github.com'**. La API de GitHub sin token da 60 petici |
 | 598 | 26 | `docs/reglas/huellas-y-cambios-inertes.md` | --- |
 | 600 | 7 | `docs/reglas/seguridad-permisos.md` | ## 4. SEGURIDAD |
-| 602 | 72 | `CLAUDE.md` | - 🔴 **Las credenciales NUNCA van en el código ni en un mensaje.** Viven en Git |
-| 603 | 73 | `CLAUDE.md` | y R2. Una llave que aparece en un chat está quemada y se regenera. |
-| 604 | 74 | `CLAUDE.md` | **Introducir credenciales no es algo que hagas tú: se lo pides a Fernando.** |
-| 605 | 75 | `CLAUDE.md` | - **Supabase es PRODUCCIÓN.** Desde una sesión: **solo lectura**. Toda escritu |
-| 606 | 76 | `CLAUDE.md` | rama → PR → Fernando aprueba → ensayo en staging → producción. |
-| 607 | 77 | `CLAUDE.md` | - **Todo lo NUEVO nace CERRADO:** RLS activo y 0 políticas. Vistas 'security_i |
-| 608 | 78 | `CLAUDE.md` | 'IMMUTABLE', sin 'SECURITY DEFINER'. |
+| 602 | 76 | `CLAUDE.md` | - 🔴 **Las credenciales NUNCA van en el código ni en un mensaje.** Viven en Git |
+| 603 | 77 | `CLAUDE.md` | y R2. Una llave que aparece en un chat está quemada y se regenera. |
+| 604 | 78 | `CLAUDE.md` | **Introducir credenciales no es algo que hagas tú: se lo pides a Fernando.** |
+| 605 | 79 | `CLAUDE.md` | - **Supabase es PRODUCCIÓN.** Desde una sesión: **solo lectura**. Toda escritu |
+| 606 | 80 | `CLAUDE.md` | rama → PR → Fernando aprueba → ensayo en staging → producción. |
+| 607 | 81 | `CLAUDE.md` | - **Todo lo NUEVO nace CERRADO:** RLS activo y 0 políticas. Vistas 'security_i |
+| 608 | 82 | `CLAUDE.md` | 'IMMUTABLE', sin 'SECURITY DEFINER'. |
 | 609 | 9 | `docs/reglas/seguridad-permisos.md` | - 🔴 **Pero "nace cerrado" NO es el estado por defecto: hay que REVOCAR antes d |
 | 610 | 10 | `docs/reglas/seguridad-permisos.md` | Medido el 30-jul-2026 en 'pg_default_acl' de las DOS bases: en 'public', toda  |
 | 611 | 11 | `docs/reglas/seguridad-permisos.md` | nueva nace con **'arwdDxtm' concedido a 'anon' Y a 'authenticated'**, y toda * |
@@ -666,12 +666,12 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 | 626 | 26 | `docs/reglas/seguridad-permisos.md` | con un 'revoke … from anon' en staging. |
 | 627 | 27 | `docs/reglas/seguridad-permisos.md` | Regla práctica: **si la migración lleva un 'drop', el 'revoke' va DESPUÉS del  |
 | 628 | 28 | `docs/reglas/seguridad-permisos.md` | migración, y se mide el ACL al terminar.** |
-| 629 | 79 | `CLAUDE.md` | - **La v1 tiene escritura anónima abierta** (deuda estructural). **No se toca  |
-| 630 | 80 | `CLAUDE.md` | se cierra en la v2 con Auth + RPC. El problema no es la llave 'publishable' (e |
-| 631 | 81 | `CLAUDE.md` | diseño): son las políticas. |
+| 629 | 83 | `CLAUDE.md` | - **La v1 tiene escritura anónima abierta** (deuda estructural). **No se toca  |
+| 630 | 84 | `CLAUDE.md` | se cierra en la v2 con Auth + RPC. El problema no es la llave 'publishable' (e |
+| 631 | 85 | `CLAUDE.md` | diseño): son las políticas. |
 | 632 | 29 | `docs/reglas/seguridad-permisos.md` | - **SP-API: jamás con credenciales de Moloka SL.** Decidido y cerrado. Las cue |
 | 633 | 30 | `docs/reglas/seguridad-permisos.md` | (Elena) y Fernando (autónomo) están separadas a nivel de credenciales. |
-| 634 | 82 | `CLAUDE.md` | - **Confirmar una factura SIEMPRE inyecta stock.** Nunca subir facturas antigu |
+| 634 | 86 | `CLAUDE.md` | - **Confirmar una factura SIEMPRE inyecta stock.** Nunca subir facturas antigu |
 | 635 | 7 | `docs/reglas/pendientes-backup-y-permisos.md` | - 🔴 **PENDIENTE — el backup NO copia los permisos: restaurar te deja la base A |
 | 636 | 8 | `docs/reglas/pendientes-backup-y-permisos.md` | 'backup-bd.yml' vuelca con '--no-privileges', así que el fichero **no contiene |
 | 637 | 9 | `docs/reglas/pendientes-backup-y-permisos.md` | 'REVOKE'**. Dicho en alto y sin adornos: **el día que haya que restaurar de ve |
@@ -775,17 +775,17 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 | 742 | 114 | `docs/reglas/pendientes-backup-y-permisos.md` | '--no-privileges'; se anota aquí para que no dependa de que alguien lo recuerd |
 | 744 | 116 | `docs/reglas/pendientes-backup-y-permisos.md` | --- |
 | 746 | 7 | `docs/reglas/como-se-trabaja.md` | ## 5. CÓMO SE TRABAJA AQUÍ |
-| 748 | 88 | `CLAUDE.md` | - **UN PR, UNA COSA.** Sin excepciones. |
+| 748 | 92 | `CLAUDE.md` | - **UN PR, UNA COSA.** Sin excepciones. |
 | 749 | 9 | `docs/reglas/como-se-trabaja.md` | - 🔴 **AL FUSIONAR UN PR, QUIEN CREÓ EL WORKTREE LO RETIRA CON 'git worktree re |
 | 750 | 10 | `docs/reglas/como-se-trabaja.md` | Un worktree que sobrevive a su PR es un clon fantasma más donde alguien leerá  |
 | 751 | 11 | `docs/reglas/como-se-trabaja.md` | equivocado. Nunca se borra la carpeta a mano —eso deja el registro de 'git wor |
 | 752 | 12 | `docs/reglas/como-se-trabaja.md` | mintiendo—: 'git worktree remove <ruta>' y, al terminar la tanda, 'git worktre |
-| 753 | 89 | `CLAUDE.md` | - 🔴 **AL TERMINAR UN TRABAJO, EL PARTE SE DEJA EN LA BANDEJA.** Además del PR, |
-| 754 | 90 | `CLAUDE.md` | una copia del informe en 'G:\Mi unidad\Moloka\bandeja\' con el nombre |
-| 755 | 91 | `CLAUDE.md` | **'AAAA-MM-DD-HHMM-tema.md'** (hora española). **Primera línea del fichero: qu |
-| 756 | 92 | `CLAUDE.md` | cuándo.** Sin esa copia, el trabajo solo existe dentro del repo y Fernando tie |
-| 757 | 93 | `CLAUDE.md` | correveidile entre Code y los chats. La bandeja es lo que lo evita, y **no dep |
-| 758 | 94 | `CLAUDE.md` | nadie se acuerde de pedirlo en el encargo**. |
+| 753 | 93 | `CLAUDE.md` | - 🔴 **AL TERMINAR UN TRABAJO, EL PARTE SE DEJA EN LA BANDEJA.** Además del PR, |
+| 754 | 94 | `CLAUDE.md` | una copia del informe en 'G:\Mi unidad\Moloka\bandeja\' con el nombre |
+| 755 | 95 | `CLAUDE.md` | **'AAAA-MM-DD-HHMM-tema.md'** (hora española). **Primera línea del fichero: qu |
+| 756 | 96 | `CLAUDE.md` | cuándo.** Sin esa copia, el trabajo solo existe dentro del repo y Fernando tie |
+| 757 | 97 | `CLAUDE.md` | correveidile entre Code y los chats. La bandeja es lo que lo evita, y **no dep |
+| 758 | 98 | `CLAUDE.md` | nadie se acuerde de pedirlo en el encargo**. |
 | 759 | 7 | `docs/reglas/escalera-de-migraciones.md` | - 🔴 **ANTES DE ENSAYAR UNA MIGRACIÓN EN STAGING, SE RESTAURA STAGING.** Se lan |
 | 760 | 8 | `docs/reglas/escalera-de-migraciones.md` | 'restaurar-staging.yml' y se espera a que salga en VERDE. La escalera entera e |
 | 761 | 9 | `docs/reglas/escalera-de-migraciones.md` | **restaurar staging → staging ensayo → staging aplicar → verificación SQL → pr |
@@ -816,13 +816,13 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 | 786 | 34 | `docs/reglas/escalera-de-migraciones.md` | 📌 La forma de saber si vuelve a tocar: **mirar el estado del destino antes de  |
 | 787 | 35 | `docs/reglas/escalera-de-migraciones.md` | fecha. Si lo que la migración necesita nació DESPUÉS del último volcado, resta |
 | 788 | 36 | `docs/reglas/escalera-de-migraciones.md` | suelo sobre el que se iba a ensayar; en cualquier otro caso, se restaura. |
-| 789 | 95 | `CLAUDE.md` | - **Antes de picar: lee cómo se hizo lo anterior.** Hay procesadores en produc |
-| 790 | 96 | `CLAUDE.md` | el siguiente se les tiene que parecer. Si algo se aparta del patrón, dilo y ex |
-| 791 | 97 | `CLAUDE.md` | - **Las dudas de diseño no se resuelven en caliente.** Se anotan en una línea  |
-| 792 | 98 | `CLAUDE.md` | - **Cuando Fernando dice "esto no me cuadra", PARA y baja al dato.** Acierta ~ |
-| 793 | 99 | `CLAUDE.md` | Casos reales: un bug oficial de la API de Amazon (FBA_CORE), un envío perdido  |
-| 794 | 100 | `CLAUDE.md` | borrado con 12 uds dentro. En los cuatro, la explicación cómoda era la equivoc |
-| 795 | 101 | `CLAUDE.md` | - **Darle la razón sin medir es fallarle.** Si tienes el dato y contradice lo  |
+| 789 | 99 | `CLAUDE.md` | - **Antes de picar: lee cómo se hizo lo anterior.** Hay procesadores en produc |
+| 790 | 100 | `CLAUDE.md` | el siguiente se les tiene que parecer. Si algo se aparta del patrón, dilo y ex |
+| 791 | 101 | `CLAUDE.md` | - **Las dudas de diseño no se resuelven en caliente.** Se anotan en una línea  |
+| 792 | 102 | `CLAUDE.md` | - **Cuando Fernando dice "esto no me cuadra", PARA y baja al dato.** Acierta ~ |
+| 793 | 103 | `CLAUDE.md` | Casos reales: un bug oficial de la API de Amazon (FBA_CORE), un envío perdido  |
+| 794 | 104 | `CLAUDE.md` | borrado con 12 uds dentro. En los cuatro, la explicación cómoda era la equivoc |
+| 795 | 105 | `CLAUDE.md` | - **Darle la razón sin medir es fallarle.** Si tienes el dato y contradice lo  |
 | 796 | 13 | `docs/reglas/como-se-trabaja.md` | - **Distingue "podría" de "está documentado".** Una hipótesis bien redactada n |
 | 797 | 14 | `docs/reglas/como-se-trabaja.md` | Si no lo has verificado ahora mismo, dilo. |
 | 798 | 15 | `docs/reglas/como-se-trabaja.md` | - **Antes de decir "no se puede":** eso es una hipótesis. Agota la búsqueda (d |
@@ -867,7 +867,7 @@ Lo que garantiza la tabla, y vuelve a comprobarse con `python docs/reglas/cotejo
 | 842 | 17 | `docs/reglas/donde-esta-el-proyecto.md` | '@supabase/ssr', y su Inventario está en marcha — hasta el punto de que un wor |
 | 843 | 18 | `docs/reglas/donde-esta-el-proyecto.md` | mañana laborable «antes de que entre Elena». Lo que sigue siendo verdad es el  |
 | 844 | 19 | `docs/reglas/donde-esta-el-proyecto.md` | va primero. |
-| 846 | 107 | `CLAUDE.md` | Orden de mudanza acordado: Inventario → Inicio → Alertas → Movimientos → Rotac |
-| 847 | 108 | `CLAUDE.md` | *(frontera lectura/escritura)* → Entrada → Facturas → Envío FBA → Motores. |
-| 849 | 139 | `CLAUDE.md` | *Para el estado exacto de cada pieza: míralo en el repo y en la BD. No lo pong |
+| 846 | 111 | `CLAUDE.md` | Orden de mudanza acordado: Inventario → Inicio → Alertas → Movimientos → Rotac |
+| 847 | 112 | `CLAUDE.md` | *(frontera lectura/escritura)* → Entrada → Facturas → Envío FBA → Motores. |
+| 849 | 143 | `CLAUDE.md` | *Para el estado exacto de cada pieza: míralo en el repo y en la BD. No lo pong |
 
