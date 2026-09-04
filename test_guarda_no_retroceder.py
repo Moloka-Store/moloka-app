@@ -95,8 +95,14 @@ def montar_stubs(estado):
     conexiones = []
 
     class _Bucket:
-        def list(self, carpeta):
-            return [{'name': '50669020692.txt', 'updated_at': estado['subido_at']}]
+        # `options` porque `listar_buzon` PAGINA desde el 4-sep-2026: pasa
+        # {'limit','offset','sortBy'} igual que hace `backup_storage`. Y no se ignora
+        # — se honra limit/offset como el SDK—, para que este doble no se vuelva un
+        # servidor complaciente que devuelva la carpeta entera se pida lo que se pida.
+        def list(self, carpeta, options=None):
+            o = {'limit': 100, 'offset': 0, **(options or {})}
+            objetos = [{'name': '50669020692.txt', 'updated_at': estado['subido_at']}]
+            return objetos[o['offset']:o['offset'] + o['limit']]
         def download(self, ruta):
             return tsv(estado['filas_fichero'])
     class _Storage:

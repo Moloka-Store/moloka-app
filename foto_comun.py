@@ -166,11 +166,63 @@ def _leer_con_reintentos(descripcion, fn, esperas=_ESPERAS_REINTENTO):
         f"nada; relanza cuando la conexión vaya.")
 
 
+# Tamaño de página del listado de Storage — el mismo que usa `backup_storage.PAGINA`.
+_PAGINA_BUZON = 100
+
+# Techo de páginas. NO trunca: ABORTA. Si el servidor dejara de honrar `offset` (misma
+# página una y otra vez), sin esto el runner se quedaría dando vueltas para siempre. Y
+# devolver lo leído hasta aquí sería repetir el pecado que esta función viene a cerrar:
+# una lista corta que no dice que es corta. 500 × 100 = 50.000 objetos; la carpeta más
+# poblada del buzón el 4-sep-2026 tenía 83 (informes/keepa_escaparate).
+_MAX_PAGINAS_BUZON = 500
+
+
 def listar_buzon(sb, bucket, carpeta):
-    """Lista una carpeta del buzón con reintento ante errores transitorios. [] si vacía."""
-    return _leer_con_reintentos(
-        f"listar {bucket}/{carpeta}/",
-        lambda: sb.storage.from_(bucket).list(carpeta) or [])
+    """TODOS los objetos de una carpeta del buzón, PAGINANDO hasta agotar, con reintento ante
+    errores transitorios. Misma firma y mismo retorno que siempre: la lista de dicts tal cual
+    la da el SDK, `[]` si la carpeta está vacía. No filtra nada (ni el
+    `.emptyFolderPlaceholder`): quien llama sigue viendo exactamente lo que veía.
+
+    🔴 POR QUÉ PAGINA. Antes esto era `sb.storage.from_(bucket).list(carpeta)` a secas, y
+       eso NO lista la carpeta: storage3 2.31.0 mezcla lo que le pases con su
+       `DEFAULT_SEARCH_OPTIONS` = {'limit': 100, 'offset': 0, 'sortBy': {'column': 'name',
+       'order': 'asc'}}. O sea que sin opciones devuelve como mucho **100** objetos — los 100
+       PRIMEROS por nombre — y **calla** que hay más: no hay error, no hay aviso, no hay
+       `next`. Es el falso verde de manual: la lista corta se lee igual que la lista entera.
+       Y en este buzón el corte no se lleva cualquier cosa: los nombres llevan la fecha
+       dentro (`KeepaExport-2026-09-02-…`), así que ordenar por nombre asc es ordenar por
+       fecha asc, y **lo que se cae del corte es LA COLA, o sea lo MÁS RECIENTE**, que es
+       justo lo que `procesador_keepa_escaparate` elige. Medido el 4-sep-2026 contra
+       `storage.objects`: informes/keepa_escaparate tenía 83 objetos (19 .csv + 64 .csv.gz)
+       creciendo a 4 por día de export — unos cinco días de export para pasar de 100.
+    """
+    objetos = []
+    offset = 0
+    for _ in range(_MAX_PAGINAS_BUZON):
+        # `o=offset` fija el offset de ESTA página en el lambda. Hoy da igual —
+        # `_leer_con_reintentos` llama a `fn()` en el acto y `offset` no avanza hasta que
+        # vuelve, así que la captura tardía daría el mismo número (comprobado: romperlo a
+        # propósito NO pone rojo el test, y así está dicho en su fichero). Se deja porque
+        # cuesta cero y deja de dar igual el día que el reintento se difiera o se haga en
+        # paralelo. No cuenta como probado: cuenta como barato.
+        pagina = _leer_con_reintentos(
+            f"listar {bucket}/{carpeta}/ (offset {offset})",
+            lambda o=offset: sb.storage.from_(bucket).list(
+                carpeta,
+                {'limit': _PAGINA_BUZON, 'offset': o,
+                 'sortBy': {'column': 'name', 'order': 'asc'}}) or [])
+        objetos.extend(pagina)
+        # Última página cuando el servidor devuelve menos de lo que se le pidió.
+        if len(pagina) < _PAGINA_BUZON:
+            return objetos
+        offset += _PAGINA_BUZON
+
+    raise Aborta(
+        f"[Storage] listar {bucket}/{carpeta}/: {_MAX_PAGINAS_BUZON} páginas de "
+        f"{_PAGINA_BUZON} y el listado no se agota ({len(objetos)} objetos leídos). O la "
+        f"carpeta es enorme de verdad — sube `_MAX_PAGINAS_BUZON` — o Storage ha dejado de "
+        f"honrar `offset` y está devolviendo siempre lo mismo. No se devuelve la lista a "
+        f"medias: sería mentir por lo corto, que es el fallo que esta función cierra.")
 
 
 def descargar_buzon(sb, bucket, ruta):
