@@ -166,10 +166,16 @@ COLS_ANTES = [
     'Com. Amazon (€)', 'Fee Logística (€)', 'Almacén (€)', 'Promo activa',
     'Beneficio (€)', 'ROI', 'Margen', 'Decisión', 'En mi BD', 'EAN ambiguo',
     'Amazon (título)', 'Coincide', 'Cotejo', 'Cotejo (detalle)', 'Coherencia caja',
-    'OcioStock']
-NUEVA = 'ISD s/ Fee Log. (€)'
+    'OcioStock',
+    # Entro con ESTE encargo (#266/#267) y ya es una de las de antes: lo que este
+    # banco protege es que NADIE se mueva de letra, no que la lista no crezca.
+    'ISD s/ Fee Log. (€)']
+ISD = 'ISD s/ Fee Log. (€)'
+# La ultima que ha llegado (3-sep-2026, guarda del catalogo propio): dice de donde
+# sale el IVA de cada fila. Su banco propio es test_escaner_catalogo_propio.py.
+NUEVA = 'Origen IVA'
 COLS = ast.literal_eval(_nodo('COLS').value)
-eq('(B1) 🔴 las 29 columnas de antes siguen EN SU SITIO, en el mismo orden',
+eq('(B1) 🔴 las 30 columnas de antes siguen EN SU SITIO, en el mismo orden',
    COLS[:len(COLS_ANTES)], COLS_ANTES)
 eq('(B1) 🔴 la columna nueva va la ULTIMA', COLS[len(COLS_ANTES):], [NUEVA])
 
@@ -182,10 +188,10 @@ for n in ast.walk(ARBOL):
                  for s in ast.walk(n)
                  if isinstance(s, ast.Subscript) and isinstance(s.value, ast.Name)
                  and s.value.id == 'L' and isinstance(s.slice, ast.Constant)}
-        if NUEVA in _refs:
+        if ISD in _refs:
             _formulas_con_isd.append(_refs)
 eq('(B2) 🔴 la formula de Com. Amazon suma la columna del ISD',
-   any({'Precio venta (€)', '% Comisión', NUEVA} <= refs for refs in _formulas_con_isd), True)
+   any({'Precio venta (€)', '% Comisión', ISD} <= refs for refs in _formulas_con_isd), True)
 
 # (B3) El % Comision pasa por pct_comision_celda (si no, la hoja volveria al x1,03).
 _asig_pct = [n for n in ast.walk(ARBOL)
@@ -329,9 +335,23 @@ class _Resp:
         self.data = data
 
 
+# 🔴 `productos` NO PUEDE VENIR VACIA. Desde el 3-sep-2026 el escaner ABORTA en
+# rojo si el catalogo propio no se lee o devuelve 0 filas (era un 'AVISO' y el run
+# seguia verde con todo "no propio"). Con el doble tonto devolviendo [] este banco
+# ni llegaria al Excel. Dos fichas bastan, y ademas dan las dos etiquetas de la
+# columna 'Origen IVA': la del Gizmo esta en el catalogo (-> 'ficha') y las otras
+# cuatro del catalogo no (-> 'asumido 21%').
+PRODUCTOS = [{'ean': '889698498883', 'asin': 'B0GIZMO', 'iva_pct': '0.2100',
+              'stock_moloka': 3, 'stock_fba': 7},
+             {'ean': '8499999999999', 'asin': None, 'iva_pct': '0.2100',
+              'stock_moloka': 0, 'stock_fba': 0}]
+EAN_PROPIO = '0889698498883'
+
+
 class _Query:
     """Doble TONTO a proposito: acepta cualquier metodo encadenado y devuelve vacio.
-    Asi un cambio en el escaner (una tabla nueva, otro filtro) no rompe este banco."""
+    Asi un cambio en el escaner (una tabla nueva, otro filtro) no rompe este banco.
+    La UNICA tabla con contenido es `productos`, porque sin ella el escaner aborta."""
     def __init__(self, tabla):
         self.tabla = tabla
 
@@ -339,6 +359,8 @@ class _Query:
         return lambda *a, **k: self
 
     def execute(self):
+        if self.tabla == 'productos':
+            return _Resp(PRODUCTOS)
         return _Resp([{'id': 1}] if self.tabla == 'escaner_resultados' else [])
 
 
@@ -455,7 +477,7 @@ if _canon:
     casi('(C2) 🔴 ISD que sale de las celdas = 0,21 (factura 404-7912092-2024339)',
          round(_com_cel - _comision, 2), 0.21, 0)
     casi('(C2) y la columna ISD s/ Fee Log. lleva el 3% de la fee',
-         celda(NUEVA, _canon), _fee * 0.03, 1e-12)
+         celda(ISD, _canon), _fee * 0.03, 1e-12)
 
 # (C4) 🔴 SIN TARIFA FBA, LA HOJA NO ECHA LA CUENTA. `Celda 8` exige `fee is not
 # None` para calcular, asi que deja el pais en 'Sin datos'; la hoja pedia menos y
@@ -486,9 +508,21 @@ if _sin_fee:
        [True, True])
 
 # (C3) Fuera de Francia la columna nueva es 0 (no un hueco), y la comision no cambia.
-_ceros = [celda(NUEVA, _r) for _r in range(2, ws.max_row + 1)
+_ceros = [celda(ISD, _r) for _r in range(2, ws.max_row + 1)
           if ws.cell(row=_r, column=IDX['País']).value in ('ES', 'IT')]
 eq('(C3) en ES/IT la columna del ISD es 0 en todas las filas', set(_ceros), {0})
+
+# (C5) La columna 'Origen IVA', leida del .xlsx real. El detalle vive en
+# test_escaner_catalogo_propio.py; aqui se comprueba que sigue siendo la ULTIMA y
+# que distingue la ficha del 21% asumido en la MISMA hoja que se acaba de cotejar.
+eq('(C5) 🔴 "Origen IVA" es la ultima columna del .xlsx', CAB[-1], NUEVA)
+_origen_es = {str(ws.cell(row=_r, column=IDX['EAN']).value or ''):
+              ws.cell(row=_r, column=IDX[NUEVA]).value
+              for _r in range(2, ws.max_row + 1)
+              if ws.cell(row=_r, column=IDX['País']).value == 'ES'}
+eq('(C5) la ficha que esta en productos dice "ficha"', _origen_es.get(EAN_PROPIO), 'ficha')
+eq('(C5) 🔴 y las que no estan dicen "asumido 21%"',
+   sorted({v for k, v in _origen_es.items() if k != EAN_PROPIO}), ['asumido 21%'])
 
 print()
 if fallos:

@@ -176,10 +176,18 @@ jobs:
       - name: 21) test_escaner_excel_isd.py
         run: python -u test_escaner_excel_isd.py
 
-      - name: 22) test_disparar.mjs
+      # El banco de la guarda del catalogo propio: corre el escaner TRES veces en
+      # tres procesos (con dobles de keepa/supabase) y comprueba que si `productos`
+      # falla o devuelve 0 filas el run sale en ROJO sin gastar un token de Keepa
+      # ni escribir nada -- y que en la pasada buena el Excel lleva su columna
+      # 'Origen IVA'. Sin red, sin secretos, sin tocar produccion.
+      - name: 22) test_escaner_catalogo_propio.py
+        run: python -u test_escaner_catalogo_propio.py
+
+      - name: 23) test_disparar.mjs
         run: node test_disparar.mjs
 
-      - name: 23) Censo - ningun test se queda sin correr
+      - name: 24) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
         #    demas se lee como si lo cubriera. Aqui registrar un test es un paso
@@ -208,6 +216,7 @@ jobs:
             test_comprimir_keepa.py
             test_escaner_memoria.py
             test_escaner_excel_isd.py
+            test_escaner_catalogo_propio.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).
