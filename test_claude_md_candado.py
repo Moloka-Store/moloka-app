@@ -32,7 +32,15 @@ RAIZ = os.path.dirname(os.path.abspath(__file__))
 
 # El techo. Subirlo es una decision de Fernando, no un arreglo: lo que sobre se MUEVE a
 # docs/reglas/ (literal, sin resumir) y se le pone su fila en el indice.
-TECHO = 8300
+#
+# 8.300 -> 8.500 el 4-sep-2026, EL MISMO DIA QUE NACIO, y el motivo es el candado y no el
+# fichero: con 8.300 el CLAUDE.md medio 8.294, o sea SEIS caracteres de margen. Un candado
+# con seis de holgura no vigila lo que vino a vigilar --que el fichero engorde a base de
+# lineas -- sino que salta con la primera coma que alguien anada, y eso es exactamente como
+# se aprende a ignorar una alarma. Es la enfermedad de la cara B: la comprobacion que
+# SIEMPRE esta roja tampoco informa. Con 8.500 quedan 206 de margen: sitio para un retoque
+# honrado y ni de lejos para una regla nueva, que es lo que se quiere parar.
+TECHO = 8500
 
 # COTEJO.md se enlaza en la prosa del CLAUDE.md, no en el indice, y no es una regla: es
 # la prueba del reparto. Va fuera de las DOS listas, no solo de una -- si estuviera fuera
