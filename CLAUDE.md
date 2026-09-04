@@ -96,6 +96,7 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   cuándo.** Sin esa copia, el trabajo solo existe dentro del repo y Fernando tiene que hacer de
   correveidile entre Code y los chats. La bandeja es lo que lo evita, y **no depende de que
   nadie se acuerde de pedirlo en el encargo**.
+- **Una regla nueva no se escribe aquí ni en `docs/reglas/`: va al parte, y entra por el consolidador con su encargo.**
 - **Antes de picar: lee cómo se hizo lo anterior.** Hay procesadores en producción que funcionan;
   el siguiente se les tiene que parecer. Si algo se aparta del patrón, dilo y explica por qué.
 - **Las dudas de diseño no se resuelven en caliente.** Se anotan en una línea y se deciden en frío.
