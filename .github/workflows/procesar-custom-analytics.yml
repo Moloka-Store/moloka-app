@@ -20,11 +20,11 @@ name: Moloka - Procesar CUSTOM ANALYTICS
 # CÓMO SE LANZA UNA CARGA A MANO (sin depender de que nadie se acuerde)
 # ----------------------------------------------------------------------------
 #   entorno = produccion   ·   modo = aplicar
-#   pais    = el del fichero        (ES / IT / FR — lo verifica la guarda 6.6)
+#   pais    = el del fichero        (ES / IT / FR / DE — ver la guarda 6.6)
 #   fichero = el nombre EXACTO subido a informes/custom_analytics/
 #
-# 🔴 UNA EJECUCIÓN POR FICHERO. Los tres países se cargan por separado: no hay
-#    forma de subir tres en una pasada, ni debe haberla (cada uno declara su país).
+# 🔴 UNA EJECUCIÓN POR FICHERO. Los cuatro países se cargan por separado: no hay
+#    forma de subir varios en una pasada, ni debe haberla (cada uno declara su país).
 #
 # 🔴 Y SI HAY MÁS DE UNA LECTURA DEL MISMO PAÍS, SIEMPRE DE MÁS ANTIGUA A MÁS
 #    NUEVA — Y NADIE LO COMPRUEBA POR TI. El orden NO es cosmético.
@@ -47,6 +47,11 @@ name: Moloka - Procesar CUSTOM ANALYTICS
 #    abortan sin escribir nada, y ninguna de las tres es un fallo del sistema:
 #    · 6.6  el país no cuadra al cruzar cuotas con transacciones
 #           → te has equivocado de selector, o el .xlsx es de otro marketplace.
+#           🇩🇪 Con pais=DE esta guarda NO confirma nada (no hay cuota alemana con la
+#              que hacerlo) y lo dice en el log: «DE elegido a mano; sin cuota de
+#              referencia». Que salga eso es lo NORMAL en Alemania, no un aviso. Lo
+#              que sí sigue abortando es un fichero declarado DE que cuadre con ES,
+#              IT o FR — o sea, el selector puesto mal.
 #    · 6.15 la lectura trae los MISMOS datos que la anterior de ese país
 #           → Amazon no ha refrescado su panel. NO es un fallo y no se pierde nada:
 #             el fichero se queda en el buzón. Mira hasta qué fecha dice el Seller
@@ -108,9 +113,13 @@ on:
         options: [ensayo, aplicar]
         default: ensayo
       pais:
-        description: 'País del fichero (LO MANDA EL SELECTOR, no se deduce). La guarda 6.6 lo VERIFICA cruzando cuotas con transacciones: si no cuadra, ABORTA.'
+        # 🇩🇪 DE entra el 6-sep-2026, y esta línea va PRIMERO: un `workflow_dispatch`
+        #    rechaza el disparo ENTERO si le llega un valor que el .yml no declara, así que
+        #    hasta que esto esté en `main` la pantalla de Buzones no puede ofrecer Alemania
+        #    sin darle un 422 a quien pulse. El orden es .yml → ficha de moloka-app-v2.
+        description: 'País del fichero (LO MANDA EL SELECTOR, no se deduce). ES/IT/FR los VERIFICA la guarda 6.6 cruzando cuotas con transacciones: si no cuadra, ABORTA. DE se RESPETA sin recalcular (su referencia en transacciones son 170 uds: ruido, no patrón), pero se sigue abortando si el fichero resulta ser de ES, IT o FR.'
         type: choice
-        options: [ES, IT, FR]
+        options: [ES, IT, FR, DE]
         default: ES
       # (Aquí vivían `periodo_desde` y `periodo_hasta`, y se fueron el 10-ago-2026 al
       #  cerrarse la secuencia de tres pasos: el procesador dejó de usarlos, luego la ficha

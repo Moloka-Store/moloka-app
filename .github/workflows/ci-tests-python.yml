@@ -134,6 +134,16 @@ jobs:
       - name: 15) test_transacciones_pais.py
         run: python -u test_transacciones_pais.py
 
+      # El banco del pais en Custom Analytics (6-sep-2026). Alemania se ACEPTA en el
+      # selector pero NO compite en el cruce de cuotas: su referencia en transacciones
+      # son 170 uds contra las 15.783 de Espana, y eso no es un patron, es ruido.
+      # Prueba las DOS mitades -- que el fichero aleman entra sin que se le recalcule el
+      # pais, y que uno declarado DE que en realidad cuadra con ES sigue abortando -- y
+      # ademas coteja que el `choice` del .yml ofrezca los mismos paises que el
+      # procesador acepta, que es lo que evita un 422 en la cara de quien pulse.
+      - name: 15 bis) test_pais_de_custom_analytics.py
+        run: python -u test_pais_de_custom_analytics.py
+
       - name: 16) test_tsv_quote_none.py
         run: python -u test_tsv_quote_none.py
 
@@ -229,6 +239,7 @@ jobs:
             test_paneu_pendiente.py
             test_refrescar_vistas.py
             test_transacciones_pais.py
+            test_pais_de_custom_analytics.py
             test_tsv_quote_none.py
             test_guarda_no_retroceder.py
             test_cerrojo4_nivel_superior.py
