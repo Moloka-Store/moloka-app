@@ -143,13 +143,30 @@ PAISES_VALIDOS = ('ES', 'IT', 'FR', 'DE')
 #    Francia, DE pasa a esta tupla y vuelve a competir como los otros tres.
 PAISES_CON_CUOTA = ('ES', 'IT', 'FR')
 
-# Error mediano de cuota por encima del cual el cruce YA NO IDENTIFICA NADA. No es un
-# número nuevo: es el 0,25 que llevaba escrito a pelo la rama «GANA pero su error pasa del
-# 25%» de la guarda 6.6. Se saca a constante porque ahora lo usan TRES sitios y tienen que
-# ser el mismo número (la guarda, el etiquetado del inventario y el cribado de impostores
-# de un país sin referencia). MEDIDO el 6-sep-2026 con las lecturas reales: el país
-# correcto da 2,3% (ES), 6,6% (IT) y 14,0% (FR); los incorrectos, del 61,7% al 100%.
-UMBRAL_ERROR_CUOTA = 0.25
+# ---------------------------------------------------------------------------
+# Los DOS umbrales del cruce de cuotas. Contestan preguntas distintas, y por eso son dos
+# números distintos. Confundirlos cuesta lecturas buenas.
+# ---------------------------------------------------------------------------
+# 1) «HA GANADO, PERO CHIRRÍA». No es nuevo: es el 0,25 que llevaba escrito a pelo la rama
+#    «GANA pero su error pasa del 25%» de la guarda 6.6. Solo GRITA; la carga entra igual.
+UMBRAL_GRITA_CUOTA = 0.25
+
+# 2) «¿ES DE ESTE PAÍS, SÍ O NO?» — la línea de RECHAZO, y ésta sí es nueva (6-sep-2026).
+#    La usan el etiquetado del inventario (que decide qué lecturas se comparan entre sí) y
+#    el cribado de impostores de un país sin referencia (que decide si se ABORTA).
+#
+# 🔬 MEDIDO, no elegido: el ensayo del 6-sep-2026 en staging (run 34024458735) etiquetó los
+#    20 .xlsx del buzón, o sea 60 cruces fichero×país. Hay un hueco limpio en medio:
+#      · el país ACERTADO va de 0,8% a 27,7%  (los 18 ficheros identificables)
+#      · el país EQUIVOCADO nunca baja del 59,9%
+#    0,40 cae dentro de ese hueco y no roza ninguno de los dos lados.
+#
+# 🔴 POR QUÉ NO VALE EL 0,25 DE ARRIBA, que es lo que había puesto antes de medir: con él,
+#    `CA_FR_01ago.xlsx` —francés de verdad, 27,7%— se quedaba SIN etiquetar y salía de las
+#    comparaciones del inventario. Un umbral que tira lecturas buenas para atrapar a una
+#    mala no es más estricto, es peor. El aviso de la casa, cumplido: el número se mide
+#    contra los ficheros reales, no se hereda del de al lado porque quede bonito.
+UMBRAL_IDENTIFICA_PAIS = 0.40
 
 # Guarda 6.6: días mínimos de transacciones con los que fiarse del cruce de país.
 # ⚠️ NÚMERO NUEVO, Y HAY QUE DECIRLO. El modelo de ventana pedía que la intersección
@@ -808,8 +825,11 @@ def etiquetar_pais(cur, leido_at, uds_fichero):
     fichero alemán habría entrado en la serie española y las restas contra ES habrían
     salido en el inventario como bajadas del contador. MEDIDO sobre `metric-data (12)`
     (el export real de amazon.de del 6-sep): ES=100,0% · IT=100,0% · FR=100,0%. Ninguno
-    es. Ahora, si el mejor no baja de UMBRAL_ERROR_CUOTA, se dice «no identificable» —que
-    es la verdad— y el inventario ya sabe no comparar ese fichero con nadie."""
+    es. Ahora, si el mejor no baja de UMBRAL_IDENTIFICA_PAIS, se dice «no identificable»
+    —que es la verdad— y el inventario ya sabe no comparar ese fichero con nadie.
+    🔒 El umbral es el de RECHAZO (0,40), no el de «chirría» (0,25), y la diferencia no es
+    de matiz: con 0,25 se quedaba fuera `CA_FR_01ago.xlsx`, que es francés de verdad y da
+    27,7%. Se midió antes de fijarlo (staging, run 34024458735)."""
     if sum(uds_fichero.values()) <= 0:
         return (None, "sin 'Unidades pedidas': no hay con qué cruzar")
     ini, fin = _tramo_global(cur, leido_at)
@@ -820,8 +840,8 @@ def etiquetar_pais(cur, leido_at, uds_fichero):
     if not validos:
         return (None, f"sin cruce ({tabla})")
     mejor = min(validos, key=lambda c: errores[c])
-    if errores[mejor] > UMBRAL_ERROR_CUOTA:
-        return (None, f"ninguno baja del {UMBRAL_ERROR_CUOTA:.0%} ({tabla}): no se parece a "
+    if errores[mejor] > UMBRAL_IDENTIFICA_PAIS:
+        return (None, f"ninguno baja del {UMBRAL_IDENTIFICA_PAIS:.0%} ({tabla}): no se parece a "
                       f"ninguno de los que tienen referencia, así que NO se etiqueta")
     return (mejor, tabla)
 
@@ -879,10 +899,10 @@ def guarda_pais(cur, pais_declarado, leido_at, uds_fichero):
             f"O el selector de país va equivocado o subiste el fichero de otro marketplace. "
             f"NO se carga.")
 
-    if errores[pais_declarado] > UMBRAL_ERROR_CUOTA:
+    if errores[pais_declarado] > UMBRAL_GRITA_CUOTA:
         return ('grita',
                 f"{pais_declarado} GANA (cuota por país: {tabla}) pero su error pasa del "
-                f"{UMBRAL_ERROR_CUOTA:.0%}. Ya no puede ser 'la ventana mal declarada' (no hay "
+                f"{UMBRAL_GRITA_CUOTA:.0%}. Ya no puede ser 'la ventana mal declarada' (no hay "
                 f"ventana): mira si el .xlsx MEZCLA marketplaces, que es lo único que esta "
                 f"guarda no caza. (Entra igual.)")
     return ('ok', f"{pais_declarado} identificado por CUOTA (error mediano: {tabla}; "
@@ -899,7 +919,7 @@ def _guarda_pais_sin_referencia(cur, pais_declarado, leido_at, uds_fichero):
     error — que es exactamente lo que pasaría si DE compitiera con una referencia de 170
     unidades. Pero «no se puede confirmar DE» no es «no se puede comprobar nada»: lo que
     sí se sabe medir es si este fichero es de ES, IT o FR, que son los tres que tienen
-    patrón de sobra. Si alguno de ellos cuadra por debajo de UMBRAL_ERROR_CUOTA, el
+    patrón de sobra. Si alguno de ellos cuadra por debajo de UMBRAL_IDENTIFICA_PAIS, el
     fichero NO es alemán y se ABORTA. Sin esto, cualquier .xlsx declarado DE entraría
     intacto y envenenaría la serie del país nuevo desde su primera lectura.
 
@@ -916,14 +936,14 @@ def _guarda_pais_sin_referencia(cur, pais_declarado, leido_at, uds_fichero):
 
     # ¿Es en realidad de uno de los que SÍ tienen patrón? Ésa sí se sabe contestar.
     impostores = [c for c in PAISES_CON_CUOTA
-                  if errores[c] is not None and errores[c] <= UMBRAL_ERROR_CUOTA]
+                  if errores[c] is not None and errores[c] <= UMBRAL_IDENTIFICA_PAIS]
     if impostores:
         quien = min(impostores, key=lambda c: errores[c])
         raise Aborta(
             f"[Guarda 6.6 · PAÍS] Se declaró {pais_declarado}, que no tiene cuota de "
             f"referencia con la que confirmarse — pero este fichero SÍ cuadra con {quien} "
             f"(error mediano de CUOTA vs transacciones [{ini}→{fin}]: {tabla}, por debajo "
-            f"del {UMBRAL_ERROR_CUOTA:.0%}). O el selector va equivocado o subiste el "
+            f"del {UMBRAL_IDENTIFICA_PAIS:.0%}). O el selector va equivocado o subiste el "
             f"fichero de otro marketplace. NO se carga.")
 
     ref_uds = int(sum(trans[pais_declarado].values()))
@@ -934,7 +954,7 @@ def _guarda_pais_sin_referencia(cur, pais_declarado, leido_at, uds_fichero):
             f"{ref_asin} ASIN), pero es demasiado fina para identificar por cuota, así que "
             f"{pais_declarado} NO compite y el país elegido se RESPETA tal cual. Lo que sí "
             f"se ha comprobado: que el fichero no sea de ninguno de los que tienen patrón "
-            f"({tabla}); ninguno baja del {UMBRAL_ERROR_CUOTA:.0%}. Guarda SALTADA.")
+            f"({tabla}); ninguno baja del {UMBRAL_IDENTIFICA_PAIS:.0%}. Guarda SALTADA.")
 
 
 # ---------------------------------------------------------------------------
