@@ -33,10 +33,12 @@
 #   Eso vive en `v_demanda_asin_ultima`, no aquí. El cargador no interpreta.
 #
 # 🔴 EL PAÍS LO MANDA EL SELECTOR; LA FECHA, EL FICHERO (§3.5, §6.6)
-#   El fichero no dice de qué marketplace es (cabeceras en español los tres, URLs a
-#   amazon.com los tres). El país entra por el input PAIS y se VERIFICA cruzando las
-#   unidades por ASIN con transacciones_movimientos (guarda 6.6): si el declarado no es
-#   el de menor error, ABORTA.
+#   El fichero no dice de qué marketplace es (cabeceras en español los CUATRO —medido el
+#   6-sep-2026 contra el export alemán: las mismas 18 columnas, en español y en el mismo
+#   orden—, URLs a amazon.com los cuatro). El país entra por el input PAIS y se VERIFICA
+#   cruzando las unidades por ASIN con transacciones_movimientos (guarda 6.6): si el
+#   declarado no es el de menor error, ABORTA. 🇩🇪 Alemania es la excepción y está
+#   razonada en `PAISES_CON_CUOTA`: se acepta, no compite y no se recalcula.
 #   La fecha del dato NO se declara: es `wb.properties.created` (cuándo lo generó
 #   Amazon) → `leido_at`. Sin ella se ABORTA (guarda 6.5): es el eje del dato y no se
 #   puede inventar.
@@ -96,7 +98,7 @@ SUPABASE_KEY  = os.environ.get('SUPABASE_KEY', '')   # llave de servicio: LEER e
 DB_URL        = os.environ.get('DB_URL', '')         # postgres del ENTORNO (staging o prod)
 MODO          = os.environ.get('MODO', 'ensayo').strip().lower()       # ensayo | aplicar
 ENTORNO       = os.environ.get('ENTORNO', 'staging').strip().lower()   # staging | produccion
-PAIS          = os.environ.get('PAIS', '').strip().upper()             # ES | IT | FR (selector)
+PAIS          = os.environ.get('PAIS', '').strip().upper()      # ES | IT | FR | DE (selector)
 FICHERO       = os.environ.get('FICHERO', '').strip()                  # nombre EXACTO; vacío = más reciente
 # 🔴 FORZAR: la salida de la ZONA GRIS de la guarda 6.14, y NADA MÁS. Zona gris = la
 #   comparación contra la lectura anterior no puede probar nada (quedan cuatro ASIN
@@ -120,7 +122,34 @@ FORZAR        = os.environ.get('FORZAR', 'no').strip().lower() in ('si', 'sí', 
 BUCKET, CARPETA = 'informes', 'custom_analytics'
 # 🔒 Escalabilidad (§8): la lista de países vive en UN solo sitio por lado. Añadir DE
 # o PL es tocar esto + el choice del .yml + las opciones de la ficha v2. Nada más.
-PAISES_VALIDOS = ('ES', 'IT', 'FR')
+# 🇩🇪 Alemania entra el 6-sep-2026. Éstos son los países que el selector ACEPTA.
+PAISES_VALIDOS = ('ES', 'IT', 'FR', 'DE')
+
+# 🇩🇪 Y ÉSTA ES LA OTRA LISTA, QUE NO ES LA MISMA: los países que pueden hacer de
+# REFERENCIA en el cruce de cuotas de la guarda 6.6. Aceptar un país e IDENTIFICARLO son
+# dos cosas distintas, y confundirlas es justo lo que rompe Alemania.
+#
+# 🔬 MEDIDO en producción el 6-sep-2026 sobre `transacciones_movimientos` con
+#    tipo_norm='pedido', cruzado por el puente SKU→ASIN (lo mismo que hace
+#    `_errores_de_cuota`), del 8-ene al 5-sep:
+#        ES 15.783 uds / 344 ASIN  ·  IT 869 / 117  ·  FR 669 / 94  ·  DE 170 / 53
+#    El top-12 de DE va de 4 a 33 unidades: una sola unidad le mueve la cuota un 1%, así
+#    que ese "error mediano" no mide el marketplace, mide el ruido. Con esa referencia DE
+#    no puede ganar limpio NI perder limpio — y perder significaría ABORTAR una carga
+#    correcta. Por eso DE se acepta pero NO compite (ver `guarda_pais`).
+#
+# 🔴 EL DÍA QUE ALEMANIA CREZCA esto es UNA LÍNEA, y la señal va impresa en cada carga de
+#    DE (la guarda dice cuántas uds de referencia hay). Cuando se acerque a las ~670 de
+#    Francia, DE pasa a esta tupla y vuelve a competir como los otros tres.
+PAISES_CON_CUOTA = ('ES', 'IT', 'FR')
+
+# Error mediano de cuota por encima del cual el cruce YA NO IDENTIFICA NADA. No es un
+# número nuevo: es el 0,25 que llevaba escrito a pelo la rama «GANA pero su error pasa del
+# 25%» de la guarda 6.6. Se saca a constante porque ahora lo usan TRES sitios y tienen que
+# ser el mismo número (la guarda, el etiquetado del inventario y el cribado de impostores
+# de un país sin referencia). MEDIDO el 6-sep-2026 con las lecturas reales: el país
+# correcto da 2,3% (ES), 6,6% (IT) y 14,0% (FR); los incorrectos, del 61,7% al 100%.
+UMBRAL_ERROR_CUOTA = 0.25
 
 # Guarda 6.6: días mínimos de transacciones con los que fiarse del cruce de país.
 # ⚠️ NÚMERO NUEVO, Y HAY QUE DECIRLO. El modelo de ventana pedía que la intersección
@@ -378,7 +407,8 @@ def _created_de_wb(wb):
 # ---------------------------------------------------------------------------
 def analizar(bytes_xlsx, pais, fichero):
     if pais not in PAISES_VALIDOS:
-        raise Aborta(f"[PAIS] {pais!r} no es ES/IT/FR. El país lo manda el selector y no se "
+        raise Aborta(f"[PAIS] {pais!r} no es ninguno de {'/'.join(PAISES_VALIDOS)}. El país lo "
+                     f"manda el selector y no se "
                      f"asume: sin país determinado, se ABORTA (§3.5).")
 
     # 🔴 data_only=False (por defecto): con True el ASIN sale None (§0.1). read_only para
@@ -625,7 +655,16 @@ def analizar(bytes_xlsx, pais, fichero):
 # ---------------------------------------------------------------------------
 # 2) GUARDA 6.6 — EL PAÍS: cruzar la DEMANDA por ASIN con transacciones_movimientos.
 #    El fichero no dice de qué marketplace es; el riesgo real es subir el de IT y
-#    marcar ES. Se identifica por CUÁL de ES/IT/FR tiene menor error mediano.
+#    marcar ES. Se identifica por CUÁL de los países CON REFERENCIA (`PAISES_CON_CUOTA`)
+#    tiene menor error mediano.
+#
+#    🇩🇪 Y LOS QUE NO TIENEN REFERENCIA (6-sep-2026, Alemania). El selector acepta cuatro
+#    países pero solo tres pueden hacer de patrón: la referencia alemana de
+#    transacciones son 170 uds en 53 ASIN, ruido puro contra las 15.783 de España. Un
+#    país sin patrón no compite —competir es perder, y perder aquí es ABORTAR una carga
+#    correcta—, así que su rama va aparte (`_guarda_pais_sin_referencia`): respeta el
+#    país elegido y, en vez de confirmarlo, DESCARTA que el fichero sea de los otros
+#    tres, que es la única pregunta que este cruce sabe contestar bien.
 #
 #    🔴 SE COMPARAN CUOTAS, NO UNIDADES ABSOLUTAS (corrección de Fernando, 31-jul).
 #    transacciones no cubre el mismo tramo que el fichero (empieza tarde en IT/FR y
@@ -676,8 +715,16 @@ def _puente_sku_asin(cur):
 
 
 def _errores_de_cuota(cur, ini, fin, uds_fichero):
-    """Error mediano de CUOTA del fichero contra CADA país, sobre el tramo [ini, fin].
-    Devuelve ({pais: error|None}, tabla_legible).
+    """Error mediano de CUOTA del fichero contra cada país CON REFERENCIA, sobre el tramo
+    [ini, fin]. Devuelve ({pais: error|None}, tabla_legible, trans).
+
+    🔴 LOS CANDIDATOS SON `PAISES_CON_CUOTA`, NO `PAISES_VALIDOS` (6-sep-2026). Un
+    candidato con referencia fina no solo se identifica mal a sí mismo: puede GANARLE a
+    otro y abortar una carga buena, porque aquí `min()` decide quién es el fichero. La
+    lista de países que se aceptan y la de los que sirven de patrón son dos listas.
+    `trans` (país → asin → uds) sale también para quien necesite decir CUÁNTA referencia
+    hay —lo usa la rama de país sin referencia—: viene de la misma consulta y trae TODOS
+    los países, incluidos los que no compiten.
 
     🔒 UNA SOLA IMPLEMENTACIÓN, y no es cosmética: la usan la guarda 6.6 (que decide si
     ABORTA la carga) y el etiquetado de países del inventario (que decide qué lecturas se
@@ -703,7 +750,7 @@ def _errores_de_cuota(cur, ini, fin, uds_fichero):
     # (sobre el tramo). Comparar cuotas neutraliza que los dos tramos no coincidan.
     cuota_fichero = {a: u / total_fichero for a, u in uds_fichero.items()} if total_fichero else {}
     errores = {}
-    for cand in PAISES_VALIDOS:
+    for cand in PAISES_CON_CUOTA:
         total_cand = sum(trans[cand].values())
         if total_cand <= 0:
             errores[cand] = None
@@ -720,8 +767,24 @@ def _errores_de_cuota(cur, ini, fin, uds_fichero):
 
     tabla = " · ".join(
         f"{c}={'s/d' if errores[c] is None else format(100*errores[c], '.1f')+'%'}"
-        for c in PAISES_VALIDOS)
-    return errores, tabla
+        for c in PAISES_CON_CUOTA)
+    return errores, tabla, trans
+
+
+def _tramo_global(cur, leido_at):
+    """Tramo de comparación cuando NO hay un país declarado del que fiarse: todo lo que
+    cubre transacciones (de cualquier país), cortado en la fecha de la lectura.
+    Devuelve (ini, fin) o (None, motivo). 🔒 UNA sola implementación para los dos que lo
+    necesitan —el etiquetado del inventario y la rama de país sin referencia—: si cada uno
+    se calculara su tramo, dirían cosas distintas del mismo fichero."""
+    cur.execute("SELECT min(fecha), max(fecha) FROM transacciones_movimientos;")
+    fmin, fmax = cur.fetchone()
+    if fmin is None:
+        return (None, "transacciones vacía")
+    ini, fin = fmin, min(fmax, leido_at.date())
+    if (fin - ini).days + 1 < DIAS_MIN_CRUCE_PAIS:
+        return (None, f"tramo de {(fin - ini).days + 1} días, menos de {DIAS_MIN_CRUCE_PAIS}")
+    return (ini, fin)
 
 
 def etiquetar_pais(cur, leido_at, uds_fichero):
@@ -737,34 +800,54 @@ def etiquetar_pais(cur, leido_at, uds_fichero):
     que ya hace la guarda 6.6. Aquí se reutiliza su misma fórmula para ETIQUETAR (sin
     abortar: el inventario informa, no decide).
     🔒 El tramo se toma sobre TODOS los países, no sobre uno declarado: aquí no hay
-    declaración que respetar y el tramo tiene que ser el mismo para los tres candidatos."""
+    declaración que respetar y el tramo tiene que ser el mismo para los tres candidatos.
+
+    🔴 GANAR NO ES PARECERSE (6-sep-2026). Esto devolvía SIEMPRE al menos malo, aunque el
+    menos malo fallara por el 100%. Con tres candidatos y un fichero de un CUARTO país,
+    eso es una etiqueta falsa, y la etiqueta decide qué lecturas se comparan entre sí: el
+    fichero alemán habría entrado en la serie española y las restas contra ES habrían
+    salido en el inventario como bajadas del contador. MEDIDO sobre `metric-data (12)`
+    (el export real de amazon.de del 6-sep): ES=100,0% · IT=100,0% · FR=100,0%. Ninguno
+    es. Ahora, si el mejor no baja de UMBRAL_ERROR_CUOTA, se dice «no identificable» —que
+    es la verdad— y el inventario ya sabe no comparar ese fichero con nadie."""
     if sum(uds_fichero.values()) <= 0:
         return (None, "sin 'Unidades pedidas': no hay con qué cruzar")
-    cur.execute("SELECT min(fecha), max(fecha) FROM transacciones_movimientos;")
-    fmin, fmax = cur.fetchone()
-    if fmin is None:
-        return (None, "transacciones vacía")
-    ini, fin = fmin, min(fmax, leido_at.date())
-    if (fin - ini).days + 1 < DIAS_MIN_CRUCE_PAIS:
-        return (None, f"tramo de {(fin - ini).days + 1} días, menos de {DIAS_MIN_CRUCE_PAIS}")
-    errores, tabla = _errores_de_cuota(cur, ini, fin, uds_fichero)
-    validos = [c for c in PAISES_VALIDOS if errores[c] is not None]
+    ini, fin = _tramo_global(cur, leido_at)
+    if ini is None:
+        return (None, fin)                       # fin = el motivo, ya redactado
+    errores, tabla, _trans = _errores_de_cuota(cur, ini, fin, uds_fichero)
+    validos = [c for c in PAISES_CON_CUOTA if errores[c] is not None]
     if not validos:
         return (None, f"sin cruce ({tabla})")
-    return (min(validos, key=lambda c: errores[c]), tabla)
+    mejor = min(validos, key=lambda c: errores[c])
+    if errores[mejor] > UMBRAL_ERROR_CUOTA:
+        return (None, f"ninguno baja del {UMBRAL_ERROR_CUOTA:.0%} ({tabla}): no se parece a "
+                      f"ninguno de los que tienen referencia, así que NO se etiqueta")
+    return (mejor, tabla)
 
 
 def guarda_pais(cur, pais_declarado, leido_at, uds_fichero):
     """Devuelve (veredicto, detalle). veredicto ∈ {'ok','grita','salta'}; si el país
     declarado NO gana, lanza Aborta. `uds_fichero` = {asin: unidades_pedidas} del fichero.
     Compara CUOTAS (no unidades) sobre todo lo que transacciones cubre del país declarado
-    hasta la fecha de la lectura — robusto a que los dos tramos no coincidan."""
+    hasta la fecha de la lectura — robusto a que los dos tramos no coincidan.
+    🇩🇪 Un país declarado que no esté en `PAISES_CON_CUOTA` NO pasa por aquí: se desvía a
+    `_guarda_pais_sin_referencia`, que respeta el elegido y solo descarta impostores."""
     # 0) Sin 'Unidades pedidas' en el fichero (el panel puede no traerla: el export del
     #    28-jul tenía 8 columnas) → uds_fichero todo a cero: no hay con qué cruzar.
     total_fichero = sum(uds_fichero.values())
     if total_fichero <= 0:
         return ('salta', "el fichero no trae 'Unidades pedidas' (columna ausente o suman 0): "
                          "no hay con qué cruzar el país. Guarda SALTADA.")
+
+    # 0 bis) 🇩🇪 EL PAÍS ELEGIDO A MANO SIN REFERENCIA DE CUOTA (6-sep-2026).
+    #    El país lo manda el selector y NO se recalcula: aquí no se elige país, se COMPRUEBA
+    #    el elegido. Para un país que no está en PAISES_CON_CUOTA no hay patrón contra el que
+    #    comprobarlo, y dejar correr la comparación sería lo peor de los dos mundos: el país
+    #    declarado no puede ganar (no compite) y por tanto SIEMPRE ganaría otro → ABORTO de
+    #    una carga correcta, cada vez.
+    if pais_declarado not in PAISES_CON_CUOTA:
+        return _guarda_pais_sin_referencia(cur, pais_declarado, leido_at, uds_fichero)
 
     # 1) Tramo de comparación: lo que transacciones cubre del declarado, hasta la lectura.
     cur.execute("SELECT min(fecha), max(fecha) FROM transacciones_movimientos WHERE pais=%s;",
@@ -781,13 +864,14 @@ def guarda_pais(cur, pais_declarado, leido_at, uds_fichero):
                          f"la lectura ({fmin}→{fmax}, cortado en {leido_dia}): menos de "
                          f"{DIAS_MIN_CRUCE_PAIS}, demasiado poco para fiarse. Guarda SALTADA.")
 
-    errores, tabla = _errores_de_cuota(cur, ini, fin, uds_fichero)
+    errores, tabla, _trans = _errores_de_cuota(cur, ini, fin, uds_fichero)
 
     if errores.get(pais_declarado) is None:
         return ('salta', f"no hay unidades cruzables para {pais_declarado} en la intersección "
                          f"(cuota por país: {tabla}). Guarda SALTADA.")
 
-    ganador = min((c for c in PAISES_VALIDOS if errores[c] is not None), key=lambda c: errores[c])
+    ganador = min((c for c in PAISES_CON_CUOTA if errores[c] is not None),
+                  key=lambda c: errores[c])
     if ganador != pais_declarado:
         raise Aborta(
             f"[Guarda 6.6 · PAÍS] Se declaró {pais_declarado} pero el fichero cuadra con "
@@ -795,13 +879,62 @@ def guarda_pais(cur, pais_declarado, leido_at, uds_fichero):
             f"O el selector de país va equivocado o subiste el fichero de otro marketplace. "
             f"NO se carga.")
 
-    if errores[pais_declarado] > 0.25:
+    if errores[pais_declarado] > UMBRAL_ERROR_CUOTA:
         return ('grita',
-                f"{pais_declarado} GANA (cuota por país: {tabla}) pero su error pasa del 25%. "
-                f"Ya no puede ser 'la ventana mal declarada' (no hay ventana): mira si el .xlsx "
-                f"MEZCLA marketplaces, que es lo único que esta guarda no caza. (Entra igual.)")
+                f"{pais_declarado} GANA (cuota por país: {tabla}) pero su error pasa del "
+                f"{UMBRAL_ERROR_CUOTA:.0%}. Ya no puede ser 'la ventana mal declarada' (no hay "
+                f"ventana): mira si el .xlsx MEZCLA marketplaces, que es lo único que esta "
+                f"guarda no caza. (Entra igual.)")
     return ('ok', f"{pais_declarado} identificado por CUOTA (error mediano: {tabla}; "
                   f"tramo {ini}→{fin} = {dias_inter} días, cortado en la lectura {leido_dia}).")
+
+
+def _guarda_pais_sin_referencia(cur, pais_declarado, leido_at, uds_fichero):
+    """La guarda 6.6 para un país que el selector ACEPTA pero que no puede hacer de patrón
+    (hoy: DE). Devuelve ('salta', detalle), o ABORTA si el fichero resulta ser de uno de
+    los países que SÍ tienen referencia.
+
+    🔴 QUÉ SE RESPETA Y QUÉ SE COMPRUEBA. El país elegido a mano se RESPETA: no se
+    recalcula por cuota, y por tanto no puede acabar cargándose como el país de menor
+    error — que es exactamente lo que pasaría si DE compitiera con una referencia de 170
+    unidades. Pero «no se puede confirmar DE» no es «no se puede comprobar nada»: lo que
+    sí se sabe medir es si este fichero es de ES, IT o FR, que son los tres que tienen
+    patrón de sobra. Si alguno de ellos cuadra por debajo de UMBRAL_ERROR_CUOTA, el
+    fichero NO es alemán y se ABORTA. Sin esto, cualquier .xlsx declarado DE entraría
+    intacto y envenenaría la serie del país nuevo desde su primera lectura.
+
+    🔬 MEDIDO el 6-sep-2026 contra el export real de amazon.de (`metric-data (12).xlsx`,
+    198 ASIN, 107 uds pedidas acumuladas): ES=100,0% · IT=100,0% · FR=100,0% → ninguno
+    cuadra, se salta y ENTRA. Y con la lectura española del mismo día declarada DE:
+    ES=2,3% → ABORTA, que es lo que tiene que pasar."""
+    ini, fin = _tramo_global(cur, leido_at)
+    if ini is None:
+        return ('salta', f"{pais_declarado} elegido a mano; sin cuota de referencia — y "
+                         f"tampoco se puede descartar que sea de otro país ({fin}). "
+                         f"Guarda SALTADA.")
+    errores, tabla, trans = _errores_de_cuota(cur, ini, fin, uds_fichero)
+
+    # ¿Es en realidad de uno de los que SÍ tienen patrón? Ésa sí se sabe contestar.
+    impostores = [c for c in PAISES_CON_CUOTA
+                  if errores[c] is not None and errores[c] <= UMBRAL_ERROR_CUOTA]
+    if impostores:
+        quien = min(impostores, key=lambda c: errores[c])
+        raise Aborta(
+            f"[Guarda 6.6 · PAÍS] Se declaró {pais_declarado}, que no tiene cuota de "
+            f"referencia con la que confirmarse — pero este fichero SÍ cuadra con {quien} "
+            f"(error mediano de CUOTA vs transacciones [{ini}→{fin}]: {tabla}, por debajo "
+            f"del {UMBRAL_ERROR_CUOTA:.0%}). O el selector va equivocado o subiste el "
+            f"fichero de otro marketplace. NO se carga.")
+
+    ref_uds = int(sum(trans[pais_declarado].values()))
+    ref_asin = len(trans[pais_declarado])
+    return ('salta',
+            f"{pais_declarado} elegido a mano; sin cuota de referencia — transacciones de "
+            f"{pais_declarado} sí tiene filas en [{ini}→{fin}] ({ref_uds} uds pedidas en "
+            f"{ref_asin} ASIN), pero es demasiado fina para identificar por cuota, así que "
+            f"{pais_declarado} NO compite y el país elegido se RESPETA tal cual. Lo que sí "
+            f"se ha comprobado: que el fichero no sea de ninguno de los que tienen patrón "
+            f"({tabla}); ninguno baja del {UMBRAL_ERROR_CUOTA:.0%}. Guarda SALTADA.")
 
 
 # ---------------------------------------------------------------------------
@@ -1116,8 +1249,8 @@ def main():
     if ENTORNO not in ('staging', 'produccion'):
         sys.exit(f"ENTORNO desconocido: {ENTORNO!r} (usa 'staging' o 'produccion')")
     if PAIS not in PAISES_VALIDOS:
-        sys.exit(f"PAIS desconocido: {PAIS!r}. El país lo manda el selector (ES/IT/FR) y NO "
-                 f"se asume: sin país no se carga (§3.5).")
+        sys.exit(f"PAIS desconocido: {PAIS!r}. El país lo manda el selector "
+                 f"({'/'.join(PAISES_VALIDOS)}) y NO se asume: sin país no se carga (§3.5).")
     if not SUPABASE_KEY or not DB_URL:
         sys.exit("Faltan credenciales (SUPABASE_KEY / DB_URL). Revisa los secrets del workflow.")
 
@@ -1135,7 +1268,7 @@ def main():
                  f"Analytics de {PAIS} y relanza.")
     xlsxs.sort(key=lambda o: (o.get('updated_at') or o.get('created_at') or ''), reverse=True)
 
-    # Con ES/IT/FR en la misma carpeta "el más reciente" es una lotería: aquí pedir el
+    # Con los cuatro países en la misma carpeta "el más reciente" es una lotería: aquí pedir el
     # nombre EXACTO es lo NORMAL. Si se pide y no está → ABORTA (no cae al más reciente).
     if FICHERO:
         nombres = [o['name'] for o in xlsxs]
