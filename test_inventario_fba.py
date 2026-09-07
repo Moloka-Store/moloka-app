@@ -35,7 +35,8 @@ from procesador_inventario_fba import (  # noqa: E402
     guarda_salto_a_transito_dentro, modelo_del_disponible, guarda_modelo_conocido,
     MODELO_TRANSITO_APARTE, MODELO_TRANSITO_DESCONOCIDO,
     MODELO_26, MODELO_24 as MODELO_24_DEL_PROCESADOR, NOMBRE_MODELO,
-    MARGEN_CAIDA_DIA, CAIDA_MAX_FICHAS, DIAS_VENTANA_PICO,
+    MARGEN_CAIDA_DIA, CAIDA_MAX_FICHAS, FACTOR_PELICULA,
+    MINIMO_SALTOS_PELICULA, salidas_del_ledger, caida_maxima_de_la_pelicula,
     disponible_de, disponible_total, SQL_DISPONIBLE,
     cabecera_de, anotar_libreta, cabecera_anterior, CARGA_ENTRO, CARGA_ABORTO,
     objetos_que_leen_nulo_como_cero, RE_NULO_COMO_CERO, CONSUMIDORES_DEL_TRANSITO,
@@ -727,120 +728,204 @@ eq('(19) el caso de vuelta: sobran dos, no falta ninguna',
    ([], ['afn-fc-transfer-quantity', 'afn-onhand-buyable-quantity']))
 
 
-print('\n== 20) GUARDA 10 · el balance del dia contra las SALIDAS medidas ==')
+print('\n== 20) GUARDA 10 · el balance del dia, y QUIEN puede opinar ==')
 AYER, HOY10 = datetime.date(2026, 9, 6), datetime.date(2026, 9, 7)
 
 
-def salidas(uds, dias=1, sin_datos=0, pico=174, hasta=AYER):
-    """Lo que devuelve `salidas_del_ledger`, a mano.
-
-    🔬 El pico por defecto es el MEDIDO el 7-sep-2026 contando todas las salidas
-       (no solo Shipments): 174 uds en un dia. Con Shipments solo eran 155."""
-    return {'uds': uds, 'dias': dias, 'dias_cubiertos': dias - sin_datos,
-            'dias_sin_datos': sin_datos, 'hasta_ledger': hasta, 'pico_dia': pico,
-            'sin_catalogar': []}
+def ledger(uds, cubre, completo=datetime.date(2026, 9, 5)):
+    """Lo que devuelve `salidas_del_ledger`, a mano."""
+    return {'uds': uds, 'cubre': cubre, 'hasta_ledger': completo + datetime.timedelta(1),
+            'completo_hasta': completo, 'sin_catalogar': []}
 
 
-# 🔴 EL CASO REAL DEL 7-sep-2026, que es para lo que existe esta guarda. El
-#    informe recortado trae 6.453 de vendible y no dice el transito; el dia 6 el
-#    disponible eran 6.692 (6.437 + 255). Si entrase sin puente, el disponible
-#    caeria 239 unidades en un dia. El ledger llega hasta el 6, asi que ese dia no
-#    tiene ventas cargadas y se cuenta al pico (155): techo 155 + 60 = 215.
+def peli(peor=111, saltos=7):
+    """Lo que devuelve `caida_maxima_de_la_pelicula`, a mano.
+
+    🔬 Los valores por defecto son los MEDIDOS en produccion el 7-sep-2026: 7 saltos
+       de un dia, y la peor caida de un dia 111 uds."""
+    return {'saltos': saltos, 'peor': peor}
+
+
+# 🔴 EL CASO REAL DEL 7-sep-2026, y ahora lo juzga la PELICULA, porque el ledger no
+#    llega: su ultimo dia es el 6-sep y ademas viene cortado, asi que completo solo esta
+#    hasta el 5. Techo = 111 x 1,6 = 177 contra una caida de 239.
 try:
     guarda_continuidad(AYER, HOY10, 6692, 6453, 381, 381,
-                       salidas=salidas(0, sin_datos=1), permitir_salto=False)
+                       salidas=ledger(16, cubre=False), pelicula=peli(),
+                       permitir_salto=False)
     eq('(20) el 7-sep sin puente (−239 uds): ABORTA', False, True)
 except Aborta as e:
     eq('(20) el 7-sep sin puente (−239 uds): ABORTA', True, True)
-    eq('(20) … y lo dice en castellano, con la caida y lo que salio',
-       'El disponible ha caido 239 unidades' in str(e), True)
-    eq('(20) … y avisa de que el ledger no llegaba a ese dia',
-       'no tienen salidas cargadas' in str(e), True)
-    eq('(20) … sin colar el nombre de ninguna columna en la primera linea',
-       'fc_transfer' in str(e).split('\n')[0], False)
-# 🔑 LA PAREJA QUE HACE QUE ESTO MIDA ALGO: el MISMO dia, con el puente haciendo
-#    su trabajo, el disponible baja lo que se vende y la carga entra.
-eq('(20) el 7-sep CON puente (el disponible baja lo que salio): NO aborta',
+    eq('(20) … y dice la caida y el techo',
+       'ha caido 239 unidades' in str(e) and 'son 177' in str(e), True)
+    eq('(20) … y dice que opina la PELICULA y por que no el ledger',
+       'pelicula del propio inventario' in str(e)
+       and 'solo tiene dias completos hasta' in str(e), True)
+# 🔑 LA PAREJA QUE HACE QUE ESTO MIDA ALGO: el MISMO dia, con el puente haciendo su
+#    trabajo, el disponible baja lo normal y la carga entra.
+eq('(20) el 7-sep CON puente: NO aborta',
    guarda_continuidad(AYER, HOY10, 6692, 6600, 381, 381,
-                      salidas=salidas(0, sin_datos=1), permitir_salto=False), [])
-# Y con el ledger al dia, la misma caida de 239 tampoco cuela: techo 90 + 60 = 150.
-try:
-    guarda_continuidad(AYER, HOY10, 6692, 6453, 381, 381,
-                       salidas=salidas(90, hasta=HOY10), permitir_salto=False)
-    eq('(20) con el ledger al dia, −239 contra 90 salidas: ABORTA', False, True)
-except Aborta as e:
-    eq('(20) con el ledger al dia, −239 contra 90 salidas: ABORTA', True, True)
-    eq('(20) … y dice cuanto salio de verdad', 'salieron 90 del almacen' in str(e), True)
+                      salidas=ledger(16, cubre=False), pelicula=peli(),
+                      permitir_salto=False), [])
 
-# 🔬 LOS DIEZ SALTOS MEDIDOS EN PRODUCCION (inventario_fba_historico contra
-#    ledger_movimientos, 23-ago → 6-sep-2026). Ninguno puede abortar: si esta guarda
-#    saltara en un dia legitimo se aprenderia a forzar, y el dia que saltase de verdad
-#    nadie la leeria. (caida_disponible, salidas_ventana, dias)
-SALTOS_REALES = [(111, 81, 1), (-254, 175, 2), (95, 102, 1), (91, 110, 1),
-                 (76, 46, 1), (73, 87, 1), (-29, 262, 2), (-181, 116, 1),
-                 (58, 95, 1), (227, 201, 3)]
-callados = 0
-for caida, vendido, dias in SALTOS_REALES:
-    hasta = AYER + datetime.timedelta(days=dias)
-    if guarda_continuidad(AYER, hasta, 6692, 6692 - caida, 381, 381,
-                          salidas=salidas(vendido, dias=dias, hasta=hasta),
-                          permitir_salto=False) == []:
-        callados += 1
-eq('(20) los 10 saltos reales del historico pasan sin decir nada', callados, 10)
-# ⚠️ Y el mas apretado de los diez, una unidad por encima: ABORTA. Sin esto, un
-#    margen enorme pasaria los diez tests de arriba sin medir nada.
-#    El peor es 111 de caida contra 81 vendidas: techo 81 + 60 = 141.
-eq('(20) el peor salto real, justo en el techo (141): NO aborta',
-   guarda_continuidad(AYER, HOY10, 6692, 6692 - 141, 381, 381,
-                      salidas=salidas(81), permitir_salto=False), [])
+# 🔬 LOS 7 SALTOS DE UN DIA MEDIDOS EN PRODUCCION. Con la pelicula opinando, ninguno
+#    puede abortar: si esta guarda saltara en un dia legitimo se aprenderia a forzar.
+CAIDAS_REALES = [111, 95, 91, 76, 73, 58, -181]
+callados = sum(1 for c in CAIDAS_REALES
+               if guarda_continuidad(AYER, HOY10, 6692, 6692 - c, 381, 381,
+                                     salidas=ledger(16, cubre=False), pelicula=peli(),
+                                     permitir_salto=False) == [])
+eq('(20) los 7 saltos reales de un dia pasan callados', callados, 7)
+# El techo de la pelicula, justo por debajo y justo por encima.
+eq('(20) justo en el techo de la pelicula (177): NO aborta',
+   guarda_continuidad(AYER, HOY10, 6692, 6692 - 177, 381, 381,
+                      salidas=ledger(16, cubre=False), pelicula=peli(),
+                      permitir_salto=False), [])
 try:
-    guarda_continuidad(AYER, HOY10, 6692, 6692 - 142, 381, 381,
-                       salidas=salidas(81), permitir_salto=False)
+    guarda_continuidad(AYER, HOY10, 6692, 6692 - 178, 381, 381,
+                       salidas=ledger(16, cubre=False), pelicula=peli(),
+                       permitir_salto=False)
     eq('(20) … y una unidad mas: ABORTA', False, True)
 except Aborta:
     eq('(20) … y una unidad mas: ABORTA', True, True)
-# El margen se cuenta POR DIA, como las ventas: dos dias de hueco, dos margenes.
-eq('(20) con dos dias de hueco el margen es el doble',
-   guarda_continuidad(datetime.date(2026, 9, 5), HOY10, 6692,
-                      6692 - (81 + 2 * MARGEN_CAIDA_DIA), 381, 381,
-                      salidas=salidas(81, dias=2), permitir_salto=False), [])
+# Y se cuenta POR DIA: dos dias de hueco, el doble de techo.
+eq('(20) con dos dias de hueco el techo de la pelicula es el doble',
+   guarda_continuidad(datetime.date(2026, 9, 5), HOY10, 6692, 6692 - 354, 381, 381,
+                      salidas=ledger(16, cubre=False), pelicula=peli(),
+                      permitir_salto=False), [])
 
-# 🔴 SIN LEDGER NO SE ABORTA, SE GRITA. Con el ledger vacio las ventas medidas
-#    serian 0 y esta guarda abortaria TODOS los dias por una causa que no tiene nada
-#    que ver con el informe de inventario.
-gritos = []
-eq('(20) sin salidas que leer: NO aborta',
-   guarda_continuidad(AYER, HOY10, 6692, 6000, 381, 381, salidas=None,
-                      permitir_salto=False, escribir=gritos.append), [])
-eq('(20) … pero lo dice muy claro',
-   any('NO SE HA PODIDO COMPROBAR' in g for g in gritos), True)
+# 🔑 CUANDO EL LEDGER SI CUBRE, manda el ledger: es el dato del dia y no una cota
+#    del pasado. Techo = lo que salio + 60/dia.
+eq('(20) con el ledger cubriendo, 111 de caida contra 82 de salidas: NO aborta',
+   guarda_continuidad(AYER, HOY10, 6692, 6692 - 111, 381, 381,
+                      salidas=ledger(82, cubre=True), pelicula=peli(),
+                      permitir_salto=False), [])
+try:
+    guarda_continuidad(AYER, HOY10, 6692, 6692 - 143, 381, 381,
+                       salidas=ledger(82, cubre=True), pelicula=peli(),
+                       permitir_salto=False)
+    eq('(20) … y 143, una mas que 82+60: ABORTA', False, True)
+except Aborta as e:
+    eq('(20) … y 143, una mas que 82+60: ABORTA', True, True)
+    eq('(20) … diciendo que opina el ledger y cuanto salio',
+       'del ledger' in str(e) and '82 uds' in str(e), True)
+# 🔴 Y el ledger MANDA SOBRE LA PELICULA cuando cubre, aunque la pelicula fuera mas
+#    laxa: 178 pasaria con la pelicula (techo 177 es menor, luego aborta)... al reves:
+#    una caida de 150 cabe en la pelicula (177) y NO cabe en el ledger (82+60=142).
+try:
+    guarda_continuidad(AYER, HOY10, 6692, 6692 - 150, 381, 381,
+                       salidas=ledger(82, cubre=True), pelicula=peli(),
+                       permitir_salto=False)
+    eq('(20) el ledger manda cuando cubre, aunque la pelicula fuera mas laxa', False, True)
+except Aborta as e:
+    eq('(20) el ledger manda cuando cubre, aunque la pelicula fuera mas laxa', True, True)
+    eq('(20) … y no se cuela la pelicula en el mensaje',
+       'pelicula' in str(e), False)
 
-# El catalogo: 20% menos fichas aborta, 5% menos no. (No depende de las ventas.)
+# 🔴 «NO PUEDO JUZGAR ESTO» NO ES «ESTO ESTA MAL», y se dice distinto. Sin ledger que
+#    cubra y sin pelicula suficiente, la guarda para y lo dice con esas palabras.
+try:
+    guarda_continuidad(AYER, HOY10, 6692, 6453, 381, 381,
+                       salidas=ledger(16, cubre=False), pelicula=peli(saltos=2),
+                       permitir_salto=False)
+    eq('(20) sin fuente que pueda opinar: PARA', False, True)
+except Aborta as e:
+    eq('(20) sin fuente que pueda opinar: PARA', True, True)
+    eq('(20) … y NO dice que el informe este mal',
+       'NO SE PUEDE JUZGAR' in str(e) and 'ha caido 239 unidades' not in str(e), True)
+    eq('(20) … y dice como arreglarlo: cargar el ledger',
+       'procesar-ledger.yml' in str(e), True)
+    eq('(20) … y cuantos saltos le faltan a la pelicula',
+       '2 salto(s) de un dia' in str(e), True)
+# Sin ledger ninguno pero con pelicula, SI se puede opinar.
+eq('(20) sin ledger pero con pelicula: la pelicula opina',
+   guarda_continuidad(AYER, HOY10, 6692, 6692 - 100, 381, 381,
+                      salidas=None, pelicula=peli(), permitir_salto=False), [])
+
+# El catalogo: 20% menos fichas aborta, 5% no. No depende de ninguna de las dos fuentes.
 try:
     guarda_continuidad(AYER, HOY10, 6692, 6692, 381, 305,
-                       salidas=salidas(90), permitir_salto=False)
+                       salidas=ledger(82, cubre=True), pelicula=peli(),
+                       permitir_salto=False)
     eq('(20) 20% menos fichas: ABORTA', False, True)
 except Aborta as e:
     eq('(20) 20% menos fichas: ABORTA', True, True)
     eq('(20) … y dice el porcentaje perdido', '19.9%' in str(e), True)
 eq('(20) 5% menos fichas: NO aborta',
    guarda_continuidad(AYER, HOY10, 6692, 6692, 381, 362,
-                      salidas=salidas(90), permitir_salto=False), [])
-# 🔴 La primera carga NO se juzga: no hay contra que comparar, y una comprobacion
-#    sin nada que comparar no comprueba nada. La cubre el suelo de la Guarda 4.
+                      salidas=ledger(82, cubre=True), pelicula=peli(),
+                      permitir_salto=False), [])
+# 🔴 La primera carga NO se juzga, y la recarga del mismo dia tampoco.
 eq('(20) sin foto anterior: no aplica',
-   guarda_continuidad(None, HOY10, 0, 6453, 0, 381, salidas=salidas(90),
+   guarda_continuidad(None, HOY10, 0, 6453, 0, 381, salidas=None, pelicula=None,
                       permitir_salto=False), [])
 eq('(20) la misma fecha (recarga de la misma foto): no aplica',
-   guarda_continuidad(HOY10, HOY10, 6692, 1, 381, 381, salidas=salidas(90),
+   guarda_continuidad(HOY10, HOY10, 6692, 1, 381, 381, salidas=None, pelicula=None,
                       permitir_salto=False), [])
-# La valvula, con nombre y dejando rastro.
+# La valvula, con nombre y dejando rastro. En los DOS caminos que abortan.
 motivos = guarda_continuidad(AYER, HOY10, 6692, 6453, 381, 381,
-                             salidas=salidas(0, sin_datos=1),
+                             salidas=ledger(16, cubre=False), pelicula=peli(),
                              permitir_salto=True, escribir=lambda *a: None)
-eq('(20) PERMITIR_SALTO=1 la deja pasar…', len(motivos), 1)
+eq('(20) PERMITIR_SALTO=1 deja pasar la caida…', len(motivos), 1)
 eq('(20) … pero devuelve el motivo, no lo borra',
    'ha caido 239' in (motivos[0] if motivos else ''), True)
+motivos = guarda_continuidad(AYER, HOY10, 6692, 6453, 381, 381,
+                             salidas=None, pelicula=peli(saltos=0),
+                             permitir_salto=True, escribir=lambda *a: None)
+eq('(20) … y tambien deja pasar el «no puedo juzgar», dejandolo escrito',
+   'NO SE PUEDE JUZGAR' in (motivos[0] if motivos else ''), True)
+
+
+print('\n== 20 ter) LA COBERTURA: el ultimo dia del ledger NO cuenta como dia ==')
+# 🔴 EL FALLO QUE ESTO CIERRA, medido por Fernando en produccion el 7-sep-2026: el
+#    informe del ledger se descarga a media manana, asi que su ultimo dia viene CORTADO.
+#    El 6-sep traia 16 unidades de salida contra 74, 119, 97, 130 y 174 los cinco dias
+#    anteriores. Contarlo como un dia entero hace que el techo dependa de a que hora se
+#    bajo un informe, que es lo contrario de una medida.
+
+
+class CursorLedger:
+    """Doble de cursor para `salidas_del_ledger`. Apunta con que fechas se le pregunta."""
+
+    def __init__(self, hasta, uds=99):
+        self.hasta = hasta
+        self.uds = uds
+        self.preguntas = []
+        self._ultimo = None
+
+    def execute(self, sql, params=None):
+        self.preguntas.append((sql, params))
+        if 'to_regclass' in sql:
+            self._ultimo = ('public.ledger_movimientos',)
+        elif 'max(fecha)' in sql:
+            self._ultimo = (self.hasta,)
+        elif 'sum(abs(quantity))' in sql:
+            self._ultimo = (self.uds,)
+        else:
+            self._ultimo = []
+
+    def fetchone(self):
+        return self._ultimo
+
+    def fetchall(self):
+        return []
+
+
+L6 = datetime.date(2026, 9, 6)
+cur_l = CursorLedger(L6)
+r = salidas_del_ledger(cur_l, datetime.date(2026, 9, 5), datetime.date(2026, 9, 6))
+eq('(20t) el ultimo dia completo es el ANTERIOR al ultimo que trae el ledger',
+   r['completo_hasta'], datetime.date(2026, 9, 5))
+eq('(20t) con el informe del 6 y el ledger hasta el 6: NO cubre', r['cubre'], False)
+cur_l = CursorLedger(L6)
+r = salidas_del_ledger(cur_l, datetime.date(2026, 9, 3), datetime.date(2026, 9, 5))
+eq('(20t) con el informe del 5 y el ledger hasta el 6: SI cubre', r['cubre'], True)
+# 🔑 Y la consulta de las salidas NO pide el dia cortado: pregunta hasta el completo.
+cur_l = CursorLedger(L6)
+salidas_del_ledger(cur_l, datetime.date(2026, 9, 5), datetime.date(2026, 9, 7))
+_sql, _par = [p for p in cur_l.preguntas if 'sum(abs(quantity))' in p[0]][0]
+eq('(20t) las salidas se piden hasta el ultimo dia COMPLETO, no hasta el cortado',
+   _par[-1], datetime.date(2026, 9, 5))
 
 
 print('\n== 20 bis) EL DISPONIBLE: la misma cuenta a los dos lados de la resta ==')

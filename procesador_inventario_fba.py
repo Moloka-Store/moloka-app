@@ -101,6 +101,7 @@
 #   de guardas, escritura por LOTES (`execute_values`) desde el primer día.
 # ============================================================================
 
+import datetime
 import os, sys
 from collections import Counter
 
@@ -1092,7 +1093,7 @@ def avisar_censo(cabecera_nueva, cabecera_anterior, escribir=print):
 
 
 # ---------------------------------------------------------------------------
-# GUARDA 10 — EL BALANCE DEL DÍA. Lo que cae tiene que caber en lo que se vendió.
+# GUARDA 10 — EL BALANCE DEL DÍA. Lo que cae tiene que caber en algo medido.
 # ---------------------------------------------------------------------------
 # 🔴 EL AGUJERO QUE TAPA: todas las guardas de arriba miran el fichero CONSIGO
 #    MISMO. Ninguna lo mira contra el de ayer. Y el 7-sep-2026 Amazon sirvió un
@@ -1101,76 +1102,71 @@ def avisar_censo(cabecera_nueva, cabecera_anterior, escribir=print):
 #    de una de ellas. Lo que lo paró ese día fue la Guarda 1, porque la columna que
 #    faltaba estaba en el contrato: **pura suerte de contrato**.
 #
-# 🔴 QUÉ HA CAMBIADO HOY, Y POR QUÉ (encargo F, punto 6, 7-sep-2026). Esta guarda
-#    comparó hasta hoy el ALMACÉN o el VENDIBLE contra un TECHO FIJO escrito en el
-#    código (160 y 145 uds/día). Dos problemas, los dos medidos en producción:
-#      · UN TECHO FIJO NO SABE QUÉ DÍA ES. Las salidas diarias de los últimos 60 días
-#        (`ledger_movimientos`, hasta el 6-sep-2026) van de **16 a 174 unidades**,
-#        media 92,6. Cualquier número fijo o aborta un día bueno o deja pasar un día
-#        malo, y con el mismo número hace las dos cosas.
-#        ⚠️ Y en concreto **89 NO vale**: es la MEDIA, o sea que la mitad de los días
-#        está por encima. Un techo puesto en la media aborta la carga un día bueno.
-#      · Y NINGUNA DE LAS DOS MAGNITUDES ERA LA QUE IMPORTA. Con esta tabla se decide
-#        reponer y se decide precio, y eso se decide sobre el DISPONIBLE.
-#
-# 🔑 EL DISPONIBLE, CON LA MISMA CUENTA A LOS DOS LADOS DE LA RESTA:
+# 🔑 QUÉ SE COMPARA: el DISPONIBLE, con la misma cuenta a los dos lados de la resta.
 #        available + fc_transfer   si el informe trajo el tránsito      ('leido')
 #        disponible_estimado       si no, y el internacional lo permite ('estimado')
 #        available                 si tampoco ('desconocido': el vendible es el suelo)
-#    🔒 Así la resta es HOMOGÉNEA aunque el informe cambie de versión por el medio,
-#       que es justo lo que pasó el 7-sep. Comparar el almacén de una versión con el
-#       de otra daba una caída de 246 unidades que no era una caída; y comparar el
-#       vendible sólo era homogéneo porque dejaba el tránsito FUERA de las dos fotos,
-#       o sea sin mirar precisamente las unidades que se estaban perdiendo.
+#    🔒 Así la resta es HOMOGÉNEA aunque el informe cambie de versión por el medio, que
+#       es justo lo que pasó el 7-sep. Comparar el almacén de una versión con el de otra
+#       daba una caída de 246 unidades que no era una caída.
 #
-# 🔬 EL CASO QUE ESTO TIENE QUE CAZAR, con las cifras de producción del 7-sep-2026:
+# 🔬 EL CASO QUE TIENE QUE CAZAR, con las cifras de producción del 7-sep-2026:
 #       disponible del 6-sep  6.692  (6.437 vendible + 255 tránsito, 381 fichas)
 #       vendible del 7-sep    6.453
 #    Si el informe recortado entrase sin puente, el disponible caería **239 unidades
-#    en un día**. Ese día se vendieron del orden de 90-155: la resta NO cuadra, y lo
-#    que hay detrás no es una venta, es una columna que Amazon dejó de mandar.
+#    en un día**, y detrás de eso no hay una venta: hay una columna que dejó de venir.
 #
-# 🔬 EL MÁRGEN, Y DE DÓNDE SALE SU NÚMERO. Medido sobre los 10 saltos del histórico
-#    (23-ago → 6-sep-2026, huecos de 1 a 3 días), comparando la caída del disponible
-#    con las unidades que SALIERON del almacén en esa misma ventana (ver
-#    `EVENTOS_QUE_SACAN`: no sólo ventas):
+# ---------------------------------------------------------------------------
+# 🔴 DE DÓNDE SALE EL TECHO, Y POR QUÉ HAY DOS FUENTES. Esto se reescribió entero el
+#    7-sep-2026 por una medición de Fernando que tumbó la versión anterior.
+# ---------------------------------------------------------------------------
+# La primera versión comparaba la caída contra las salidas del ledger, y para los días
+# que el ledger no cubriera usaba su pico diario. **Eso no se sostenía**, y así está
+# medido en producción el 7-sep-2026 a las 17:40:
+#   · `ledger_movimientos` **no tiene reloj**: `procesar-ledger.yml` es sólo
+#     `workflow_dispatch`. Se carga cuando alguien pulsa el botón — sus 16 cargas van
+#     del 23-jul al 6-sep, con huecos de hasta cuatro días.
+#   · Y **su último día siempre viene cortado**, porque el informe se descarga a media
+#     mañana: el 6-sep trae 16 unidades de salida contra 74, 119, 97, 130 y 174 los
+#     cinco días anteriores.
+#   ∴ O sea que el día que hay que juzgar NUNCA está completo en el ledger, y el
+#     anterior tampoco lo está si es el último que se descargó. Una guarda que se apoya
+#     en eso no mide lo que dice medir: mide a qué hora se bajó un informe.
+#
+# 🔑 LA REGLA, EN DOS PASOS, Y EL PRIMERO ES LA COBERTURA:
+#   1) ¿Puede el ledger opinar? Sólo si tiene DÍAS COMPLETOS que lleguen hasta la fecha
+#      del informe que entra. Completo = ANTERIOR a su último día, que está cortado.
+#      Si cubre → techo = lo que salió + 60 uds/día de margen.
+#   2) Si no cubre —que hoy es lo NORMAL, no la excepción— opina la PELÍCULA: la mayor
+#      caída de un día medida en `inventario_fba_historico`, que es un dato completo por
+#      construcción porque es la misma serie que se está protegiendo.
+#      🔬 Medido el 7-sep-2026: 7 saltos de un día, con caídas de **111, 95, 91, 76, 73
+#         y 58**, y una subida de 181. La mayor caída de un día es **111**.
+#         Con la holgura de la casa: 111 × 1,6 = **177 uds/día**.
+#         Contra el caso del 7-sep: 239 contra 177, salta por 62 unidades — no por 5,
+#         que es lo que daba la versión del pico. Y ninguno de los 7 saltos reales lo roza.
+#   3) Y si la película tampoco tiene con qué —menos de 5 saltos de un día—,
+#      la guarda **no opina y PARA**. Decir «no puedo juzgar esto» no es lo mismo que
+#      decir «esto está mal», y las dos cosas tienen que poder distinguirse en el log.
+#
+# ⚠️ EL MARGEN DEL LEDGER, y de dónde sale su número. Medido sobre los 10 saltos del
+#    histórico comparando la caída con lo que salió en esa ventana (`EVENTOS_QUE_SACAN`):
 #        caída 111 / salidas  82     caída  76 / salidas  47     caída 227 / salidas 209
 #        caída  95 / salidas 103     caída  73 / salidas  88     caída  58 / salidas  97
 #        caída  91 / salidas 113     y tres saltos en que el disponible SUBIÓ
-#    El disponible puede caer algo más que lo que salió —tránsito que se recoloca, el
-#    corte del día que no cae a la misma hora—, pero **el exceso nunca pasó de +29
-#    unidades**. De ahí el margen: 29 × 2 ≈ **60 unidades por día** de holgura.
-#    ⚠️ NO es un techo: es lo que se le SUMA a las salidas medidas de esos días. Un
-#       día de 47 salidas admite una caída de 107; uno de 174, de 234. El número se
-#       mueve con el día, que es lo que un techo fijo no sabe hacer.
-#
-# ⚠️ EL LEDGER LLEGA TARDE, Y ESO ES LO NORMAL, NO LA EXCEPCIÓN. Medido el 7-sep: el
-#    ledger llega hasta el 6-sep y el informe FBA que hay que cargar es del 7. Para los
-#    días que el ledger todavía no cubre se usa el **pico diario de los últimos 60
-#    días** (174 uds el 6-sep-2026), también MEDIDO en cada carga: es lo más que ha
-#    salido nunca en un día, así que no puede abortar por un día bueno.
-#    ⚠️ CON ESO EL CASO DEL 7-sep SALTA, PERO POR POCO: techo 174 + 60 = 234 contra una
-#       caída de 239. Cinco unidades. Y sólo en el caso peor —ledger sin cargar ese día
-#       Y puente que no recupera nada—; si el ledger llega al día 7, el techo baja a
-#       unas 170 y la distancia es cómoda. Que conste el margen real, no el que
-#       gustaría: quien cambie estos números tiene que saber por dónde pasa la raya.
-#
-# 🔴 Y SI NO HAY LEDGER NINGUNO, no se aborta: se GRITA que el balance no se ha
-#    podido comprobar. Un ledger vacío daría ventas 0, y con ventas 0 esta guarda
-#    abortaría todos los días por una causa que no tiene nada que ver con el informe
-#    de inventario — que es la definición de ruido futuro (§3 de CLAUDE.md). Parar el
-#    inventario del almacén porque otra cañería va con retraso no arregla nada.
+#    El exceso de la caída sobre lo que salió nunca pasó de +29 unidades. De ahí el
+#    margen: 29 × 2 ≈ 60 uds/día.
 #
 # ⚠️ ES UN SUELO POR CAÍDA, NO POR SUBIDA, a propósito: una entrada de mercancía puede
 #    subir el stock todo lo que quiera en un día (llega un camión). Lo que no puede es
-#    BAJAR más rápido de lo que se vende.
+#    BAJAR más rápido de lo que sale.
 #
-# 🔴 LA PUERTA TIENE NOMBRE: PERMITIR_SALTO=1, mismo patrón que
-#    PERMITIR_UMBRAL_BAJO. Lo que no se hace es subir el margen hasta que deje de
-#    molestar.
-MARGEN_CAIDA_DIA = 60    # el peor exceso medido de la caída sobre las SALIDAS fue +29 × 2
-CAIDA_MAX_FICHAS = 0.15  # medido: el peor día perdió un 0,5% de las fichas
-DIAS_VENTANA_PICO = 60   # la ventana sobre la que se mide el pico diario de ventas
+# 🔴 LA PUERTA TIENE NOMBRE: PERMITIR_SALTO=1. Lo que no se hace es subir el margen
+#    hasta que deje de molestar.
+CAIDA_MAX_FICHAS = 0.15        # medido: el peor dia perdio un 0,5% de las fichas
+MARGEN_CAIDA_DIA = 60          # el peor exceso de la caída sobre las salidas fue +29 × 2
+FACTOR_PELICULA = 1.6          # la holgura de la casa sobre la peor caída observada
+MINIMO_SALTOS_PELICULA = 5     # con menos, la película no tiene con qué opinar
 
 
 def disponible_de(reg):
@@ -1204,54 +1200,50 @@ TABLA_LEDGER = 'ledger_movimientos'
 # ---------------------------------------------------------------------------
 # QUÉ CUENTA COMO «SALIDA», Y POR QUÉ CADA UNA. Medido el 7-sep-2026, 60 días.
 # ---------------------------------------------------------------------------
-# 🔴 NO SON «LAS VENTAS», Y LLAMARLO ASÍ ERA EL ERROR. Lo que tiene que caber en la
-#    caída del disponible es TODO lo que saca unidades del almacén europeo, no sólo
-#    lo que se vende. Por eso la lista tiene cuatro nombres y no uno:
+# 🔴 NO SON «LAS VENTAS». Lo que tiene que caber en la caída del disponible es TODO lo
+#    que saca unidades del almacén europeo:
 #      · Shipments     — la venta. Mayor día 155, y 5.365 uds en los 60.
 #      · Adjustments   — mermas y correcciones de Amazon. Mayor día 23 en negativo.
 #      · VendorReturns — devoluciones al proveedor. Mayor día 11.
 #      · Receipts      — normalmente ENTRAN (5.310 uds), pero hay días en negativo:
 #                        mayor día 7. Sólo cuentan los negativos, como en las otras.
-#    🔒 Se cuentan SÓLO las cantidades NEGATIVAS. Un `Adjustments` positivo es stock
-#       que aparece, y eso no hay que justificarlo con nada: la guarda es un suelo
-#       por caída, no por subida.
+#    🔒 Se cuentan SÓLO las cantidades NEGATIVAS: un `Adjustments` positivo es stock
+#       que aparece, y esta guarda es un suelo por caída, no por subida.
 #
 # 🔴 Y LA QUE SE QUEDA FUERA, que es la que más pesa: `WhseTransfers`. Mayor día
-#    **790 unidades**, y en los 60 días saca 5.662 y mete 5.669 — o sea que se
-#    compensa consigo misma, porque son traslados ENTRE centros de Amazon. No
-#    reducen el stock europeo, y contarlas dispararía el techo justo en los días de
-#    más movimiento interno, que es cuando esta guarda tiene que estar más fina.
+#    **790 unidades**, y en los 60 días saca 5.662 y mete 5.669 — son traslados ENTRE
+#    centros de Amazon. No reducen el stock europeo, y contarlas dispararía el techo
+#    justo en los días de más movimiento interno.
 #
-# ⚠️ Y LO QUE PASE MAÑANA: si el ledger trae un `event_type` que no está en ninguna
-#    de las dos listas, se GRITA. No se cuenta ni se descarta por su cuenta — un
-#    evento nuevo que saque stock haría que las salidas midiesen de menos, y una
-#    guarda que mide de menos aborta de más.
+# ⚠️ Un `event_type` que no esté en ninguna de las listas se GRITA. No se cuenta ni se
+#    descarta por su cuenta: un evento nuevo que saque stock haría que las salidas
+#    midiesen de menos, y una guarda que mide de menos aborta de más.
 EVENTOS_QUE_SACAN = ('Shipments', 'Adjustments', 'VendorReturns', 'Receipts')
-# Internos: mueven stock de sitio sin sacarlo de Europa.
 EVENTOS_INTERNOS = ('WhseTransfers',)
-# Entran, nunca salen (medido: 0 uds en negativo en 60 días). Se catalogan para que
-# no salgan por el aviso de arriba cada día.
 EVENTOS_QUE_ENTRAN = ('CustomerReturns',)
 
 
 def salidas_del_ledger(cur, desde, hasta):
-    """Lo que SALIÓ de los almacenes de Amazon entre dos fotos. Medido, no supuesto.
+    """Lo que SALIÓ del almacén entre dos fotos, y si el ledger puede opinar siquiera.
 
-    🔑 POR QUÉ EL LEDGER Y NO `transacciones_movimientos`, que es la otra fuente de
-       ventas — y el motivo NO es el que puse primero. Escribí que transacciones «no
-       tiene Alemania», y es FALSO: medido el 7-sep-2026 sobre los últimos 60 días,
-       trae de, es, fr e it. Las tres razones de verdad son otras:
-         · el ledger es la SALIDA FÍSICA del almacén, que es exactamente lo que baja
-           el stock de esta tabla; transacciones es el pedido en el marketplace;
+    🔑 POR QUÉ EL LEDGER Y NO `transacciones_movimientos` — y el motivo NO es el que
+       puse primero. Escribí que transacciones «no tiene Alemania», y es FALSO: medido
+       el 7-sep-2026 sobre 60 días, trae de, es, fr e it. Las razones de verdad:
+         · el ledger es la SALIDA FÍSICA del almacén, que es lo que baja este stock;
+           transacciones es el pedido en el marketplace;
          · llega más lejos: hasta el 6-sep cuando transacciones se queda en el 5;
-         · y trae dos países más, `pl` y `sk`, que en transacciones no están.
-       🔬 Las dos fuentes se parecen mucho en el agregado (ledger 89,4 de media y 155
-          de pico contando sólo Shipments; transacciones 90,0 y 158), así que la
-          elección no cambia las cifras: cambia qué se está midiendo.
+         · y trae dos países más, `pl` y `sk`.
+
+    🔴 EL ÚLTIMO DÍA DEL LEDGER NO CUENTA COMO DÍA. El informe se descarga a media
+       mañana, así que su último día viene cortado a esa hora: medido el 7-sep-2026, el
+       6-sep trae 16 unidades contra 74, 119, 97, 130 y 174 los cinco días anteriores.
+       Contarlo como un día entero hace que el techo dependa de a qué hora se bajó un
+       informe, que es lo contrario de una medida.
 
     🔒 Las cantidades llegan NEGATIVAS (una salida), de ahí el abs().
 
-    Devuelve el dict que lee la Guarda 10, o None si no hay ledger que leer.
+    Devuelve el dict que lee la Guarda 10, o None si no hay ledger que leer. `cubre`
+    dice si puede opinar: días completos hasta la fecha del informe que entra.
     """
     cur.execute("SELECT to_regclass(%s);", ('public.' + TABLA_LEDGER,))
     if cur.fetchone()[0] is None:
@@ -1261,51 +1253,75 @@ def salidas_del_ledger(cur, desde, hasta):
     if hasta_ledger is None:
         return None
 
-    hasta_util = min(hasta, hasta_ledger)
-    dias = (hasta - desde).days
-    dias_cubiertos = max((hasta_util - desde).days, 0)
+    # El último día COMPLETO del ledger es el anterior al último que trae.
+    completo_hasta = hasta_ledger - datetime.timedelta(days=1)
+    cubre = completo_hasta >= hasta
 
     cur.execute(
         "SELECT coalesce(sum(abs(quantity)), 0) FROM %s "
         "WHERE quantity < 0 AND event_type = ANY(%%s) "
         "  AND fecha > %%s AND fecha <= %%s;" % TABLA_LEDGER,
-        (list(EVENTOS_QUE_SACAN), desde, hasta_util))
+        (list(EVENTOS_QUE_SACAN), desde, min(hasta, completo_hasta)))
     uds = int(cur.fetchone()[0] or 0)
 
-    # El pico diario de la ventana, MEDIDO en cada carga: es lo que cubre los días que
-    # el ledger todavía no ha cargado. Un número escrito a mano aquí volvería a ser el
-    # techo fijo que este parche viene a quitar.
-    cur.execute(
-        "SELECT coalesce(max(uds), 0) FROM ("
-        "  SELECT fecha, sum(abs(quantity)) AS uds FROM %s"
-        "   WHERE quantity < 0 AND event_type = ANY(%%s) AND fecha > %%s - %%s"
-        "   GROUP BY fecha) t;" % TABLA_LEDGER,
-        (list(EVENTOS_QUE_SACAN), hasta_ledger, DIAS_VENTANA_PICO))
-    pico = int(cur.fetchone()[0] or 0)
-
-    # ⚠️ Un `event_type` que nadie ha catalogado. No se cuenta ni se descarta solo.
     cur.execute(
         "SELECT DISTINCT event_type FROM %s "
-        " WHERE fecha > %%s - %%s AND NOT (event_type = ANY(%%s));" % TABLA_LEDGER,
-        (hasta_ledger, DIAS_VENTANA_PICO,
+        " WHERE fecha > %%s - 60 AND NOT (event_type = ANY(%%s));" % TABLA_LEDGER,
+        (hasta_ledger,
          list(EVENTOS_QUE_SACAN + EVENTOS_INTERNOS + EVENTOS_QUE_ENTRAN)))
     sin_catalogar = sorted(r[0] for r in cur.fetchall() if r[0])
 
-    return {'uds': uds, 'dias': dias, 'dias_cubiertos': dias_cubiertos,
-            'dias_sin_datos': max(dias - dias_cubiertos, 0),
-            'hasta_ledger': hasta_ledger, 'pico_dia': pico,
-            'sin_catalogar': sin_catalogar}
+    return {'uds': uds, 'cubre': cubre, 'hasta_ledger': hasta_ledger,
+            'completo_hasta': completo_hasta, 'sin_catalogar': sin_catalogar}
+
+
+def caida_maxima_de_la_pelicula(cur):
+    """La mayor caída de UN día medida en la propia película del inventario.
+
+    🔑 POR QUÉ ESTA FUENTE. Es el único dato completo que hay: la película es la misma
+       serie que la guarda protege, así que no depende de que otra cañería se haya
+       cargado hoy ni de a qué hora se descargó un informe. Lo que mide no es cuánto se
+       vendió ayer, sino **cuánto ha llegado a caer este almacén en un día**, que para un
+       suelo por caída es exactamente la pregunta.
+
+    🔴 SÓLO SALTOS DE UN DÍA. Repartir la caída de una ventana de tres días entre sus
+       tres días es inventarse el reparto: pudo caer todo en uno. Un salto de varios
+       días no dice cuál fue la peor caída diaria, así que no se usa para medirla.
+
+    ⚠️ Y LO QUE ESTO NO SABE: describe el pasado. Un día de venta récord o una retirada
+       grande pueden pasar del techo sin que el informe tenga nada malo — para eso está
+       PERMITIR_SALTO, y por eso el aborto dice que compruebe si el salto es real.
+
+    Devuelve {'saltos': n, 'peor': uds} o None si la tabla no existe.
+    """
+    cur.execute("SELECT to_regclass(%s);", ('public.' + TABLA_HIST,))
+    if cur.fetchone()[0] is None:
+        return None
+    cur.execute(
+        """WITH fotos AS (
+               SELECT fecha_foto, sum(%s) AS disp
+                 FROM %s GROUP BY fecha_foto),
+                p AS (
+               SELECT fecha_foto, disp,
+                      lag(fecha_foto) OVER (ORDER BY fecha_foto) AS f_ant,
+                      lag(disp)       OVER (ORDER BY fecha_foto) AS d_ant
+                 FROM fotos)
+           SELECT count(*), coalesce(max(d_ant - disp), 0)
+             FROM p
+            WHERE f_ant IS NOT NULL AND fecha_foto - f_ant = 1;""" % (
+            SQL_DISPONIBLE, TABLA_HIST))
+    saltos, peor = cur.fetchone()
+    return {'saltos': int(saltos or 0), 'peor': int(peor or 0)}
 
 
 def guarda_continuidad(fecha_ant, fecha_nueva, disponible_ant, disponible_nuevo,
-                       fichas_ant, fichas_nuevas, salidas=None,
+                       fichas_ant, fichas_nuevas, salidas=None, pelicula=None,
                        permitir_salto=None, escribir=print):
     """Compara la foto que entra con la que ya está. Aborta si la resta no cuadra.
 
-    🔒 Función PURA a propósito: entra lo que dice la base y lo que dice el fichero,
-       sale un Aborta o nada. Las salidas llegan YA MEDIDAS (`salidas_del_ledger`),
-       es lo único que toca la base. Así se prueba sin base y sin red, con números a
-       mano (`test_inventario_fba.py`).
+    🔒 Función PURA a propósito: las dos fuentes llegan YA MEDIDAS
+       (`salidas_del_ledger`, `caida_maxima_de_la_pelicula`), que es lo único que toca
+       la base. Así se prueba sin base y sin red, con números a mano.
 
     Devuelve la lista de motivos. Vacía = todo en orden. No vacía sólo puede pasar si
     PERMITIR_SALTO=1 la dejó pasar, y entonces ya ha gritado.
@@ -1317,10 +1333,8 @@ def guarda_continuidad(fecha_ant, fecha_nueva, disponible_ant, disponible_nuevo,
     # comparar no comprueba nada: la primera carga la cubre el suelo de la Guarda 4.
     if fecha_ant is None or not fichas_ant:
         return []
-    # Misma fecha: es la MISMA foto recargada, no un salto.
     if fecha_nueva == fecha_ant:
         return []
-    # Hacia atrás no se compara: de eso ya se ocupa `guarda_no_retroceder`, antes.
     dias = (fecha_nueva - fecha_ant).days
     if dias <= 0:
         return []
@@ -1328,47 +1342,60 @@ def guarda_continuidad(fecha_ant, fecha_nueva, disponible_ant, disponible_nuevo,
     motivos = []
     caida = (disponible_ant or 0) - (disponible_nuevo or 0)
 
-    if salidas is None:
-        escribir("")
-        escribir("⚠️  [Guarda 10] EL BALANCE DEL DIA NO SE HA PODIDO COMPROBAR: no hay "
-                 "salidas que leer en %s." % TABLA_LEDGER)
-        escribir("     El disponible pasa de %s a %s (%+d) entre el %s y el %s, y esta "
-                 "carga NO lleva esa cifra contrastada contra nada."
-                 % (disponible_ant, disponible_nuevo, -caida, fecha_ant, fecha_nueva))
-        escribir("     Con el ledger vacio, las salidas medidas serian 0 y esta guarda "
-                 "abortaria TODOS los dias por una causa que no tiene que ver con el "
-                 "informe de inventario. Por eso avisa en vez de parar. MIRALO.")
-        escribir("")
+    # 🔑 PASO 1: ¿quién puede opinar? La cobertura ANTES que el veredicto.
+    if salidas is not None and salidas.get('cubre'):
+        techo = salidas['uds'] + MARGEN_CAIDA_DIA * dias
+        fuente = ("lo que salio del almacen entre el %s y el %s (%d uds, del ledger) "
+                  "mas %d uds/dia de margen"
+                  % (fecha_ant, fecha_nueva, salidas['uds'], MARGEN_CAIDA_DIA))
+    elif pelicula is not None and pelicula['saltos'] >= MINIMO_SALTOS_PELICULA:
+        techo = int(pelicula['peor'] * FACTOR_PELICULA) * dias
+        motivo_ledger = "no hay ledger que leer"
+        if salidas is not None:
+            motivo_ledger = ("el ledger solo tiene dias completos hasta el %s y este "
+                             "informe es del %s"
+                             % (salidas['completo_hasta'], fecha_nueva))
+        fuente = ("la peor caida de un dia medida en la pelicula del propio inventario "
+                  "(%d uds en %d saltos de un dia) por %s de holgura, %s"
+                  % (pelicula['peor'], pelicula['saltos'], FACTOR_PELICULA,
+                     "y no el ledger porque " + motivo_ledger))
     else:
-        techo = (salidas['uds'] + salidas['pico_dia'] * salidas['dias_sin_datos']
-                 + MARGEN_CAIDA_DIA * dias)
-        if caida > techo:
-            coletilla = ""
-            if salidas['dias_sin_datos']:
-                coletilla = (
-                    "\n   Ojo: el ledger solo llega hasta el %s, asi que %d de esos %d "
-                    "dia(s) no tienen salidas cargadas y se han contado al pico diario "
-                    "de los ultimos %d dias (%d uds/dia), que es lo mas que ha salido "
-                    "nunca en un dia."
-                    % (salidas['hasta_ledger'], salidas['dias_sin_datos'], dias,
-                       DIAS_VENTANA_PICO, salidas['pico_dia']))
-            motivos.append(
-                "El disponible ha caido %d unidades entre el %s y el %s, y en esos "
-                "%d dia(s) salieron %d del almacen (ventas, mermas, devoluciones al "
-                "proveedor y recepciones en negativo).%s\n"
-                "   El maximo que puede caer son %d: lo que salio mas %d uds/dia de "
-                "margen. Ese margen esta medido — en los 10 saltos del historico "
-                "(23-ago a 6-sep-2026) la caida del disponible nunca paso de las "
-                "salidas en mas de 29 unidades.\n"
-                "   Para que esto fuera movimiento real habrian tenido que salir %d "
-                "unidades del almacen. No pasa.\n"
-                "   Lo que si pasa, y ya paso el 7-sep-2026, es que Amazon sirva un "
-                "informe que cuadra consigo mismo pero deja unidades fuera: ese dia el "
-                "disponible habria caido 239 (6.692 -> 6.453) sin que saliera nada "
-                "parecido."
-                % (caida, fecha_ant, fecha_nueva, dias,
-                   salidas['uds'] + salidas['pico_dia'] * salidas['dias_sin_datos'],
-                   coletilla, techo, MARGEN_CAIDA_DIA, caida))
+        # 🔴 «No puedo juzgar esto» NO es «esto está mal», y se dice distinto.
+        cuerpo = (
+            "[Guarda 10] NO SE PUEDE JUZGAR ESTA CARGA: no hay con que.\n"
+            "   El disponible pasa de %s a %s (%+d) entre el %s y el %s, y no hay "
+            "ninguna fuente completa con la que decir si esa caida cabe:\n"
+            "   · el ledger %s\n"
+            "   · y la pelicula del inventario tiene %d salto(s) de un dia, y hacen "
+            "falta %d para que pueda opinar.\n"
+            "   Esto NO dice que el informe este mal: dice que nadie puede decir si "
+            "esta bien. Carga el ledger (procesar-ledger.yml, que no tiene reloj y va "
+            "a mano) y repite, o mira la foto tu mismo y sigue con PERMITIR_SALTO=1."
+            % (disponible_ant, disponible_nuevo, -caida, fecha_ant, fecha_nueva,
+               ("no se puede leer" if salidas is None else
+                ("solo tiene dias completos hasta el %s y este informe es del %s"
+                 % (salidas['completo_hasta'], fecha_nueva))),
+               0 if pelicula is None else pelicula['saltos'],
+               MINIMO_SALTOS_PELICULA))
+        if permitir_salto:
+            escribir("")
+            escribir("AVISO  " + cuerpo)
+            escribir("   PERMITIR_SALTO=1 la salta. Que conste, y que se mire.")
+            escribir("")
+            return [cuerpo]
+        raise Aborta(cuerpo)
+
+    if caida > techo:
+        motivos.append(
+            "El disponible ha caido %d unidades entre el %s y el %s, y lo maximo que "
+            "puede caer son %d.\n"
+            "   Ese techo es %s.\n"
+            "   Para que esto fuera movimiento real habrian tenido que salir %d "
+            "unidades del almacen en %d dia(s). No pasa.\n"
+            "   Lo que si pasa, y ya paso el 7-sep-2026, es que Amazon sirva un informe "
+            "que cuadra consigo mismo pero deja unidades fuera: ese dia el disponible "
+            "habria caido 239 (6.692 -> 6.453) sin que saliera nada parecido."
+            % (caida, fecha_ant, fecha_nueva, techo, fuente, caida, dias))
 
     if fichas_nuevas < fichas_ant * (1 - CAIDA_MAX_FICHAS):
         perdido = (fichas_ant - fichas_nuevas) / float(fichas_ant) * 100
@@ -2192,40 +2219,59 @@ def main():
     #    pasado. Antes de escribir nada, que es lo que importa.
     disponible_nuevo = disponible_total(filas)
     salidas = None
+    pelicula = None
     if fecha_ant is not None and fecha_ant != info['fecha_foto']:
         salidas = salidas_del_ledger(cur, fecha_ant, info['fecha_foto'])
-        if salidas is not None:
-            print(f"\n--- EL BALANCE DEL DIA (Guarda 10) ---")
-            print(f"   · disponible                  : {disponible_ant} → "
-                  f"{disponible_nuevo}  ({disponible_nuevo - disponible_ant:+d} entre "
-                  f"el {fecha_ant} y el {info['fecha_foto']})")
-            print(f"   · salio del almacen en {salidas['dias']} dia(s): {salidas['uds']} "
-                  f"uds (ledger, hasta el {salidas['hasta_ledger']}; ventas, mermas, "
-                  f"devoluciones al proveedor y recepciones en negativo)")
-            if salidas['dias_sin_datos']:
-                print(f"   · dias sin salidas cargadas   : {salidas['dias_sin_datos']} — "
-                      f"se cuentan al pico diario de los ultimos {DIAS_VENTANA_PICO} "
-                      f"dias ({salidas['pico_dia']} uds/dia)")
-            print(f"   · el almacen, de contexto      : {almacen_ant} → "
-                  f"{info['almacen_total']}  (⚠️ no es comparable entre versiones "
-                  f"distintas del informe: el 7-sep-2026 dejo de incluir el transito)")
-            print(f"   · caida maxima admitida       : "
-                  f"{salidas['uds'] + salidas['pico_dia'] * salidas['dias_sin_datos'] + MARGEN_CAIDA_DIA * salidas['dias']} "
-                  f"uds (lo que salio + {MARGEN_CAIDA_DIA} uds/dia de margen medido)",
+        pelicula = caida_maxima_de_la_pelicula(cur)
+        _dias = (info['fecha_foto'] - fecha_ant).days
+        print(f"\n--- EL BALANCE DEL DIA (Guarda 10) ---")
+        print(f"   · disponible                  : {disponible_ant} → "
+              f"{disponible_nuevo}  ({disponible_nuevo - disponible_ant:+d} entre "
+              f"el {fecha_ant} y el {info['fecha_foto']}, {_dias} dia(s))")
+        print(f"   · el almacen, de contexto      : {almacen_ant} → "
+              f"{info['almacen_total']}  (⚠️ no es comparable entre versiones "
+              f"distintas del informe: el 7-sep-2026 dejo de incluir el transito)")
+        # 🔑 LA COBERTURA, ANTES QUE EL VEREDICTO. El ledger no tiene reloj y su ultimo
+        #    dia viene cortado a la hora de la descarga, asi que decir «que fuente puede
+        #    opinar» es la primera pregunta, no un detalle del log.
+        if salidas is None:
+            print(f"   · ledger                       : NO SE PUEDE LEER")
+        else:
+            print(f"   · ledger                       : llega al "
+                  f"{salidas['hasta_ledger']}, y su ultimo dia viene cortado, asi que "
+                  f"completo hasta el {salidas['completo_hasta']}")
+            print(f"   · ¿puede opinar el ledger?     : "
+                  f"{'SI' if salidas['cubre'] else 'NO'}")
+        if pelicula is not None:
+            print(f"   · la pelicula del inventario   : {pelicula['saltos']} salto(s) "
+                  f"de un dia, la peor caida {pelicula['peor']} uds")
+        if salidas is not None and salidas['cubre']:
+            _techo = salidas['uds'] + MARGEN_CAIDA_DIA * _dias
+            print(f"   · OPINA EL LEDGER             : salieron {salidas['uds']} uds; "
+                  f"caida maxima admitida {_techo} (mas {MARGEN_CAIDA_DIA} uds/dia de "
+                  f"margen medido)", flush=True)
+        elif pelicula is not None and pelicula['saltos'] >= MINIMO_SALTOS_PELICULA:
+            _techo = int(pelicula['peor'] * FACTOR_PELICULA) * _dias
+            print(f"   · OPINA LA PELICULA           : caida maxima admitida {_techo} "
+                  f"({pelicula['peor']} x {FACTOR_PELICULA} x {_dias} dia(s))",
                   flush=True)
-            # ⚠️ Un event_type que nadie ha catalogado: ni cuenta como salida ni se
-            #    descarta. Si saca stock, las salidas miden de menos y la guarda
-            #    abortaria de mas — y nadie sabria por que.
-            if salidas['sin_catalogar']:
-                print(f"   🔴 el ledger trae {len(salidas['sin_catalogar'])} tipo(s) de "
-                      f"movimiento que este procesador no conoce: "
-                      f"{', '.join(salidas['sin_catalogar'])}", flush=True)
-                print(f"      No se cuentan ni se descartan solos. Miralos y ponlos en "
-                      f"EVENTOS_QUE_SACAN o en EVENTOS_INTERNOS.", flush=True)
+        else:
+            print(f"   🔴 NO PUEDE OPINAR NADIE        : ni el ledger cubre ni la "
+                  f"pelicula tiene {MINIMO_SALTOS_PELICULA} saltos de un dia",
+                  flush=True)
+        # ⚠️ Un event_type que nadie ha catalogado: ni cuenta como salida ni se descarta.
+        #    Si saca stock, las salidas miden de menos y la guarda abortaria de mas.
+        if salidas is not None and salidas['sin_catalogar']:
+            print(f"   🔴 el ledger trae {len(salidas['sin_catalogar'])} tipo(s) de "
+                  f"movimiento que este procesador no conoce: "
+                  f"{', '.join(salidas['sin_catalogar'])}", flush=True)
+            print(f"      No se cuentan ni se descartan solos. Miralos y ponlos en "
+                  f"EVENTOS_QUE_SACAN o en EVENTOS_INTERNOS.", flush=True)
     try:
         guarda_continuidad(fecha_ant, info['fecha_foto'],
                            disponible_ant, disponible_nuevo,
-                           fichas_ant, len(filas), salidas=salidas)
+                           fichas_ant, len(filas),
+                           salidas=salidas, pelicula=pelicula)
     except Aborta as e:
         morir(e)
 

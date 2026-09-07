@@ -20,10 +20,20 @@ name: Moloka - Procesar INVENTARIO_FBA
 #    ⚠️ HAY QUE HACERLO **ANTES** DE CARGAR NINGUNA FOTO MÁS NUEVA. `guarda_no_retroceder`
 #       impide cargar una foto anterior a la que ya está: en cuanto entre la del 8-sep,
 #       la del 7 ya no se puede meter y ese día queda para siempre fuera del histórico.
-#    ⚠️ Y OJO: en el buzón hay CUATRO .txt subidos el 7-sep (50738020703, 50740020703,
-#       50742020703 y una copia de este último). Los cuatro llevan fecha_foto del 7 —la
-#       fecha es la de subida—, así que se carga el que Fernando diga POR SU NOMBRE; sin
-#       el input `fichero` se cargaría «el más reciente», que aquí es una lotería.
+#    ⚠️ Y OJO: en el buzón hay CUATRO .txt subidos el 7-sep, pero sólo DOS contenidos
+#       (medido por el eTag, que es el MD5): 50738020703 y 50740020703 son el mismo
+#       fichero, y 50742020703 y su copia (1) son el mismo. Fernando eligió el de las
+#       09:56, **50742020703.txt**. Se carga POR SU NOMBRE; sin el input `fichero` se
+#       cargaría «el más reciente», que aquí es una lotería.
+#
+# 🔑 EL ORDEN CON EL LEDGER, Y POR QUÉ IMPORTA (medido el 7-sep-2026). La Guarda 10
+#    compara la caída del disponible contra lo que salió del almacén, y eso lo dice
+#    `ledger_movimientos` — que **no tiene reloj**: `procesar-ledger.yml` es sólo
+#    `workflow_dispatch` y se carga cuando alguien pulsa el botón. Además su último día
+#    viene siempre cortado a la hora de la descarga.
+#    Consecuencia práctica: **si quieres que opine el ledger, cárgalo ANTES que el
+#    inventario**. Si no, opina la película del propio inventario, que es un dato
+#    completo pero describe el pasado. Las dos cosas las dice el log, con su nombre.
 #
 # 🔒 EL BUZÓN LO ABRE `migraciones/2026-08-23_jubilar_salud_fba.sql`, que mete
 #    `informes/inventario_fba/` en `moloka_buzones_fase0()` y saca de ahí a
