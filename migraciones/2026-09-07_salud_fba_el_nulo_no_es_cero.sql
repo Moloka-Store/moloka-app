@@ -76,6 +76,14 @@
 --          and column_name='disponible_cierto';        -- 0 = hay algo que probar
 --   Medido el 7-sep-2026 en producción: 0.
 --
+-- 🔬 CORREGIDA DESPUES DE APLICARLA EN STAGING, y queda dicho porque es justo para
+--   lo que sirve la escalera. La primera version resolvia el `disponible_origen` del
+--   ASIN con un `ELSE 'estimado'`, y con la columna todavia vacia —la carga sigue
+--   cerrada por la Guarda 12— eso devolvia **'estimado' en los 361 ASIN de staging**:
+--   la vista afirmando que habia una estimacion donde no se habia estimado nada.
+--   Produccion no llego a verlo. La migracion es idempotente (CREATE OR REPLACE), asi
+--   que relanzarla en staging deja las dos vistas en el estado bueno.
+--
 -- ESCALERA: staging ensayo → staging aplicar → verificación por SQL → producción
 --   ensayo → producción aplicar → verificación por SQL. Con `aplicar-migracion.yml`.
 -- ============================================================================
@@ -237,7 +245,14 @@ CREATE OR REPLACE VIEW public.v_salud_asin AS
          THEN sum(disponible_estimado) END AS disponible_estimado,
     -- 🔑 El origen del ASIN es el PEOR de sus SKU, no el mejor: si a uno solo le
     --    falta el dato, la cifra del ASIN no es fiable del todo.
+    -- 🔴 LA PRIMERA RAMA LA CAZO STAGING, y sin ella esta vista MENTIA. Mientras la
+    --    carga siga cerrada por la Guarda 12, `disponible_origen` esta VACIA en toda
+    --    la tabla; sin este primer CASE ninguna fila casaba con 'desconocido' ni con
+    --    'leido' y el ELSE devolvia **'estimado' para los 361 ASIN** — o sea, la
+    --    vista afirmando que hay una estimacion donde no se ha estimado nada.
+    --    Un ELSE es una AFIRMACION, no un valor por defecto.
         CASE
+            WHEN count(*) <> count(disponible_origen) THEN NULL::text
             WHEN count(*) FILTER (WHERE disponible_origen = 'desconocido'::text) > 0 THEN 'desconocido'::text
             WHEN count(*) = count(*) FILTER (WHERE disponible_origen = 'leido'::text) THEN 'leido'::text
             ELSE 'estimado'::text
@@ -323,6 +338,17 @@ BEGIN
   IF n <> 0 THEN
     RAISE EXCEPTION 'ABORTA: % fila(s) donde el disponible nuevo no coincide con el '
                     'viejo, y con el transito leido tienen que ser identicos.', n;
+  END IF;
+
+  -- 3.8 · 🔴 EL FALLO QUE CAZO STAGING: con `disponible_origen` sin escribir, el
+  --       agregado por ASIN no puede afirmar 'estimado'. O lo sabe, o es NULO.
+  SELECT count(*) INTO n FROM public.v_salud_asin a
+   WHERE a.disponible_origen IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM public.salud_fba s
+                      WHERE s.asin = a.asin AND s.disponible_origen IS NOT NULL);
+  IF n <> 0 THEN
+    RAISE EXCEPTION 'ABORTA: % ASIN dicen tener un origen del disponible y ninguno de '
+                    'sus SKU lo tiene. La vista estaria afirmando lo que no sabe.', n;
   END IF;
 
   RAISE NOTICE 'Numero de control OK: authenticated conserva el SELECT y no escribe, '
