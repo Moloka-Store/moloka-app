@@ -194,6 +194,15 @@ jobs:
       - name: 22) test_escaner_catalogo_propio.py
         run: python -u test_escaner_catalogo_propio.py
 
+      # El banco de que la PELICULA (escaner_detalle, Celda 9b) solo se escribe en
+      # pasadas de FACTURA (perfil MIS_COMPRAS). Corre el escaner de punta a punta
+      # dos veces (factura y proveedor, mismo catalogo, misma SUPABASE_SERVICE_KEY
+      # de mentira) y comprueba que la pasada de proveedor deja CERO filas en
+      # escaner_detalle -- decision de Fernando del 7-sep-2026: la historia de los
+      # escaneos de proveedor no se guarda. Sin red, sin secretos, sin tocar produccion.
+      - name: 22 bis) test_escaner_pelicula_factura.py
+        run: python -u test_escaner_pelicula_factura.py
+
       - name: 23) test_disparar.mjs
         run: node test_disparar.mjs
 
@@ -248,6 +257,7 @@ jobs:
             test_escaner_memoria.py
             test_escaner_excel_isd.py
             test_escaner_catalogo_propio.py
+            test_escaner_pelicula_factura.py
             test_claude_md_candado.py
             test_paginacion_buzon.py
           )
