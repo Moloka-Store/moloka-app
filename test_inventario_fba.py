@@ -727,14 +727,18 @@ eq('(19) el caso de vuelta: sobran dos, no falta ninguna',
    ([], ['afn-fc-transfer-quantity', 'afn-onhand-buyable-quantity']))
 
 
-print('\n== 20) GUARDA 10 · el balance del dia contra las ventas MEDIDAS ==')
+print('\n== 20) GUARDA 10 · el balance del dia contra las SALIDAS medidas ==')
 AYER, HOY10 = datetime.date(2026, 9, 6), datetime.date(2026, 9, 7)
 
 
-def ventas(uds, dias=1, sin_datos=0, pico=155, hasta=AYER):
-    """Lo que devuelve `ventas_del_ledger`, a mano."""
+def salidas(uds, dias=1, sin_datos=0, pico=174, hasta=AYER):
+    """Lo que devuelve `salidas_del_ledger`, a mano.
+
+    🔬 El pico por defecto es el MEDIDO el 7-sep-2026 contando todas las salidas
+       (no solo Shipments): 174 uds en un dia. Con Shipments solo eran 155."""
     return {'uds': uds, 'dias': dias, 'dias_cubiertos': dias - sin_datos,
-            'dias_sin_datos': sin_datos, 'hasta_ledger': hasta, 'pico_dia': pico}
+            'dias_sin_datos': sin_datos, 'hasta_ledger': hasta, 'pico_dia': pico,
+            'sin_catalogar': []}
 
 
 # 🔴 EL CASO REAL DEL 7-sep-2026, que es para lo que existe esta guarda. El
@@ -744,34 +748,34 @@ def ventas(uds, dias=1, sin_datos=0, pico=155, hasta=AYER):
 #    tiene ventas cargadas y se cuenta al pico (155): techo 155 + 60 = 215.
 try:
     guarda_continuidad(AYER, HOY10, 6692, 6453, 381, 381,
-                       ventas=ventas(0, sin_datos=1), permitir_salto=False)
+                       salidas=salidas(0, sin_datos=1), permitir_salto=False)
     eq('(20) el 7-sep sin puente (−239 uds): ABORTA', False, True)
 except Aborta as e:
     eq('(20) el 7-sep sin puente (−239 uds): ABORTA', True, True)
-    eq('(20) … y lo dice en castellano, con la caida y lo vendido',
+    eq('(20) … y lo dice en castellano, con la caida y lo que salio',
        'El disponible ha caido 239 unidades' in str(e), True)
     eq('(20) … y avisa de que el ledger no llegaba a ese dia',
-       'no tienen ventas cargadas' in str(e), True)
+       'no tienen salidas cargadas' in str(e), True)
     eq('(20) … sin colar el nombre de ninguna columna en la primera linea',
        'fc_transfer' in str(e).split('\n')[0], False)
 # 🔑 LA PAREJA QUE HACE QUE ESTO MIDA ALGO: el MISMO dia, con el puente haciendo
 #    su trabajo, el disponible baja lo que se vende y la carga entra.
-eq('(20) el 7-sep CON puente (el disponible baja lo vendido): NO aborta',
+eq('(20) el 7-sep CON puente (el disponible baja lo que salio): NO aborta',
    guarda_continuidad(AYER, HOY10, 6692, 6600, 381, 381,
-                      ventas=ventas(0, sin_datos=1), permitir_salto=False), [])
+                      salidas=salidas(0, sin_datos=1), permitir_salto=False), [])
 # Y con el ledger al dia, la misma caida de 239 tampoco cuela: techo 90 + 60 = 150.
 try:
     guarda_continuidad(AYER, HOY10, 6692, 6453, 381, 381,
-                       ventas=ventas(90, hasta=HOY10), permitir_salto=False)
-    eq('(20) con el ledger al dia, −239 contra 90 vendidas: ABORTA', False, True)
+                       salidas=salidas(90, hasta=HOY10), permitir_salto=False)
+    eq('(20) con el ledger al dia, −239 contra 90 salidas: ABORTA', False, True)
 except Aborta as e:
-    eq('(20) con el ledger al dia, −239 contra 90 vendidas: ABORTA', True, True)
-    eq('(20) … y dice cuanto se vendio de verdad', 'se vendieron 90' in str(e), True)
+    eq('(20) con el ledger al dia, −239 contra 90 salidas: ABORTA', True, True)
+    eq('(20) … y dice cuanto salio de verdad', 'salieron 90 del almacen' in str(e), True)
 
 # 🔬 LOS DIEZ SALTOS MEDIDOS EN PRODUCCION (inventario_fba_historico contra
 #    ledger_movimientos, 23-ago → 6-sep-2026). Ninguno puede abortar: si esta guarda
 #    saltara en un dia legitimo se aprenderia a forzar, y el dia que saltase de verdad
-#    nadie la leeria. (caida_disponible, ventas_ventana, dias)
+#    nadie la leeria. (caida_disponible, salidas_ventana, dias)
 SALTOS_REALES = [(111, 81, 1), (-254, 175, 2), (95, 102, 1), (91, 110, 1),
                  (76, 46, 1), (73, 87, 1), (-29, 262, 2), (-181, 116, 1),
                  (58, 95, 1), (227, 201, 3)]
@@ -779,7 +783,7 @@ callados = 0
 for caida, vendido, dias in SALTOS_REALES:
     hasta = AYER + datetime.timedelta(days=dias)
     if guarda_continuidad(AYER, hasta, 6692, 6692 - caida, 381, 381,
-                          ventas=ventas(vendido, dias=dias, hasta=hasta),
+                          salidas=salidas(vendido, dias=dias, hasta=hasta),
                           permitir_salto=False) == []:
         callados += 1
 eq('(20) los 10 saltos reales del historico pasan sin decir nada', callados, 10)
@@ -788,10 +792,10 @@ eq('(20) los 10 saltos reales del historico pasan sin decir nada', callados, 10)
 #    El peor es 111 de caida contra 81 vendidas: techo 81 + 60 = 141.
 eq('(20) el peor salto real, justo en el techo (141): NO aborta',
    guarda_continuidad(AYER, HOY10, 6692, 6692 - 141, 381, 381,
-                      ventas=ventas(81), permitir_salto=False), [])
+                      salidas=salidas(81), permitir_salto=False), [])
 try:
     guarda_continuidad(AYER, HOY10, 6692, 6692 - 142, 381, 381,
-                       ventas=ventas(81), permitir_salto=False)
+                       salidas=salidas(81), permitir_salto=False)
     eq('(20) … y una unidad mas: ABORTA', False, True)
 except Aborta:
     eq('(20) … y una unidad mas: ABORTA', True, True)
@@ -799,14 +803,14 @@ except Aborta:
 eq('(20) con dos dias de hueco el margen es el doble',
    guarda_continuidad(datetime.date(2026, 9, 5), HOY10, 6692,
                       6692 - (81 + 2 * MARGEN_CAIDA_DIA), 381, 381,
-                      ventas=ventas(81, dias=2), permitir_salto=False), [])
+                      salidas=salidas(81, dias=2), permitir_salto=False), [])
 
 # 🔴 SIN LEDGER NO SE ABORTA, SE GRITA. Con el ledger vacio las ventas medidas
 #    serian 0 y esta guarda abortaria TODOS los dias por una causa que no tiene nada
 #    que ver con el informe de inventario.
 gritos = []
-eq('(20) sin ventas que leer: NO aborta',
-   guarda_continuidad(AYER, HOY10, 6692, 6000, 381, 381, ventas=None,
+eq('(20) sin salidas que leer: NO aborta',
+   guarda_continuidad(AYER, HOY10, 6692, 6000, 381, 381, salidas=None,
                       permitir_salto=False, escribir=gritos.append), [])
 eq('(20) … pero lo dice muy claro',
    any('NO SE HA PODIDO COMPROBAR' in g for g in gritos), True)
@@ -814,25 +818,25 @@ eq('(20) … pero lo dice muy claro',
 # El catalogo: 20% menos fichas aborta, 5% menos no. (No depende de las ventas.)
 try:
     guarda_continuidad(AYER, HOY10, 6692, 6692, 381, 305,
-                       ventas=ventas(90), permitir_salto=False)
+                       salidas=salidas(90), permitir_salto=False)
     eq('(20) 20% menos fichas: ABORTA', False, True)
 except Aborta as e:
     eq('(20) 20% menos fichas: ABORTA', True, True)
     eq('(20) … y dice el porcentaje perdido', '19.9%' in str(e), True)
 eq('(20) 5% menos fichas: NO aborta',
    guarda_continuidad(AYER, HOY10, 6692, 6692, 381, 362,
-                      ventas=ventas(90), permitir_salto=False), [])
+                      salidas=salidas(90), permitir_salto=False), [])
 # 🔴 La primera carga NO se juzga: no hay contra que comparar, y una comprobacion
 #    sin nada que comparar no comprueba nada. La cubre el suelo de la Guarda 4.
 eq('(20) sin foto anterior: no aplica',
-   guarda_continuidad(None, HOY10, 0, 6453, 0, 381, ventas=ventas(90),
+   guarda_continuidad(None, HOY10, 0, 6453, 0, 381, salidas=salidas(90),
                       permitir_salto=False), [])
 eq('(20) la misma fecha (recarga de la misma foto): no aplica',
-   guarda_continuidad(HOY10, HOY10, 6692, 1, 381, 381, ventas=ventas(90),
+   guarda_continuidad(HOY10, HOY10, 6692, 1, 381, 381, salidas=salidas(90),
                       permitir_salto=False), [])
 # La valvula, con nombre y dejando rastro.
 motivos = guarda_continuidad(AYER, HOY10, 6692, 6453, 381, 381,
-                             ventas=ventas(0, sin_datos=1),
+                             salidas=salidas(0, sin_datos=1),
                              permitir_salto=True, escribir=lambda *a: None)
 eq('(20) PERMITIR_SALTO=1 la deja pasar…', len(motivos), 1)
 eq('(20) … pero devuelve el motivo, no lo borra',
@@ -870,18 +874,43 @@ print('\n== 21) GUARDA 12 · el cerrojo, ahora MEDIDO contra la definicion viva 
 #    solo — y contesta distinto en staging y en produccion, que es lo que una
 #    constante no puede hacer.
 try:
-    guarda_transito_desconocido(ORIGEN_DESCONOCIDO, ['v_trackeador_pantalla'])
+    guarda_transito_desconocido(ORIGEN_DESCONOCIDO, ['v_trackeador_pantalla'],
+                                abre_fernando=False)
     eq('(21) con el transito desconocido y un culpable: ABORTA', False, True)
 except Aborta as e:
     eq('(21) con el transito desconocido y un culpable: ABORTA', True, True)
     eq('(21) … y nombra al culpable', 'v_trackeador_pantalla' in str(e), True)
     eq('(21) … y dice como se abre, sin mandar editar ninguna lista',
        'este cerrojo se abre solo' in str(e), True)
-# Las dos parejas calladas.
+
+# 🔴 LA DOBLE LLAVE, Y NO ES SIMETRICA (decision de Fernando, 7-sep-2026): la
+#    medicion puede mantener CERRADO, pero no puede ABRIR. Las cuatro combinaciones,
+#    que es la unica forma de ver que las dos llaves hacen falta y que hacen cosas
+#    distintas.
+try:
+    guarda_transito_desconocido(ORIGEN_DESCONOCIDO, ['v_trackeador_pantalla'],
+                                abre_fernando=True)
+    eq('(21) con culpables, ni con la llave de Fernando se abre', False, True)
+except Aborta as e:
+    eq('(21) con culpables, ni con la llave de Fernando se abre', True, True)
+    eq('(21) … y aborta por los culpables, no por la llave',
+       'COALESCE(fc_transfer, 0) en esta base' in str(e), True)
+try:
+    guarda_transito_desconocido(ORIGEN_DESCONOCIDO, [], abre_fernando=False)
+    eq('(21) sin culpables pero sin la llave de Fernando: ABORTA igual', False, True)
+except Aborta as e:
+    eq('(21) sin culpables pero sin la llave de Fernando: ABORTA igual', True, True)
+    eq('(21) … y lo dice con todas las letras',
+       'abrir no lo decide la medicion, lo decide Fernando' in str(e), True)
+    eq('(21) … y da el nombre de la llave',
+       'ABRIR_TRANSITO_DESCONOCIDO=1' in str(e), True)
+eq('(21) sin culpables Y con la llave: se abre',
+   guarda_transito_desconocido(ORIGEN_DESCONOCIDO, [], abre_fernando=True), None)
+# 🔑 Y la cuarta pareja callada: con el transito LEIDO esto no estorba nunca, haya
+#    culpables o no. El cerrojo es para las fotos que no traen el transito.
 eq('(21) con el transito leido del informe: no dice nada',
-   guarda_transito_desconocido(ORIGEN_INFORME, ['v_trackeador_pantalla']), None)
-eq('(21) sin culpables (vistas ya arregladas): se abre',
-   guarda_transito_desconocido(ORIGEN_DESCONOCIDO, []), None)
+   guarda_transito_desconocido(ORIGEN_INFORME, ['v_trackeador_pantalla'],
+                               abre_fernando=False), None)
 
 # 🔬 LA EXPRESION QUE DECIDE QUIEN ES CULPABLE, contra los siete casos con los que
 #    se probo en produccion el 7-sep-2026. Los cuatro primeros TIENEN que caer; los

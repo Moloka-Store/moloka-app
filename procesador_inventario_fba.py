@@ -1104,10 +1104,10 @@ def avisar_censo(cabecera_nueva, cabecera_anterior, escribir=print):
 # 🔴 QUÉ HA CAMBIADO HOY, Y POR QUÉ (encargo F, punto 6, 7-sep-2026). Esta guarda
 #    comparó hasta hoy el ALMACÉN o el VENDIBLE contra un TECHO FIJO escrito en el
 #    código (160 y 145 uds/día). Dos problemas, los dos medidos en producción:
-#      · UN TECHO FIJO NO SABE QUÉ DÍA ES. Las ventas diarias de los últimos 60 días
-#        (`ledger_movimientos`, event_type='Shipments', hasta el 6-sep-2026) van de
-#        **15 a 155 unidades**, media 89,4. Cualquier número fijo o aborta un día
-#        bueno o deja pasar un día malo, y con el mismo número hace las dos cosas.
+#      · UN TECHO FIJO NO SABE QUÉ DÍA ES. Las salidas diarias de los últimos 60 días
+#        (`ledger_movimientos`, hasta el 6-sep-2026) van de **16 a 174 unidades**,
+#        media 92,6. Cualquier número fijo o aborta un día bueno o deja pasar un día
+#        malo, y con el mismo número hace las dos cosas.
 #        ⚠️ Y en concreto **89 NO vale**: es la MEDIA, o sea que la mitad de los días
 #        está por encima. Un techo puesto en la media aborta la carga un día bueno.
 #      · Y NINGUNA DE LAS DOS MAGNITUDES ERA LA QUE IMPORTA. Con esta tabla se decide
@@ -1132,23 +1132,28 @@ def avisar_censo(cabecera_nueva, cabecera_anterior, escribir=print):
 #
 # 🔬 EL MÁRGEN, Y DE DÓNDE SALE SU NÚMERO. Medido sobre los 10 saltos del histórico
 #    (23-ago → 6-sep-2026, huecos de 1 a 3 días), comparando la caída del disponible
-#    con las unidades que salió el ledger en esa misma ventana:
-#        caída 111 / ventas  81      caída  76 / ventas  46      caída 227 / ventas 201
-#        caída  95 / ventas 102      caída  73 / ventas  87      caída  58 / ventas  95
-#        caída  91 / ventas 110      y tres saltos en que el disponible SUBIÓ
-#    El disponible puede caer algo más que lo vendido —retiradas, mermas, tránsito que
-#    se recoloca—, pero **el exceso sobre las ventas nunca pasó de +30 unidades**.
-#    De ahí el margen: 30 × 2 = **60 unidades por día** de holgura sobre lo vendido.
-#    ⚠️ NO es un techo: es lo que se le SUMA a las ventas medidas de esos días. Un día
-#       de 46 ventas admite una caída de 106; uno de 155, de 215. El número se mueve
-#       con el día, que es lo que un techo fijo no sabe hacer.
+#    con las unidades que SALIERON del almacén en esa misma ventana (ver
+#    `EVENTOS_QUE_SACAN`: no sólo ventas):
+#        caída 111 / salidas  82     caída  76 / salidas  47     caída 227 / salidas 209
+#        caída  95 / salidas 103     caída  73 / salidas  88     caída  58 / salidas  97
+#        caída  91 / salidas 113     y tres saltos en que el disponible SUBIÓ
+#    El disponible puede caer algo más que lo que salió —tránsito que se recoloca, el
+#    corte del día que no cae a la misma hora—, pero **el exceso nunca pasó de +29
+#    unidades**. De ahí el margen: 29 × 2 ≈ **60 unidades por día** de holgura.
+#    ⚠️ NO es un techo: es lo que se le SUMA a las salidas medidas de esos días. Un
+#       día de 47 salidas admite una caída de 107; uno de 174, de 234. El número se
+#       mueve con el día, que es lo que un techo fijo no sabe hacer.
 #
 # ⚠️ EL LEDGER LLEGA TARDE, Y ESO ES LO NORMAL, NO LA EXCEPCIÓN. Medido el 7-sep: el
 #    ledger llega hasta el 6-sep y el informe FBA que hay que cargar es del 7. Para los
 #    días que el ledger todavía no cubre se usa el **pico diario de los últimos 60
-#    días** (155 uds el 6-sep-2026), también MEDIDO en cada carga: es lo más que se ha
-#    vendido nunca en un día, así que no puede abortar por un día bueno. Con eso, el
-#    caso del 7-sep sigue saltando: techo 155 + 60 = 215 contra una caída de 239.
+#    días** (174 uds el 6-sep-2026), también MEDIDO en cada carga: es lo más que ha
+#    salido nunca en un día, así que no puede abortar por un día bueno.
+#    ⚠️ CON ESO EL CASO DEL 7-sep SALTA, PERO POR POCO: techo 174 + 60 = 234 contra una
+#       caída de 239. Cinco unidades. Y sólo en el caso peor —ledger sin cargar ese día
+#       Y puente que no recupera nada—; si el ledger llega al día 7, el techo baja a
+#       unas 170 y la distancia es cómoda. Que conste el margen real, no el que
+#       gustaría: quien cambie estos números tiene que saber por dónde pasa la raya.
 #
 # 🔴 Y SI NO HAY LEDGER NINGUNO, no se aborta: se GRITA que el balance no se ha
 #    podido comprobar. Un ledger vacío daría ventas 0, y con ventas 0 esta guarda
@@ -1163,7 +1168,7 @@ def avisar_censo(cabecera_nueva, cabecera_anterior, escribir=print):
 # 🔴 LA PUERTA TIENE NOMBRE: PERMITIR_SALTO=1, mismo patrón que
 #    PERMITIR_UMBRAL_BAJO. Lo que no se hace es subir el margen hasta que deje de
 #    molestar.
-MARGEN_CAIDA_DIA = 60    # el peor exceso medido de la caída sobre las ventas fue +30 × 2
+MARGEN_CAIDA_DIA = 60    # el peor exceso medido de la caída sobre las SALIDAS fue +29 × 2
 CAIDA_MAX_FICHAS = 0.15  # medido: el peor día perdió un 0,5% de las fichas
 DIAS_VENTANA_PICO = 60   # la ventana sobre la que se mide el pico diario de ventas
 
@@ -1195,18 +1200,55 @@ def disponible_total(filas):
 SQL_DISPONIBLE = "coalesce(available + fc_transfer, disponible_estimado, available)"
 
 TABLA_LEDGER = 'ledger_movimientos'
-EVENTO_VENTA = 'Shipments'
+
+# ---------------------------------------------------------------------------
+# QUÉ CUENTA COMO «SALIDA», Y POR QUÉ CADA UNA. Medido el 7-sep-2026, 60 días.
+# ---------------------------------------------------------------------------
+# 🔴 NO SON «LAS VENTAS», Y LLAMARLO ASÍ ERA EL ERROR. Lo que tiene que caber en la
+#    caída del disponible es TODO lo que saca unidades del almacén europeo, no sólo
+#    lo que se vende. Por eso la lista tiene cuatro nombres y no uno:
+#      · Shipments     — la venta. Mayor día 155, y 5.365 uds en los 60.
+#      · Adjustments   — mermas y correcciones de Amazon. Mayor día 23 en negativo.
+#      · VendorReturns — devoluciones al proveedor. Mayor día 11.
+#      · Receipts      — normalmente ENTRAN (5.310 uds), pero hay días en negativo:
+#                        mayor día 7. Sólo cuentan los negativos, como en las otras.
+#    🔒 Se cuentan SÓLO las cantidades NEGATIVAS. Un `Adjustments` positivo es stock
+#       que aparece, y eso no hay que justificarlo con nada: la guarda es un suelo
+#       por caída, no por subida.
+#
+# 🔴 Y LA QUE SE QUEDA FUERA, que es la que más pesa: `WhseTransfers`. Mayor día
+#    **790 unidades**, y en los 60 días saca 5.662 y mete 5.669 — o sea que se
+#    compensa consigo misma, porque son traslados ENTRE centros de Amazon. No
+#    reducen el stock europeo, y contarlas dispararía el techo justo en los días de
+#    más movimiento interno, que es cuando esta guarda tiene que estar más fina.
+#
+# ⚠️ Y LO QUE PASE MAÑANA: si el ledger trae un `event_type` que no está en ninguna
+#    de las dos listas, se GRITA. No se cuenta ni se descarta por su cuenta — un
+#    evento nuevo que saque stock haría que las salidas midiesen de menos, y una
+#    guarda que mide de menos aborta de más.
+EVENTOS_QUE_SACAN = ('Shipments', 'Adjustments', 'VendorReturns', 'Receipts')
+# Internos: mueven stock de sitio sin sacarlo de Europa.
+EVENTOS_INTERNOS = ('WhseTransfers',)
+# Entran, nunca salen (medido: 0 uds en negativo en 60 días). Se catalogan para que
+# no salgan por el aviso de arriba cada día.
+EVENTOS_QUE_ENTRAN = ('CustomerReturns',)
 
 
-def ventas_del_ledger(cur, desde, hasta):
-    """Las unidades que SALIERON de los almacenes de Amazon entre dos fotos.
+def salidas_del_ledger(cur, desde, hasta):
+    """Lo que SALIÓ de los almacenes de Amazon entre dos fotos. Medido, no supuesto.
 
-    🔑 `ledger_movimientos` con event_type='Shipments' es la SALIDA FÍSICA real, de
-       TODOS los mercados. No se usa `transacciones_movimientos` —que es la otra
-       fuente de ventas— porque sólo tiene ES, IT y FR: lo vendido en Alemania o en
-       Países Bajos no está ahí, y una guarda que mide de menos aborta de más.
-       (Medido el 7-sep-2026 sobre 60 días: ledger media 89,4 y pico 155; transacciones
-       media 90,0 y pico 158 — se parecen, pero el ledger es el que baja el stock.)
+    🔑 POR QUÉ EL LEDGER Y NO `transacciones_movimientos`, que es la otra fuente de
+       ventas — y el motivo NO es el que puse primero. Escribí que transacciones «no
+       tiene Alemania», y es FALSO: medido el 7-sep-2026 sobre los últimos 60 días,
+       trae de, es, fr e it. Las tres razones de verdad son otras:
+         · el ledger es la SALIDA FÍSICA del almacén, que es exactamente lo que baja
+           el stock de esta tabla; transacciones es el pedido en el marketplace;
+         · llega más lejos: hasta el 6-sep cuando transacciones se queda en el 5;
+         · y trae dos países más, `pl` y `sk`, que en transacciones no están.
+       🔬 Las dos fuentes se parecen mucho en el agregado (ledger 89,4 de media y 155
+          de pico contando sólo Shipments; transacciones 90,0 y 158), así que la
+          elección no cambia las cifras: cambia qué se está midiendo.
+
     🔒 Las cantidades llegan NEGATIVAS (una salida), de ahí el abs().
 
     Devuelve el dict que lee la Guarda 10, o None si no hay ledger que leer.
@@ -1225,8 +1267,9 @@ def ventas_del_ledger(cur, desde, hasta):
 
     cur.execute(
         "SELECT coalesce(sum(abs(quantity)), 0) FROM %s "
-        "WHERE event_type = %%s AND fecha > %%s AND fecha <= %%s;" % TABLA_LEDGER,
-        (EVENTO_VENTA, desde, hasta_util))
+        "WHERE quantity < 0 AND event_type = ANY(%%s) "
+        "  AND fecha > %%s AND fecha <= %%s;" % TABLA_LEDGER,
+        (list(EVENTOS_QUE_SACAN), desde, hasta_util))
     uds = int(cur.fetchone()[0] or 0)
 
     # El pico diario de la ventana, MEDIDO en cada carga: es lo que cubre los días que
@@ -1235,22 +1278,32 @@ def ventas_del_ledger(cur, desde, hasta):
     cur.execute(
         "SELECT coalesce(max(uds), 0) FROM ("
         "  SELECT fecha, sum(abs(quantity)) AS uds FROM %s"
-        "   WHERE event_type = %%s AND fecha > %%s - %%s GROUP BY fecha) t;" % TABLA_LEDGER,
-        (EVENTO_VENTA, hasta_ledger, DIAS_VENTANA_PICO))
+        "   WHERE quantity < 0 AND event_type = ANY(%%s) AND fecha > %%s - %%s"
+        "   GROUP BY fecha) t;" % TABLA_LEDGER,
+        (list(EVENTOS_QUE_SACAN), hasta_ledger, DIAS_VENTANA_PICO))
     pico = int(cur.fetchone()[0] or 0)
+
+    # ⚠️ Un `event_type` que nadie ha catalogado. No se cuenta ni se descarta solo.
+    cur.execute(
+        "SELECT DISTINCT event_type FROM %s "
+        " WHERE fecha > %%s - %%s AND NOT (event_type = ANY(%%s));" % TABLA_LEDGER,
+        (hasta_ledger, DIAS_VENTANA_PICO,
+         list(EVENTOS_QUE_SACAN + EVENTOS_INTERNOS + EVENTOS_QUE_ENTRAN)))
+    sin_catalogar = sorted(r[0] for r in cur.fetchall() if r[0])
 
     return {'uds': uds, 'dias': dias, 'dias_cubiertos': dias_cubiertos,
             'dias_sin_datos': max(dias - dias_cubiertos, 0),
-            'hasta_ledger': hasta_ledger, 'pico_dia': pico}
+            'hasta_ledger': hasta_ledger, 'pico_dia': pico,
+            'sin_catalogar': sin_catalogar}
 
 
 def guarda_continuidad(fecha_ant, fecha_nueva, disponible_ant, disponible_nuevo,
-                       fichas_ant, fichas_nuevas, ventas=None,
+                       fichas_ant, fichas_nuevas, salidas=None,
                        permitir_salto=None, escribir=print):
     """Compara la foto que entra con la que ya está. Aborta si la resta no cuadra.
 
     🔒 Función PURA a propósito: entra lo que dice la base y lo que dice el fichero,
-       sale un Aborta o nada. Las ventas llegan YA MEDIDAS (`ventas_del_ledger`), que
+       sale un Aborta o nada. Las salidas llegan YA MEDIDAS (`salidas_del_ledger`),
        es lo único que toca la base. Así se prueba sin base y sin red, con números a
        mano (`test_inventario_fba.py`).
 
@@ -1275,45 +1328,46 @@ def guarda_continuidad(fecha_ant, fecha_nueva, disponible_ant, disponible_nuevo,
     motivos = []
     caida = (disponible_ant or 0) - (disponible_nuevo or 0)
 
-    if ventas is None:
+    if salidas is None:
         escribir("")
         escribir("⚠️  [Guarda 10] EL BALANCE DEL DIA NO SE HA PODIDO COMPROBAR: no hay "
-                 "ventas que leer en %s." % TABLA_LEDGER)
+                 "salidas que leer en %s." % TABLA_LEDGER)
         escribir("     El disponible pasa de %s a %s (%+d) entre el %s y el %s, y esta "
                  "carga NO lleva esa cifra contrastada contra nada."
                  % (disponible_ant, disponible_nuevo, -caida, fecha_ant, fecha_nueva))
-        escribir("     Con el ledger vacio, las ventas medidas serian 0 y esta guarda "
+        escribir("     Con el ledger vacio, las salidas medidas serian 0 y esta guarda "
                  "abortaria TODOS los dias por una causa que no tiene que ver con el "
                  "informe de inventario. Por eso avisa en vez de parar. MIRALO.")
         escribir("")
     else:
-        techo = (ventas['uds'] + ventas['pico_dia'] * ventas['dias_sin_datos']
+        techo = (salidas['uds'] + salidas['pico_dia'] * salidas['dias_sin_datos']
                  + MARGEN_CAIDA_DIA * dias)
         if caida > techo:
             coletilla = ""
-            if ventas['dias_sin_datos']:
+            if salidas['dias_sin_datos']:
                 coletilla = (
                     "\n   Ojo: el ledger solo llega hasta el %s, asi que %d de esos %d "
-                    "dia(s) no tienen ventas cargadas y se han contado al pico diario de "
-                    "los ultimos %d dias (%d uds/dia), que es lo mas que se ha vendido "
+                    "dia(s) no tienen salidas cargadas y se han contado al pico diario "
+                    "de los ultimos %d dias (%d uds/dia), que es lo mas que ha salido "
                     "nunca en un dia."
-                    % (ventas['hasta_ledger'], ventas['dias_sin_datos'], dias,
-                       DIAS_VENTANA_PICO, ventas['pico_dia']))
+                    % (salidas['hasta_ledger'], salidas['dias_sin_datos'], dias,
+                       DIAS_VENTANA_PICO, salidas['pico_dia']))
             motivos.append(
                 "El disponible ha caido %d unidades entre el %s y el %s, y en esos "
-                "%d dia(s) se vendieron %d.%s\n"
-                "   El maximo que puede caer son %d: lo vendido mas %d uds/dia de "
+                "%d dia(s) salieron %d del almacen (ventas, mermas, devoluciones al "
+                "proveedor y recepciones en negativo).%s\n"
+                "   El maximo que puede caer son %d: lo que salio mas %d uds/dia de "
                 "margen. Ese margen esta medido — en los 10 saltos del historico "
-                "(23-ago a 6-sep-2026) la caida del disponible nunca paso de las ventas "
-                "en mas de 30 unidades.\n"
+                "(23-ago a 6-sep-2026) la caida del disponible nunca paso de las "
+                "salidas en mas de 29 unidades.\n"
                 "   Para que esto fuera movimiento real habrian tenido que salir %d "
                 "unidades del almacen. No pasa.\n"
                 "   Lo que si pasa, y ya paso el 7-sep-2026, es que Amazon sirva un "
                 "informe que cuadra consigo mismo pero deja unidades fuera: ese dia el "
-                "disponible habria caido 239 (6.692 -> 6.453) sin que se vendiera nada "
+                "disponible habria caido 239 (6.692 -> 6.453) sin que saliera nada "
                 "parecido."
                 % (caida, fecha_ant, fecha_nueva, dias,
-                   ventas['uds'] + ventas['pico_dia'] * ventas['dias_sin_datos'],
+                   salidas['uds'] + salidas['pico_dia'] * salidas['dias_sin_datos'],
                    coletilla, techo, MARGEN_CAIDA_DIA, caida))
 
     if fichas_nuevas < fichas_ant * (1 - CAIDA_MAX_FICHAS):
@@ -1491,14 +1545,42 @@ def objetos_que_leen_nulo_como_cero(cur, objetos=None):
     return culpables, ausentes
 
 
-def guarda_transito_desconocido(fc_origen, culpables):
-    """Con `fc_transfer` a NULO y consumidores que lo leen como 0, no se escribe.
+def guarda_transito_desconocido(fc_origen, culpables, abre_fernando=None):
+    """Con `fc_transfer` a NULO, dos llaves: la medición y Fernando.
+
+    🔴 LA DOBLE LLAVE, y el reparto entre las dos NO es simétrico (decisión de
+       Fernando, 7-sep-2026): **la medición puede mantener CERRADO, pero no puede
+       ABRIR**. Que ningún consumidor haga ya `COALESCE(fc_transfer, 0)` es condición
+       necesaria y no suficiente: dice que el camino está despejado, no que sea hoy el
+       día de soltar por él una foto sin tránsito. Lo segundo lo decide una persona.
+       🔑 Por qué así: la medición mira UNA expresión en CUATRO objetos. Si mañana el
+          nulo se leyera como cero en un sitio que esa expresión no ve —otro objeto,
+          la app, un informe—, la medición diría «limpio» y la carga se abriría sola.
+          Una guarda que puede equivocarse por el lado de ABRIR no debe poder abrir.
 
     🔒 Función PURA: los culpables llegan YA MEDIDOS
        (`objetos_que_leen_nulo_como_cero`), que es lo único que toca la base.
     """
-    if fc_origen != ORIGEN_DESCONOCIDO or not culpables:
+    if abre_fernando is None:
+        abre_fernando = os.environ.get('ABRIR_TRANSITO_DESCONOCIDO') == '1'
+    if fc_origen != ORIGEN_DESCONOCIDO:
         return
+    if not culpables and abre_fernando:
+        return
+    if not culpables:
+        raise Aborta(
+            "[Guarda 12] Este informe no trae el transito entre centros, y la medicion "
+            "dice que se PODRIA abrir: ninguno de los %d consumidores hace ya "
+            "COALESCE(fc_transfer, 0) en esta base.\n"
+            "   Pero abrir no lo decide la medicion, lo decide Fernando. La medicion "
+            "solo puede mantener CERRADO.\n"
+            "   COMO SE ABRE: ABRIR_TRANSITO_DESCONOCIDO=1 (en el .yml, «abrir transito "
+            "desconocido = si»), y con Fernando delante.\n"
+            "   Por que la segunda llave: esa expresion mira CUATRO objetos. Si el nulo "
+            "se leyera como cero en un sitio que no mira —otro objeto, la app, un "
+            "informe—, la medicion diria «limpio» y la carga se abriria sola con el "
+            "disponible ~250 uds corto."
+            % len(CONSUMIDORES_DEL_TRANSITO))
     raise Aborta(
         "[Guarda 12] Este informe no trae el transito entre centros, asi que "
         "`fc_transfer` quedaria a NULO en todas las filas — que es lo correcto: no "
@@ -2105,31 +2187,41 @@ def main():
     #    disponible de HOY — y el disponible de hoy no existe hasta que el puente ha
     #    pasado. Antes de escribir nada, que es lo que importa.
     disponible_nuevo = disponible_total(filas)
-    ventas = None
+    salidas = None
     if fecha_ant is not None and fecha_ant != info['fecha_foto']:
-        ventas = ventas_del_ledger(cur, fecha_ant, info['fecha_foto'])
-        if ventas is not None:
+        salidas = salidas_del_ledger(cur, fecha_ant, info['fecha_foto'])
+        if salidas is not None:
             print(f"\n--- EL BALANCE DEL DIA (Guarda 10) ---")
-            print(f"   · disponible                 : {disponible_ant} → "
+            print(f"   · disponible                  : {disponible_ant} → "
                   f"{disponible_nuevo}  ({disponible_nuevo - disponible_ant:+d} entre "
                   f"el {fecha_ant} y el {info['fecha_foto']})")
-            print(f"   · vendido en esos {ventas['dias']} dia(s) : {ventas['uds']} uds "
-                  f"(ledger, salidas fisicas, hasta el {ventas['hasta_ledger']})")
-            if ventas['dias_sin_datos']:
-                print(f"   · dias sin ventas cargadas  : {ventas['dias_sin_datos']} — "
+            print(f"   · salio del almacen en {salidas['dias']} dia(s): {salidas['uds']} "
+                  f"uds (ledger, hasta el {salidas['hasta_ledger']}; ventas, mermas, "
+                  f"devoluciones al proveedor y recepciones en negativo)")
+            if salidas['dias_sin_datos']:
+                print(f"   · dias sin salidas cargadas   : {salidas['dias_sin_datos']} — "
                       f"se cuentan al pico diario de los ultimos {DIAS_VENTANA_PICO} "
-                      f"dias ({ventas['pico_dia']} uds/dia)")
-            print(f"   · el almacen, de contexto     : {almacen_ant} → "
+                      f"dias ({salidas['pico_dia']} uds/dia)")
+            print(f"   · el almacen, de contexto      : {almacen_ant} → "
                   f"{info['almacen_total']}  (⚠️ no es comparable entre versiones "
                   f"distintas del informe: el 7-sep-2026 dejo de incluir el transito)")
-            print(f"   · caida maxima admitida      : "
-                  f"{ventas['uds'] + ventas['pico_dia'] * ventas['dias_sin_datos'] + MARGEN_CAIDA_DIA * ventas['dias']} "
-                  f"uds (lo vendido + {MARGEN_CAIDA_DIA} uds/dia de margen medido)",
+            print(f"   · caida maxima admitida       : "
+                  f"{salidas['uds'] + salidas['pico_dia'] * salidas['dias_sin_datos'] + MARGEN_CAIDA_DIA * salidas['dias']} "
+                  f"uds (lo que salio + {MARGEN_CAIDA_DIA} uds/dia de margen medido)",
                   flush=True)
+            # ⚠️ Un event_type que nadie ha catalogado: ni cuenta como salida ni se
+            #    descarta. Si saca stock, las salidas miden de menos y la guarda
+            #    abortaria de mas — y nadie sabria por que.
+            if salidas['sin_catalogar']:
+                print(f"   🔴 el ledger trae {len(salidas['sin_catalogar'])} tipo(s) de "
+                      f"movimiento que este procesador no conoce: "
+                      f"{', '.join(salidas['sin_catalogar'])}", flush=True)
+                print(f"      No se cuentan ni se descartan solos. Miralos y ponlos en "
+                      f"EVENTOS_QUE_SACAN o en EVENTOS_INTERNOS.", flush=True)
     try:
         guarda_continuidad(fecha_ant, info['fecha_foto'],
                            disponible_ant, disponible_nuevo,
-                           fichas_ant, len(filas), ventas=ventas)
+                           fichas_ant, len(filas), salidas=salidas)
     except Aborta as e:
         morir(e)
 

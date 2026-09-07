@@ -88,6 +88,19 @@ on:
         type: choice
         options: ['no', 'si']
         default: 'no'
+      # 🔴 LA SEGUNDA LLAVE DEL CERROJO (Guarda 12), Y NO ES UNA VALVULA COMO LAS
+      #    OTRAS. Las de arriba SALTAN una guarda; esta no salta nada: es la mitad
+      #    humana de una decision que tiene dos mitades. El procesador mide si algun
+      #    consumidor sigue leyendo el nulo como cero — y esa medicion puede mantener
+      #    CERRADO, pero **no puede abrir**. Abrir lo activa Fernando, aqui.
+      #    🔑 Por que: la medicion mira UNA expresion en CUATRO objetos. Si el nulo se
+      #       leyera como cero en un sitio que no mira, diria «limpio» y la carga se
+      #       abriria sola con el disponible ~250 uds corto.
+      abrir_transito_desconocido:
+        description: 'Dejar entrar una foto SIN el transito entre centros (Guarda 12). Solo con Fernando delante y las vistas ya arregladas.'
+        type: choice
+        options: ['no', 'si']
+        default: 'no'
 
 # ⚠️ Las opciones y los defaults van ENTRECOMILLADOS: en YAML un `no` suelto es el
 #    BOOLEANO false, no la cadena "no" (el problema de Noruega: NO = Norway). Medido
@@ -136,4 +149,5 @@ jobs:
           EXIGIR_INBOUND: ${{ inputs.exigir_inbound == 'si' && '1' || '0' }}
           PERMITIR_SALTO: ${{ inputs.permitir_salto == 'si' && '1' || '0' }}
           PERMITIR_MODELO_NUEVO: ${{ inputs.permitir_modelo_nuevo == 'si' && '1' || '0' }}
+          ABRIR_TRANSITO_DESCONOCIDO: ${{ inputs.abrir_transito_desconocido == 'si' && '1' || '0' }}
         run: python -u procesador_inventario_fba.py

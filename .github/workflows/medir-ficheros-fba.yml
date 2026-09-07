@@ -1,0 +1,59 @@
+# MEDIDOR · qué hay en el buzón de inventario_fba, fichero a fichero. SOLO LECTURA.
+#
+# 🔴 POR QUÉ UN WORKFLOW Y NO UNA CONSULTA. Los ficheros están en el buzón de Storage,
+#    que es privado: la base guarda metadatos (`storage.objects`) y el `crudo` de la
+#    carga que sí entró, pero no el .txt. Para contar columnas y filas de un fichero que
+#    NO se ha cargado hace falta bajarlo, y para bajarlo hace falta la clave de servicio.
+#
+# 🔴 EL CASO QUE LO TRAE, del 7-sep-2026: en el buzón hay CUATRO .txt subidos ese día. La
+#    `fecha_foto` de este informe es la de SUBIDA, así que los cuatro entrarían como la
+#    foto del 7 y sólo uno puede serlo. Antes de decidir cuál, hay que verlos.
+#
+# 🔒 NO ESCRIBE NADA y NO TOCA NINGUNA BASE: no lleva `DB_URL` ni `ENTORNO`. Sólo la
+#    clave de lectura del Storage. Se puede lanzar con la carga cerrada y con Elena
+#    trabajando.
+name: Moloka - MEDIR los ficheros del buzon de inventario_fba
+
+on:
+  workflow_dispatch:
+    inputs:
+      # ⚠️ Entrecomillado: en YAML un `no` suelto es el BOOLEANO false (el problema de
+      #    Noruega). Aquí no hay opciones, pero el default vacío se escribe igual.
+      solo_dia:
+        description: 'Mirar solo los .txt subidos ese dia (AAAA-MM-DD). Vacio = todos.'
+        type: string
+        required: false
+        default: ''
+
+concurrency:
+  group: medir-ficheros-fba
+  cancel-in-progress: false
+
+jobs:
+  medir:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 🔴 psycopg2 hace falta aunque esto no toque ninguna base: el medidor importa
+      #    `foto_comun` (para listar y bajar del buzón) y `procesador_inventario_fba`
+      #    (para leer el TSV con las guardas de verdad), y ésos sí lo importan arriba
+      #    del todo. Es la misma piedra con la que tropezó `medir-quote-none.yml`.
+      - name: Instalar dependencias
+        run: pip install --quiet supabase psycopg2-binary
+
+      # 🔒 Las guardas que este medidor reutiliza, vistas rojas y vistas calladas. Si el
+      #    banco no pasa, lo que midiese esto no valdría nada.
+      - name: Mesa de pruebas de las guardas de inventario_fba
+        run: python -u test_inventario_fba.py
+
+      - name: Medir el buzon
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SOLO_DIA: ${{ inputs.solo_dia }}
+        run: python -u medir_ficheros_fba.py
