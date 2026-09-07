@@ -433,13 +433,59 @@ eq('(14) el recorte del CREATE TABLE trae columnas (si no, no comprueba nada)',
 #    describe el conjunto de las migraciones, no solo la que la creo. Sin esto,
 #    anadir una columna dejaria este cotejo en rojo para siempre o —peor— invitaria
 #    a reescribir una migracion ya aplicada.
-MIG_NUEVA = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'migraciones',
-                         '2026-09-07_inventario_fba_esperadas_y_censo.sql')
-with open(MIG_NUEVA, encoding='utf-8') as fh:
-    sql_nueva = sin_comentarios(fh.read())
-anadidas = set(re.findall(r'ADD COLUMN IF NOT EXISTS\s+(\w+)', sql_nueva))
-eq('(14) la migracion nueva anade columnas (si no, no comprueba nada)',
+# 🔴 SE LEEN **TODAS** las migraciones, no una nombrada a mano. Con el nombre
+#    escrito aqui, cada migracion nueva dejaba este cotejo en rojo hasta que
+#    alguien se acordase de anadirla — y la tentacion entonces es tocar el test en
+#    vez del codigo. Leyendolas todas, el cotejo se mantiene solo.
+# ⚠️ Y cada `ADD COLUMN` se atribuye a SU tabla: buscar el nombre de la columna en
+#    todo el .sql daria por buena una columna anadida a OTRA tabla cualquiera.
+def columnas_anadidas(por_tabla=None):
+    """{tabla: {columnas}} de todos los ALTER TABLE ... ADD COLUMN de migraciones/."""
+    carpeta = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'migraciones')
+    salida = {}
+    for nombre in sorted(os.listdir(carpeta)):
+        if not nombre.endswith('.sql') or nombre.startswith('_PRUEBA'):
+            continue
+        with open(os.path.join(carpeta, nombre), encoding='utf-8') as fh:
+            limpio = sin_comentarios(fh.read())
+        for trozo in limpio.split('ALTER TABLE')[1:]:
+            cuerpo = trozo.split(';')[0]
+            m = re.match(r'\s+(?:ONLY\s+)?(?:public\.)?(\w+)', cuerpo)
+            if not m:
+                continue
+            # 🔴 Las columnas GENERADAS se quedan FUERA, y no es un detalle: las
+            #    calcula Postgres al escribir, asi que el procesador NO PUEDE
+            #    ponerlas en su INSERT — un `GENERATED ALWAYS` en la lista de
+            #    columnas es un error de SQL en cada carga. `inventario_fba.asin_k`
+            #    es una de ellas (migracion del 25-ago, para que el cruce por ASIN
+            #    baje al indice con la RLS puesta).
+            cols = set()
+            for frag in re.split(r'ADD COLUMN\s+', cuerpo)[1:]:
+                m2 = re.match(r'(?:IF NOT EXISTS\s+)?(\w+)', frag)
+                if not m2:
+                    continue
+                trozo = frag.split(',')[0] if 'GENERATED' not in frag.split(',')[0].upper() else frag
+                if 'GENERATED' in trozo.upper():
+                    continue
+                cols.add(m2.group(1))
+            if cols:
+                salida.setdefault(m.group(1), set()).update(cols)
+    return salida
+
+
+ALTERADAS = columnas_anadidas()
+anadidas = ALTERADAS.get('inventario_fba', set())
+eq('(14) las migraciones anaden columnas a inventario_fba (si no, no comprueba nada)',
    len(anadidas) > 0, True)
+# 🔒 Y la pareja que impide que el recorte por tabla sea decorativo: lo que se
+#    anadio al HISTORICO no puede colarse como si fuera de la foto.
+eq('(14) … y el recorte separa las dos tablas',
+   'inventario_fba_historico' in ALTERADAS, True)
+# 🔴 Y el aserto que impide el error de SQL en cada carga: la columna GENERADA no
+#    esta entre las que el procesador escribe. Postgres la calcula el solo.
+eq('(14) el procesador NO escribe la columna generada asin_k',
+   'asin_k' in {c for _, c, _ in TIPADAS} | set(DERIVADAS_COLS), False)
+eq('(14) … y el recorte tampoco la cuenta como suya', 'asin_k' in anadidas, False)
 cols_sql |= anadidas
 cols_py = {c for _, c, _ in TIPADAS} | {'fichero', 'fecha_foto', 'crudo', 'procesado_at'}
 cols_py |= set(DERIVADAS_COLS)
@@ -492,7 +538,7 @@ for linea in cuerpo_h.split('\n'):
     if linea and not linea.lower().startswith('primary key'):
         cols_h.add(linea.split()[0].strip(','))
 eq('(15) el recorte del CREATE TABLE trae columnas', len(cols_h) > 0, True)
-cols_h |= anadidas
+cols_h |= ALTERADAS.get('inventario_fba_historico', set())
 py_h = set(HIST_COLS) | {'capturado_en'}
 eq('(15) las que el procesador escribe y la tabla no tiene', sorted(py_h - cols_h), [])
 eq('(15) las que la tabla tiene y el procesador no escribe', sorted(cols_h - py_h), [])
@@ -792,6 +838,94 @@ eq('(23) cuando cuadra, no dice nada', sano['onhand_discrepa'], [])
 #    como 0 daria una discrepancia falsa en cada fila.
 eq('(23) con el transito desconocido no se inventa discrepancia',
    degradado['onhand_discrepa'], [])
+
+
+print('\n== 24) EL PUENTE: el disponible estimado ==')
+from procesador_inventario_fba import (  # noqa: E402
+    estimar_disponible, _reparto, ORIGEN_LEIDO, ORIGEN_ESTIMADO)
+
+D6 = datetime.date(2026, 9, 6)
+
+
+def reg(sku, asin, available, fc=None, ent=0):
+    """Una fila ya analizada, tal como se la pasa `main()` al puente."""
+    return {'registro': {'sku': sku, 'asin': asin, 'available': available,
+                         'fc_transfer': fc, 'inbound_working': 0,
+                         'inbound_shipped': ent, 'inbound_receiving': 0}}
+
+
+# 🔬 EL CASO QUE MOTIVA TODO, con las cifras reales de B0D6CXB8J1 el 7-sep-2026:
+#    el informe dice vendible 0 y no trae transito; el internacional dice 12; la
+#    pantalla del Seller enseña «Disponible (FBA) 12».
+f = [reg('S1', 'B0D6CXB8J1', 0)]
+r = estimar_disponible(f, {'B0D6CXB8J1': (12, D6)}, escribir=lambda *a: None)
+eq('(24) sin transito y con internacional: estima', f[0]['registro']['disponible_estimado'], 12)
+eq('(24) … y lo marca como estimado', f[0]['registro']['disponible_origen'], ORIGEN_ESTIMADO)
+eq('(24) … y deja dicho de que dia era la fuente',
+   f[0]['registro']['disponible_fuente_fecha'], D6)
+
+# 🔴 LOS ENTRANTES SE RESTAN. Sin esa resta se contaria dos veces lo que va de
+#    camino, que es el error mas caro que puede tener esta formula.
+f = [reg('S1', 'A1', 4, ent=10)]
+estimar_disponible(f, {'A1': (16, D6)}, escribir=lambda *a: None)
+eq('(24) los entrantes se restan (16 - 10 entrantes - 4 vendible = 2 encima)',
+   f[0]['registro']['disponible_estimado'], 6)
+
+# 🔑 EL VENDIBLE ES EL SUELO: un internacional atrasado NO puede bajar el dato.
+f = [reg('S1', 'A1', 40)]
+estimar_disponible(f, {'A1': (5, D6)}, escribir=lambda *a: None)
+eq('(24) el internacional atrasado no baja el vendible',
+   f[0]['registro']['disponible_estimado'], 40)
+
+# 🔴 SIN INTERNACIONAL NO SE INVENTA: NULO y «desconocido», jamas un 0 ni el
+#    vendible disfrazado de estimacion.
+f = [reg('S1', 'A1', 7)]
+estimar_disponible(f, {}, escribir=lambda *a: None)
+eq('(24) sin fila en el internacional: NULO', f[0]['registro']['disponible_estimado'], None)
+eq('(24) … y dicho en el dato', f[0]['registro']['disponible_origen'], 'desconocido')
+
+# 🔑 CON EL TRANSITO LEIDO manda el dato leido, pero la estimacion se guarda al
+#    lado: es el falsador permanente del puente.
+f = [reg('S1', 'A1', 10, fc=5)]
+r = estimar_disponible(f, {'A1': (15, D6)}, escribir=lambda *a: None)
+eq('(24) con transito leido, el origen es «leido»',
+   f[0]['registro']['disponible_origen'], ORIGEN_LEIDO)
+eq('(24) … y la estimacion se guarda igual, para poder contrastarla',
+   f[0]['registro']['disponible_estimado'], 15)
+eq('(24) … y cuando coincide con la verdad no se grita', r['discrepa'], [])
+f = [reg('S1', 'A1', 10, fc=5)]
+r = estimar_disponible(f, {'A1': (99, D6)}, escribir=lambda *a: None)
+eq('(24) … y cuando NO coincide, se anota con las dos cifras',
+   r['discrepa'], [('S1', 99, 15)])
+
+# 🔬 EL REPARTO entre SKU de un mismo ASIN, en proporcion al vendible. Medido: 13
+#    casos commingled en 11 dias y NINGUNO con excedente, asi que hoy esto no
+#    mueve un dato — que es el mejor momento para escribirlo bien.
+f = [reg('S1', 'A1', 30), reg('S2', 'A1', 10)]
+estimar_disponible(f, {'A1': (60, D6)}, escribir=lambda *a: None)
+eq('(24) el excedente se reparte en proporcion al vendible',
+   [x['registro']['disponible_estimado'] for x in f], [45, 15])
+# 🔴 Y NO SE PIERDE NI SE INVENTA UNA UNIDAD: es la razon de los restos mayores.
+f = [reg('S1', 'A1', 1), reg('S2', 'A1', 1), reg('S3', 'A1', 1)]
+estimar_disponible(f, {'A1': (4, D6)}, escribir=lambda *a: None)
+eq('(24) el reparto conserva el total (1 ud entre 3 fichas iguales)',
+   sum(x['registro']['disponible_estimado'] for x in f), 4)
+
+# 🔴 VARIOS SKU Y NINGUNO CON VENDIBLE: no hay proporcion, y NO se parte a ojo.
+f = [reg('S1', 'A1', 0), reg('S2', 'A1', 0)]
+avisos = []
+r = estimar_disponible(f, {'A1': (8, D6)}, escribir=avisos.append)
+eq('(24) sin proporcion con la que repartir: NULO en las dos',
+   [x['registro']['disponible_estimado'] for x in f], [None, None])
+eq('(24) … marcadas como desconocido',
+   [x['registro']['disponible_origen'] for x in f], ['desconocido', 'desconocido'])
+eq('(24) … y se GRITA con el ASIN y las unidades', r['sin_reparto'], [('A1', 2, 8)])
+eq('(24) … en el log, no solo en el resumen', any('A1' in a for a in avisos), True)
+# La pareja: con UNA sola ficha sin vendible, si se puede, y se estima.
+f = [reg('S1', 'A1', 0)]
+estimar_disponible(f, {'A1': (8, D6)}, escribir=lambda *a: None)
+eq('(24) una sola ficha sin vendible: todo el excedente es suyo',
+   f[0]['registro']['disponible_estimado'], 8)
 
 
 print('')

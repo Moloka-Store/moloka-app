@@ -280,6 +280,13 @@ HEADER_FC = 'afn-fc-transfer-quantity'
 #    el informe internacional porque inventaba stock (ver ESPERADAS).
 DERIVADAS = [
     ('fc_transfer_origen', 'text'),
+    # ── EL PUENTE: qué se puede comprar cuando el informe no dice el tránsito ──
+    # 🔴 NO SUSTITUYE A NADA Y EL PRECIO NO LO TOCA. `fc_transfer` sigue siendo
+    #    NULO cuando no se sabe, y `available` sigue siendo `available`. Esto es
+    #    una columna MÁS, para la pantalla de reposición y de cobertura.
+    ('disponible_estimado',     'integer'),
+    ('disponible_origen',       'text'),
+    ('disponible_fuente_fecha', 'date'),
 ]
 
 # ---------------------------------------------------------------------------
@@ -332,6 +339,156 @@ def modelo_del_disponible(cabecera):
 DERIVADAS_COLS = [c for c, _ in DERIVADAS]
 ORIGEN_INFORME = 'informe'
 ORIGEN_DESCONOCIDO = 'desconocido'
+
+# ---------------------------------------------------------------------------
+# EL PUENTE — de dónde sale el disponible cuando el informe no trae el tránsito.
+# ---------------------------------------------------------------------------
+# 🔴 PRIMERO, LO QUE **NO** ES. No es una fuente de stock: `inventario_internacional`
+#    NO manda sobre `inventario_fba` (Stock 6 sigue vigente). No sustituye a
+#    `available` ni a `fc_transfer`, que se siguen guardando tal cual y en columnas
+#    separadas (Stock 1-2). Y **el precio no lo toca**: la sesión de precios usa el
+#    disponible LEÍDO, y si no lo hay, la ficha no entra. Esto lo lee la pantalla
+#    de reposición y de cobertura, y nadie más.
+#
+# 🔑 LA FÓRMULA, y por qué tiene esa forma:
+#        disponible_estimado = available + max(0, internacional − entrantes − available)
+#    que es lo mismo que `max(available, internacional − entrantes)` pero escrito
+#    de modo que se vea el suelo: **el vendible nunca se pierde**. El internacional
+#    sólo puede AÑADIR por encima, jamás quitar.
+#    · Se restan los ENTRANTES porque el internacional los cuenta y el vendible no:
+#      sin esa resta se sumaría dos veces la mercancía que va de camino.
+#    · Y se toma el máximo con `available` porque el internacional puede ir
+#      atrasado; el vendible del propio informe es siempre un suelo cierto.
+#
+# 🔬 MEDIDO SOBRE LA VERDAD GUARDADA (11 días, 4.042 filas sku-día del histórico,
+#    donde `fc_transfer` sí venía leído y por tanto hay contra qué medir):
+#        sólo el vendible            → error 3.080 uds, y SIEMPRE corto
+#        este puente                 → error 549 uds
+#      de las 2.530 filas con estimación, CLAVA 2.425 (95,8%);
+#      se pasa en 78 (487 uds, máximo 23 en una ficha) y se queda corto en 27 (62 uds).
+#    ⚠️ Y lo que parecía «inflado» no lo es: son unidades de ALEMANIA que el informe
+#       FBA no reporta (`B08KJTM337`: 84 en el informe, 84+23 en el internacional los
+#       once días), y tránsito que el informe pierde y el internacional sí ve
+#       (`B0D6CXB8J1`, contrastado contra la pantalla del Seller el 7-sep). El puente
+#       CORRIGE; no infla.
+#
+# 🔴 LO QUE NO SE ESTIMA SE DICE, NO SE RELLENA. Sin fila de ese ASIN en el
+#    internacional, `disponible_estimado` queda a NULO y el origen es 'desconocido'.
+#    Nunca un 0 por defecto (Stock 8). Y está medido que eso cuesta poco: de las
+#    1.512 filas que caen en 'desconocido', **sólo 3 tienen stock**. El puente falta
+#    justo donde no hace falta.
+#
+# 🔒 SE ESTIMA SIEMPRE QUE SE PUEDE, TAMBIÉN LOS DÍAS EN QUE EL TRÁNSITO SÍ VIENE,
+#    y esto es una decisión mía que conviene ver: así el estimado y la verdad
+#    conviven en la misma fila y el error del puente se puede medir CADA DÍA, en vez
+#    de descubrirlo el día que haga falta. `disponible_origen` dice cuál manda.
+ORIGEN_LEIDO = 'leido'          # el informe trajo el tránsito: available + fc_transfer
+ORIGEN_ESTIMADO = 'estimado'    # no lo trajo, y el internacional permite estimarlo
+
+
+def _reparto(excedente, pesos):
+    """Reparte `excedente` entre `pesos` sin perder ni inventar una unidad.
+
+    🔴 Restos mayores, no `round()` a secas: redondear cada parte por su cuenta
+       hace que la suma de las partes NO sea el total (dos fichas con 0,5 dan 1+1=2
+       donde había 1). Aquí lo que se reparte es STOCK: una unidad que aparece o
+       desaparece en el reparto es una unidad que no existe o que se pierde.
+    """
+    total = sum(pesos)
+    if total <= 0:
+        return None
+    brutos = [excedente * p / float(total) for p in pesos]
+    partes = [int(b) for b in brutos]
+    faltan = excedente - sum(partes)
+    # Las que más resto tienen se llevan la unidad suelta, en orden estable.
+    orden = sorted(range(len(pesos)), key=lambda i: (-(brutos[i] - partes[i]), i))
+    for i in orden[:faltan]:
+        partes[i] += 1
+    return partes
+
+
+def estimar_disponible(filas, intl, escribir=print):
+    """Rellena disponible_estimado / _origen / _fuente_fecha. Devuelve el resumen.
+
+    🔒 Función PURA: `intl` es {asin: (unidades, fecha_foto)}, ya leído de la base
+       por quien llame. Así se prueba sin base y sin red.
+
+    🔑 El reparto entre SKU de un mismo ASIN (fichas commingled) va en proporción al
+       vendible de cada uno. Medido en 11 días: 13 casos commingled y NINGUNO con
+       excedente, o sea que hoy este reparto no mueve un solo dato — que es el mejor
+       momento para escribirlo bien. El caso que no se puede repartir (varios SKU y
+       vendible 0 en todos) tampoco ha pasado nunca: se deja en 'desconocido' y se
+       GRITA, jamás se parte a ojo.
+    """
+    por_asin = {}
+    for f in filas:
+        por_asin.setdefault(f['registro']['asin'], []).append(f)
+
+    resumen = {'leido': 0, 'estimado': 0, 'desconocido': 0,
+               'sin_intl': 0, 'sin_reparto': [], 'fuente_mas_vieja': None,
+               'aporta_uds': 0, 'discrepa': []}
+
+    for asin, grupo in por_asin.items():
+        uds_intl, fecha_intl = intl.get(asin, (None, None))
+        av = [r['registro']['available'] for r in grupo]
+        ent = sum(r['registro']['inbound_working'] + r['registro']['inbound_shipped']
+                  + r['registro']['inbound_receiving'] for r in grupo)
+        excedente = None
+        if uds_intl is not None:
+            excedente = max(0, uds_intl - ent - sum(av))
+
+        partes = None
+        if excedente is None:
+            resumen['sin_intl'] += len(grupo)
+        elif excedente == 0:
+            partes = [0] * len(grupo)          # el vendible es el suelo y basta
+        elif sum(av) > 0:
+            partes = _reparto(excedente, av)
+        elif len(grupo) == 1:
+            partes = [excedente]               # una sola ficha: todo suyo
+        else:
+            # 🔴 Varios SKU, ninguno con vendible: no hay proporcion con la que
+            #    repartir. No se parte a ojo — se dice que no se sabe.
+            resumen['sin_reparto'].append((asin, len(grupo), excedente))
+
+        for r, vendible, parte in zip(grupo, av,
+                                      partes if partes is not None else [None] * len(grupo)):
+            reg = r['registro']
+            if parte is None:
+                reg['disponible_estimado'] = None
+                reg['disponible_fuente_fecha'] = None
+            else:
+                reg['disponible_estimado'] = vendible + parte
+                reg['disponible_fuente_fecha'] = fecha_intl
+                resumen['aporta_uds'] += parte
+                if (resumen['fuente_mas_vieja'] is None
+                        or fecha_intl < resumen['fuente_mas_vieja']):
+                    resumen['fuente_mas_vieja'] = fecha_intl
+
+            if reg.get('fc_transfer') is not None:
+                reg['disponible_origen'] = ORIGEN_LEIDO
+                resumen['leido'] += 1
+                # 🔬 El falsador permanente: los días que hay verdad, se compara.
+                cierto = reg['available'] + reg['fc_transfer']
+                if reg['disponible_estimado'] is not None and reg['disponible_estimado'] != cierto:
+                    resumen['discrepa'].append(
+                        (reg['sku'], reg['disponible_estimado'], cierto))
+            elif reg['disponible_estimado'] is not None:
+                reg['disponible_origen'] = ORIGEN_ESTIMADO
+                resumen['estimado'] += 1
+            else:
+                reg['disponible_origen'] = ORIGEN_DESCONOCIDO
+                resumen['desconocido'] += 1
+
+    if resumen['sin_reparto']:
+        escribir("")
+        escribir("[Puente] %d ASIN con varios SKU y ninguno con vendible: no hay "
+                 "proporcion con la que repartir, y NO se parte a ojo. Quedan en "
+                 "«desconocido»:" % len(resumen['sin_reparto']))
+        for asin, n, exc in resumen['sin_reparto'][:10]:
+            escribir("        · %s · %d SKU · %d uds sin repartir" % (asin, n, exc))
+        escribir("     Medido en 11 dias: esto no habia pasado nunca. Miralo.")
+    return resumen
 
 # ---------------------------------------------------------------------------
 # EL HISTÓRICO (cajón PELÍCULA). Mismas columnas tipadas + fecha_foto y fichero.
@@ -1095,6 +1252,35 @@ def cabecera_anterior(cur, fecha_nueva):
     return list(fila[0]) if fila and fila[0] else None
 
 
+TABLA_INTL_HIST = 'inventario_internacional_historico'
+
+
+def internacional_por_asin(cur, fecha_foto, asines):
+    """{asin: (unidades, fecha_foto)} con la lectura MÁS RECIENTE que no sea futura.
+
+    🔑 Del HISTÓRICO, no de la foto viva del internacional, y por dos razones: la
+       foto viva puede ser de otro día que el informe FBA que se está cargando, y
+       —sobre todo— de aquí sale `disponible_fuente_fecha`, que es lo que delata a
+       los tres días que se está tirando de un dato viejo. Una fuente sin su fecha
+       no se puede auditar.
+    🔒 `fecha_foto <= la de esta carga`: jamás se estima un día con datos de un día
+       posterior. Eso daría un número que el día que se escribió no existía.
+    🔴 Se limita a los ASIN de esta carga a propósito: traer el internacional entero
+       serían miles de filas para nada, y el runner está en EEUU y la base en Irlanda.
+    """
+    if not asines:
+        return {}
+    cur.execute(
+        f"""SELECT DISTINCT ON (asin) asin, uds, fecha_foto FROM (
+                SELECT asin, fecha_foto, sum(quantity) AS uds
+                  FROM {TABLA_INTL_HIST}
+                 WHERE fecha_foto <= %s AND asin = ANY(%s)
+                 GROUP BY asin, fecha_foto
+            ) z ORDER BY asin, fecha_foto DESC;""",
+        (fecha_foto, list(asines)))
+    return {a: (int(u), f) for a, u, f in cur.fetchall()}
+
+
 def exigir_columnas(cur, tabla, columnas):
     """La MIGRACIÓN pone las columnas; aquí sólo se comprueba que están.
 
@@ -1112,7 +1298,7 @@ def exigir_columnas(cur, tabla, columnas):
             f"A la tabla {tabla} le faltan columnas que este procesador escribe:\n"
             f"   · " + "\n   · ".join(faltan) + "\n"
             f"   Las pone la MIGRACION, no el procesador. Aplica "
-            f"migraciones/2026-09-07_inventario_fba_esperadas_y_censo.sql y relanza.")
+            f"migraciones/ (las DOS del 7-sep-2026: _esperadas_y_censo.sql y _disponible_estimado.sql) y relanza.")
 
 
 # ---------------------------------------------------------------------------
@@ -1352,6 +1538,41 @@ def main():
         print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
 
+    # ── EL PUENTE: estimar el disponible cuando el informe no trae el transito ──
+    # 🔑 Va ANTES del cerrojo a proposito. Cuando la carga esta cerrada (que es hoy),
+    #    esto no escribe nada, pero el log SI dice que habria estimado — que es la
+    #    unica forma de ver si el puente esta sano el dia que haga falta abrirlo.
+    _asines = sorted({f['registro']['asin'] for f in filas if f['registro']['asin']})
+    intl = internacional_por_asin(cur, info['fecha_foto'], _asines)
+    puente = estimar_disponible(filas, intl)
+    print(f"\n--- EL PUENTE (disponible estimado) ---")
+    print(f"   · el informe trae el transito en    : {puente['leido']} fichas "
+          f"(ahi manda el dato leido, no la estimacion)")
+    print(f"   · estimado desde el internacional en: {puente['estimado']} fichas "
+          f"(+{puente['aporta_uds']} uds sobre el vendible)")
+    print(f"   · en DESCONOCIDO                    : {puente['desconocido']} fichas "
+          f"(sin fila de ese ASIN en el internacional; queda NULO, nunca 0)",
+          flush=True)
+    if puente['fuente_mas_vieja'] is not None:
+        _viejo = (info['fecha_foto'] - puente['fuente_mas_vieja']).days
+        print(f"   · dato del internacional mas viejo  : {puente['fuente_mas_vieja']} "
+              f"({_viejo} dia(s) antes que esta foto)", flush=True)
+        if _viejo >= 3:
+            print("     ⚠️ Tres dias o mas: el internacional tambien se ha parado. Lo "
+                  "que se estima con el ya no es de hoy.", flush=True)
+    # 🔬 El falsador permanente del puente: los dias que el transito SI viene, el
+    #    estimado y la verdad conviven y se comparan. Si esto crece, el puente se
+    #    esta separando de la realidad y hay que enterarse antes de necesitarlo.
+    if puente['discrepa']:
+        _n = len(puente['discrepa'])
+        _uds = sum(abs(e - c) for _, e, c in puente['discrepa'])
+        print(f"   · CONTRASTE contra la verdad        : difiere en {_n} de "
+              f"{puente['leido']} fichas leidas, {_uds} uds en total", flush=True)
+        for _sku, _est, _cierto in sorted(
+                puente['discrepa'], key=lambda t: -abs(t[1] - t[2]))[:10]:
+            print(f"        · {_sku}: estimado {_est}, cierto {_cierto} "
+                  f"({_est - _cierto:+d})", flush=True)
+
     # ── GUARDA 12: el cerrojo. Va la ULTIMA de las tres a proposito, para que el
     #    log ya haya dicho que version es y como va la continuidad antes de parar.
     try:
@@ -1489,7 +1710,7 @@ def main():
         print(f"\n❌ ABORTA (no se ha escrito nada):\n"
               f"RLS no esta activa en {TABLA_CENSO}. La tabla nace CERRADA por "
               f"migracion, no por el procesador. Aplica "
-              f"migraciones/2026-09-07_inventario_fba_esperadas_y_censo.sql y relanza.",
+              f"migraciones/ (las DOS del 7-sep-2026: _esperadas_y_censo.sql y _disponible_estimado.sql) y relanza.",
               flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
     cur.execute(
