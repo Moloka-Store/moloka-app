@@ -92,6 +92,27 @@
 --   ensayo → producción aplicar → verificación por SQL → Fernando abre la pantalla.
 -- ============================================================================
 
+-- ── 0) LA FOTO DEL «ANTES», que es lo que hace verificable la transcripción ──
+-- 🔴 AQUÍ HABÍA CIFRAS DE PRODUCCIÓN A PELO (1.776 filas, huella e33912…) Y ESO
+--    ESTABA MAL. La escalera pasa por STAGING primero, y staging tiene otros datos
+--    —362 fichas contra 381—, así que la vista devuelve ahí 1.708 filas y no 1.776.
+--    El ensayo abortó por esa diferencia de entornos, que no tiene nada que ver con
+--    lo que esta migración hace. Una guarda que salta por una causa distinta de la
+--    que dice medir no es una guarda.
+-- 🔑 La invariante de verdad no es «1.776 filas»: es **«exactamente lo mismo que
+--    antes, sea lo que sea aquí»**. Hoy el tránsito se conoce en todas las fichas,
+--    así que la vista nueva tiene que producir lo mismo que la vieja en CUALQUIER
+--    entorno. Se fotografía antes y se compara después. Y de paso es más fuerte que
+--    el número a pelo: compara las filas ENTERAS, columna a columna.
+CREATE TEMP TABLE _pantalla_antes ON COMMIT DROP AS
+SELECT count(*) AS filas,
+       md5(string_agg(t::text, E'
+' ORDER BY t.asin, t.dominio)) AS huella,
+       sum(t.stock_fba_eu) AS suma_stock_fba_eu,
+       sum(t.stock_fc_transfer) AS suma_fc_transfer,
+       count(*) FILTER (WHERE t.accion = 'COMPROBAR') AS n_comprobar
+  FROM public.v_trackeador_pantalla t;
+
 CREATE OR REPLACE VIEW public.v_trackeador_pantalla AS
  WITH ven_pais AS (
          SELECT COALESCE(p.asin, l.asin) AS asin,
@@ -1366,31 +1387,38 @@ DECLARE
   n int; huella text; opciones text;
 BEGIN
   -- 1 · 🔴 LA COMPROBACIÓN QUE HACE SEGURAS 1.237 LÍNEAS COPIADAS A MANO. Hoy el
-  --     tránsito se conoce en las 381 fichas, así que la vista nueva TIENE que
-  --     producir exactamente lo mismo que la vieja. Si se me escapó un carácter,
-  --     esta huella no cuadra y aquí se para.
-  SELECT count(*), md5(string_agg(t::text, E'\n' ORDER BY t.asin, t.dominio))
+  --     tránsito se conoce en todas las fichas, así que la vista nueva TIENE que
+  --     producir exactamente lo mismo que la vieja. Se compara contra la foto del
+  --     bloque 0, no contra un número escrito aquí (ver el porqué allí).
+  SELECT count(*), md5(string_agg(t::text, E'
+' ORDER BY t.asin, t.dominio))
     INTO n, huella
     FROM public.v_trackeador_pantalla t;
-  IF n <> 1776 THEN
-    RAISE EXCEPTION 'ABORTA: la vista devuelve % filas y antes devolvia 1776.', n;
+  IF n IS DISTINCT FROM (SELECT filas FROM _pantalla_antes) THEN
+    RAISE EXCEPTION 'ABORTA: la vista devuelve % filas y antes devolvia %.',
+                    n, (SELECT filas FROM _pantalla_antes);
   END IF;
-  IF huella <> 'e3391208f81387b4aa9ff704923acb2f' THEN
-    RAISE EXCEPTION 'ABORTA: la huella de las 1776 filas es % y tenia que ser '
-                    'e3391208f81387b4aa9ff704923acb2f. Con el transito leido en '
-                    'todas las fichas, esta migracion NO puede cambiar ni un valor: '
-                    'si cambia, hay un error de transcripcion.', huella;
+  IF huella IS DISTINCT FROM (SELECT p.huella FROM _pantalla_antes p) THEN
+    RAISE EXCEPTION 'ABORTA: la huella de las % filas ha cambiado. Con el transito '
+                    'leido en todas las fichas esta migracion NO puede mover ni un '
+                    'valor: si lo mueve, hay un error de transcripcion.', n;
   END IF;
 
-  -- 2 · Las dos sumas, por si la huella cambiara por un motivo tonto (un orden):
-  --     estas dicen si lo que se ha movido es el stock.
-  SELECT sum(stock_fba_eu) INTO n FROM public.v_trackeador_pantalla;
-  IF n <> 26768 THEN
-    RAISE EXCEPTION 'ABORTA: suma de stock_fba_eu = % y tenia que ser 26768.', n;
+  -- 2 · Las tres cifras que dicen QUE es lo que se habria movido, por si la huella
+  --     cambiara por un motivo tonto. La de COMPROBAR es la que avisaria de que el
+  --     nulo se ha colado en las decisiones.
+  IF (SELECT sum(t.stock_fba_eu) FROM public.v_trackeador_pantalla t)
+     IS DISTINCT FROM (SELECT suma_stock_fba_eu FROM _pantalla_antes) THEN
+    RAISE EXCEPTION 'ABORTA: la suma de stock_fba_eu ha cambiado.';
   END IF;
-  SELECT sum(stock_fc_transfer) INTO n FROM public.v_trackeador_pantalla;
-  IF n <> 1020 THEN
-    RAISE EXCEPTION 'ABORTA: suma de stock_fc_transfer = % y tenia que ser 1020.', n;
+  IF (SELECT sum(t.stock_fc_transfer) FROM public.v_trackeador_pantalla t)
+     IS DISTINCT FROM (SELECT suma_fc_transfer FROM _pantalla_antes) THEN
+    RAISE EXCEPTION 'ABORTA: la suma de stock_fc_transfer ha cambiado.';
+  END IF;
+  IF (SELECT count(*) FROM public.v_trackeador_pantalla t WHERE t.accion = 'COMPROBAR')
+     IS DISTINCT FROM (SELECT n_comprobar FROM _pantalla_antes) THEN
+    RAISE EXCEPTION 'ABORTA: ha cambiado cuantas fichas salen en COMPROBAR. El nulo '
+                    'se ha colado en las decisiones: para eso estan los seis suelos.';
   END IF;
 
   -- 3 · La vista conserva security_invoker (ya lo tenia; un REPLACE no lo quita,
@@ -1415,14 +1443,16 @@ BEGIN
   -- 5 · La materializada sigue en pie y LLENA. No se recrea aqui, pero si algo la
   --     hubiera vaciado, el Trackeador de Elena estaria en blanco y hay que verlo.
   SELECT count(*) INTO n FROM public.mv_trackeador_pantalla;
-  IF n <> 1776 THEN
-    RAISE EXCEPTION 'ABORTA: mv_trackeador_pantalla tiene % filas y tenia 1776. Una '
-                    'materializada vacia deja la pantalla en blanco SIN dar error.', n;
+  IF n = 0 THEN
+    RAISE EXCEPTION 'ABORTA: mv_trackeador_pantalla esta VACIA. Una materializada '
+                    'vacia deja la pantalla en blanco SIN dar error. Esta migracion '
+                    'no la toca, asi que si esta vacia el problema es otro.';
   END IF;
 
-  RAISE NOTICE 'Numero de control OK: 1776 filas con la huella exacta de antes, las '
-               'dos sumas de stock intactas, security_invoker y el SELECT en su '
-               'sitio, y la materializada con sus 1776 filas.';
+  RAISE NOTICE 'Numero de control OK: % filas con la huella EXACTA de antes de '
+               'tocar nada, las dos sumas de stock y el recuento de COMPROBAR '
+               'intactos, security_invoker y el SELECT en su sitio, y la '
+               'materializada con datos.', n;
 END $$;
 
 -- ============================================================================
