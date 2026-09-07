@@ -1110,11 +1110,32 @@ def avisar_censo(cabecera_nueva, cabecera_anterior, escribir=print):
 #       es justo lo que pasó el 7-sep. Comparar el almacén de una versión con el de otra
 #       daba una caída de 246 unidades que no era una caída.
 #
-# 🔬 EL CASO QUE TIENE QUE CAZAR, con las cifras de producción del 7-sep-2026:
-#       disponible del 6-sep  6.692  (6.437 vendible + 255 tránsito, 381 fichas)
-#       vendible del 7-sep    6.453
-#    Si el informe recortado entrase sin puente, el disponible caería **239 unidades
-#    en un día**, y detrás de eso no hay una venta: hay una columna que dejó de venir.
+# 🔬 EL CASO QUE TIENE QUE CAZAR — Y LA TRAMPA DE SU CIFRA, que es lo que hay que
+#    leer despacio (medido en producción el 7-sep-2026):
+#       disponible del 6-sep   6.692  (6.437 vendible + 255 tránsito, 381 fichas)
+#       vendible del 7-sep     6.453
+#    Esas dos cifras se restan solas y dan **239**, y esa resta está MAL: compara el
+#    disponible de un día con el VENDIBLE del siguiente. Peras con manzanas.
+#
+# 🔴 LO QUE PASARÍA SI LA GUARDA MIDIERA ASÍ, y por eso no lo hace: el tránsito del
+#    6-sep eran 255 unidades, y mientras Amazon no lo reporte el vendible en bruto va a
+#    salir cada día ~250 por debajo del disponible de la víspera. Con un techo de 177,
+#    **la carga abortaría todos los días del mes, siempre por el mismo motivo falso** — y
+#    una guarda que salta siempre se acaba desactivando.
+#
+# 🔑 POR ESO LOS DOS LADOS SE MIDEN POR LA MISMA ESCALERA (la del 2c):
+#    `disponible_de()` en Python y `SQL_DISPONIBLE` en SQL, las dos
+#    COALESCE(leído, estimado, vendible). 🔬 Y está MEDIDO que con eso el escalón
+#    desaparece: sobre la foto viva del 6-sep, fingiendo que el tránsito no viniera,
+#       disponible real (con tránsito)     6.692
+#       por la escalera (sin tránsito)     6.717   → escalón **−25**, o sea que SUBE
+#       sólo el vendible en bruto          6.437   → escalón 255, que es el falso
+#    Y las 137 fichas que se quedan sin estimación suman **0 unidades de tránsito**: el
+#    puente falta justo donde no hace falta.
+#
+# ⚠️ Lo que SÍ haría saltar la guarda es que el informe internacional no llegue: sin él
+#    no hay estimación, la escalera cae al vendible y el escalón vuelve. Eso es correcto
+#    — ese día no se sabe el disponible — y el aviso de la fuente vieja lo dice antes.
 #
 # ---------------------------------------------------------------------------
 # 🔴 DE DÓNDE SALE EL TECHO, Y POR QUÉ HAY DOS FUENTES. Esto se reescribió entero el
@@ -1392,9 +1413,13 @@ def guarda_continuidad(fecha_ant, fecha_nueva, disponible_ant, disponible_nuevo,
             "   Ese techo es %s.\n"
             "   Para que esto fuera movimiento real habrian tenido que salir %d "
             "unidades del almacen en %d dia(s). No pasa.\n"
-            "   Lo que si pasa, y ya paso el 7-sep-2026, es que Amazon sirva un informe "
-            "que cuadra consigo mismo pero deja unidades fuera: ese dia el disponible "
-            "habria caido 239 (6.692 -> 6.453) sin que saliera nada parecido."
+            "   Lo que si pasa es que Amazon sirva un informe que cuadra consigo "
+            "mismo pero deja unidades fuera. ¡OJO CON LA CIFRA QUE SE MIRA! El 7-sep-2026 "
+            "el VENDIBLE EN BRUTO caia 239 (6.692 del dia 6 contra 6.453 del dia 7), pero "
+            "eso NO es una caida del disponible: es comparar el disponible de un dia con "
+            "el vendible del siguiente, o sea peras con manzanas. Esta guarda mide el "
+            "disponible por la ESCALERA a los dos lados (leido, si no estimado, si no "
+            "vendible), y con ella el escalon del transito no existe."
             % (caida, fecha_ant, fecha_nueva, techo, fuente, caida, dias))
 
     if fichas_nuevas < fichas_ant * (1 - CAIDA_MAX_FICHAS):

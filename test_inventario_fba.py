@@ -753,9 +753,9 @@ try:
     guarda_continuidad(AYER, HOY10, 6692, 6453, 381, 381,
                        salidas=ledger(16, cubre=False), pelicula=peli(),
                        permitir_salto=False)
-    eq('(20) el 7-sep sin puente (−239 uds): ABORTA', False, True)
+    eq('(20) el 7-sep SI el puente no recuperase nada (−239): ABORTA', False, True)
 except Aborta as e:
-    eq('(20) el 7-sep sin puente (−239 uds): ABORTA', True, True)
+    eq('(20) el 7-sep SI el puente no recuperase nada (−239): ABORTA', True, True)
     eq('(20) … y dice la caida y el techo',
        'ha caido 239 unidades' in str(e) and 'son 177' in str(e), True)
     eq('(20) … y dice que opina la PELICULA y por que no el ledger',
@@ -763,7 +763,7 @@ except Aborta as e:
        and 'solo tiene dias completos hasta' in str(e), True)
 # 🔑 LA PAREJA QUE HACE QUE ESTO MIDA ALGO: el MISMO dia, con el puente haciendo su
 #    trabajo, el disponible baja lo normal y la carga entra.
-eq('(20) el 7-sep CON puente: NO aborta',
+eq('(20) el 7-sep con el puente haciendo su trabajo: NO aborta',
    guarda_continuidad(AYER, HOY10, 6692, 6600, 381, 381,
                       salidas=ledger(16, cubre=False), pelicula=peli(),
                       permitir_salto=False), [])
@@ -874,6 +874,66 @@ motivos = guarda_continuidad(AYER, HOY10, 6692, 6453, 381, 381,
                              permitir_salto=True, escribir=lambda *a: None)
 eq('(20) … y tambien deja pasar el «no puedo juzgar», dejandolo escrito',
    'NO SE PUEDE JUZGAR' in (motivos[0] if motivos else ''), True)
+
+
+print('\n== 20 quater) EL ESCALON DEL TRANSITO NO PUEDE HACER SALTAR LA GUARDA ==')
+# 🔴 EL FALLO QUE ESTO CIERRA, y no es del rescate: es de TODOS los dias del mes.
+#    Mientras Amazon no reporte el transito, el VENDIBLE EN BRUTO de cada dia va a salir
+#    ~250 unidades por debajo del disponible de la vispera (el transito del 6-sep eran
+#    255). Una guarda que restara disponible-de-ayer menos vendible-de-hoy abortaria la
+#    carga todos los dias, siempre por el mismo motivo falso — y una guarda que salta
+#    siempre se acaba desactivando.
+#
+# 🔑 POR ESO LOS DOS LADOS SE MIDEN POR LA MISMA ESCALERA (la del 2c): leido, si no
+#    estimado, si no vendible. Las cifras de aqui abajo son las MEDIDAS en produccion el
+#    7-sep-2026 sobre la foto viva del 6, fingiendo que el transito no viniera:
+#        disponible real (con transito)   6.692
+#        por la escalera (sin transito)   6.717   -> escalon -25, o sea que SUBE
+#        solo el vendible en bruto        6.437   -> escalon 255, que es el falso
+D6_REAL, D7_ESCALERA, D7_VENDIBLE = 6692, 6717, 6437
+
+eq('(20q) el escalon del transito, medido con la escalera: NO salta',
+   guarda_continuidad(AYER, HOY10, D6_REAL, D7_ESCALERA, 381, 381,
+                      salidas=ledger(16, cubre=False), pelicula=peli(),
+                      permitir_salto=False), [])
+# 🔴 LA PAREJA QUE ENSENA POR QUE IMPORTA: la MISMA foto medida con el vendible en
+#    bruto —que es la resta mal hecha— si abortaria. Este test es el que se pondria rojo
+#    el dia que alguien cambie la escalera por `available` a secas.
+try:
+    guarda_continuidad(AYER, HOY10, D6_REAL, D7_VENDIBLE, 381, 381,
+                       salidas=ledger(16, cubre=False), pelicula=peli(),
+                       permitir_salto=False)
+    eq('(20q) … y medido con el vendible en bruto, ABORTARIA', False, True)
+except Aborta as e:
+    eq('(20q) … y medido con el vendible en bruto, ABORTARIA', True, True)
+    eq('(20q) … y el mensaje avisa de que esa resta es peras con manzanas',
+       'peras con manzanas' in str(e), True)
+# Y una caida REAL por encima del techo sigue saltando, que es para lo que existe.
+try:
+    guarda_continuidad(AYER, HOY10, D6_REAL, D6_REAL - 178, 381, 381,
+                       salidas=ledger(16, cubre=False), pelicula=peli(),
+                       permitir_salto=False)
+    eq('(20q) una caida REAL por encima del techo: ABORTA', False, True)
+except Aborta:
+    eq('(20q) una caida REAL por encima del techo: ABORTA', True, True)
+
+# 🔒 Y LA ESCALERA, FICHA A FICHA, con el caso que la motiva: la misma ficha con el
+#    transito leido y sin el. Sin estimacion cae al vendible y ahi SI hay escalon — que
+#    es correcto: ese dia no se sabe. Con estimacion, no.
+con_transito = {'available': 5, 'fc_transfer': 3, 'disponible_estimado': 8}
+sin_transito_con_puente = {'available': 5, 'fc_transfer': None, 'disponible_estimado': 8}
+sin_transito_sin_puente = {'available': 5, 'fc_transfer': None, 'disponible_estimado': None}
+eq('(20q) la misma ficha, con transito y sin el pero con puente: mismo disponible',
+   (disponible_de(con_transito), disponible_de(sin_transito_con_puente)), (8, 8))
+eq('(20q) … y sin puente cae al vendible, que es un SUELO, no la cifra completa',
+   disponible_de(sin_transito_sin_puente), 5)
+# 🔬 Medido el 7-sep-2026: de las 381 fichas de la foto viva, 137 se quedan sin
+#    estimacion y entre las 137 suman CERO unidades de transito. El puente falta justo
+#    donde no hace falta, y por eso el escalon de la escalera sale -25 y no 255.
+foto = ([{'registro': {'available': 5, 'fc_transfer': None, 'disponible_estimado': 8}}] * 2
+        + [{'registro': {'available': 7, 'fc_transfer': None, 'disponible_estimado': None}}])
+eq('(20q) la foto entera: cada ficha por su peldano, no todas por el mismo',
+   disponible_total(foto), 8 + 8 + 7)
 
 
 print('\n== 20 ter) LA COBERTURA: el ultimo dia del ledger NO cuenta como dia ==')
