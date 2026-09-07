@@ -11,7 +11,7 @@
 #   - Carga el catalogo:
 #       * TCG / DBLINE / BEMS -> el fichero crudo que la app subio al buzon.
 #       * MOLOKA              -> lee el inventario propio DIRECTO de Supabase.
-#   - Escanea con Keepa (Fase 1 rank + Fase 2 ES/IT/FR), calcula rentabilidad.
+#   - Escanea con Keepa (Fase 1 rank + Fase 2 por pais, ver PAISES), calcula rentabilidad.
 #   - Genera el Excel, lo SUBE a Storage (informes/resultados/) y registra el
 #     escaneo en la tabla 'escaner_resultados' (la biblioteca de la app).
 #   - Actualiza la memoria viva del proveedor (presentes / agotados).
@@ -472,7 +472,24 @@ if PROVEEDOR != 'MOLOKA' and not catalogo_local:
     abortar(f'falta el catalogo de {PROVEEDOR} en el buzon {BUCKET}/{CARPETA_ESCANER}. '
             f'Sube el fichero y vuelve a lanzar')
 
-IVA_DEFAULT_ES, IVA_IT, IVA_FR = 0.21, 0.22, 0.20
+# ============================================================
+# LOS PAISES DEL ESCANEO, EN UN SOLO SITIO
+# ------------------------------------------------------------
+# 🔴 UNA LISTA, NO CINCO. Hasta hoy los paises viajaban como ('ES','IT','FR')
+#    LITERAL en cinco bucles distintos (Fase 2, chase de HEO, el calculo, la
+#    hoja Analisis y la pestana 'Precio por lote'). Anadir un pais era acordarse
+#    de los cinco: el que se quedara sin abrir no daria error -- ese pais
+#    sencillamente NO APARECERIA en ese paso, y nadie lo veria. Un fallo que se
+#    ve igual que un exito no es un fallo: es un silencio.
+# 🔒 EL ORDEN IMPORTA Y ALEMANIA VA LA ULTIMA: la hoja escribe una fila por pais
+#    en ESTE orden, asi que ES/IT/FR conservan su sitio y DE se anade detras.
+# 🔑 Son los codigos de `keepa.DCODES` (constants.py de keepa 1.5.0): 'DE' es el
+#    dominio 3 (amazon.de), igual que 'FR' es el 4, 'IT' el 8 y 'ES' el 9. Se
+#    pasan tal cual a `api.query(domain=...)`, sin traduccion.
+PAISES = ('ES', 'IT', 'FR', 'DE')
+
+# IVA general de cada pais. El de ES sale de la ficha cuando la hay (iva_es_de).
+IVA_DEFAULT_ES, IVA_IT, IVA_FR, IVA_DE = 0.21, 0.22, 0.20, 0.19
 ALMACEN, COM_DIGITALES = 0.15, 1.03
 UNIDADES_CASE_TCG = 6          # CHASE en case de 6 (5+1) -> coste unitario = PA / 6. TCG y chase HEO.
 LOTE_FASE1 = int(os.environ.get('LOTE_FASE1', '50'))   # 100 -> 50: si se pierde un lote, el agujero es la mitad
@@ -1694,7 +1711,7 @@ print(f"\nCon ASIN: {len(candidatos)} | PASAN: {len(pasan)} | sin rank: {len(sin
       f"no encontrados: {len(no_encontrados)} | ambiguos: {len(ambiguos)}")
 
 # ============================================================
-# Celda 7 - FASE 2: informe ES/IT/FR (3 tok/pais, buybox sin offers)
+# Celda 7 - FASE 2: informe por pais (PAISES) (3 tok/pais, buybox sin offers)
 # ============================================================
 def _url_imagen(prod):
     # Mismo montaje VERIFICADO que el v1 en produccion (moloka_actualizar_nube.py:1882): Keepa marco
@@ -1786,7 +1803,7 @@ def _guardar_ckpt():
     except Exception as _e:
         print("AVISO checkpoint (no se guardo, sigo igual):", _e)
 
-print(f"Fase 2: {len(lista)} candidatos x 3 paises"
+print(f"Fase 2: {len(lista)} candidatos x {len(PAISES)} paises ({'/'.join(PAISES)})"
       + (f" | {len(infos)} ya hechos, faltan {len(lista)-len(infos)}" if infos else ""))
 _nuevos = 0
 for i,c in enumerate(lista,1):
@@ -1801,7 +1818,7 @@ for i,c in enumerate(lista,1):
             'cotejo':(cotejo_info.get(c['ean_in']) or {}).get('veredicto','—'),   # para marcar dudosos en Telegram
             'coherencia_caja':aviso_caja.get(c['ean_in'],''),   # caja/ud incoherente vs su suelta (guardarrail)
             'case_de_6':bool(f.get('es_caja6'))}
-    for dom in ('ES','IT','FR'):
+    for dom in PAISES:
         d = datos_pais(c['asin'], dom)
         if d:
             item['paises'][dom] = d
@@ -1850,7 +1867,7 @@ if PROVEEDOR == 'HEO':
                         'marca': 'Funko', 'pa': _num(x.get('precio_caja')), 'core': str(x.get('ean_caja') or ''),
                         'es_chase': True, 'propio': False, 'volumen': None, 'url': x.get('link_amazon', ''),
                         'titulo_amz': '', 'ambiguo': False, 'paises': {}, 'case_de_6': True}
-                for dom in ('ES', 'IT', 'FR'):
+                for dom in PAISES:
                     d = datos_pais(_as, dom)
                     if d:
                         item['paises'][dom] = d
@@ -1874,7 +1891,7 @@ def decision_de(margen):
 
 registros = []
 for item in infos:
-    iva = {'ES':iva_es_de(item['core']),'IT':IVA_IT,'FR':IVA_FR}
+    iva = {'ES':iva_es_de(item['core']),'IT':IVA_IT,'FR':IVA_FR,'DE':IVA_DE}
     pa = item['pa']
     # 🔒 Solo se divide donde el proveedor da el precio de la CAJA COMPLETA.
     # OcioStock lo da POR UNIDAD (11,99 €/ud, 71,94 € la caja): dividir alli
@@ -1884,7 +1901,7 @@ for item in infos:
         pa = pa / (item.get('uds_caja') or UNIDADES_CASE_TCG)
     item['_pa_efectivo'] = pa
     margen_es = None; paises_out = {}
-    for dom in ('ES','IT','FR'):
+    for dom in PAISES:
         d = item['paises'].get(dom)
         if d and d.get('precio') and pa and d.get('ref_pct') is not None and d.get('fee') is not None:
             r = calc_rentabilidad(d['precio'], pa, d['ref_pct'], d['fee'], iva[dom],
@@ -1928,7 +1945,7 @@ COLS = ['Nombre','EAN','ASIN','Marca','PA (€)','País','Rank actual','Rank 90d
         # catalogo propio se cruzo de verdad.
         'Origen IVA']
 L = {name:get_column_letter(i+1) for i,name in enumerate(COLS)}
-DOM_AMZ = {'ES':'amazon.es','IT':'amazon.it','FR':'amazon.fr'}
+DOM_AMZ = {'ES':'amazon.es','IT':'amazon.it','FR':'amazon.fr','DE':'amazon.de'}
 
 wb = Workbook(); ws = wb.active; ws.title='Análisis'
 ws.append(COLS)
@@ -1938,7 +1955,7 @@ for item in registros:
     en_bd = en_bd_txt(item['core'])
     amb = 'AMBIGUO' if item['ambiguo'] else ''
     _cot = cotejo_info.get(item['ean']) or {}   # veredicto del cotejo para este producto ('—' si no hay)
-    for dom in ('ES','IT','FR'):
+    for dom in PAISES:
         d = item['_paises_calc'].get(dom)
         if not d:
             d = {'rank_act':None,'rank90':None,'vendidos':None,'precio':None,'canal':'sin datos',
@@ -2049,7 +2066,9 @@ if last >= 2:
     ws.conditional_formatting.add(rng_ccj, FormulaRule(formula=[f'ISNUMBER(SEARCH("INCOHERENTE",{ccj}2))'],
         fill=_cf_fill('FFC7CE'), font=Font(color='9C0006')))
     ws.conditional_formatting.add(f'A2:{get_column_letter(len(COLS))}{last}',
-        FormulaRule(formula=['ISODD(INT((ROW()-2)/3))'], fill=_cf_fill('D9D9D9')))
+        # 🔒 El /len(PAISES) NO es cosmetica: la banda gris marca UN PRODUCTO, y
+        # un 3 escrito a mano pintaria media banda por producto con cuatro paises.
+        FormulaRule(formula=[f'ISODD(INT((ROW()-2)/{len(PAISES)}))'], fill=_cf_fill('D9D9D9')))
 
 def hoja(nombre, regs):
     w = wb.create_sheet(nombre)
@@ -2085,7 +2104,7 @@ for item in registros:
     _coh = ''
     if pa_suelto and pa_lote and pa_lote > pa_suelto * 1.05:
         _coh = f'INCOHERENTE: lote ({pa_lote}) mas caro que suelto ({pa_suelto})'
-    for dom in ('ES','IT','FR'):
+    for dom in PAISES:
         d = item['_paises_calc'].get(dom)
         if not d or not d.get('precio') or d.get('ref_pct') is None or d.get('fee') is None:
             continue

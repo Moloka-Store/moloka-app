@@ -75,13 +75,18 @@ PRODUCTOS = [
 ]
 EAN_PROPIO = {'0889698498883', '8412345678905'}
 EAN_NO_PROPIO = {'0889698851909'}
+# 🔴 SI FALTA UN PAIS AQUI, ESTE BANCO NO SE PONE ROJO: SE CUELGA. El doble
+#    levanta KeyError, el reintento de Keepa se lo traga y espera 5+15+40+90 s
+#    por cada producto. Medido al abrir Alemania (6-sep-2026). Los paises del
+#    doble tienen que ser los de `PAISES` en el escaner, y (D) en
+#    test_escaner_excel_isd.py es quien vigila que esa lista sea una sola.
 PRECIOS = {   # asin -> pais -> (precio, ref_pct, fee FBA, rank)
     'B0GIZMO': {'ES': (16.99, 15.0, 3.51, 4200), 'IT': (17.49, 15.0, 3.62, 9100),
-                'FR': (18.25, 15.0, 3.72, 6400)},
+                'FR': (18.25, 15.0, 3.72, 6400), 'DE': (17.99, 15.0, 3.55, 5100)},
     'B0CHAI':  {'ES': (12.50, 15.0, 3.10, 22000), 'IT': (12.90, 15.0, 3.20, 41000),
-                'FR': (13.10, 15.0, 3.30, 38000)},
+                'FR': (13.10, 15.0, 3.30, 38000), 'DE': (12.70, 15.0, 3.15, 33000)},
     'B0LUKE5': {'ES': (15.50, 15.0, 3.51, 30000), 'IT': (14.90, 15.0, 3.62, 51000),
-                'FR': (21.90, 15.0, 5.29, 12500)},
+                'FR': (21.90, 15.0, 5.29, 12500), 'DE': (16.20, 15.0, 3.58, 27000)},
 }
 RECADO = {"proveedor": "MIS_COMPRAS", "marca": "TODAS", "modo": "todo",
           "rank_maximo": 200000, "incluir_sin_rank": False}
@@ -307,6 +312,8 @@ eq('(A) 🔴 fila IT -> el tipo general italiano, no la ficha',
    origen_iva_fila('IT', 0.22, '0889698498883'), 'general IT 22%')
 eq('(A) 🔴 fila FR -> el tipo general frances',
    origen_iva_fila('FR', 0.20, '0889698498883'), 'general FR 20%')
+eq('(A) 🔴 fila DE -> el tipo general aleman (19%), no el 21% de la ficha',
+   origen_iva_fila('DE', 0.19, '0889698498883'), 'general DE 19%')
 eq('(A) la etiqueta lleva el numero que la fila ha USADO de verdad',
    origen_iva_fila('IT', 0.04, '0889698498883'), 'general IT 4%')
 eq('(A) fila sin IVA (el pais no dio datos) -> la fila calla',
@@ -433,17 +440,19 @@ if _ok['xlsx'] == 1 and os.path.exists(_dest):
     _por_pais = {}
     for _f in range(2, ws.max_row + 1):
         _por_pais.setdefault(col(_f, 'País'), {})[str(col(_f, 'EAN'))] = col(_f, COL_NUEVA)
-    eq('(C) [normal] hay las 3 filas de cada pais',
-       {k: len(v) for k, v in sorted(_por_pais.items())}, {'ES': 3, 'FR': 3, 'IT': 3})
+    eq('(C) [normal] hay las 3 filas de cada uno de los cuatro paises',
+       {k: len(v) for k, v in sorted(_por_pais.items())},
+       {'DE': 3, 'ES': 3, 'FR': 3, 'IT': 3})
     eq('(C) [normal] 🔴 los propios dicen "ficha" en su fila ES',
        {e: _por_pais['ES'].get(e) for e in sorted(EAN_PROPIO)},
        {e: 'ficha' for e in sorted(EAN_PROPIO)})
     eq('(C) [normal] 🔴 el que no esta en productos dice "asumido 21%"',
        {e: _por_pais['ES'].get(e) for e in sorted(EAN_NO_PROPIO)},
        {e: 'asumido 21%' for e in sorted(EAN_NO_PROPIO)})
-    eq('(C) [normal] IT y FR llevan su tipo general en las 6 filas',
-       (set(_por_pais['IT'].values()), set(_por_pais['FR'].values())),
-       ({'general IT 22%'}, {'general FR 20%'}))
+    eq('(C) [normal] IT, FR y DE llevan su tipo general en las 9 filas',
+       (set(_por_pais['IT'].values()), set(_por_pais['FR'].values()),
+        set(_por_pais['DE'].values())),
+       ({'general IT 22%'}, {'general FR 20%'}, {'general DE 19%'}))
     # La cuenta que se verifica tambien en la pasada real: las filas 'ficha' no
     # pueden pasar del numero de fichas del catalogo propio.
     _n_ficha = sum(1 for p in _por_pais.values() for v in p.values() if v == 'ficha')

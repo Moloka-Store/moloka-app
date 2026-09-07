@@ -11,7 +11,7 @@ En ES e IT las dos coincidian POR CASUALIDAD (COM_DIGITALES = 1,03 y el ISD es e
 ese trozo, o sea que ensenaba ~1 punto de margen de MAS con un semaforo al lado
 diciendo otra cosa. Una fila con dos cuentas es una fila que no se puede creer.
 
-LAS TRES PARTES, Y POR QUE HACEN FALTA LAS TRES:
+LAS CUATRO PARTES, Y POR QUE HACEN FALTA LAS CUATRO:
   (A) La IDENTIDAD, sobre las funciones REALES del escaner (sacadas del fichero con
       `ast`, por estructura, y ejecutadas):
           precio x pct_comision_celda + isd_sobre_fee  ==  calc_rentabilidad[...]
@@ -24,6 +24,12 @@ LAS TRES PARTES, Y POR QUE HACEN FALTA LAS TRES:
       `supabase` sustituidos por dobles en memoria. Se lee el .xlsx que sale, se
       EVALUAN sus formulas y se comparan con `_paises_calc`. Sin red, sin secretos,
       sin tocar produccion, y sin escribir en escaner_memoria (perfil efimero).
+
+  (D) LOS PAISES: que la lista viva en UNA constante y que los CINCO bucles la
+      recorran. Se mira por estructura (`ast`) y ademas se CUENTA con los dobles
+      cuantos paises se preguntaron de verdad en la Fase 2 y cuantas filas por
+      producto salieron en la hoja. Un bucle que se quedara en tres paises no
+      daria error: ese pais sencillamente no apareceria en ese paso.
 
 SI (C) SE ROMPE POR UN CAMBIO AJENO (el escaner pide una tabla nueva, otra variable
 de entorno...), lo que hay que tocar son los dobles de aqui abajo, NO la cuenta.
@@ -238,21 +244,31 @@ ASIN = {'0889698498883': 'B0GIZMO', '0889698851909': 'B0LUKE5',
         '0889698000005': 'B0SINFEE'}
 # precio de venta, ref_pct, fee FBA, rank. La fila 'B0CANON'/FR es la factura:
 # 12,13 x 15% = 1,8195 de comision, fee 5,29 -> ISD (1,8195+5,29) x 3% = 0,2133.
+# 🔒 ALEMANIA (6-sep-2026) lleva numeros PROPIOS, no una copia de ES: si DE fuera
+#    un calco, una fila alemana escrita con el IVA o el ISD de otro pais daria los
+#    mismos euros y este banco no la distinguiria. El unico que repite cifras a
+#    proposito es 'B0CANON', y justamente para enseñar que con la MISMA comision y
+#    la MISMA tarifa FBA, FR cobra ISD sobre las dos y DE solo sobre la comision.
 PAIS = {
     'B0GIZMO': {'ES': (16.99, 15.0, 3.51, 4200), 'IT': (17.49, 15.0, 3.62, 9100),
-                'FR': (18.25, 15.0, 3.72, 6400)},
+                'FR': (18.25, 15.0, 3.72, 6400), 'DE': (17.99, 15.0, 3.55, 5100)},
     'B0LUKE5': {'ES': (15.50, 15.0, 3.51, 30000), 'IT': (14.90, 15.0, 3.62, 51000),
-                'FR': (21.90, 15.0, 5.29, 12500)},
+                'FR': (21.90, 15.0, 5.29, 12500), 'DE': (16.20, 15.0, 3.58, 27000)},
     'B0CANON': {'ES': (12.13, 15.0, 5.29, 15000), 'IT': (12.13, 15.0, 5.29, 15000),
-                'FR': (12.13, 15.0, 5.29, 15000)},
+                'FR': (12.13, 15.0, 5.29, 15000), 'DE': (12.13, 15.0, 5.29, 15000)},
     'B0FUNDA': {'ES': (4.20, 15.0, 2.70, 88000), 'IT': (4.60, 8.0, 2.75, 120000),
-                'FR': (4.95, 8.0, 2.80, 140000)},
+                'FR': (4.95, 8.0, 2.80, 140000), 'DE': (4.70, 8.0, 2.78, 95000)},
     # 🔴 fee = None en ES: Keepa a veces no trae `fbaFees.pickAndPackFee`. Es la fila
     #    que enseñaba un Beneficio calculado con la celda de fee VACIA (leida como 0)
     #    mientras la columna Decision decia 'Sin datos'.
     'B0SINFEE': {'ES': (19.99, 15.0, None, 5000), 'IT': (19.99, 15.0, 3.60, 5000),
-                 'FR': (19.99, 15.0, 3.70, 5000)},
+                 'FR': (19.99, 15.0, 3.70, 5000), 'DE': (19.99, 15.0, 3.65, 5000)},
 }
+
+# 🔒 EL CONTADOR DE LA FASE 2: (asin, dominio) de CADA pregunta que el escaner le
+#    hace a Keepa por pais. Es lo que permite CONTAR paises con dobles en vez de
+#    creerse un grep: si un bucle se quedara en tres, aqui faltarian las parejas.
+PREGUNTAS_F2 = []
 
 
 def _stats(rank, precio, con_bb):
@@ -277,7 +293,9 @@ class _FakeKeepa:
         self.tokens_left -= len(items)
         if kw.get('product_code_is_asin'):        # Fase 2: un ASIN, un pais
             asin = items[0]
-            precio, ref, fee, rank = PAIS[asin][(kw.get('domain') or 'ES').upper()]
+            _dom = (kw.get('domain') or 'ES').upper()
+            PREGUNTAS_F2.append((asin, _dom))
+            precio, ref, fee, rank = PAIS[asin][_dom]
             cur, a90 = _stats(rank, precio, True)
             return [{'asin': asin, 'title': 'T ' + asin,
                      'stats': {'current': cur, 'avg90': a90, 'buyBoxIsFBA': True,
@@ -443,7 +461,8 @@ def celda(nombre, fila):
     return valor('%s%d' % (LET[nombre], fila))
 
 
-_cotejadas, _es, _fr, _canon = 0, 0, 0, 0
+_cotejadas, _es, _fr, _de, _canon = 0, 0, 0, 0, 0
+_canon_de = 0
 _peor_ben = _peor_mar = _peor_roi = 0.0
 for _r in range(2, ws.max_row + 1):
     _ean = str(ws.cell(row=_r, column=IDX['EAN']).value or '')
@@ -454,13 +473,17 @@ for _r in range(2, ws.max_row + 1):
     _cotejadas += 1
     _es += (_pais == 'ES')
     _fr += (_pais == 'FR')
+    _de += (_pais == 'DE')
     _peor_ben = max(_peor_ben, abs(celda('Beneficio (€)', _r) - _d['beneficio']))
     _peor_mar = max(_peor_mar, abs(celda('Margen', _r) - _d['margen']))
     _peor_roi = max(_peor_roi, abs(celda('ROI', _r) - _d['roi']))
     if _ean == '0889698000004' and _pais == 'FR':
         _canon = _r
+    if _ean == '0889698000004' and _pais == 'DE':
+        _canon_de = _r
 
-eq('(C1) hay filas ES y FR que cotejar', (_cotejadas >= 6, _es >= 1, _fr >= 1), (True, True, True))
+eq('(C1) hay filas ES, FR y DE que cotejar',
+   (_cotejadas >= 8, _es >= 1, _fr >= 1, _de >= 1), (True, True, True, True))
 casi('(C1) 🔴 Beneficio: la CELDA y _paises_calc, al centimo (peor fila)', _peor_ben, 0.0, 0.005)
 casi('(C1) 🔴 Margen: la CELDA y _paises_calc (peor fila)', _peor_mar, 0.0, 5e-5)
 casi('(C1) 🔴 ROI: la CELDA y _paises_calc (peor fila)', _peor_roi, 0.0, 5e-5)
@@ -508,9 +531,12 @@ if _sin_fee:
        [True, True])
 
 # (C3) Fuera de Francia la columna nueva es 0 (no un hueco), y la comision no cambia.
+# 🔴 ALEMANIA ENTRA AQUI, no en la lista de Francia: su ISD es un SUPUESTO por
+#    prudencia (no hay ni una venta alemana con la que cuadrarlo) y su base es la
+#    comision, como ES e IT. Francia es la excepcion, no la norma.
 _ceros = [celda(ISD, _r) for _r in range(2, ws.max_row + 1)
-          if ws.cell(row=_r, column=IDX['País']).value in ('ES', 'IT')]
-eq('(C3) en ES/IT la columna del ISD es 0 en todas las filas', set(_ceros), {0})
+          if ws.cell(row=_r, column=IDX['País']).value in ('ES', 'IT', 'DE')]
+eq('(C3) en ES/IT/DE la columna del ISD es 0 en todas las filas', set(_ceros), {0})
 
 # (C5) La columna 'Origen IVA', leida del .xlsx real. El detalle vive en
 # test_escaner_catalogo_propio.py; aqui se comprueba que sigue siendo la ULTIMA y
@@ -523,6 +549,120 @@ _origen_es = {str(ws.cell(row=_r, column=IDX['EAN']).value or ''):
 eq('(C5) la ficha que esta en productos dice "ficha"', _origen_es.get(EAN_PROPIO), 'ficha')
 eq('(C5) 🔴 y las que no estan dicen "asumido 21%"',
    sorted({v for k, v in _origen_es.items() if k != EAN_PROPIO}), ['asumido 21%'])
+
+# ===========================================================================
+# (D) LOS PAISES: una lista, y los CINCO bucles recorriendola
+# ---------------------------------------------------------------------------
+# EL FALLO QUE CIERRA (6-sep-2026, entrada de Alemania). Los paises viajaban como
+# ('ES','IT','FR') LITERAL en cinco bucles distintos: Fase 2, el chase de HEO, el
+# calculo de la Celda 8, la hoja 'Analisis' y la pestana 'Precio por lote'. Anadir
+# un pais era acordarse de los cinco, y el bucle que se quedara sin abrir NO daria
+# error: ese pais sencillamente no apareceria en ese paso. Un fallo que se ve igual
+# que un exito no es un fallo, es un silencio.
+#
+# Se comprueba por los DOS lados, porque ninguno solo basta:
+#   - por ESTRUCTURA (`ast`), que es lo unico que alcanza a los dos bucles que este
+#     banco no puede EJECUTAR (el chase solo corre con PROVEEDOR='HEO'; 'Precio por
+#     lote' solo con productos que traen descuento por volumen);
+#   - CONTANDO con los dobles lo que de verdad paso: cuantos paises se le
+#     preguntaron a Keepa en la Fase 2 y cuantas filas por producto salieron en la
+#     hoja. Un ast verde con una hoja de tres paises seria un verde mentiroso.
+# ===========================================================================
+print()
+PAISES = ast.literal_eval(_nodo('PAISES').value)
+eq('(D1) 🔴 los paises viven en UNA constante PAISES', PAISES, ('ES', 'IT', 'FR', 'DE'))
+
+# (D2) Los CINCO bucles de pais recorren la constante, y no queda ni un literal.
+_bucles_paises = [n for n in ast.walk(ARBOL)
+                  if isinstance(n, ast.For) and isinstance(n.iter, ast.Name)
+                  and n.iter.id == 'PAISES']
+eq('(D2) 🔴 hay CINCO bucles `for ... in PAISES`', len(_bucles_paises), 5)
+eq('(D2) y los cinco iteran sobre `dom`',
+   sorted({n.target.id for n in _bucles_paises if isinstance(n.target, ast.Name)}), ['dom'])
+# La otra mitad: que no haya quedado ningun bucle con la lista escrita a mano. Por
+# ESTRUCTURA (el iterable de un `for`), que un grep casaria tambien los comentarios
+# -- y este fichero y el escaner tienen comentarios que citan la lista vieja.
+_literales = []
+for n in ast.walk(ARBOL):
+    if isinstance(n, ast.For) and isinstance(n.iter, (ast.Tuple, ast.List)):
+        _vals = [e.value for e in n.iter.elts if isinstance(e, ast.Constant)]
+        if 'ES' in _vals:
+            _literales.append(_vals)
+eq('(D2) 🔴 no queda NINGUN bucle con la lista de paises escrita a mano', _literales, [])
+
+# (D3) Las tablas por pais cubren TODOS los paises: si falta una entrada, el
+# escaner revienta con KeyError en la primera fila alemana. Mejor aqui que alli.
+eq('(D3) ISD_PAIS cubre los cuatro paises', sorted(ISD_PAIS), sorted(PAISES))
+_dom_amz = ast.literal_eval(_nodo('DOM_AMZ').value)
+eq('(D3) DOM_AMZ cubre los cuatro, y DE apunta a amazon.de',
+   (sorted(_dom_amz), _dom_amz['DE']), (sorted(PAISES), 'amazon.de'))
+_dict_iva = [n.value for n in ast.walk(ARBOL)
+             if isinstance(n, ast.Assign) and isinstance(n.value, ast.Dict)
+             and any(isinstance(t, ast.Name) and t.id == 'iva' for t in n.targets)]
+eq('(D3) el diccionario de IVA se monta UNA vez', len(_dict_iva), 1)
+eq('(D3) 🔴 y cubre los cuatro paises',
+   sorted(k.value for k in _dict_iva[0].keys), sorted(PAISES))
+# El tipo aleman, leido del fichero real (asignacion en tupla: no la ve `_nodo`).
+_tuplas_iva = [n for n in ARBOL.body
+               if isinstance(n, ast.Assign) and len(n.targets) == 1
+               and isinstance(n.targets[0], ast.Tuple)
+               and any(isinstance(e, ast.Name) and e.id == 'IVA_DE'
+                       for e in n.targets[0].elts)]
+eq('(D3) IVA_DE se declara con los otros tres', len(_tuplas_iva), 1)
+if _tuplas_iva:
+    _nom = [e.id for e in _tuplas_iva[0].targets[0].elts]
+    _val = dict(zip(_nom, ast.literal_eval(_tuplas_iva[0].value)))
+    eq('(D3) 🔴 IVA_DE = 19% (tipo general aleman)', _val['IVA_DE'], 0.19)
+    eq('(D3) y los tres de antes no se han movido',
+       [_val['IVA_DEFAULT_ES'], _val['IVA_IT'], _val['IVA_FR']], [0.21, 0.22, 0.20])
+
+# (D4) CONTADO CON LOS DOBLES: a cuantos paises se pregunto de verdad en la Fase 2.
+_por_asin = {}
+for _as, _dm in PREGUNTAS_F2:
+    _por_asin.setdefault(_as, []).append(_dm)
+eq('(D4) 🔴 la Fase 2 pregunto a los CUATRO paises de cada ASIN',
+   sorted({tuple(v) for v in _por_asin.values()}), [tuple(PAISES)])
+eq('(D4) y a los cinco ASIN del catalogo', len(_por_asin), len(ASIN))
+
+# (D5) Y EN LA HOJA: cada producto trae una fila por pais, en el orden de PAISES.
+_filas_por_ean = {}
+for _r in range(2, ws.max_row + 1):
+    _filas_por_ean.setdefault(str(ws.cell(row=_r, column=IDX['EAN']).value or ''),
+                              []).append(ws.cell(row=_r, column=IDX['País']).value)
+eq('(D5) 🔴 cada producto tiene sus cuatro filas, en el orden de PAISES',
+   sorted({tuple(v) for v in _filas_por_ean.values()}), [tuple(PAISES)])
+eq('(D5) el Excel tiene 5 productos x 4 paises', ws.max_row - 1, len(ASIN) * len(PAISES))
+
+# (D6) LA FILA ALEMANA, AL CENTIMO. Mismo producto, misma comision y misma tarifa
+# FBA que la fila francesa de la factura (B0CANON): lo unico que cambia es el pais.
+# Si alguien le pegara a DE la base francesa, este par de lineas lo canta.
+eq('(D6) la fila alemana del caso canonico esta en el Excel', _canon_de > 0, True)
+if _canon_de and _canon:
+    _pr_de = celda('Precio venta (€)', _canon_de)
+    _fee_de = celda('Fee Logística (€)', _canon_de)
+    _com_de = celda('Com. Amazon (€)', _canon_de)
+    _comision_de = _pr_de * 15.0 / 100
+    eq('(D6) misma comision y misma fee que la fila francesa',
+       (round(_comision_de, 2), round(_fee_de, 2)), (1.82, 5.29))
+    casi('(D6) 🔴 el ISD aleman es el 3% de la COMISION (0,05), no el frances (0,21)',
+         _com_de - _comision_de, _comision_de * 0.03, 1e-9)
+    casi('(D6) y la columna ISD s/ Fee Log. es 0 en Alemania', celda(ISD, _canon_de), 0.0, 0)
+    casi('(D6) 🔴 el frances de la MISMA fila sigue siendo 0,21 (las dos bases se distinguen)',
+         round(celda('Com. Amazon (€)', _canon) - _comision_de, 2), 0.21, 0)
+    # 🔴 Y EL IVA: la hoja divide por (1+IVA). El 1,19 aleman en la formula VIVA
+    #    es lo que separa "hemos abierto Alemania" de "hemos duplicado la fila espanola".
+    _ben_de = str(ws.cell(row=_canon_de, column=IDX['Beneficio (€)']).value or '')
+    eq('(D6) 🔴 la formula alemana divide por 1.19, no por 1.21',
+       ('/1.19)' in _ben_de, '/1.21)' in _ben_de), (True, False))
+    eq('(D6) y el enlace del ASIN de la fila alemana va a amazon.de',
+       'amazon.de' in str(ws.cell(row=_canon_de, column=IDX['ASIN']).hyperlink.target), True)
+
+# (D7) Las BANDAS grises de la hoja marcan UN PRODUCTO, no tres filas.
+_reglas = [str(r.formula[0]) for rango in ws.conditional_formatting
+           for r in rango.rules if getattr(r, 'formula', None)
+           and str(r.formula[0]).startswith('ISODD')]
+eq('(D7) 🔴 la banda gris se parte cada len(PAISES) filas, no cada 3',
+   _reglas, ['ISODD(INT((ROW()-2)/%d))' % len(PAISES)])
 
 print()
 if fallos:
