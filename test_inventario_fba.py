@@ -929,6 +929,116 @@ eq('(24) una sola ficha sin vendible: todo el excedente es suyo',
 
 
 print('')
+print('== 25) LA FOTO DEL INTERNACIONAL: UNA, Y LA MISMA PARA TODOS ==')
+# 🔴 EL FALLO QUE ESTO FIJA. `internacional_por_asin` hacia
+#    `DISTINCT ON (asin) ... ORDER BY asin, fecha_foto DESC`: a cada ASIN le daba SU
+#    ultima lectura, cada uno de un dia distinto. El internacional es cajon FOTO —lo
+#    que no viene en la hoja se BORRA—, asi que un ASIN que no esta en la ultima foto
+#    no es «no lo se»: es «ahi ya no queda nada». Rescatarle una lectura de hace
+#    semanas resucita unidades que no existen.
+#    🔬 Medido el 7-sep-2026 sobre los 11 dias del historico, a nivel de ASIN-dia:
+#         una foto (lo de ahora)   → error 549 uds · clava 2.414 · se pasa 78
+#         la ultima de cada ASIN   → error 2.204 uds · clava 2.456 · se pasa 715
+from procesador_inventario_fba import (  # noqa: E402
+    internacional_por_asin, foto_internacional)
+
+D1 = datetime.date(2026, 8, 30)
+D2 = datetime.date(2026, 9, 3)
+D3 = datetime.date(2026, 9, 6)
+
+
+class CursorInternacional:
+    """Doble del cursor SOLO para el internacional. Dos consultas y en este orden:
+    1) la fecha de la foto que toca, 2) las filas DE ESA foto.
+
+    🔒 Es un guion, no un motor de SQL: contesta por el NUMERO DE LLAMADA. Por eso
+       cuenta las llamadas y el test las comprueba — la version vieja hacia UNA
+       sola consulta, asi que con este doble se pone roja por el numero de viajes
+       antes incluso de mirar el resultado.
+    """
+
+    def __init__(self, filas):
+        self.filas = filas            # [(fecha_foto, asin, quantity)]
+        self.llamadas = []
+        self._ultimo = None
+
+    def execute(self, sql, params):
+        self.llamadas.append(params)
+        if len(self.llamadas) == 1:
+            fechas = [f for f, _, _ in self.filas if f <= params[0]]
+            self._ultimo = [(max(fechas) if fechas else None,)]
+        else:
+            foto, asines = params
+            acumulado = {}
+            for f, a, q in self.filas:
+                if f == foto and a in asines:
+                    acumulado[a] = acumulado.get(a, 0) + q
+            self._ultimo = sorted(acumulado.items())
+
+    def fetchone(self):
+        return self._ultimo[0] if self._ultimo else None
+
+    def fetchall(self):
+        return self._ultimo
+
+
+# El internacional: A1 esta en las tres fotos; A2 solo en la primera (se cayo de la
+# hoja el 3-sep); A3 aparece con dos paises el 6-sep.
+INTL = [(D1, 'A1', 10), (D1, 'A2', 7),
+        (D2, 'A1', 8),
+        (D3, 'A1', 6), (D3, 'A3', 4), (D3, 'A3', 5)]
+
+cur = CursorInternacional(INTL)
+res = internacional_por_asin(cur, D3, ['A1', 'A2', 'A3'])
+eq('(25) el ASIN que sigue en la ultima foto: su cifra y la fecha de esa foto',
+   res.get('A1'), (6, D3))
+eq('(25) los paises de un mismo ASIN se suman (TODOS, sin filtrar)',
+   res.get('A3'), (9, D3))
+# 🔴 LA PAREJA QUE HACE QUE ESTO MIDA ALGO.
+eq('(25) el ASIN que se cayo de la hoja NO se rescata de una foto vieja',
+   'A2' in res, False)
+eq('(25) … y por tanto queda DESCONOCIDO, que es lo que dice el internacional',
+   res.get('A2'), None)
+eq('(25) dos consultas: primero que foto toca, luego las filas de esa foto',
+   len(cur.llamadas), 2)
+eq('(25) … y la segunda pregunta por LA FOTO elegida, no por «<= la fecha»',
+   cur.llamadas[1][0], D3)
+
+# 🔒 UN DIA SIN FOTO PROPIA se estima con la anterior ENTERA: el internacional no se
+#    carga a diario (21 fotos entre el 23-jul y el 7-sep). Lo que no se hace es
+#    mezclar dias.
+cur = CursorInternacional(INTL)
+res = internacional_por_asin(cur, datetime.date(2026, 9, 5), ['A1', 'A2', 'A3'])
+eq('(25) sin foto de ese dia, se usa la anterior entera', res.get('A1'), (8, D2))
+eq('(25) … y con ella tampoco vuelve el ASIN caido', 'A2' in res, False)
+
+# 🔴 JAMAS UNA FOTO FUTURA: estimar el 30-ago con el internacional del 6-sep daria un
+#    numero que ese dia no existia.
+cur = CursorInternacional(INTL)
+res = internacional_por_asin(cur, D1, ['A1', 'A2'])
+eq('(25) no se estima un dia con datos posteriores', res.get('A1'), (10, D1))
+eq('(25) … y ahi A2 SI estaba, luego se estima', res.get('A2'), (7, D1))
+
+# Sin ninguna foto anterior no se inventa nada, y sin ASIN no se viaja a la base.
+cur = CursorInternacional(INTL)
+eq('(25) antes de la primera foto del internacional: vacio',
+   internacional_por_asin(cur, datetime.date(2026, 7, 1), ['A1']), {})
+cur = CursorInternacional(INTL)
+eq('(25) sin ASIN que preguntar, no se toca la base',
+   (internacional_por_asin(cur, D3, []), len(cur.llamadas)), ({}, 0))
+cur = CursorInternacional(INTL)
+eq('(25) la foto que toca se puede pedir sola', foto_internacional(cur, D2), D2)
+
+# 🔒 EL DESEMPATE DEL REPARTO ES POR SKU, no por el orden del fichero: es lo que hace
+#    que el procesador y la migracion de relleno escriban LO MISMO.
+f = [reg('S9', 'A1', 1), reg('S1', 'A1', 1)]
+estimar_disponible(f, {'A1': (3, D3)}, escribir=lambda *a: None)
+eq('(25) la unidad suelta se la lleva el sku menor, venga como venga el fichero',
+   {x['registro']['sku']: x['registro']['disponible_estimado'] for x in f},
+   {'S1': 2, 'S9': 1})
+
+
+print('')
 if fallos:
     print('%d FALLOS: %s' % (len(fallos), ', '.join(fallos)))
     sys.exit(1)
