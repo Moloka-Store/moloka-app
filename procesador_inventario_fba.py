@@ -393,15 +393,23 @@ def _reparto(excedente, pesos):
        hace que la suma de las partes NO sea el total (dos fichas con 0,5 dan 1+1=2
        donde había 1). Aquí lo que se reparte es STOCK: una unidad que aparece o
        desaparece en el reparto es una unidad que no existe o que se pierde.
+    🔒 El desempate es la POSICIÓN en `pesos`, y quien llama las ordena por `sku`:
+       así el reparto de esta función y el de la migración de relleno coinciden.
     """
     total = sum(pesos)
     if total <= 0:
         return None
-    brutos = [excedente * p / float(total) for p in pesos]
-    partes = [int(b) for b in brutos]
+    # 🔴 ARITMÉTICA ENTERA, no coma flotante, y no es purismo: el resto exacto es
+    #    `(excedente*peso) mod total`, y así es como lo calcula la migración de
+    #    relleno en SQL. Con floats, dos restos exactos distintos pueden redondear
+    #    al mismo número y el desempate cambiar de ficha — o sea, las dos cañerías
+    #    escribiendo repartos distintos del MISMO día.
+    numeradores = [excedente * p for p in pesos]
+    partes = [n // total for n in numeradores]
+    restos = [n % total for n in numeradores]
     faltan = excedente - sum(partes)
     # Las que más resto tienen se llevan la unidad suelta, en orden estable.
-    orden = sorted(range(len(pesos)), key=lambda i: (-(brutos[i] - partes[i]), i))
+    orden = sorted(range(len(pesos)), key=lambda i: (-restos[i], i))
     for i in orden[:faltan]:
         partes[i] += 1
     return partes
@@ -423,6 +431,13 @@ def estimar_disponible(filas, intl, escribir=print):
     por_asin = {}
     for f in filas:
         por_asin.setdefault(f['registro']['asin'], []).append(f)
+    # 🔒 ORDEN ESTABLE POR SKU, y no es cosmética: el desempate de los restos
+    #    mayores decide qué ficha se lleva la unidad suelta. Si el orden fuera el
+    #    del fichero, la migración de relleno —que ordena por `sku`, porque en SQL
+    #    no existe «el orden del .txt»— escribiría un reparto distinto del que
+    #    escribe esta función. Dos verdades para el mismo día.
+    for grupo in por_asin.values():
+        grupo.sort(key=lambda r: r['registro']['sku'])
 
     resumen = {'leido': 0, 'estimado': 0, 'desconocido': 0,
                'sin_intl': 0, 'sin_reparto': [], 'fuente_mas_vieja': None,
@@ -1255,30 +1270,66 @@ def cabecera_anterior(cur, fecha_nueva):
 TABLA_INTL_HIST = 'inventario_internacional_historico'
 
 
+def foto_internacional(cur, fecha_foto):
+    """La `fecha_foto` del internacional que se usa para estimar el día `fecha_foto`.
+
+    Es la MÁS RECIENTE que no sea futura, o None si no hay ninguna.
+
+    🔒 `<= la de esta carga`: jamás se estima un día con datos de un día posterior.
+       Eso daría un número que el día que se escribió no existía.
+    """
+    cur.execute(f"SELECT max(fecha_foto) FROM {TABLA_INTL_HIST} WHERE fecha_foto <= %s;",
+                (fecha_foto,))
+    fila = cur.fetchone()
+    return fila[0] if fila else None
+
+
 def internacional_por_asin(cur, fecha_foto, asines):
-    """{asin: (unidades, fecha_foto)} con la lectura MÁS RECIENTE que no sea futura.
+    """{asin: (unidades, fecha_foto)} leído de UNA sola foto del internacional.
 
     🔑 Del HISTÓRICO, no de la foto viva del internacional, y por dos razones: la
        foto viva puede ser de otro día que el informe FBA que se está cargando, y
        —sobre todo— de aquí sale `disponible_fuente_fecha`, que es lo que delata a
        los tres días que se está tirando de un dato viejo. Una fuente sin su fecha
        no se puede auditar.
-    🔒 `fecha_foto <= la de esta carga`: jamás se estima un día con datos de un día
-       posterior. Eso daría un número que el día que se escribió no existía.
+
+    🔴 UNA FOTO, LA MISMA PARA TODOS LOS ASIN — y esto es lo que se corrigió el
+       7-sep-2026, porque antes no era así. La primera versión hacía
+       `DISTINCT ON (asin) ... ORDER BY asin, fecha_foto DESC`, o sea que a cada
+       ASIN le daba SU última lectura, cada uno de un día distinto.
+       El internacional es cajón FOTO: **lo que no viene en la hoja, se borra**. Que
+       un ASIN no esté en la última foto no es «no lo sé», es «el internacional dice
+       que ahí no queda nada». Rescatarle una lectura de hace semanas resucita
+       unidades que ya no existen.
+       🔬 MEDIDO sobre los 11 días del histórico (4.042 filas, con el tránsito LEÍDO
+       y por tanto con verdad contra la que medir), a nivel de ASIN-día:
+             una foto (esto)          → error 549 uds · clava 2.414 · se pasa 78
+             la última de cada ASIN   → error 2.204 uds · clava 2.456 · se pasa 715
+       Cuatro veces peor, y siempre por arriba. Y de los 71 ASIN que el 6-sep tiraban
+       de una lectura vieja, 68 se pasaban (el más viejo, de hace 45 días).
+       ⚠️ Las cifras que justificaron el puente en la migración del 7-sep (error 549,
+       se pasa en 78 fichas con 487 uds, corto en 27 con 62) están medidas ASÍ. El
+       código hacía otra cosa: la medición era buena y la implementación no la seguía.
+
+    🔒 Y el `<=` sigue estando, pero en la FOTO, no en el ASIN: el internacional no
+       se carga a diario (21 fotos entre el 23-jul y el 7-sep), así que un día sin
+       foto propia se estima con la anterior ENTERA, que es un estado coherente del
+       almacén internacional. Lo que no se hace es mezclar días.
     🔴 Se limita a los ASIN de esta carga a propósito: traer el internacional entero
        serían miles de filas para nada, y el runner está en EEUU y la base en Irlanda.
     """
     if not asines:
         return {}
+    foto = foto_internacional(cur, fecha_foto)
+    if foto is None:
+        return {}
     cur.execute(
-        f"""SELECT DISTINCT ON (asin) asin, uds, fecha_foto FROM (
-                SELECT asin, fecha_foto, sum(quantity) AS uds
-                  FROM {TABLA_INTL_HIST}
-                 WHERE fecha_foto <= %s AND asin = ANY(%s)
-                 GROUP BY asin, fecha_foto
-            ) z ORDER BY asin, fecha_foto DESC;""",
-        (fecha_foto, list(asines)))
-    return {a: (int(u), f) for a, u, f in cur.fetchall()}
+        f"""SELECT asin, sum(quantity) AS uds
+              FROM {TABLA_INTL_HIST}
+             WHERE fecha_foto = %s AND asin = ANY(%s)
+             GROUP BY asin;""",
+        (foto, list(asines)))
+    return {a: (int(u), foto) for a, u in cur.fetchall()}
 
 
 def exigir_columnas(cur, tabla, columnas):
@@ -1555,7 +1606,9 @@ def main():
           flush=True)
     if puente['fuente_mas_vieja'] is not None:
         _viejo = (info['fecha_foto'] - puente['fuente_mas_vieja']).days
-        print(f"   · dato del internacional mas viejo  : {puente['fuente_mas_vieja']} "
+        # 🔑 Es UNA sola foto para toda la carga, asi que esta linea dice de que
+        #    dia es el internacional entero con el que se ha estimado hoy.
+        print(f"   · foto del internacional usada      : {puente['fuente_mas_vieja']} "
               f"({_viejo} dia(s) antes que esta foto)", flush=True)
         if _viejo >= 3:
             print("     ⚠️ Tres dias o mas: el internacional tambien se ha parado. Lo "
