@@ -15,7 +15,12 @@ name: Moloka - Procesar INVENTARIO_FBA
 # 🔴 EL RESCATE DEL 7-sep-2026, Y EL ORDEN IMPORTA. Ese día Amazon sirvió el informe
 #    con 24 columnas, la Guarda 1 lo rechazó y la carga se quedó cerrada: la foto viva
 #    es del 6-sep. El fichero sigue en el buzón. Para meterlo en su sitio:
-#        fichero = 50740020703.txt   ·   entorno = produccion   ·   modo = ensayo
+#        fichero = 50742020703.txt   ·   entorno = produccion   ·   modo = ensayo
+#    🔴 ESE NOMBRE SE CORRIGIÓ EL 7-sep-2026 Y CONVIENE SABER POR QUÉ: el encargo
+#       decía `50740020703.txt`, que es el contenido de las 09:2x. Fernando eligió el
+#       de las 09:56. Más abajo, en las mediciones, `50740020703.txt` sigue citado a
+#       propósito: es el fichero sobre el que se midió el informe de 24 columnas ese
+#       día, y eso no se reescribe. Lo que se carga es el otro.
 #    y, si el ensayo cuadra, el mismo disparo con modo = aplicar.
 #    ⚠️ HAY QUE HACERLO **ANTES** DE CARGAR NINGUNA FOTO MÁS NUEVA. `guarda_no_retroceder`
 #       impide cargar una foto anterior a la que ya está: en cuanto entre la del 8-sep,

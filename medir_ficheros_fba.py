@@ -50,6 +50,25 @@ BUCKET, CARPETA = 'informes', 'inventario_fba'
 SOLO_DIA = os.environ.get('SOLO_DIA', '').strip()
 
 
+def etag_de(obj):
+    """El eTag del listado, normalizado, o None si no sirve para comparar.
+
+    🔑 LA REGLA, del 7-sep-2026: **dos ficheros con el mismo eTag son el mismo
+       fichero, y el repetido se descarta sin abrir nada.** El eTag que devuelve el
+       Storage es el MD5 del contenido, y eso permite contestar «¿son el mismo?» con lo
+       que ya trae el listado, sin bajar un solo byte.
+    ⚠️ CON UNA CONDICIÓN, y por eso esto no devuelve el valor a secas: en una subida
+       por partes el eTag es `md5-N` y **ya no es el MD5 del contenido**. Cuando trae
+       guión no se usa para comparar: se baja el fichero y se compara su MD5 de verdad.
+       Medido el 7-sep-2026 en los cuatro .txt del día: los cuatro traen 32 hex sin
+       guión, o sea subida en una sola parte.
+    """
+    bruto = ((obj.get('metadata') or {}).get('eTag') or '').strip().strip('"')
+    if len(bruto) == 32 and all(c in '0123456789abcdefABCDEF' for c in bruto):
+        return bruto.lower()
+    return None
+
+
 def decodificar(crudo):
     """El mismo par de intentos que hace el procesador: BOM primero, cp1252 de reserva."""
     try:
@@ -96,9 +115,29 @@ def main():
             continue
         mirados += 1
 
+        # 🔑 EL REPETIDO NO SE BAJA. Si el eTag del listado ya lo hemos visto, es
+        #    el mismo fichero con otro nombre y no hay nada que medir en el.
+        etag = etag_de(o)
+        if etag is not None and etag in huellas:
+            huellas[etag].append(nombre)
+            print("· %s" % nombre)
+            print("    subido            : %s  ->  fecha_foto seria %s"
+                  % (o.get('updated_at') or o.get('created_at'), fecha))
+            print("    MISMO FICHERO que %s (mismo eTag). No se baja: no hay nada "
+                  "distinto que medir." % ", ".join(huellas[etag][:-1]))
+            print("", flush=True)
+            continue
+
         crudo = descargar_buzon(sb, BUCKET, "%s/%s" % (CARPETA, nombre))
         huella = hashlib.md5(crudo).hexdigest()
-        huellas.setdefault(huella, []).append(nombre)
+        # 🔬 El falsador del eTag: lo que dice el listado y lo que sale de bajar el
+        #    fichero tienen que coincidir. Si no, el eTag no es el MD5 (subida por partes
+        #    que se ha colado) y comparar por el estaria descartando ficheros distintos.
+        if etag is not None and etag != huella:
+            print("    ⚠️  el eTag del listado (%s) NO es el MD5 del fichero (%s). "
+                  "No se fia de el para comparar." % (etag, huella))
+            etag = None
+        huellas.setdefault(etag or huella, []).append(nombre)
         texto = decodificar(crudo)
         cab = cabecera_de(texto)
         modelo = modelo_del_disponible(cab)
@@ -107,10 +146,7 @@ def main():
         print("    subido            : %s  ->  fecha_foto seria %s"
               % (o.get('updated_at') or o.get('created_at'), fecha))
         print("    tamano            : %d bytes" % len(crudo))
-        print("    huella (md5)      : %s%s"
-              % (huella,
-                 ("   ← MISMO CONTENIDO que %s" % ", ".join(huellas[huella][:-1]))
-                 if len(huellas[huella]) > 1 else ""))
+        print("    huella (md5)      : %s" % huella)
         print("    encabezados       : %d" % len(cab))
         if modelo is not None:
             print("    modelo            : %s  (%s)" % (modelo, NOMBRE_MODELO[tuple(cab)]))
