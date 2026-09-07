@@ -1925,7 +1925,11 @@ def main():
     # 🔑 LA CABECERA, APARTE Y ANTES QUE NADA. `analizar()` no devuelve nada cuando
     #    aborta — y la carga que aborta es justo la que hay que apuntar en la libreta.
     cabecera_txt = cabecera_de(texto)
-    print(f"   · la cabecera trae {len(cabecera_txt)} encabezados", flush=True)
+    # 🔑 Y se imprimen los NOMBRES, no solo cuantos. Cuando Amazon cambia la forma del
+    #    informe, «24 encabezados» no dice nada y la lista lo dice todo — y esta linea
+    #    sale ANTES de tocar la base, asi que un ensayo la escupe pase lo que pase.
+    print(f"   · la cabecera trae {len(cabecera_txt)} encabezados: "
+          f"{', '.join(cabecera_txt)}", flush=True)
 
     # --- Conectar al ENTORNO ---
     # 🔴 SE CONECTA ANTES DE ANALIZAR, y el orden es el cambio de fondo del encargo F

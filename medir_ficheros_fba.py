@@ -31,6 +31,7 @@
 Se lanza por `.github/workflows/medir-ficheros-fba.yml`. Solo lectura, sin secretos de
 base de datos.
 """
+import hashlib
 import os
 import sys
 
@@ -77,6 +78,12 @@ def main():
           % (len(txts), ("  Filtro SOLO_DIA=%s" % SOLO_DIA) if SOLO_DIA else ""),
           flush=True)
 
+    # 🔑 EL MISMO FICHERO CON DOS NOMBRES, que es lo que aparecio el 7-sep-2026:
+    #    de los cuatro .txt de ese dia solo habia DOS contenidos, cada uno subido dos
+    #    veces. Sin esto, elegir «cual es la foto del dia» parece una decision entre
+    #    cuatro cuando en realidad es entre dos. Se agrupa por el MD5 del contenido.
+    huellas = {}
+
     mirados = 0
     for o in txts:
         nombre = o.get('name')
@@ -90,6 +97,8 @@ def main():
         mirados += 1
 
         crudo = descargar_buzon(sb, BUCKET, "%s/%s" % (CARPETA, nombre))
+        huella = hashlib.md5(crudo).hexdigest()
+        huellas.setdefault(huella, []).append(nombre)
         texto = decodificar(crudo)
         cab = cabecera_de(texto)
         modelo = modelo_del_disponible(cab)
@@ -98,6 +107,10 @@ def main():
         print("    subido            : %s  ->  fecha_foto seria %s"
               % (o.get('updated_at') or o.get('created_at'), fecha))
         print("    tamano            : %d bytes" % len(crudo))
+        print("    huella (md5)      : %s%s"
+              % (huella,
+                 ("   ← MISMO CONTENIDO que %s" % ", ".join(huellas[huella][:-1]))
+                 if len(huellas[huella]) > 1 else ""))
         print("    encabezados       : %d" % len(cab))
         if modelo is not None:
             print("    modelo            : %s  (%s)" % (modelo, NOMBRE_MODELO[tuple(cab)]))
@@ -141,6 +154,17 @@ def main():
 
     if SOLO_DIA and mirados == 0:
         sys.exit("Ningun .txt del buzon se subio el %s. Revisa la fecha." % SOLO_DIA)
+
+    repetidos = {h: n for h, n in huellas.items() if len(n) > 1}
+    print("--- CUANTOS CONTENIDOS DISTINTOS HAY, de verdad ---")
+    print("    %d fichero(s) mirados · %d contenido(s) distinto(s)"
+          % (mirados, len(huellas)))
+    for h, nombres in repetidos.items():
+        print("    · mismo fichero con %d nombres: %s" % (len(nombres), ", ".join(nombres)))
+    if repetidos:
+        print("    🔑 Elegir la foto del dia es elegir entre CONTENIDOS, no entre "
+              "nombres. Dos nombres del mismo contenido cargan exactamente lo mismo.")
+    print("")
     print("=== FIN · %d fichero(s) mirados · NO se ha escrito nada ===" % mirados,
           flush=True)
 
