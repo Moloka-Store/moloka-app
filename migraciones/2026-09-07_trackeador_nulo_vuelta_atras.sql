@@ -40,6 +40,20 @@
 --   lanzar esto → comprobar por SQL que la vista vuelve a su texto de partida.
 -- ============================================================================
 
+-- ── 0) LA FOTO DEL «ANTES» ──────────────────────────────────────────────────
+-- 🔴 AQUÍ TAMBIÉN HABÍA CIFRAS DE PRODUCCIÓN A PELO, y por tercera vez el mismo
+--    error: la escalera pasa por STAGING primero, donde la vista devuelve 1.708
+--    filas y no 1.776, así que la guarda abortaba por una diferencia de entornos.
+--    Lo que hay que exigir no es un número: es que **la vuelta atrás no mueva
+--    ningún dato**. Hoy el tránsito se conoce en todas las fichas, luego revertir
+--    tiene que dejar exactamente las mismas cifras, sean las que sean aquí.
+CREATE TEMP TABLE _pantalla_antes ON COMMIT DROP AS
+SELECT count(*) AS filas,
+       md5(string_agg(t::text, E'
+' ORDER BY t.asin, t.dominio)) AS huella,
+       sum(t.stock_fba_eu) AS suma_stock_fba_eu
+  FROM public.v_trackeador_pantalla t;
+
 CREATE OR REPLACE VIEW public.v_trackeador_pantalla AS
  WITH ven_pais AS (
          SELECT COALESCE(p.asin, l.asin) AS asin,
@@ -1287,7 +1301,7 @@ ALTER VIEW public.v_trackeador_pantalla SET (security_invoker = true);
 -- ── EL NÚMERO DE CONTROL, DENTRO DE LA TRANSACCIÓN ──────────────────────────
 DO $$
 DECLARE
-  n int; tapones int; suelos int;
+  n int; huella text; tapones int; suelos int;
 BEGIN
   -- 1 · 🔑 LA COMPROBACIÓN DE VERDAD ES SOBRE EL TEXTO, no sobre los datos: hoy el
   --     tránsito se conoce en todas las fichas, así que la version del 2b y esta
@@ -1308,14 +1322,21 @@ BEGIN
                     'y tenian que irse los 6.', suelos;
   END IF;
 
-  -- 2 · Y las cifras siguen siendo las de siempre.
-  SELECT count(*) INTO n FROM public.v_trackeador_pantalla;
-  IF n <> 1776 THEN
-    RAISE EXCEPTION 'ABORTA: la vista devuelve % filas y tenia que devolver 1776.', n;
+  -- 2 · Y no se ha movido ni un dato respecto a como estaba al empezar.
+  SELECT count(*), md5(string_agg(t::text, E'
+' ORDER BY t.asin, t.dominio))
+    INTO n, huella FROM public.v_trackeador_pantalla t;
+  IF n IS DISTINCT FROM (SELECT filas FROM _pantalla_antes) THEN
+    RAISE EXCEPTION 'ABORTA: la vista devuelve % filas y antes devolvia %.',
+                    n, (SELECT filas FROM _pantalla_antes);
   END IF;
-  SELECT sum(stock_fba_eu) INTO n FROM public.v_trackeador_pantalla;
-  IF n <> 26768 THEN
-    RAISE EXCEPTION 'ABORTA: suma de stock_fba_eu = % y tenia que ser 26768.', n;
+  IF huella IS DISTINCT FROM (SELECT p.huella FROM _pantalla_antes p) THEN
+    RAISE EXCEPTION 'ABORTA: revertir ha movido datos, y hoy no puede mover ninguno: '
+                    'el transito se conoce en todas las fichas.';
+  END IF;
+  IF (SELECT sum(t.stock_fba_eu) FROM public.v_trackeador_pantalla t)
+     IS DISTINCT FROM (SELECT suma_stock_fba_eu FROM _pantalla_antes) THEN
+    RAISE EXCEPTION 'ABORTA: la suma de stock_fba_eu ha cambiado al revertir.';
   END IF;
 
   -- 3 · No se ha perdido el SELECT ni la materializada.
@@ -1323,13 +1344,14 @@ BEGIN
     RAISE EXCEPTION 'ABORTA: `authenticated` se ha quedado sin SELECT sobre la vista.';
   END IF;
   SELECT count(*) INTO n FROM public.mv_trackeador_pantalla;
-  IF n <> 1776 THEN
-    RAISE EXCEPTION 'ABORTA: mv_trackeador_pantalla tiene % filas y tenia 1776.', n;
+  IF n = 0 THEN
+    RAISE EXCEPTION 'ABORTA: mv_trackeador_pantalla esta VACIA. Deja la pantalla en '
+                    'blanco sin dar error, y esta migracion no la toca.';
   END IF;
 
   RAISE NOTICE 'Numero de control OK: ha vuelto el COALESCE del transito, se han ido '
-               'los 6 suelos, 1776 filas con la suma de siempre, el SELECT en su '
-               'sitio y la materializada llena.';
+               'los 6 suelos, % filas sin mover un dato, el SELECT en su '
+               'sitio y la materializada llena.', n;
 END $$;
 
 -- ============================================================================
