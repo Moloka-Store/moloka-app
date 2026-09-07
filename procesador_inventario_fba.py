@@ -176,9 +176,12 @@ UMBRAL_FILAS = 150
 # constante muerta y falsa al lado de una guarda que sí funciona es peor que nada,
 # porque invita a confiar en ella.
 #
-# 🔑 Quien registra hoy la forma del informe es el CENSO (Guarda 11), que guarda
-#    cuántos encabezados vinieron **y cuáles**, carga a carga. Un ancla que nadie
-#    lee no es un ancla.
+# 🔑 Quien registra la forma del informe carga a carga sigue siendo el CENSO
+#    (Guarda 11), que guarda cuántos encabezados vinieron **y cuáles**.
+# ⚠️ Y desde el 7-sep-2026 SÍ hay un ancla del ancho, pero no es un número suelto:
+#    es el CATÁLOGO de modelos conocidos (`MODELO_26` / `MODELO_24`) que lee la
+#    Guarda 14, y compara la cabecera entera y en su orden. La diferencia con la
+#    constante muerta que había aquí es exactamente ésa: **una guarda la lee**.
 
 # ---------------------------------------------------------------------------
 # Columnas: (encabezado EXACTO del .txt, columna Postgres, tipo)
@@ -325,17 +328,125 @@ MODELO_TRANSITO_APARTE = 'transito_aparte'        # disponible = vendible + tran
 MODELO_TRANSITO_DENTRO = 'transito_dentro'        # disponible = vendible (ya lo lleva)
 MODELO_TRANSITO_DESCONOCIDO = 'transito_desconocido'   # el informe no lo dice
 
+# ---------------------------------------------------------------------------
+# EL CATÁLOGO DE MODELOS CONOCIDOS — Guarda 14. Dos formas, y ninguna más.
+# ---------------------------------------------------------------------------
+# 🔴 QUÉ CAMBIA HOY (7-sep-2026, encargo F paso 4): **el informe de 24 columnas
+#    deja de ser «un informe roto» y pasa a ser un MODELO CONOCIDO.** Hasta ahora
+#    entraba por descarte: cualquier cabecera que no llevase `afn-fc-transfer-quantity`
+#    se leía como «tránsito desconocido», viniera de donde viniera. O sea que un
+#    informe con veinte columnas mal, o con las columnas movidas de sitio, habría
+#    entrado exactamente igual que el degradado del 7-sep.
+#
+# 🔑 LO QUE ESTO CATALOGA ES LA CABECERA ENTERA Y EN SU ORDEN, no la presencia de
+#    dos columnas. Se comparan las 26 (o las 24) con `==`. Si Amazon quita, añade o
+#    MUEVE una tercera columna, esto no la reconoce y la Guarda 14 para la carga.
+#
+# ⚠️ Y SÍ, ESTO APRIETA UNA DECISIÓN QUE ANTES ERA MÁS FLOJA. En la Guarda 11 está
+#    escrito que «sobrar NO aborta», porque el fichero se lee por NOMBRE de columna
+#    y una de más no desplaza nada — y eso sigue siendo cierto para LEER. Lo que ha
+#    cambiado es lo que sabemos: el 7-sep Amazon movió el significado de una columna
+#    sin cambiarle el nombre, y una cabecera que no reconocemos ya no es «una columna
+#    de adorno», es un informe del que no sabemos qué está contando. Durante el mes
+#    que le queda a esta cañería —después entra la API—, parar y mirar cuesta menos
+#    que una cifra creíble y falsa.
+# 🔒 La puerta tiene nombre, como las otras: PERMITIR_MODELO_NUEVO=1. Entonces el
+#    modelo se decide por presencia (la regla vieja) y se GRITA que se ha entrado
+#    por una forma que nadie ha catalogado.
+#
+# 🔬 De dónde sale la lista: es la cabecera literal del .txt real, la misma que
+#    `test_inventario_fba.py` tiene copiada aparte desde el 23-ago-2026. Las dos se
+#    cotejan en el test — si sólo viviera aquí, el test estaría comprobando este
+#    fichero contra sí mismo.
+MODELO_26 = (
+    'sku', 'fnsku', 'asin', 'product-name', 'condition', 'your-price',
+    'mfn-listing-exists', 'mfn-fulfillable-quantity', 'afn-listing-exists',
+    'afn-warehouse-quantity', 'afn-fulfillable-quantity', 'afn-unsellable-quantity',
+    'afn-reserved-quantity', 'afn-total-quantity', 'per-unit-volume',
+    'afn-inbound-working-quantity', 'afn-inbound-shipped-quantity',
+    'afn-inbound-receiving-quantity', 'afn-researching-quantity',
+    'afn-reserved-future-supply', 'afn-future-supply-buyable',
+    'afn-fulfillable-quantity-local', 'afn-fulfillable-quantity-remote',
+    'afn-fc-transfer-quantity', 'afn-onhand-buyable-quantity', 'store',
+)
+# 🔒 El degradado se DERIVA quitando las dos esperadas, no se retecla: dos listas
+#    escritas a mano se separan en cuanto una cambia, y entonces el catálogo miente.
+MODELO_24 = tuple(h for h in MODELO_26 if h not in ESPERADAS)
+
+MODELOS_CONOCIDOS = {
+    MODELO_26: MODELO_TRANSITO_APARTE,
+    MODELO_24: MODELO_TRANSITO_DESCONOCIDO,
+}
+NOMBRE_MODELO = {
+    MODELO_26: 'el largo (26 columnas, con el transito)',
+    MODELO_24: 'el corto (24 columnas, sin el transito), el que sirve Amazon desde el 7-sep-2026',
+}
+
 
 def modelo_del_disponible(cabecera):
-    """Bajo qué regla se lee el disponible en ESTA versión del informe.
+    """Bajo qué regla se lee el disponible con ESTA cabecera. None = no catalogada.
 
     🔑 Ésta es la ÚNICA puerta. El día que Amazon complete el cambio, aquí —y sólo
-       aquí— se aprende a devolver MODELO_TRANSITO_DENTRO para la versión que
-       corresponda. Ninguna otra parte del procesador decide esto.
+       aquí— se cataloga la cabecera nueva con MODELO_TRANSITO_DENTRO. Ninguna otra
+       parte del procesador decide esto.
     """
-    if HEADER_FC in cabecera:
-        return MODELO_TRANSITO_APARTE
-    return MODELO_TRANSITO_DESCONOCIDO
+    return MODELOS_CONOCIDOS.get(tuple(cabecera))
+
+
+def _diferencias(cabecera, modelo):
+    """(faltan, sobran, movidas) de `cabecera` respecto de un modelo del catálogo."""
+    faltan = [h for h in modelo if h not in cabecera]
+    sobran = [h for h in cabecera if h not in modelo]
+    movidas = (not faltan and not sobran and tuple(cabecera) != tuple(modelo))
+    return faltan, sobran, movidas
+
+
+def guarda_modelo_conocido(cabecera, permitir=None, escribir=print):
+    """Guarda 14: la cabecera tiene que ser uno de los dos modelos catalogados.
+
+    🔒 Función PURA: entra una lista de encabezados, sale el modelo o un Aborta.
+    """
+    if permitir is None:
+        permitir = os.environ.get('PERMITIR_MODELO_NUEVO') == '1'
+    modelo = modelo_del_disponible(cabecera)
+    if modelo is not None:
+        return modelo
+
+    detalle = []
+    for conocido in (MODELO_26, MODELO_24):
+        faltan, sobran, movidas = _diferencias(cabecera, conocido)
+        trozos = []
+        if faltan:
+            trozos.append("le faltan %d (%s)" % (len(faltan), ", ".join(faltan)))
+        if sobran:
+            trozos.append("le sobran %d (%s)" % (len(sobran), ", ".join(sobran)))
+        if movidas:
+            trozos.append("trae las mismas columnas pero CAMBIADAS DE ORDEN")
+        detalle.append("     - contra %s: %s"
+                       % (NOMBRE_MODELO[conocido], "; ".join(trozos) or "?"))
+
+    cuerpo = (
+        "[Guarda 14] La cabecera de este informe NO es ninguno de los dos modelos "
+        "conocidos.\n"
+        "   Trae %d encabezados: %s\n%s\n"
+        "   Los dos catalogados son el de 26 columnas y el de 24 (el degradado que "
+        "Amazon sirve desde el 7-sep-2026). Cualquier otra forma para la carga: no "
+        "sabemos que esta contando, y un informe que cuenta otra cosa no da un error, "
+        "da una cifra creible.\n"
+        "   QUE HAY QUE HACER: mirar el .txt, decidir que significa la forma nueva y "
+        "CATALOGARLA en MODELOS_CONOCIDOS con su modelo de disponible."
+        % (len(cabecera), list(cabecera), "\n".join(detalle)))
+
+    if permitir:
+        escribir("")
+        escribir("AVISO  " + cuerpo)
+        escribir("   PERMITIR_MODELO_NUEVO=1 la salta: el modelo se decide por "
+                 "presencia de la columna del transito, que es la regla vieja.")
+        escribir("   Que conste, y que se mire.")
+        escribir("")
+        return MODELO_TRANSITO_APARTE if HEADER_FC in cabecera else MODELO_TRANSITO_DESCONOCIDO
+    raise Aborta(cuerpo + "\n   (Si hay que cargarlo YA y se asume el riesgo: "
+                          "PERMITIR_MODELO_NUEVO=1.)")
 DERIVADAS_COLS = [c for c, _ in DERIVADAS]
 ORIGEN_INFORME = 'informe'
 ORIGEN_DESCONOCIDO = 'desconocido'
@@ -415,7 +526,7 @@ def _reparto(excedente, pesos):
     return partes
 
 
-def estimar_disponible(filas, intl, escribir=print):
+def estimar_disponible(filas, intl, fecha_foto=None, escribir=print):
     """Rellena disponible_estimado / _origen / _fuente_fecha. Devuelve el resumen.
 
     🔒 Función PURA: `intl` es {asin: (unidades, fecha_foto)}, ya leído de la base
@@ -441,7 +552,19 @@ def estimar_disponible(filas, intl, escribir=print):
 
     resumen = {'leido': 0, 'estimado': 0, 'desconocido': 0,
                'sin_intl': 0, 'sin_reparto': [], 'fuente_mas_vieja': None,
-               'aporta_uds': 0, 'discrepa': []}
+               'aporta_uds': 0, 'discrepa': [],
+               # 🔴 EL FALLO SILENCIOSO QUE ESTO CIERRA (punto 4 del encargo F,
+               #    7-sep-2026): cuando el internacional NO es del mismo día que este
+               #    informe, el disponible se estima con una foto VIEJA y hasta hoy
+               #    nada lo decía. Medido ese día en producción: el internacional
+               #    tiene 21 fotos entre el 23-jul y el 7-sep, con huecos de hasta 7
+               #    días, PERO los 11 días del histórico del inventario caen todos en
+               #    días que SÍ tienen internacional, así que el desfase es 0 en los 12
+               #    casos guardados. O sea que esto no ha pasado NUNCA todavía — que es
+               #    exactamente el momento de ponerle el aviso, porque el día que uno de
+               #    los dos informes llegue sin el otro, la cifra saldrá igual de
+               #    creíble y será de otro día.
+               'fuente_vieja': 0, 'fuente_dias': None}
 
     for asin, grupo in por_asin.items():
         uds_intl, fecha_intl = intl.get(asin, (None, None))
@@ -476,6 +599,9 @@ def estimar_disponible(filas, intl, escribir=print):
                 reg['disponible_estimado'] = vendible + parte
                 reg['disponible_fuente_fecha'] = fecha_intl
                 resumen['aporta_uds'] += parte
+                if fecha_foto is not None and fecha_intl != fecha_foto:
+                    resumen['fuente_vieja'] += 1
+                    resumen['fuente_dias'] = (fecha_foto - fecha_intl).days
                 if (resumen['fuente_mas_vieja'] is None
                         or fecha_intl < resumen['fuente_mas_vieja']):
                     resumen['fuente_mas_vieja'] = fecha_intl
@@ -494,6 +620,23 @@ def estimar_disponible(filas, intl, escribir=print):
             else:
                 reg['disponible_origen'] = ORIGEN_DESCONOCIDO
                 resumen['desconocido'] += 1
+
+    if resumen['fuente_vieja']:
+        escribir("")
+        escribir("  ==================================================================")
+        escribir("  EL DISPONIBLE DE HOY SE ESTA ESTIMANDO CON UNA FOTO DE OTRO DIA.")
+        escribir("  ==================================================================")
+        escribir("    fichas afectadas : %d" % resumen['fuente_vieja'])
+        escribir("    foto usada       : %s" % resumen['fuente_mas_vieja'])
+        escribir("    esta carga es del: %s  (%d dia(s) despues)"
+                 % (fecha_foto, resumen['fuente_dias']))
+        escribir("")
+        escribir("  El informe del almacen internacional y el de FBA llegan juntos, y por")
+        escribir("  eso hasta hoy el desfase habia sido 0 en los 12 casos guardados. Si")
+        escribir("  esto sale, uno de los dos NO ha entrado: el disponible que se escriba")
+        escribir("  para estas fichas no es de hoy, y una cifra sin la fecha del dato que")
+        escribir("  la sostiene miente. Carga el internacional del dia y repite.")
+        escribir("")
 
     if resumen['sin_reparto']:
         escribir("")
@@ -560,6 +703,22 @@ def _clean(v):
     return ('' if v is None else str(v)).replace('﻿', '').replace('\xa0', ' ').strip()
 
 
+def cabecera_de(texto):
+    """Sólo la cabecera del .txt, sin parsear el resto. [] si no hay ni una línea.
+
+    🔑 EXISTE PARA LA LIBRETA, y ése es todo el motivo. Cuando `analizar()` aborta
+       —que es lo que pasó el 7-sep-2026— no devuelve nada, así que sin esto no habría
+       con qué anotar en `inventario_fba_cabecera` qué forma tenía el informe que se
+       rechazó. Y la carga que se rechaza es justo la que hay que dejar escrita.
+    🔒 Por `leer_tsv`, el mismo lector que el resto del fichero: la cabecera se lee
+       igual que los datos o algún día dirán cosas distintas.
+    """
+    primera = texto.split('\n', 1)[0]
+    for fila in leer_tsv(primera):
+        return [_clean(c) for c in fila]
+    return []
+
+
 # ---------------------------------------------------------------------------
 # 1) Parseo + guardas estructurales (1..9). Sin tocar la base todavía.
 #    🔒 Función PURA: entra texto, sale un dict o un Aborta. Por eso se puede
@@ -591,6 +750,12 @@ def analizar(texto, fichero, fecha_foto, umbral_filas=None):
             "(regla que mató al PR #26: se ABORTA, no se aproxima):\n   · "
             + "\n   · ".join(repr(h) for h in faltan)
             + f"\n   Cabecera real ({len(cabecera)} cols): {cabecera}")
+
+    # Guarda 14: y además la cabecera ENTERA tiene que ser un modelo catalogado.
+    # 🔑 Va justo detrás de la Guarda 1 y no al final: si el informe ha cambiado de
+    #    forma, no tiene sentido seguir midiendo sus filas. La Guarda 1 mira que estén
+    #    las obligatorias; ésta mira que no haya nada más, ni de menos, ni movido.
+    modelo = guarda_modelo_conocido(cabecera)
 
     filas_datos = filas[1:]
 
@@ -783,7 +948,7 @@ def analizar(texto, fichero, fecha_foto, umbral_filas=None):
             'esperadas_ausentes': esperadas_ausentes,
             'esperadas_vacias': esperadas_vacias,
             'fc_origen': fc_origen,
-            'modelo_disponible': modelo_del_disponible(cabecera),
+            'modelo_disponible': modelo,
             'inbound_total': sum(f['registro']['inbound_shipped'] for f in salida),
             'precios_vacios': precios_vacios,
             'onhand_discrepa': onhand_discrepa,
@@ -927,68 +1092,170 @@ def avisar_censo(cabecera_nueva, cabecera_anterior, escribir=print):
 
 
 # ---------------------------------------------------------------------------
-# GUARDA 10 — CONTINUIDAD CONTRA LA FOTO ANTERIOR. La que faltaba.
+# GUARDA 10 — EL BALANCE DEL DÍA. Lo que cae tiene que caber en lo que se vendió.
 # ---------------------------------------------------------------------------
 # 🔴 EL AGUJERO QUE TAPA: todas las guardas de arriba miran el fichero CONSIGO
 #    MISMO. Ninguna lo mira contra el de ayer. Y el 7-sep-2026 Amazon sirvió un
 #    informe **internamente coherente** —cuadra consigo mismo al dígito y pasa las
-#    otras diez guardas— al que le faltaban dos columnas y las unidades que había
-#    detrás de una de ellas. Lo que lo paró ese día fue la Guarda 1, porque la
-#    columna que faltaba estaba en el contrato: **pura suerte de contrato**. El día
-#    que se caiga una que no esté, no salta nada y el disponible entra corto en
-#    silencio. Un disponible corto no da un error: da una cifra creíble con la que
-#    se decide reponer y se decide precio.
+#    otras guardas— al que le faltaban dos columnas y las unidades que había detrás
+#    de una de ellas. Lo que lo paró ese día fue la Guarda 1, porque la columna que
+#    faltaba estaba en el contrato: **pura suerte de contrato**.
 #
-# 🔑 QUÉ COMPARA, Y POR QUÉ DEPENDE DE LA VERSIÓN (esto es el corazón):
-#      · MISMA versión que la carga anterior → compara el ALMACÉN. Es la magnitud
-#        más completa y la que antes se mueve.
-#      · VERSIÓN DISTINTA → compara el STOCK VENDIBLE. El almacén cambió de
-#        significado el 7-sep (dejó de incluir el tránsito) y comparar el de una
-#        versión con el de otra da una caída de 246 unidades que no es una caída.
-#        El vendible sí es homogéneo: el 7-sep se movió +16, que es un día normal.
+# 🔴 QUÉ HA CAMBIADO HOY, Y POR QUÉ (encargo F, punto 6, 7-sep-2026). Esta guarda
+#    comparó hasta hoy el ALMACÉN o el VENDIBLE contra un TECHO FIJO escrito en el
+#    código (160 y 145 uds/día). Dos problemas, los dos medidos en producción:
+#      · UN TECHO FIJO NO SABE QUÉ DÍA ES. Las ventas diarias de los últimos 60 días
+#        (`ledger_movimientos`, event_type='Shipments', hasta el 6-sep-2026) van de
+#        **15 a 155 unidades**, media 89,4. Cualquier número fijo o aborta un día
+#        bueno o deja pasar un día malo, y con el mismo número hace las dos cosas.
+#        ⚠️ Y en concreto **89 NO vale**: es la MEDIA, o sea que la mitad de los días
+#        está por encima. Un techo puesto en la media aborta la carga un día bueno.
+#      · Y NINGUNA DE LAS DOS MAGNITUDES ERA LA QUE IMPORTA. Con esta tabla se decide
+#        reponer y se decide precio, y eso se decide sobre el DISPONIBLE.
 #
-# 🔬 LOS DOS TECHOS, MEDIDOS en `inventario_fba_historico`, no inventados.
-#    Ventana 23-ago → 6-sep-2026: 11 fotos, 10 saltos, huecos de 1 a 3 días
-#    (por eso todo se normaliza POR DÍA antes de comparar).
-#      · stock vendible, variación diaria real: de −91 a +40. Peor caída 91.
-#      · almacén, variación diaria real:        de −100 a +130. Peor caída 100.
-#    Con un factor de 1,6 sobre la peor caída observada:
-#      · vendible: 91 × 1,6 = 145,6 → **145 uds/día**
-#      · almacén: 100 × 1,6 = 160   → **160 uds/día**
-#    ⚠️ EL FACTOR NO ES DECORATIVO Y LA BASE ES CORTA: son 10 saltos, y las dos
-#       peores caídas del vendible (−85 y −91) son CONSECUTIVAS, o sea que la cola
-#       de la distribución llega de verdad hasta ahí y el máximo real está
-#       probablemente por encima de 91. Con un factor más apretado esta guarda
-#       saltaría en días legítimos, se aprendería a forzar, y el día que saltase de
-#       verdad nadie la leería. Es el caso exacto de §3 de CLAUDE.md.
-#    🔒 Contraste: el 7-sep el almacén cayó 246, que es 2,5 veces la peor caída
-#       observada. Esta guarda lo caza con holgura y sin apretar el techo.
+# 🔑 EL DISPONIBLE, CON LA MISMA CUENTA A LOS DOS LADOS DE LA RESTA:
+#        available + fc_transfer   si el informe trajo el tránsito      ('leido')
+#        disponible_estimado       si no, y el internacional lo permite ('estimado')
+#        available                 si tampoco ('desconocido': el vendible es el suelo)
+#    🔒 Así la resta es HOMOGÉNEA aunque el informe cambie de versión por el medio,
+#       que es justo lo que pasó el 7-sep. Comparar el almacén de una versión con el
+#       de otra daba una caída de 246 unidades que no era una caída; y comparar el
+#       vendible sólo era homogéneo porque dejaba el tránsito FUERA de las dos fotos,
+#       o sea sin mirar precisamente las unidades que se estaban perdiendo.
 #
-# ⚠️ ES UN SUELO POR CAÍDA, NO POR SUBIDA, a propósito: una entrada de mercancía
-#    puede subir el stock todo lo que quiera en un día (llega un camión). Lo que no
-#    puede es BAJAR más rápido de lo que se vende.
+# 🔬 EL CASO QUE ESTO TIENE QUE CAZAR, con las cifras de producción del 7-sep-2026:
+#       disponible del 6-sep  6.692  (6.437 vendible + 255 tránsito, 381 fichas)
+#       vendible del 7-sep    6.453
+#    Si el informe recortado entrase sin puente, el disponible caería **239 unidades
+#    en un día**. Ese día se vendieron del orden de 90-155: la resta NO cuadra, y lo
+#    que hay detrás no es una venta, es una columna que Amazon dejó de mandar.
+#
+# 🔬 EL MÁRGEN, Y DE DÓNDE SALE SU NÚMERO. Medido sobre los 10 saltos del histórico
+#    (23-ago → 6-sep-2026, huecos de 1 a 3 días), comparando la caída del disponible
+#    con las unidades que salió el ledger en esa misma ventana:
+#        caída 111 / ventas  81      caída  76 / ventas  46      caída 227 / ventas 201
+#        caída  95 / ventas 102      caída  73 / ventas  87      caída  58 / ventas  95
+#        caída  91 / ventas 110      y tres saltos en que el disponible SUBIÓ
+#    El disponible puede caer algo más que lo vendido —retiradas, mermas, tránsito que
+#    se recoloca—, pero **el exceso sobre las ventas nunca pasó de +30 unidades**.
+#    De ahí el margen: 30 × 2 = **60 unidades por día** de holgura sobre lo vendido.
+#    ⚠️ NO es un techo: es lo que se le SUMA a las ventas medidas de esos días. Un día
+#       de 46 ventas admite una caída de 106; uno de 155, de 215. El número se mueve
+#       con el día, que es lo que un techo fijo no sabe hacer.
+#
+# ⚠️ EL LEDGER LLEGA TARDE, Y ESO ES LO NORMAL, NO LA EXCEPCIÓN. Medido el 7-sep: el
+#    ledger llega hasta el 6-sep y el informe FBA que hay que cargar es del 7. Para los
+#    días que el ledger todavía no cubre se usa el **pico diario de los últimos 60
+#    días** (155 uds el 6-sep-2026), también MEDIDO en cada carga: es lo más que se ha
+#    vendido nunca en un día, así que no puede abortar por un día bueno. Con eso, el
+#    caso del 7-sep sigue saltando: techo 155 + 60 = 215 contra una caída de 239.
+#
+# 🔴 Y SI NO HAY LEDGER NINGUNO, no se aborta: se GRITA que el balance no se ha
+#    podido comprobar. Un ledger vacío daría ventas 0, y con ventas 0 esta guarda
+#    abortaría todos los días por una causa que no tiene nada que ver con el informe
+#    de inventario — que es la definición de ruido futuro (§3 de CLAUDE.md). Parar el
+#    inventario del almacén porque otra cañería va con retraso no arregla nada.
+#
+# ⚠️ ES UN SUELO POR CAÍDA, NO POR SUBIDA, a propósito: una entrada de mercancía puede
+#    subir el stock todo lo que quiera en un día (llega un camión). Lo que no puede es
+#    BAJAR más rápido de lo que se vende.
 #
 # 🔴 LA PUERTA TIENE NOMBRE: PERMITIR_SALTO=1, mismo patrón que
-#    PERMITIR_UMBRAL_BAJO. Lo que no se hace es bajar el techo hasta que deje de
+#    PERMITIR_UMBRAL_BAJO. Lo que no se hace es subir el margen hasta que deje de
 #    molestar.
-TECHO_CAIDA_VENDIBLE_DIA = 145   # peor caída medida 91 (10 saltos, 23-ago→6-sep) × 1,6
-TECHO_CAIDA_ALMACEN_DIA = 160    # peor caída medida 100 (misma ventana) × 1,6
-CAIDA_MAX_FICHAS = 0.15          # medido: el peor día perdió un 0,5% de las fichas
+MARGEN_CAIDA_DIA = 60    # el peor exceso medido de la caída sobre las ventas fue +30 × 2
+CAIDA_MAX_FICHAS = 0.15  # medido: el peor día perdió un 0,5% de las fichas
+DIAS_VENTANA_PICO = 60   # la ventana sobre la que se mide el pico diario de ventas
 
 
-def guarda_continuidad(fecha_ant, fecha_nueva, version_igual,
-                       vendible_ant, vendible_nuevo,
-                       almacen_ant, almacen_nuevo,
-                       fichas_ant, fichas_nuevas,
-                       techo_dia=None, permitir_salto=None, escribir=print):
-    """Compara la foto que entra con la que ya está. Aborta si el salto es imposible.
+def disponible_de(reg):
+    """El disponible de UNA ficha. La misma regla a los dos lados de la resta.
 
-    🔒 Función PURA a propósito: entra lo que dice la base y lo que dice el
-       fichero, sale un Aborta o nada. Así se prueba sin base y sin red, con
-       números a mano (`test_inventario_fba.py`).
+    🔴 `available + fc_transfer` con `fc_transfer` a NULO da NULO, no `available`:
+       por eso el orden importa y por eso NO hay ningún `or 0` sobre el tránsito. Un
+       tránsito que no se sabe no vale cero (Stock 8); lo que se hace es bajar al
+       escalón siguiente, que es la estimación, y si tampoco la hay, al vendible — que
+       es un SUELO cierto, no una cifra completa.
+    """
+    if reg.get('fc_transfer') is not None:
+        return (reg.get('available') or 0) + reg['fc_transfer']
+    if reg.get('disponible_estimado') is not None:
+        return reg['disponible_estimado']
+    return reg.get('available') or 0
 
-    Devuelve la lista de motivos. Vacía = todo en orden. No vacía sólo puede pasar
-    si PERMITIR_SALTO=1 la dejó pasar, y entonces ya ha gritado.
+
+def disponible_total(filas):
+    """El disponible de toda la foto que entra. Se llama DESPUÉS del puente."""
+    return sum(disponible_de(f['registro']) for f in filas)
+
+
+# 🔒 La MISMA regla que `disponible_de()`, escrita en SQL para el lado de la base.
+#    Van juntas y con el mismo comentario a propósito: el día que una cambie y la otra
+#    no, la resta compararía dos cuentas distintas y la diferencia parecería un salto.
+SQL_DISPONIBLE = "coalesce(available + fc_transfer, disponible_estimado, available)"
+
+TABLA_LEDGER = 'ledger_movimientos'
+EVENTO_VENTA = 'Shipments'
+
+
+def ventas_del_ledger(cur, desde, hasta):
+    """Las unidades que SALIERON de los almacenes de Amazon entre dos fotos.
+
+    🔑 `ledger_movimientos` con event_type='Shipments' es la SALIDA FÍSICA real, de
+       TODOS los mercados. No se usa `transacciones_movimientos` —que es la otra
+       fuente de ventas— porque sólo tiene ES, IT y FR: lo vendido en Alemania o en
+       Países Bajos no está ahí, y una guarda que mide de menos aborta de más.
+       (Medido el 7-sep-2026 sobre 60 días: ledger media 89,4 y pico 155; transacciones
+       media 90,0 y pico 158 — se parecen, pero el ledger es el que baja el stock.)
+    🔒 Las cantidades llegan NEGATIVAS (una salida), de ahí el abs().
+
+    Devuelve el dict que lee la Guarda 10, o None si no hay ledger que leer.
+    """
+    cur.execute("SELECT to_regclass(%s);", ('public.' + TABLA_LEDGER,))
+    if cur.fetchone()[0] is None:
+        return None
+    cur.execute("SELECT max(fecha) FROM %s;" % TABLA_LEDGER)
+    hasta_ledger = cur.fetchone()[0]
+    if hasta_ledger is None:
+        return None
+
+    hasta_util = min(hasta, hasta_ledger)
+    dias = (hasta - desde).days
+    dias_cubiertos = max((hasta_util - desde).days, 0)
+
+    cur.execute(
+        "SELECT coalesce(sum(abs(quantity)), 0) FROM %s "
+        "WHERE event_type = %%s AND fecha > %%s AND fecha <= %%s;" % TABLA_LEDGER,
+        (EVENTO_VENTA, desde, hasta_util))
+    uds = int(cur.fetchone()[0] or 0)
+
+    # El pico diario de la ventana, MEDIDO en cada carga: es lo que cubre los días que
+    # el ledger todavía no ha cargado. Un número escrito a mano aquí volvería a ser el
+    # techo fijo que este parche viene a quitar.
+    cur.execute(
+        "SELECT coalesce(max(uds), 0) FROM ("
+        "  SELECT fecha, sum(abs(quantity)) AS uds FROM %s"
+        "   WHERE event_type = %%s AND fecha > %%s - %%s GROUP BY fecha) t;" % TABLA_LEDGER,
+        (EVENTO_VENTA, hasta_ledger, DIAS_VENTANA_PICO))
+    pico = int(cur.fetchone()[0] or 0)
+
+    return {'uds': uds, 'dias': dias, 'dias_cubiertos': dias_cubiertos,
+            'dias_sin_datos': max(dias - dias_cubiertos, 0),
+            'hasta_ledger': hasta_ledger, 'pico_dia': pico}
+
+
+def guarda_continuidad(fecha_ant, fecha_nueva, disponible_ant, disponible_nuevo,
+                       fichas_ant, fichas_nuevas, ventas=None,
+                       permitir_salto=None, escribir=print):
+    """Compara la foto que entra con la que ya está. Aborta si la resta no cuadra.
+
+    🔒 Función PURA a propósito: entra lo que dice la base y lo que dice el fichero,
+       sale un Aborta o nada. Las ventas llegan YA MEDIDAS (`ventas_del_ledger`), que
+       es lo único que toca la base. Así se prueba sin base y sin red, con números a
+       mano (`test_inventario_fba.py`).
+
+    Devuelve la lista de motivos. Vacía = todo en orden. No vacía sólo puede pasar si
+    PERMITIR_SALTO=1 la dejó pasar, y entonces ya ha gritado.
     """
     if permitir_salto is None:
         permitir_salto = os.environ.get('PERMITIR_SALTO') == '1'
@@ -1005,32 +1272,49 @@ def guarda_continuidad(fecha_ant, fecha_nueva, version_igual,
     if dias <= 0:
         return []
 
-    # 🔑 LA ELECCIÓN. Con otra versión del informe, el almacén no es comparable.
-    if version_igual:
-        que, ant, nuevo = 'El almacen', almacen_ant, almacen_nuevo
-        techo_dia = TECHO_CAIDA_ALMACEN_DIA if techo_dia is None else techo_dia
-        coletilla = ""
-    else:
-        que, ant, nuevo = 'El stock vendible', vendible_ant, vendible_nuevo
-        techo_dia = TECHO_CAIDA_VENDIBLE_DIA if techo_dia is None else techo_dia
-        coletilla = ("\n   Se compara el stock vendible y no el almacen porque el "
-                     "informe ha cambiado de version, y entre versiones distintas el "
-                     "almacen no quiere decir lo mismo.")
-
     motivos = []
-    caida = (ant or 0) - (nuevo or 0)
-    techo = techo_dia * dias
-    if caida > techo:
-        motivos.append(
-            "%s ha caido %d unidades en %d dia(s), y lo maximo que puede bajar en "
-            "ese tiempo son %d.%s\n"
-            "   Ese techo son %d unidades al dia: la peor caida diaria medida en el "
-            "historico (23-ago a 6-sep-2026, 10 saltos) por 1,6 de holgura.\n"
-            "   Para que esto fuera movimiento real habria que haber sacado %d "
-            "unidades del almacen en %d dia(s). No pasa.\n"
-            "   Lo que si pasa, y ya paso el 7-sep-2026, es que Amazon sirva un "
-            "informe que cuadra consigo mismo pero deja unidades fuera."
-            % (que, caida, dias, techo, coletilla, techo_dia, caida, dias))
+    caida = (disponible_ant or 0) - (disponible_nuevo or 0)
+
+    if ventas is None:
+        escribir("")
+        escribir("⚠️  [Guarda 10] EL BALANCE DEL DIA NO SE HA PODIDO COMPROBAR: no hay "
+                 "ventas que leer en %s." % TABLA_LEDGER)
+        escribir("     El disponible pasa de %s a %s (%+d) entre el %s y el %s, y esta "
+                 "carga NO lleva esa cifra contrastada contra nada."
+                 % (disponible_ant, disponible_nuevo, -caida, fecha_ant, fecha_nueva))
+        escribir("     Con el ledger vacio, las ventas medidas serian 0 y esta guarda "
+                 "abortaria TODOS los dias por una causa que no tiene que ver con el "
+                 "informe de inventario. Por eso avisa en vez de parar. MIRALO.")
+        escribir("")
+    else:
+        techo = (ventas['uds'] + ventas['pico_dia'] * ventas['dias_sin_datos']
+                 + MARGEN_CAIDA_DIA * dias)
+        if caida > techo:
+            coletilla = ""
+            if ventas['dias_sin_datos']:
+                coletilla = (
+                    "\n   Ojo: el ledger solo llega hasta el %s, asi que %d de esos %d "
+                    "dia(s) no tienen ventas cargadas y se han contado al pico diario de "
+                    "los ultimos %d dias (%d uds/dia), que es lo mas que se ha vendido "
+                    "nunca en un dia."
+                    % (ventas['hasta_ledger'], ventas['dias_sin_datos'], dias,
+                       DIAS_VENTANA_PICO, ventas['pico_dia']))
+            motivos.append(
+                "El disponible ha caido %d unidades entre el %s y el %s, y en esos "
+                "%d dia(s) se vendieron %d.%s\n"
+                "   El maximo que puede caer son %d: lo vendido mas %d uds/dia de "
+                "margen. Ese margen esta medido — en los 10 saltos del historico "
+                "(23-ago a 6-sep-2026) la caida del disponible nunca paso de las ventas "
+                "en mas de 30 unidades.\n"
+                "   Para que esto fuera movimiento real habrian tenido que salir %d "
+                "unidades del almacen. No pasa.\n"
+                "   Lo que si pasa, y ya paso el 7-sep-2026, es que Amazon sirva un "
+                "informe que cuadra consigo mismo pero deja unidades fuera: ese dia el "
+                "disponible habria caido 239 (6.692 -> 6.453) sin que se vendiera nada "
+                "parecido."
+                % (caida, fecha_ant, fecha_nueva, dias,
+                   ventas['uds'] + ventas['pico_dia'] * ventas['dias_sin_datos'],
+                   coletilla, techo, MARGEN_CAIDA_DIA, caida))
 
     if fichas_nuevas < fichas_ant * (1 - CAIDA_MAX_FICHAS):
         perdido = (fichas_ant - fichas_nuevas) / float(fichas_ant) * 100
@@ -1060,26 +1344,31 @@ def guarda_continuidad(fecha_ant, fecha_nueva, version_igual,
 # ---------------------------------------------------------------------------
 # GUARDA 12 — EL CERROJO: con el tránsito en DESCONOCIDO, la carga NO se abre.
 # ---------------------------------------------------------------------------
-# 🔴 ESTO ES UN CERROJO TEMPORAL Y TIENE FECHA DE CADUCIDAD ESCRITA. Que
-#    `fc_transfer` pueda ser NULL ya está hecho y probado aquí arriba; lo que
-#    todavía NO está hecho es que quien lo LEE sepa distinguir NULL de 0.
+# 🔴 QUÉ IMPIDE, en una frase: que entre una carga con el tránsito a NULO mientras
+#    quien lo LEE siga convirtiendo ese «no se sabe» en un CERO. Que `fc_transfer`
+#    pueda ser NULL está hecho y probado aquí arriba; lo que hay que comprobar es
+#    quién lo lee después.
 #
-# 🔬 MEDIDO EN PRODUCCIÓN el 7-sep-2026, leyendo las definiciones de los objetos:
-#    los cuatro que usan la columna hacen `COALESCE(fc_transfer, 0)`.
-#      · salud_fba              → inventory_supply_at_fba = available + fc_transfer + …
-#      · v_salud_asin           → disponible = sum(available + fc_transfer), y de ahí
-#                                 sale la cobertura en días
-#      · v_trackeador_pantalla  → stock_fba_eu = stock_vendible + stock_fc_transfer
-#      · mv_trackeador_pantalla → la materializada que sirve la pantalla
-#    O sea que un NULL entraría por esos cuatro sitios convertido en CERO, y el
-#    disponible quedaría ~250 unidades corto **sin que nada lo dijera**. Es
-#    exactamente el fallo silencioso que todo este trabajo intenta evitar: abrir la
-#    carga hoy sería cambiar un aborto ruidoso por una cifra falsa y creíble.
+# 🔬 LA MEDICIÓN QUE LO ABRIÓ. El 7-sep-2026 por la mañana los cuatro consumidores
+#    hacían `COALESCE(fc_transfer, 0)`, así que un NULL habría entrado por esos
+#    cuatro sitios convertido en cero y el disponible habría quedado ~250 unidades
+#    corto **sin que nada lo dijera**. Esa misma tarde, leídas otra vez sus
+#    definiciones en producción, los cuatro estaban ya arreglados: usan
+#    `CASE WHEN count(*) = count(fc_transfer) THEN sum(…) ELSE NULL END`, que es
+#    tratar el nulo como lo que es.
 #
-# 🔑 CÓMO SE ABRE, y por qué está escrito así: se vacía esta lista, en el PR que
-#    arregle esas cuatro definiciones para que traten el NULO como desconocido y no
-#    como cero. La lista NO es documentación: es el cerrojo. Mientras tenga un
-#    nombre dentro, la carga con tránsito desconocido para.
+# 🔑 CÓMO SE ABRE, Y ESTO ES LO QUE CAMBIÓ EL 7-sep-2026 (encargo F): **ya no se
+#    abre vaciando una lista a mano.** Antes había aquí una lista de cuatro nombres
+#    y el cerrojo se abría borrándolos, o sea que la carga del almacén dependía de
+#    que alguien se acordara de editarla el día justo. Ahora los culpables se MIDEN
+#    en cada carga contra la definición viva de cada objeto
+#    (`objetos_que_leen_nulo_como_cero`): el cerrojo se abre solo el día que el
+#    último queda arreglado, se cierra solo si alguno vuelve atrás, y contesta
+#    distinto en staging y en producción — que es justo lo que una lista escrita en
+#    el código no puede hacer.
+# 🔒 Lo que sigue siendo una decisión humana es A QUIÉN se mira, y por eso
+#    `CONSUMIDORES_DEL_TRANSITO` sigue existiendo: es la lista de quien consume la
+#    columna, no la lista de quien está roto.
 # ---------------------------------------------------------------------------
 # GUARDA 13 — EL DÍA EN QUE SUMAR EMPIEZA A CONTAR DOBLE.
 # ---------------------------------------------------------------------------
@@ -1143,33 +1432,89 @@ def guarda_salto_a_transito_dentro(vendible_ant, vendible_nuevo,
         % (subida, dias, no_explicada, aterrizado, fc_ant))
 
 
-VISTAS_QUE_LEEN_NULO_COMO_CERO = [
+# 🔴 AQUÍ VIVÍA `VISTAS_QUE_LEEN_NULO_COMO_CERO`, UNA LISTA ESCRITA A MANO, Y SE HA
+#    IDO. Léelo antes de escribir otra igual. Decía qué objetos hacían
+#    `COALESCE(fc_transfer, 0)` el 7-sep-2026 por la mañana, y el cerrojo se abría
+#    VACIÁNDOLA a mano. O sea que la carga del almacén dependía de que alguien se
+#    acordara de borrar cuatro nombres el día justo — ni antes (se abriría con las
+#    vistas todavía rotas) ni después (el almacén a ciegas un día de más).
+#
+# 🔑 AHORA SE PREGUNTA A LA BASE, EN CADA CARGA. La lista de abajo dice a QUIÉN hay
+#    que mirar —esa decisión sí es humana, es quién consume la columna— y el veredicto
+#    lo da la definición viva de cada objeto, leída con `pg_get_viewdef`. Ventajas, y
+#    no son teóricas: el cerrojo se abre solo el día que el último objeto queda
+#    arreglado, se cierra solo si alguno vuelve atrás, y **contesta distinto en staging
+#    y en producción**, que es justo lo que una constante no puede hacer.
+#
+# 🔬 MEDIDO EL 7-sep-2026 EN PRODUCCIÓN con la expresión de abajo: los cuatro salen
+#    LIMPIOS. Ya no hacen `COALESCE(fc_transfer, 0)`; hacen
+#    `CASE WHEN count(*) = count(fc_transfer) THEN sum(...) ELSE NULL END`, que es
+#    tratar el nulo como lo que es. O sea que hoy, en producción, el cerrojo está
+#    ABIERTO — pero por medición, no porque nadie lo haya declarado.
+CONSUMIDORES_DEL_TRANSITO = [
     'salud_fba',
     'v_salud_asin',
     'v_trackeador_pantalla',
     'mv_trackeador_pantalla',
 ]
 
+# 🔒 LA EXPRESIÓN, Y POR QUÉ ES TAN ESTRECHA. Tiene que cazar el `COALESCE` cuyo
+#    PRIMER argumento es `fc_transfer` (o algo que lo envuelve, como `sum(fc_transfer)`)
+#    y cuyo segundo es 0. Y tiene que dejar en paz `COALESCE(available, 0) + fc_transfer`,
+#    que es CORRECTO y que `v_salud_asin` hace de verdad: ahí el que se coalesce es el
+#    vendible, y el tránsito sigue propagando su nulo. Una expresión más ancha daría
+#    ese falso positivo y el cerrojo no se abriría jamás.
+#    🔬 Probada el 7-sep-2026 contra siete casos, cuatro que debe cazar y tres que no
+#       (están en `test_inventario_fba.py`, bloque 21).
+RE_NULO_COMO_CERO = (r'coalesce\s*\(\s*(?:[a-z0-9_]+\s*\(\s*)?[^,()]*'
+                     r'fc_transfer[^,]{0,20},\s*\(?\s*0')
 
-def guarda_transito_desconocido(fc_origen, vistas=None):
-    """Con `fc_transfer` a NULO y consumidores que lo leen como 0, no se escribe."""
-    if vistas is None:
-        vistas = VISTAS_QUE_LEEN_NULO_COMO_CERO
-    if fc_origen != ORIGEN_DESCONOCIDO or not vistas:
+
+def objetos_que_leen_nulo_como_cero(cur, objetos=None):
+    """Cuáles de los consumidores convierten HOY el NULO en 0. Se mide, no se cree.
+
+    Devuelve (culpables, ausentes). `ausentes` son los que ni siquiera existen en esta
+    base: no son culpables, pero se dicen — un consumidor que se ha esfumado también
+    es una noticia.
+    """
+    if objetos is None:
+        objetos = CONSUMIDORES_DEL_TRANSITO
+    cur.execute(
+        "SELECT c.relname, pg_get_viewdef(c.oid) ~* %s "
+        "  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+        " WHERE n.nspname = 'public' AND c.relkind IN ('v', 'm') "
+        "   AND c.relname = ANY(%s);",
+        (RE_NULO_COMO_CERO, list(objetos)))
+    visto = {nombre: sucio for nombre, sucio in cur.fetchall()}
+    culpables = [o for o in objetos if visto.get(o)]
+    ausentes = [o for o in objetos if o not in visto]
+    return culpables, ausentes
+
+
+def guarda_transito_desconocido(fc_origen, culpables):
+    """Con `fc_transfer` a NULO y consumidores que lo leen como 0, no se escribe.
+
+    🔒 Función PURA: los culpables llegan YA MEDIDOS
+       (`objetos_que_leen_nulo_como_cero`), que es lo único que toca la base.
+    """
+    if fc_origen != ORIGEN_DESCONOCIDO or not culpables:
         return
     raise Aborta(
         "[Guarda 12] Este informe no trae el transito entre centros, asi que "
         "`fc_transfer` quedaria a NULO en todas las filas — que es lo correcto: no "
         "se sabe.\n"
-        "   El problema no es la carga: es quien la lee. Estos %d objetos hacen hoy "
-        "COALESCE(fc_transfer, 0), o sea que convertirian ese «no lo se» en un cero:\n"
+        "   El problema no es la carga: es quien la lee. Estos %d objetos hacen HOY "
+        "COALESCE(fc_transfer, 0) en esta base, o sea que convertirian ese «no lo "
+        "se» en un cero (medido leyendo su definicion viva, no una lista):\n"
         "   · %s\n"
         "   El disponible saldria unas 250 unidades corto y NADA lo diria. Un aborto "
         "ruidoso es mejor que una cifra falsa y creible.\n"
         "   COMO SE ABRE: arreglar esos objetos para que traten el NULO como "
-        "desconocido, y vaciar la lista VISTAS_QUE_LEEN_NULO_COMO_CERO en este mismo "
-        "fichero. No hay que tocar ninguna guarda."
-        % (len(vistas), "\n   · ".join(vistas)))
+        "desconocido — el patron que ya usan los demas es "
+        "CASE WHEN count(*) = count(fc_transfer) THEN sum(...) ELSE NULL END. No hay "
+        "que tocar ninguna guarda ni editar ninguna lista: en cuanto la definicion "
+        "cambie, este cerrojo se abre solo."
+        % (len(culpables), "\n   · ".join(culpables)))
 
 
 # ---------------------------------------------------------------------------
@@ -1236,10 +1581,61 @@ def sql_crear_tabla_censo():
         --    histórico no se puede releer: un fotograma de antes del cambio y uno
         --    de después significan cosas distintas con las mismas columnas.
         modelo_disponible text,
+        -- 🔴 SI LA CARGA ENTRÓ O NO, y el porqué si no. Sin esto la libreta no
+        --    puede llevar las cargas fallidas, y son justo las que hay que apuntar:
+        --    la del 7-sep-2026 abortó y no dejó rastro en ninguna parte.
+        resultado     text,
+        motivo        text,
         capturado_en  timestamptz NOT NULL DEFAULT now(),
         PRIMARY KEY (fecha_foto)
     );
     """
+
+
+CARGA_ENTRO = 'cargada'
+CARGA_ABORTO = 'abortada'
+
+
+def anotar_libreta(cur, fecha_foto, fichero, cabecera, modelo, resultado, motivo=None):
+    """Deja en `inventario_fba_cabecera` la fila de ESTA carga. No hace commit.
+
+    🔴 POR QUÉ TAMBIÉN SE APUNTAN LAS CARGAS QUE ABORTAN (encargo F, punto 2). El
+       7-sep-2026 la libreta estaba a **0 filas en producción**, medido: la carga del
+       6-sep es anterior a que la tabla existiera y la del 7 abortó antes de llegar
+       aquí, porque esto se escribía al final y dentro de la transacción de datos. O
+       sea que el día en que el informe cambió de forma —el único día en que esta
+       libreta tenía algo que decir— fue exactamente el día en que no anotó nada.
+       La forma del informe que se RECHAZA es información, y de las caras: es lo único
+       que distinguirá mañana un informe viejo de uno nuevo.
+
+    🔒 Y POR ESO LLEVA `resultado`. Una fila sin él sería una mentira nueva: la
+       serie diría que ese día entró una carga que en realidad no entró, y
+       `cabecera_anterior()` compararía la versión de hoy contra un informe que nunca
+       se cargó. Se apunta lo que pasó, no sólo que pasó algo.
+    """
+    # 🔴 UN ABORTO NO PISA UN DÍA QUE SÍ SE CARGÓ, y esto no es una precaución: es un
+    #    caso que va a pasar. Basta con relanzar a mano el fichero de un día ya cargado
+    #    cuando ya hay una foto más nueva — `guarda_no_retroceder` aborta, y sin este
+    #    `WHERE` la fila de aquel día pasaría de 'cargada' a 'abortada' y la libreta
+    #    diría que un día que SÍ entró no entró. La carga buena manda sobre el intento
+    #    fallido, siempre.
+    filtro = ("" if resultado == CARGA_ENTRO
+              else " WHERE %s.resultado IS DISTINCT FROM '%s'" % (TABLA_CENSO, CARGA_ENTRO))
+    cur.execute(
+        "INSERT INTO %s (fecha_foto, fichero, n_encabezados, encabezados, "
+        "modelo_disponible, resultado, motivo) VALUES (%%s, %%s, %%s, %%s, %%s, %%s, %%s) "
+        "ON CONFLICT (fecha_foto) DO UPDATE SET "
+        "fichero=EXCLUDED.fichero, n_encabezados=EXCLUDED.n_encabezados, "
+        "encabezados=EXCLUDED.encabezados, "
+        "modelo_disponible=EXCLUDED.modelo_disponible, "
+        "resultado=EXCLUDED.resultado, motivo=EXCLUDED.motivo, capturado_en=now()%s;"
+        % (TABLA_CENSO, filtro),
+        (fecha_foto, fichero, len(cabecera), list(cabecera), modelo, resultado, motivo))
+
+
+def _motivo_corto(e):
+    """La primera línea del aborto, que es la que dice qué guarda ha saltado."""
+    return str(e).strip().split('\n')[0][:500]
 
 
 def cabecera_anterior(cur, fecha_nueva):
@@ -1256,7 +1652,14 @@ def cabecera_anterior(cur, fecha_nueva):
     """
     cur.execute("SELECT to_regclass(%s);", ('public.' + TABLA_CENSO,))
     if cur.fetchone()[0] is not None:
+        # 🔴 `resultado <> 'abortada'`: la carga anterior es la última que ENTRÓ,
+        #    no la última que se intentó. Desde que la libreta apunta también los
+        #    rechazos, comparar contra el último intento haría que un informe raro
+        #    rechazado ayer se convirtiera hoy en «la versión anterior». El
+        #    `IS DISTINCT FROM` deja pasar los NULL: las filas anteriores a esta
+        #    columna se escribieron sólo cuando la carga había cuadrado.
         cur.execute(f"SELECT encabezados FROM {TABLA_CENSO} WHERE fecha_foto < %s "
+                    f"AND resultado IS DISTINCT FROM '{CARGA_ABORTO}' "
                     f"ORDER BY fecha_foto DESC LIMIT 1;", (fecha_nueva,))
         fila = cur.fetchone()
         if fila and fila[0]:
@@ -1437,13 +1840,89 @@ def main():
     except UnicodeDecodeError:
         texto = crudo_bytes.decode('cp1252')
 
-    # --- Guardas estructurales 1..7 y 9 (antes de tocar la base) ---
+    # 🔑 LA CABECERA, APARTE Y ANTES QUE NADA. `analizar()` no devuelve nada cuando
+    #    aborta — y la carga que aborta es justo la que hay que apuntar en la libreta.
+    cabecera_txt = cabecera_de(texto)
+    print(f"   · la cabecera trae {len(cabecera_txt)} encabezados", flush=True)
+
+    # --- Conectar al ENTORNO ---
+    # 🔴 SE CONECTA ANTES DE ANALIZAR, y el orden es el cambio de fondo del encargo F
+    #    (punto 2). Antes se analizaba primero y se conectaba después, así que una carga
+    #    rechazada por una guarda estructural —la del 7-sep-2026, sin ir más lejos— se
+    #    moría sin haber tocado la base y sin dejar ni una línea de qué forma tenía el
+    #    informe que se rechazó. Conectar antes no escribe nada de más: sólo permite
+    #    que el aborto quede anotado.
+    con = conectar_bd(DB_URL)
+    con.autocommit = False
+    cur = con.cursor()
+
+    # La libreta tiene que estar EN PIE antes de la primera guarda, o el aborto no
+    # tendría dónde anotarse. El `IF NOT EXISTS` es barato; la RLS y las columnas las
+    # pone la MIGRACIÓN, como en las otras dos tablas.
+    cur.execute(sql_crear_tabla_censo())
+    cur.execute(f"SELECT relrowsecurity FROM pg_class WHERE oid = 'public.{TABLA_CENSO}'::regclass;")
+    if not cur.fetchone()[0]:
+        print(f"\n❌ ABORTA (no se ha escrito nada):\n"
+              f"RLS no esta activa en {TABLA_CENSO}. La tabla nace CERRADA por "
+              f"migracion, no por el procesador. Aplica migraciones/ y relanza.",
+              flush=True)
+        con.rollback(); cur.close(); con.close(); sys.exit(1)
+    try:
+        exigir_columnas(cur, TABLA_CENSO, ['resultado', 'motivo'])
+    except Aborta as e:
+        print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
+        con.rollback(); cur.close(); con.close(); sys.exit(1)
+    con.commit()
+
+    def morir(e):
+        """Aborta: revierte, ANOTA la carga fallida en la libreta y sale.
+
+        🔒 El orden importa: primero el `rollback` —con la transacción envenenada no
+           se puede escribir nada— y luego la fila de la libreta, en una transacción
+           propia que SÍ se confirma. Lo que no entra son los datos; lo que queda
+           escrito es que ese día hubo un informe con esta forma y no se cargó.
+        🔴 Y en ENSAYO no se escribe ni un byte, tampoco esto. Un ensayo que deja
+           filas detrás deja de ser un ensayo.
+        """
+        try:
+            con.rollback()
+        except Exception:
+            pass
+        print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
+        if cabecera_txt:
+            modelo_txt = modelo_del_disponible(cabecera_txt)
+            if MODO == 'aplicar':
+                try:
+                    anotar_libreta(cur, fecha_foto, fichero, cabecera_txt, modelo_txt,
+                                   CARGA_ABORTO, _motivo_corto(e))
+                    con.commit()
+                    print(f"   · anotado en {TABLA_CENSO}: la carga del {fecha_foto} "
+                          f"({len(cabecera_txt)} encabezados, modelo {modelo_txt}) "
+                          f"ABORTO. La forma del informe que se rechaza tambien es un "
+                          f"dato.", flush=True)
+                except Exception as x:
+                    try:
+                        con.rollback()
+                    except Exception:
+                        pass
+                    print(f"   ⚠️  y encima no se ha podido anotar en la libreta: {x}",
+                          flush=True)
+            else:
+                print(f"   · ENSAYO: en modo aplicar esto habria dejado su fila en "
+                      f"{TABLA_CENSO} ({len(cabecera_txt)} encabezados, ABORTO).",
+                      flush=True)
+        try:
+            cur.close(); con.close()
+        except Exception:
+            pass
+        sys.exit(1)
+
+    # --- Guardas estructurales 1..7, 9 y 14 (sin escribir nada todavia) ---
     try:
         info = analizar(texto, fichero, fecha_foto)
         avisar_inbound(info)
     except Aborta as e:
-        print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
-        sys.exit(1)
+        morir(e)
 
     filas = info['filas']
 
@@ -1530,11 +2009,6 @@ def main():
     print(f"   · disponible que calcula Amazon         : {_con_oh} de {len(filas)} "
           f"fichas lo traen", flush=True)
 
-    # --- Conectar al ENTORNO ---
-    con = conectar_bd(DB_URL)
-    con.autocommit = False
-    cur = con.cursor()
-
     # 🔒 ÁMBITO DE LA FOTO: ninguno. El fichero ES la tabla entera.
     AMBITO = None
 
@@ -1546,36 +2020,34 @@ def main():
                                            etiqueta='8 anti-encogimiento')
         guarda_no_retroceder(cur, TABLA, 'fecha_foto', info['fecha_foto'], ambito=AMBITO)
     except Aborta as e:
-        print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
-        con.rollback(); cur.close(); con.close(); sys.exit(1)
+        morir(e)
 
     # ── GUARDA 11: el censo de la cabecera, y con el la VERSION del informe ──
-    #    Va ANTES de la Guarda 10 porque es quien le dice que puede comparar.
+    # 🔑 LA VERSION YA NO ES UN INTERRUPTOR, ES CONTEXTO. Hasta el encargo F esto
+    #    decidia QUE comparaba la Guarda 10 (el almacen si la version era la misma, el
+    #    vendible si no). Ya no hace falta: la Guarda 10 compara el DISPONIBLE, que se
+    #    calcula igual en las dos versiones del informe. Pero saber que la carga de hoy
+    #    y la de ayer son de versiones distintas sigue siendo lo primero que hay que
+    #    leer cuando una cifra no cuadra, asi que se dice.
     cab_ant = cabecera_anterior(cur, info['fecha_foto'])
     avisar_censo(info['cabecera'], cab_ant)
     version_igual = misma_version(info['cabecera'], cab_ant)
+    if cab_ant and not version_igual:
+        print("     🔑 La carga anterior que ENTRO era de otra version del informe. "
+              "El balance del dia se hace igual: compara el disponible, que es la "
+              "misma cuenta a los dos lados.", flush=True)
 
-    # ── GUARDA 10: continuidad contra la foto anterior ───────────────────────
+    # ── LA FOTO ANTERIOR, EN CIFRAS ────────────────────────────────
+    #    🔑 El disponible sale con la MISMA cuenta que `disponible_de()` en Python
+    #       (SQL_DISPONIBLE). La Guarda 10 lo compara mas abajo, DESPUES del puente:
+    #       sin el puente, el disponible de una foto sin transito no esta calculado
+    #       todavia y la resta compararia dos cosas distintas.
     cur.execute(f"SELECT max(fecha_foto), count(*), coalesce(sum(available),0), "
                 f"coalesce(sum(warehouse_quantity),0), coalesce(sum(fc_transfer),0), "
-                f"coalesce(sum(inbound_shipped),0) FROM {TABLA};")
+                f"coalesce(sum(inbound_shipped),0), "
+                f"coalesce(sum({SQL_DISPONIBLE}),0) FROM {TABLA};")
     (fecha_ant, fichas_ant, vendible_ant, almacen_ant,
-     fc_ant, inbound_ant) = cur.fetchone()
-    try:
-        guarda_continuidad(fecha_ant, info['fecha_foto'], version_igual,
-                           vendible_ant, info['vendible_total'],
-                           almacen_ant, info['almacen_total'],
-                           fichas_ant, len(filas))
-    except Aborta as e:
-        print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
-        con.rollback(); cur.close(); con.close(); sys.exit(1)
-    if fecha_ant is not None and fecha_ant != info['fecha_foto']:
-        _que = 'el almacen' if version_igual else 'el stock vendible'
-        _ant = almacen_ant if version_igual else vendible_ant
-        _nue = info['almacen_total'] if version_igual else info['vendible_total']
-        print(f"\n[Guarda 10] Continuidad: {_que} pasa de {_ant} a {_nue} "
-              f"({_nue - _ant:+d}) entre el {fecha_ant} y el {info['fecha_foto']}. "
-              f"Dentro de lo que puede moverse.", flush=True)
+     fc_ant, inbound_ant, disponible_ant) = cur.fetchone()
 
     # ── GUARDA 13: ¿ha metido Amazon el transito DENTRO del vendible? ────────
     #    Va aqui porque necesita las dos fotos y el transito de la anterior, y
@@ -1586,16 +2058,17 @@ def main():
                 vendible_ant, info['vendible_total'], inbound_ant,
                 info['inbound_total'], fc_ant, (info['fecha_foto'] - fecha_ant).days)
     except Aborta as e:
-        print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
-        con.rollback(); cur.close(); con.close(); sys.exit(1)
+        morir(e)
 
     # ── EL PUENTE: estimar el disponible cuando el informe no trae el transito ──
-    # 🔑 Va ANTES del cerrojo a proposito. Cuando la carga esta cerrada (que es hoy),
-    #    esto no escribe nada, pero el log SI dice que habria estimado — que es la
-    #    unica forma de ver si el puente esta sano el dia que haga falta abrirlo.
+    # 🔑 Va ANTES del cerrojo y ANTES de la Guarda 10, y las dos razones son buenas:
+    #    si el cerrojo esta echado, el log dice igualmente que habria estimado — que es
+    #    lo unico que permite ver si el puente esta sano el dia que haga falta abrirlo;
+    #    y la Guarda 10 compara el disponible, que sin el puente no existe todavia en
+    #    una foto que no trae el transito.
     _asines = sorted({f['registro']['asin'] for f in filas if f['registro']['asin']})
     intl = internacional_por_asin(cur, info['fecha_foto'], _asines)
-    puente = estimar_disponible(filas, intl)
+    puente = estimar_disponible(filas, intl, info['fecha_foto'])
     print(f"\n--- EL PUENTE (disponible estimado) ---")
     print(f"   · el informe trae el transito en    : {puente['leido']} fichas "
           f"(ahi manda el dato leido, no la estimacion)")
@@ -1610,9 +2083,10 @@ def main():
         #    dia es el internacional entero con el que se ha estimado hoy.
         print(f"   · foto del internacional usada      : {puente['fuente_mas_vieja']} "
               f"({_viejo} dia(s) antes que esta foto)", flush=True)
-        if _viejo >= 3:
-            print("     ⚠️ Tres dias o mas: el internacional tambien se ha parado. Lo "
-                  "que se estima con el ya no es de hoy.", flush=True)
+        # 🔴 El aviso de la FUENTE VIEJA lo da ya `estimar_disponible()`, que sabe
+        #    cuantas fichas afecta. Aqui habia un `if _viejo >= 3` que solo miraba los
+        #    dias y callaba con uno o dos: un disponible estimado con la foto de
+        #    anteayer es igual de viejo se avise o no.
     # 🔬 El falsador permanente del puente: los dias que el transito SI viene, el
     #    estimado y la verdad conviven y se comparan. Si esto crece, el puente se
     #    esta separando de la realidad y hay que enterarse antes de necesitarlo.
@@ -1626,13 +2100,57 @@ def main():
             print(f"        · {_sku}: estimado {_est}, cierto {_cierto} "
                   f"({_est - _cierto:+d})", flush=True)
 
+    # ── GUARDA 10: EL BALANCE DEL DIA ──────────────────────────────
+    #    Va aqui, y no arriba con la lectura de la foto anterior, porque necesita el
+    #    disponible de HOY — y el disponible de hoy no existe hasta que el puente ha
+    #    pasado. Antes de escribir nada, que es lo que importa.
+    disponible_nuevo = disponible_total(filas)
+    ventas = None
+    if fecha_ant is not None and fecha_ant != info['fecha_foto']:
+        ventas = ventas_del_ledger(cur, fecha_ant, info['fecha_foto'])
+        if ventas is not None:
+            print(f"\n--- EL BALANCE DEL DIA (Guarda 10) ---")
+            print(f"   · disponible                 : {disponible_ant} → "
+                  f"{disponible_nuevo}  ({disponible_nuevo - disponible_ant:+d} entre "
+                  f"el {fecha_ant} y el {info['fecha_foto']})")
+            print(f"   · vendido en esos {ventas['dias']} dia(s) : {ventas['uds']} uds "
+                  f"(ledger, salidas fisicas, hasta el {ventas['hasta_ledger']})")
+            if ventas['dias_sin_datos']:
+                print(f"   · dias sin ventas cargadas  : {ventas['dias_sin_datos']} — "
+                      f"se cuentan al pico diario de los ultimos {DIAS_VENTANA_PICO} "
+                      f"dias ({ventas['pico_dia']} uds/dia)")
+            print(f"   · el almacen, de contexto     : {almacen_ant} → "
+                  f"{info['almacen_total']}  (⚠️ no es comparable entre versiones "
+                  f"distintas del informe: el 7-sep-2026 dejo de incluir el transito)")
+            print(f"   · caida maxima admitida      : "
+                  f"{ventas['uds'] + ventas['pico_dia'] * ventas['dias_sin_datos'] + MARGEN_CAIDA_DIA * ventas['dias']} "
+                  f"uds (lo vendido + {MARGEN_CAIDA_DIA} uds/dia de margen medido)",
+                  flush=True)
+    try:
+        guarda_continuidad(fecha_ant, info['fecha_foto'],
+                           disponible_ant, disponible_nuevo,
+                           fichas_ant, len(filas), ventas=ventas)
+    except Aborta as e:
+        morir(e)
+
     # ── GUARDA 12: el cerrojo. Va la ULTIMA de las tres a proposito, para que el
     #    log ya haya dicho que version es y como va la continuidad antes de parar.
+    # 🔑 Y los culpables se MIDEN aqui, contra la definicion viva de cada objeto en
+    #    ESTA base: en staging y en produccion la respuesta puede ser distinta, y una
+    #    lista escrita en el codigo contestaria lo mismo en las dos.
+    culpables, ausentes = objetos_que_leen_nulo_como_cero(cur)
+    print(f"\n--- QUIEN LEE EL TRANSITO (cerrojo de la Guarda 12) ---")
+    print(f"   · consumidores mirados       : {len(CONSUMIDORES_DEL_TRANSITO)}")
+    print(f"   · siguen haciendo COALESCE(fc_transfer, 0): "
+          f"{', '.join(culpables) if culpables else 'ninguno'}", flush=True)
+    if ausentes:
+        print(f"   ⚠️  y {len(ausentes)} no existe(n) en esta base: "
+              f"{', '.join(ausentes)}. No cuentan como culpables, pero mirelo: un "
+              f"consumidor que se ha esfumado tambien es una noticia.", flush=True)
     try:
-        guarda_transito_desconocido(info['fc_origen'])
+        guarda_transito_desconocido(info['fc_origen'], culpables)
     except Aborta as e:
-        print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
-        con.rollback(); cur.close(); con.close(); sys.exit(1)
+        morir(e)
 
     # Claves que ya estaban (solo para contar altas). Antes del barrido.
     prev = claves_previas(cur, TABLA, ['sku'], ambito=AMBITO)
@@ -1653,8 +2171,7 @@ def main():
     try:
         exigir_columnas(cur, TABLA, ['onhand_buyable'] + DERIVADAS_COLS)
     except Aborta as e:
-        print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
-        con.rollback(); cur.close(); con.close(); sys.exit(1)
+        morir(e)
 
     # 🔒 LA FOTO TIRA LA HOJA VIEJA: los sku que ya no vienen se BORRAN. Mismo
     # commit que la carga: o todo o nada. Las claves son EXACTAMENTE los valores
@@ -1663,8 +2180,7 @@ def main():
     try:
         borradas = barrer_sobrantes(cur, TABLA, ['sku'], claves_nuevas, ambito=AMBITO)
     except Aborta as e:
-        print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
-        con.rollback(); cur.close(); con.close(); sys.exit(1)
+        morir(e)
 
     # --- Volcar POR LOTES (execute_values, jamás fila a fila: el runner está en
     # EEUU y Supabase en Irlanda; cada execute() son ~90 ms de viaje) ---
@@ -1708,8 +2224,7 @@ def main():
     try:
         exigir_columnas(cur, TABLA_HIST, ['onhand_buyable'] + DERIVADAS_COLS)
     except Aborta as e:
-        print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
-        con.rollback(); cur.close(); con.close(); sys.exit(1)
+        morir(e)
 
     def _val_hist(f, col):
         if col == 'fecha_foto': return info['fecha_foto']
@@ -1749,35 +2264,20 @@ def main():
     #    algo se quedó por el camino y la película empieza a mentir desde el primer
     #    día — que es cuando menos se nota.
     if hist_hoy != len(filas):
-        print(f"\n❌ ABORTA: la foto trae {len(filas)} filas y el fotograma de "
-              f"{info['fecha_foto']} tiene {hist_hoy}. No cuadran.", flush=True)
-        con.rollback(); cur.close(); con.close(); sys.exit(1)
+        morir(Aborta(f"La foto trae {len(filas)} filas y el fotograma de "
+                     f"{info['fecha_foto']} tiene {hist_hoy}. No cuadran."))
 
-    # --- EL CENSO DE ESTA CARGA (Guarda 11, cajon PELICULA) ---
-    # 🔑 Se escribe DESPUES de que todo lo demas haya cuadrado: censar una carga
-    #    que luego se revierte dejaria en la serie una version del informe que
-    #    nunca entro.
-    cur.execute(sql_crear_tabla_censo())
-    cur.execute(f"SELECT relrowsecurity FROM pg_class WHERE oid = 'public.{TABLA_CENSO}'::regclass;")
-    if not cur.fetchone()[0]:
-        print(f"\n❌ ABORTA (no se ha escrito nada):\n"
-              f"RLS no esta activa en {TABLA_CENSO}. La tabla nace CERRADA por "
-              f"migracion, no por el procesador. Aplica "
-              f"migraciones/ (las DOS del 7-sep-2026: _esperadas_y_censo.sql y _disponible_estimado.sql) y relanza.",
-              flush=True)
-        con.rollback(); cur.close(); con.close(); sys.exit(1)
-    cur.execute(
-        f"INSERT INTO {TABLA_CENSO} (fecha_foto, fichero, n_encabezados, encabezados, "
-        f"modelo_disponible) VALUES (%s, %s, %s, %s, %s) "
-        f"ON CONFLICT (fecha_foto) DO UPDATE SET "
-        f"fichero=EXCLUDED.fichero, n_encabezados=EXCLUDED.n_encabezados, "
-        f"encabezados=EXCLUDED.encabezados, "
-        f"modelo_disponible=EXCLUDED.modelo_disponible, capturado_en=now();",
-        (info['fecha_foto'], fichero, len(info['cabecera']), info['cabecera'],
-         info['modelo_disponible']))
-    print(f"\n--- CENSO DE LA CABECERA {TABLA_CENSO} ---")
+    # --- LA LIBRETA DE ESTA CARGA (Guarda 11, cajon PELICULA) ---
+    # 🔑 La fila de la carga que ENTRA va DENTRO de la transaccion de datos, para
+    #    que no pueda quedar un 'cargada' de una carga que luego se revierte. La de la
+    #    carga que aborta la escribe `morir()`, en una transaccion propia. Dos
+    #    caminos, un solo escritor: `anotar_libreta()`.
+    anotar_libreta(cur, info['fecha_foto'], fichero, info['cabecera'],
+                   info['modelo_disponible'], CARGA_ENTRO)
+    print(f"\n--- LIBRETA DE CARGAS {TABLA_CENSO} ---")
     print(f"   · {len(info['cabecera'])} encabezados anotados para la foto del "
-          f"{info['fecha_foto']} · modelo {info['modelo_disponible']}", flush=True)
+          f"{info['fecha_foto']} · modelo {info['modelo_disponible']} · "
+          f"resultado {CARGA_ENTRO}", flush=True)
 
     # --- La verificación que importa, DENTRO de la transacción ---
     # 🔒 El log dice lo que el procesador cree; esto lee lo que la tabla tiene.
@@ -1788,10 +2288,9 @@ def main():
     print(f"   · filas            : {n_bd}")
     print(f"   · inbound_shipped  : {inbound_bd} uds en {asin_bd} ASIN", flush=True)
     if (n_bd, inbound_bd) != (len(filas), info['total_inbound']):
-        print(f"\n❌ ABORTA: la tabla dice ({n_bd} filas, {inbound_bd} uds) y el fichero "
-              f"decía ({len(filas)}, {info['total_inbound']}). No cuadran al dígito: algo "
-              f"se ha quedado por el camino.", flush=True)
-        con.rollback(); cur.close(); con.close(); sys.exit(1)
+        morir(Aborta(f"La tabla dice ({n_bd} filas, {inbound_bd} uds) y el fichero "
+                     f"decía ({len(filas)}, {info['total_inbound']}). No cuadran al "
+                     f"dígito: algo se ha quedado por el camino."))
 
     print(resumen_foto(TABLA, AMBITO, previas, len(filas), altas, borradas, MODO),
           flush=True)

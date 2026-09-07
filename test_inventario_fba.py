@@ -32,9 +32,14 @@ from procesador_inventario_fba import (  # noqa: E402
     CABECERA_ESPERADA, ESPERADAS, HEADER_FC, ORIGEN_INFORME, ORIGEN_DESCONOCIDO,
     DERIVADAS_COLS, HIST_COLS, HIST_PK, TABLA_HIST, sql_crear_tabla_historico,
     censo_cabecera, misma_version, guarda_continuidad, guarda_transito_desconocido,
-    guarda_salto_a_transito_dentro, modelo_del_disponible,
+    guarda_salto_a_transito_dentro, modelo_del_disponible, guarda_modelo_conocido,
     MODELO_TRANSITO_APARTE, MODELO_TRANSITO_DESCONOCIDO,
-    TECHO_CAIDA_VENDIBLE_DIA, TECHO_CAIDA_ALMACEN_DIA, CAIDA_MAX_FICHAS)
+    MODELO_26, MODELO_24 as MODELO_24_DEL_PROCESADOR, NOMBRE_MODELO,
+    MARGEN_CAIDA_DIA, CAIDA_MAX_FICHAS, DIAS_VENTANA_PICO,
+    disponible_de, disponible_total, SQL_DISPONIBLE,
+    cabecera_de, anotar_libreta, cabecera_anterior, CARGA_ENTRO, CARGA_ABORTO,
+    objetos_que_leen_nulo_como_cero, RE_NULO_COMO_CERO, CONSUMIDORES_DEL_TRANSITO,
+    TABLA_CENSO)
 
 fallos = []
 HOY = datetime.date(2026, 8, 23)
@@ -145,6 +150,16 @@ print('== 0) LO QUE SE MIDIO EN EL FICHERO REAL (anclas, 23-ago-2026) ==')
 #    forma del informe ahora es el CENSO (Guarda 11), que ademas guarda CUALES.
 eq('(0) las 26 columnas de la version larga y las 24 de la corta',
    (len(CABECERA), len(CABECERA_24)), (26, 24))
+# 🔴 EL COTEJO DEL CATALOGO, Y POR QUE EXISTE. Desde el 7-sep-2026 el procesador
+#    lleva su propia copia de la cabecera (`MODELO_26`), porque la Guarda 14 compara
+#    la cabecera ENTERA. Esta lista de aqui arriba se copio del .txt real y se queda
+#    donde estaba: si el catalogo viviera solo en el procesador, el test estaria
+#    comprobando el fichero contra si mismo, que es la comprobacion que no puede
+#    fallar.
+eq('(0) el catalogo del procesador es la cabecera real, en su orden',
+   list(MODELO_26), CABECERA)
+eq('(0) y el modelo corto se deriva quitando las dos esperadas',
+   list(MODELO_24_DEL_PROCESADOR), CABECERA_24)
 eq('(0) los encabezados OBLIGATORIOS son de la cabecera real',
    [h for h in CABECERA_ESPERADA if h not in CABECERA], [])
 # 🔑 Y la particion del contrato: las dos esperadas NO estan entre las que abortan.
@@ -712,87 +727,219 @@ eq('(19) el caso de vuelta: sobran dos, no falta ninguna',
    ([], ['afn-fc-transfer-quantity', 'afn-onhand-buyable-quantity']))
 
 
-print('\n== 20) GUARDA 10 · continuidad contra la foto anterior ==')
+print('\n== 20) GUARDA 10 · el balance del dia contra las ventas MEDIDAS ==')
 AYER, HOY10 = datetime.date(2026, 9, 6), datetime.date(2026, 9, 7)
-# 🔴 EL CASO REAL DEL 7-sep, y las dos lecturas del MISMO dato:
-#    almacen 6.881 → 6.635 (−246) · vendible 6.437 → 6.453 (+16).
-#    Con otra version se compara el vendible y PASA; con la misma version se
-#    compararia el almacen y ABORTA. Las dos direcciones sobre las mismas cifras.
-eq('(20) 7-sep con version distinta (mira el vendible): PASA',
-   guarda_continuidad(AYER, HOY10, False, 6437, 6453, 6881, 6635, 381, 381,
-                      permitir_salto=False), [])
+
+
+def ventas(uds, dias=1, sin_datos=0, pico=155, hasta=AYER):
+    """Lo que devuelve `ventas_del_ledger`, a mano."""
+    return {'uds': uds, 'dias': dias, 'dias_cubiertos': dias - sin_datos,
+            'dias_sin_datos': sin_datos, 'hasta_ledger': hasta, 'pico_dia': pico}
+
+
+# 🔴 EL CASO REAL DEL 7-sep-2026, que es para lo que existe esta guarda. El
+#    informe recortado trae 6.453 de vendible y no dice el transito; el dia 6 el
+#    disponible eran 6.692 (6.437 + 255). Si entrase sin puente, el disponible
+#    caeria 239 unidades en un dia. El ledger llega hasta el 6, asi que ese dia no
+#    tiene ventas cargadas y se cuenta al pico (155): techo 155 + 60 = 215.
 try:
-    guarda_continuidad(AYER, HOY10, True, 6437, 6453, 6881, 6635, 381, 381,
-                       permitir_salto=False)
-    eq('(20) 7-sep con la MISMA version (mira el almacen): ABORTA', False, True)
+    guarda_continuidad(AYER, HOY10, 6692, 6453, 381, 381,
+                       ventas=ventas(0, sin_datos=1), permitir_salto=False)
+    eq('(20) el 7-sep sin puente (−239 uds): ABORTA', False, True)
 except Aborta as e:
-    eq('(20) 7-sep con la MISMA version (mira el almacen): ABORTA', True, True)
-    eq('(20) … y lo dice en castellano y sin nombres de columna',
-       'El almacen ha caido 246 unidades en 1 dia(s)' in str(e), True)
-    eq('(20) … y dice cual era el techo', 'son %d' % TECHO_CAIDA_ALMACEN_DIA in str(e), True)
-    eq('(20) … sin colar el nombre de la columna en esa primera linea',
-       'warehouse' in str(e).split('\n')[0], False)
-# El techo del vendible, justo por debajo y justo por encima.
-eq('(20) el vendible cayendo justo el techo: NO aborta',
-   guarda_continuidad(AYER, HOY10, False, 6437, 6437 - TECHO_CAIDA_VENDIBLE_DIA,
-                      6881, 6881, 381, 381, permitir_salto=False), [])
+    eq('(20) el 7-sep sin puente (−239 uds): ABORTA', True, True)
+    eq('(20) … y lo dice en castellano, con la caida y lo vendido',
+       'El disponible ha caido 239 unidades' in str(e), True)
+    eq('(20) … y avisa de que el ledger no llegaba a ese dia',
+       'no tienen ventas cargadas' in str(e), True)
+    eq('(20) … sin colar el nombre de ninguna columna en la primera linea',
+       'fc_transfer' in str(e).split('\n')[0], False)
+# 🔑 LA PAREJA QUE HACE QUE ESTO MIDA ALGO: el MISMO dia, con el puente haciendo
+#    su trabajo, el disponible baja lo que se vende y la carga entra.
+eq('(20) el 7-sep CON puente (el disponible baja lo vendido): NO aborta',
+   guarda_continuidad(AYER, HOY10, 6692, 6600, 381, 381,
+                      ventas=ventas(0, sin_datos=1), permitir_salto=False), [])
+# Y con el ledger al dia, la misma caida de 239 tampoco cuela: techo 90 + 60 = 150.
 try:
-    guarda_continuidad(AYER, HOY10, False, 6437, 6437 - TECHO_CAIDA_VENDIBLE_DIA - 1,
-                       6881, 6881, 381, 381, permitir_salto=False)
+    guarda_continuidad(AYER, HOY10, 6692, 6453, 381, 381,
+                       ventas=ventas(90, hasta=HOY10), permitir_salto=False)
+    eq('(20) con el ledger al dia, −239 contra 90 vendidas: ABORTA', False, True)
+except Aborta as e:
+    eq('(20) con el ledger al dia, −239 contra 90 vendidas: ABORTA', True, True)
+    eq('(20) … y dice cuanto se vendio de verdad', 'se vendieron 90' in str(e), True)
+
+# 🔬 LOS DIEZ SALTOS MEDIDOS EN PRODUCCION (inventario_fba_historico contra
+#    ledger_movimientos, 23-ago → 6-sep-2026). Ninguno puede abortar: si esta guarda
+#    saltara en un dia legitimo se aprenderia a forzar, y el dia que saltase de verdad
+#    nadie la leeria. (caida_disponible, ventas_ventana, dias)
+SALTOS_REALES = [(111, 81, 1), (-254, 175, 2), (95, 102, 1), (91, 110, 1),
+                 (76, 46, 1), (73, 87, 1), (-29, 262, 2), (-181, 116, 1),
+                 (58, 95, 1), (227, 201, 3)]
+callados = 0
+for caida, vendido, dias in SALTOS_REALES:
+    hasta = AYER + datetime.timedelta(days=dias)
+    if guarda_continuidad(AYER, hasta, 6692, 6692 - caida, 381, 381,
+                          ventas=ventas(vendido, dias=dias, hasta=hasta),
+                          permitir_salto=False) == []:
+        callados += 1
+eq('(20) los 10 saltos reales del historico pasan sin decir nada', callados, 10)
+# ⚠️ Y el mas apretado de los diez, una unidad por encima: ABORTA. Sin esto, un
+#    margen enorme pasaria los diez tests de arriba sin medir nada.
+#    El peor es 111 de caida contra 81 vendidas: techo 81 + 60 = 141.
+eq('(20) el peor salto real, justo en el techo (141): NO aborta',
+   guarda_continuidad(AYER, HOY10, 6692, 6692 - 141, 381, 381,
+                      ventas=ventas(81), permitir_salto=False), [])
+try:
+    guarda_continuidad(AYER, HOY10, 6692, 6692 - 142, 381, 381,
+                       ventas=ventas(81), permitir_salto=False)
     eq('(20) … y una unidad mas: ABORTA', False, True)
 except Aborta:
     eq('(20) … y una unidad mas: ABORTA', True, True)
-# 🔑 Se normaliza POR DIA: los huecos del historico van de 1 a 3 dias, y una caida
-#    de dos dias no puede juzgarse con el techo de uno.
-eq('(20) con dos dias de hueco, el techo es el doble',
-   guarda_continuidad(datetime.date(2026, 9, 5), HOY10, False,
-                      6437, 6437 - 2 * TECHO_CAIDA_VENDIBLE_DIA, 6881, 6881,
-                      381, 381, permitir_salto=False), [])
-# El catalogo: 20% menos fichas aborta, 5% menos no.
+# El margen se cuenta POR DIA, como las ventas: dos dias de hueco, dos margenes.
+eq('(20) con dos dias de hueco el margen es el doble',
+   guarda_continuidad(datetime.date(2026, 9, 5), HOY10, 6692,
+                      6692 - (81 + 2 * MARGEN_CAIDA_DIA), 381, 381,
+                      ventas=ventas(81, dias=2), permitir_salto=False), [])
+
+# 🔴 SIN LEDGER NO SE ABORTA, SE GRITA. Con el ledger vacio las ventas medidas
+#    serian 0 y esta guarda abortaria TODOS los dias por una causa que no tiene nada
+#    que ver con el informe de inventario.
+gritos = []
+eq('(20) sin ventas que leer: NO aborta',
+   guarda_continuidad(AYER, HOY10, 6692, 6000, 381, 381, ventas=None,
+                      permitir_salto=False, escribir=gritos.append), [])
+eq('(20) … pero lo dice muy claro',
+   any('NO SE HA PODIDO COMPROBAR' in g for g in gritos), True)
+
+# El catalogo: 20% menos fichas aborta, 5% menos no. (No depende de las ventas.)
 try:
-    guarda_continuidad(AYER, HOY10, True, 6437, 6437, 6881, 6881, 381, 305,
-                       permitir_salto=False)
+    guarda_continuidad(AYER, HOY10, 6692, 6692, 381, 305,
+                       ventas=ventas(90), permitir_salto=False)
     eq('(20) 20% menos fichas: ABORTA', False, True)
 except Aborta as e:
     eq('(20) 20% menos fichas: ABORTA', True, True)
     eq('(20) … y dice el porcentaje perdido', '19.9%' in str(e), True)
 eq('(20) 5% menos fichas: NO aborta',
-   guarda_continuidad(AYER, HOY10, True, 6437, 6437, 6881, 6881, 381, 362,
-                      permitir_salto=False), [])
+   guarda_continuidad(AYER, HOY10, 6692, 6692, 381, 362,
+                      ventas=ventas(90), permitir_salto=False), [])
 # 🔴 La primera carga NO se juzga: no hay contra que comparar, y una comprobacion
 #    sin nada que comparar no comprueba nada. La cubre el suelo de la Guarda 4.
 eq('(20) sin foto anterior: no aplica',
-   guarda_continuidad(None, HOY10, False, 0, 6453, 0, 6635, 0, 381,
+   guarda_continuidad(None, HOY10, 0, 6453, 0, 381, ventas=ventas(90),
                       permitir_salto=False), [])
 eq('(20) la misma fecha (recarga de la misma foto): no aplica',
-   guarda_continuidad(HOY10, HOY10, True, 6437, 1, 6881, 1, 381, 381,
+   guarda_continuidad(HOY10, HOY10, 6692, 1, 381, 381, ventas=ventas(90),
                       permitir_salto=False), [])
 # La valvula, con nombre y dejando rastro.
-motivos = guarda_continuidad(AYER, HOY10, True, 6437, 6453, 6881, 6635, 381, 381,
+motivos = guarda_continuidad(AYER, HOY10, 6692, 6453, 381, 381,
+                             ventas=ventas(0, sin_datos=1),
                              permitir_salto=True, escribir=lambda *a: None)
 eq('(20) PERMITIR_SALTO=1 la deja pasar…', len(motivos), 1)
-eq('(20) … pero devuelve el motivo, no lo borra', 'ha caido 246' in motivos[0], True)
+eq('(20) … pero devuelve el motivo, no lo borra',
+   'ha caido 239' in (motivos[0] if motivos else ''), True)
 
 
-print('\n== 21) GUARDA 12 · el cerrojo mientras las vistas lean el nulo como 0 ==')
-# 🔴 Que `fc_transfer` pueda ser NULL ya funciona (bloque 18). Lo que NO funciona
-#    todavia es quien lo LEE: medido el 7-sep-2026 en produccion, cuatro objetos
-#    hacen COALESCE(fc_transfer, 0). Abrir la carga hoy cambiaria un aborto ruidoso
-#    por un disponible ~250 uds corto y creible.
+print('\n== 20 bis) EL DISPONIBLE: la misma cuenta a los dos lados de la resta ==')
+# 🔴 Los tres escalones, y el orden importa: el transito leido manda; si no lo hay,
+#    la estimacion; y si tampoco, el vendible — que es un SUELO, no una cifra completa.
+eq('(20b) con el transito leido: vendible + transito',
+   disponible_de({'available': 5, 'fc_transfer': 3, 'disponible_estimado': 99}), 8)
+eq('(20b) sin transito pero con estimacion: la estimacion',
+   disponible_de({'available': 5, 'fc_transfer': None, 'disponible_estimado': 9}), 9)
+eq('(20b) sin nada de eso: el vendible, que es el suelo',
+   disponible_de({'available': 5, 'fc_transfer': None, 'disponible_estimado': None}), 5)
+# 🔴 Y LO QUE NO HACE: un transito a 0 NO es lo mismo que un transito desconocido.
+eq('(20b) un transito de CERO leido sigue siendo leido',
+   disponible_de({'available': 5, 'fc_transfer': 0, 'disponible_estimado': 99}), 5)
+eq('(20b) el total suma las fichas de la foto',
+   disponible_total([{'registro': {'available': 5, 'fc_transfer': 3,
+                                   'disponible_estimado': None}},
+                     {'registro': {'available': 2, 'fc_transfer': None,
+                                   'disponible_estimado': 7}}]), 15)
+# 🔒 Y la version SQL dice lo mismo, en el mismo orden. Se comprueba el texto
+#    porque aqui no hay base: lo que se ancla es que las dos cuentas no se separen.
+eq('(20b) el SQL hace la misma cuenta y en el mismo orden',
+   SQL_DISPONIBLE,
+   'coalesce(available + fc_transfer, disponible_estimado, available)')
+
+
+print('\n== 21) GUARDA 12 · el cerrojo, ahora MEDIDO contra la definicion viva ==')
+# 🔴 QUE CAMBIA: hasta el 7-sep-2026 esto era una lista escrita a mano que habia
+#    que VACIAR a mano el dia que las vistas quedaran arregladas. Ahora los culpables
+#    se miden leyendo la definicion viva de cada objeto, asi que el cerrojo se abre
+#    solo — y contesta distinto en staging y en produccion, que es lo que una
+#    constante no puede hacer.
 try:
-    guarda_transito_desconocido(ORIGEN_DESCONOCIDO)
-    eq('(21) con el transito desconocido: ABORTA', False, True)
+    guarda_transito_desconocido(ORIGEN_DESCONOCIDO, ['v_trackeador_pantalla'])
+    eq('(21) con el transito desconocido y un culpable: ABORTA', False, True)
 except Aborta as e:
-    eq('(21) con el transito desconocido: ABORTA', True, True)
-    eq('(21) … y nombra los objetos que hay que arreglar',
-       all(v in str(e) for v in ('salud_fba', 'v_salud_asin', 'v_trackeador_pantalla')), True)
-    eq('(21) … y dice como se abre', 'VISTAS_QUE_LEEN_NULO_COMO_CERO' in str(e), True)
-# 🔑 Las dos parejas calladas: con el transito leido no estorba, y el dia que se
-#    arreglen las vistas se abre vaciando la lista — sin tocar ninguna guarda.
+    eq('(21) con el transito desconocido y un culpable: ABORTA', True, True)
+    eq('(21) … y nombra al culpable', 'v_trackeador_pantalla' in str(e), True)
+    eq('(21) … y dice como se abre, sin mandar editar ninguna lista',
+       'este cerrojo se abre solo' in str(e), True)
+# Las dos parejas calladas.
 eq('(21) con el transito leido del informe: no dice nada',
-   guarda_transito_desconocido(ORIGEN_INFORME), None)
-eq('(21) con la lista vacia (vistas ya arregladas): se abre',
-   guarda_transito_desconocido(ORIGEN_DESCONOCIDO, vistas=[]), None)
+   guarda_transito_desconocido(ORIGEN_INFORME, ['v_trackeador_pantalla']), None)
+eq('(21) sin culpables (vistas ya arregladas): se abre',
+   guarda_transito_desconocido(ORIGEN_DESCONOCIDO, []), None)
+
+# 🔬 LA EXPRESION QUE DECIDE QUIEN ES CULPABLE, contra los siete casos con los que
+#    se probo en produccion el 7-sep-2026. Los cuatro primeros TIENEN que caer; los
+#    tres ultimos NO — y el sexto es el que importa: `COALESCE(available, 0) +
+#    fc_transfer` es CORRECTO (se coalesce el vendible, el transito propaga su nulo) y
+#    lo hace `v_salud_asin` de verdad. Una expresion mas ancha lo daria por culpable y
+#    el cerrojo no se abriria jamas.
+# ⚠️ El motor de verdad es Postgres (`~*`); aqui se comprueba la MISMA cadena con el
+#    `re` de Python, que para esta sintaxis coincide. La medida contra la base esta en
+#    el parte.
+CASOS_REGEX = [
+    ('coalesce directo',       'inventory = sum(COALESCE(i.fc_transfer, 0)) + x', True),
+    ('coalesce del sum',       'COALESCE(sum(i.fc_transfer), 0) AS uds', True),
+    ('coalesce con cast',      'COALESCE(fc_transfer, (0)::integer)', True),
+    ('coalesce con espacios',  'coalesce (  x.fc_transfer ,  0 )', True),
+    ('el arreglo (CASE)',
+     'CASE WHEN (count(*) = count(i.fc_transfer)) THEN sum(i.fc_transfer) ELSE NULL END',
+     False),
+    ('coalesce de OTRA columna', 'sum((COALESCE(available, 0) + fc_transfer))', False),
+    ('suma limpia',            'i.available + i.fc_transfer', False),
+]
+for nombre, texto, esperado in CASOS_REGEX:
+    eq('(21) la expresion y %s' % nombre,
+       bool(re.search(RE_NULO_COMO_CERO, texto, re.IGNORECASE)), esperado)
+
+
+class CursorVistas:
+    """Doble de cursor para `objetos_que_leen_nulo_como_cero`: contesta lo que
+    contestaria `pg_get_viewdef` sobre los objetos que EXISTEN."""
+
+    def __init__(self, definiciones):
+        self.definiciones = definiciones      # {nombre: texto}
+        self._ultimo = []
+
+    def execute(self, sql, params):
+        patron, nombres = params
+        self._ultimo = [(n, bool(re.search(patron, self.definiciones[n], re.IGNORECASE)))
+                        for n in nombres if n in self.definiciones]
+
+    def fetchall(self):
+        return self._ultimo
+
+
+LIMPIA = 'CASE WHEN count(*) = count(fc_transfer) THEN sum(fc_transfer) ELSE NULL END'
+SUCIA = 'sum(COALESCE(i.fc_transfer, 0))'
+cur_v = CursorVistas({'salud_fba': LIMPIA, 'v_salud_asin': LIMPIA,
+                      'v_trackeador_pantalla': SUCIA, 'mv_trackeador_pantalla': LIMPIA})
+eq('(21) mide quien sigue sucio y quien no',
+   objetos_que_leen_nulo_como_cero(cur_v), (['v_trackeador_pantalla'], []))
+cur_v = CursorVistas({n: LIMPIA for n in CONSUMIDORES_DEL_TRANSITO})
+eq('(21) con los cuatro arreglados, ningun culpable',
+   objetos_que_leen_nulo_como_cero(cur_v), ([], []))
+# 🔴 Y el objeto que NO existe no es un culpable, pero se dice: un consumidor que
+#    se ha esfumado tambien es una noticia.
+cur_v = CursorVistas({'salud_fba': LIMPIA})
+culpables, ausentes = objetos_que_leen_nulo_como_cero(cur_v)
+eq('(21) el que no existe no cuenta como culpable', culpables, [])
+eq('(21) … pero se nombra aparte', len(ausentes), 3)
 
 
 print('\n== 22) GUARDA 13 · el dia en que sumar empieza a contar doble ==')
@@ -1036,6 +1183,178 @@ estimar_disponible(f, {'A1': (3, D3)}, escribir=lambda *a: None)
 eq('(25) la unidad suelta se la lleva el sku menor, venga como venga el fichero',
    {x['registro']['sku']: x['registro']['disponible_estimado'] for x in f},
    {'S1': 2, 'S9': 1})
+
+
+print('\n== 26) GUARDA 14 · el catalogo de modelos: dos formas, y ninguna mas ==')
+# 🔴 QUE VIENE A CERRAR. Hasta el 7-sep-2026 el modelo del disponible se decidia
+#    por PRESENCIA de una columna: si no venia `afn-fc-transfer-quantity`, el informe
+#    se leia como «transito desconocido», viniera de donde viniera. O sea que un .txt
+#    con las columnas movidas, o con una tercera que faltase, entraba exactamente
+#    igual que el degradado del 7-sep. Ahora se compara la cabecera ENTERA.
+eq('(26) la de 26 columnas es un modelo conocido: transito aparte',
+   guarda_modelo_conocido(CABECERA, permitir=False), MODELO_TRANSITO_APARTE)
+eq('(26) la de 24 tambien lo es: transito desconocido',
+   guarda_modelo_conocido(CABECERA_24, permitir=False), MODELO_TRANSITO_DESCONOCIDO)
+eq('(26) y el catalogo tiene nombre para las dos', len(NOMBRE_MODELO), 2)
+
+
+def no_conocida(cabecera, etiqueta, dentro=None):
+    try:
+        guarda_modelo_conocido(cabecera, permitir=False)
+        eq('(26) %s: ABORTA' % etiqueta, False, True)
+        return ''
+    except Aborta as e:
+        eq('(26) %s: ABORTA' % etiqueta, True, True)
+        if dentro:
+            eq('(26) … y dice por que (%s)' % dentro, dentro in str(e), True)
+        return str(e)
+
+
+# Una columna de MAS.
+msg = no_conocida(CABECERA + ['afn-lo-que-sea'], 'una columna nueva de Amazon',
+                  'le sobran 1')
+eq('(26) … y manda catalogarla, no forzar la guarda',
+   'MODELOS_CONOCIDOS' in msg, True)
+# Una tercera columna de MENOS, de las que no estan en el contrato de la Guarda 1.
+no_conocida([h for h in CABECERA if h != 'per-unit-volume'],
+            'una tercera columna que se va', 'le faltan 1')
+# Y las mismas columnas CAMBIADAS DE ORDEN, que es el caso que ninguna otra guarda ve:
+# el fichero se lee por nombre, asi que cuadraria fila a fila sin decir nada.
+revuelta = CABECERA[:9] + [CABECERA[10], CABECERA[9]] + CABECERA[11:]
+no_conocida(revuelta, 'las mismas columnas movidas de sitio', 'CAMBIADAS DE ORDEN')
+# 🔒 La valvula, con nombre: deja pasar y cae a la regla vieja (por presencia).
+avisos14 = []
+eq('(26) PERMITIR_MODELO_NUEVO=1 la deja pasar…',
+   guarda_modelo_conocido(CABECERA + ['nueva'], permitir=True,
+                          escribir=avisos14.append), MODELO_TRANSITO_APARTE)
+eq('(26) … y sin la columna del transito, cae en «desconocido»',
+   guarda_modelo_conocido(CABECERA_24 + ['nueva'], permitir=True,
+                          escribir=lambda *a: None), MODELO_TRANSITO_DESCONOCIDO)
+eq('(26) … pero deja rastro en el log', any('Guarda 14' in a for a in avisos14), True)
+
+# 🔴 Y LO QUE IMPORTA: que esto se EJECUTE al analizar el fichero, no que este
+#    escrito. Un fichero entero con una columna de mas tiene que parar la carga.
+con_extra = [f + ['x'] for f in SANAS]
+corto, msg = corta(fichero(con_extra, cabecera=CABECERA + ['afn-lo-que-sea']))
+eq('(26) un .txt con una columna nueva: la carga PARA', corto, True)
+eq('(26) … y por la Guarda 14', '[Guarda 14]' in msg, True)
+# La pareja callada: los dos modelos buenos siguen entrando por el mismo camino.
+eq('(26) el .txt de 26 columnas sigue entrando', corta(SANO)[0], False)
+eq('(26) y el degradado de 24 tambien',
+   corta(fichero(sin_esperadas(SANAS), cabecera=CABECERA_24))[0], False)
+eq('(26) … y cada uno con su modelo anotado',
+   (analizar(SANO, 'p.txt', HOY)['modelo_disponible'],
+    analizar(fichero(sin_esperadas(SANAS), cabecera=CABECERA_24),
+             'p.txt', HOY)['modelo_disponible']),
+   (MODELO_TRANSITO_APARTE, MODELO_TRANSITO_DESCONOCIDO))
+
+
+print('\n== 27) EL PUENTE · la FUENTE VIEJA se grita, no se calla ==')
+# 🔴 EL FALLO SILENCIOSO QUE CIERRA: cuando el internacional no es del mismo dia
+#    que el informe FBA, el disponible se estima con una foto vieja y hasta hoy nada lo
+#    decia. Medido el 7-sep-2026 en produccion: los 11 dias del historico del
+#    inventario caen todos en dias que SI tienen internacional, asi que el desfase es 0
+#    en los 12 casos guardados. No ha pasado nunca — que es justo cuando se pone el
+#    aviso, porque el dia que pase la cifra saldra igual de creible y sera de otro dia.
+D7 = datetime.date(2026, 9, 7)
+avisos27 = []
+f = [reg('S1', 'A1', 2)]
+r = estimar_disponible(f, {'A1': (10, D6)}, D7, escribir=avisos27.append)
+eq('(27) la ficha estimada con la foto de ayer se cuenta', r['fuente_vieja'], 1)
+eq('(27) … y se dice de cuantos dias es el desfase', r['fuente_dias'], 1)
+eq('(27) … y se GRITA, no se queda en el resumen',
+   any('OTRO DIA' in a for a in avisos27), True)
+eq('(27) … diciendo cuantas fichas y de que dia es la fuente',
+   any('fichas afectadas : 1' in a for a in avisos27)
+   and any(str(D6) in a for a in avisos27), True)
+# 🔑 LAS PAREJAS CALLADAS, que son las que hacen que esto mida algo.
+avisos27b = []
+f = [reg('S1', 'A1', 2)]
+r = estimar_disponible(f, {'A1': (10, D7)}, D7, escribir=avisos27b.append)
+eq('(27) con el internacional del mismo dia: 0 fichas', r['fuente_vieja'], 0)
+eq('(27) … y ni una palabra', any('OTRO DIA' in a for a in avisos27b), False)
+# Sin internacional no hay fuente vieja: hay DESCONOCIDO, que es otra cosa y ya se dice.
+f = [reg('S1', 'A1', 2)]
+r = estimar_disponible(f, {}, D7, escribir=lambda *a: None)
+eq('(27) sin internacional no se inventa un desfase',
+   (r['fuente_vieja'], r['desconocido']), (0, 1))
+# Y sin decirle de que dia es la foto, no juzga: no se compara contra nada.
+f = [reg('S1', 'A1', 2)]
+r = estimar_disponible(f, {'A1': (10, D6)}, escribir=lambda *a: None)
+eq('(27) sin fecha de la foto no hay desfase que medir', r['fuente_vieja'], 0)
+
+
+print('\n== 28) LA LIBRETA · cada carga deja su fila, tambien la que aborta ==')
+# 🔴 POR QUE. Medido el 7-sep-2026 en produccion: `inventario_fba_cabecera` a CERO
+#    filas. La carga del 6-sep es anterior a que la tabla existiera y la del 7 ABORTO,
+#    y el censo se escribia al final y dentro de la transaccion de datos. O sea que la
+#    libreta estaba muda exactamente el dia en que tenia algo que decir.
+
+
+class CursorGrabador:
+    """Doble de cursor que APUNTA cada sentencia y devuelve lo que se le diga."""
+
+    def __init__(self, respuestas=None):
+        self.sentencias = []          # [(sql, params)]
+        self.respuestas = list(respuestas or [])
+
+    def execute(self, sql, params=None):
+        self.sentencias.append((sql, params))
+
+    def fetchone(self):
+        return self.respuestas.pop(0) if self.respuestas else None
+
+    def fetchall(self):
+        return self.respuestas.pop(0) if self.respuestas else []
+
+
+cur_l = CursorGrabador()
+anotar_libreta(cur_l, HOY, 'p.txt', CABECERA_24, MODELO_TRANSITO_DESCONOCIDO,
+               CARGA_ABORTO, 'Guarda 1: falta una columna')
+sql_l, params_l = cur_l.sentencias[0]
+eq('(28) escribe en la libreta y no en otra tabla', TABLA_CENSO in sql_l, True)
+eq('(28) una fila por foto: se pisa la del mismo dia',
+   'ON CONFLICT (fecha_foto) DO UPDATE' in sql_l, True)
+eq('(28) guarda los encabezados EXACTOS y EN SU ORDEN', params_l[3], CABECERA_24)
+eq('(28) … y cuantos son', params_l[2], 24)
+eq('(28) … y el modelo del disponible', params_l[4], MODELO_TRANSITO_DESCONOCIDO)
+eq('(28) … y que la carga NO entro', params_l[5], CARGA_ABORTO)
+eq('(28) … con el motivo, que dice que guarda salto',
+   params_l[6], 'Guarda 1: falta una columna')
+# La pareja: la carga que entra se apunta igual, marcada como cargada.
+cur_l = CursorGrabador()
+anotar_libreta(cur_l, HOY, 'p.txt', CABECERA, MODELO_TRANSITO_APARTE, CARGA_ENTRO)
+eq('(28) la carga que entra queda como cargada y sin motivo',
+   cur_l.sentencias[0][1][5:], (CARGA_ENTRO, None))
+sql_ok = cur_l.sentencias[0][0]
+eq('(28) y las dos escriben en la misma tabla y con el mismo ON CONFLICT',
+   (TABLA_CENSO in sql_ok, 'ON CONFLICT (fecha_foto) DO UPDATE' in sql_ok), (True, True))
+# 🔴 LA ÚNICA DIFERENCIA ENTRE LAS DOS, Y ES UN CASO QUE VA A PASAR: relanzar a mano
+#    el fichero de un dia YA CARGADO cuando ya hay una foto mas nueva. Ahi
+#    `guarda_no_retroceder` aborta — y sin este filtro la fila de aquel dia pasaria de
+#    'cargada' a 'abortada', o sea que la libreta diria que un dia que SI entro no
+#    entro. La carga buena manda sobre el intento fallido.
+eq('(28) el aborto NO pisa un dia que si se cargo',
+   "WHERE inventario_fba_cabecera.resultado IS DISTINCT FROM 'cargada'" in sql_l, True)
+eq('(28) … y la carga que entra si manda, sin filtro',
+   'WHERE' in sql_ok, False)
+
+# 🔴 Y LA CONSECUENCIA QUE HABRIA SIDO UN BUG: con los abortos dentro, «la carga
+#    anterior» tiene que seguir siendo la ultima que ENTRO. Si no, un informe raro
+#    rechazado ayer se convertiria hoy en «la version anterior».
+cur_c = CursorGrabador([('public.' + TABLA_CENSO,), ([CABECERA_24],)])
+cabecera_anterior(cur_c, HOY)
+eq('(28) la version anterior no mira las cargas que abortaron',
+   "resultado IS DISTINCT FROM 'abortada'" in cur_c.sentencias[1][0], True)
+eq('(28) … y es distinto de «= cargada»: las filas viejas llevan NULL',
+   "= 'cargada'" in cur_c.sentencias[1][0], False)
+
+# 🔑 Y la cabecera se puede leer SIN analizar el fichero — que es lo que permite
+#    apuntar en la libreta una carga que la Guarda 1 rechaza antes de devolver nada.
+eq('(28) la cabecera sola sale del .txt', cabecera_de(SANO), CABECERA)
+eq('(28) … tambien del degradado',
+   cabecera_de(fichero(sin_esperadas(SANAS), cabecera=CABECERA_24)), CABECERA_24)
+eq('(28) … y de un fichero vacio sale vacia, sin reventar', cabecera_de(''), [])
 
 
 print('')

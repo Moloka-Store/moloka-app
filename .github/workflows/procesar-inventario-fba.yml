@@ -12,6 +12,19 @@ name: Moloka - Procesar INVENTARIO_FBA
 #    (crea la tabla CERRADA). El procesador NO activa
 #    la RLS —era un lock exclusivo en cada carga— y aborta pidiéndola si no está.
 #
+# 🔴 EL RESCATE DEL 7-sep-2026, Y EL ORDEN IMPORTA. Ese día Amazon sirvió el informe
+#    con 24 columnas, la Guarda 1 lo rechazó y la carga se quedó cerrada: la foto viva
+#    es del 6-sep. El fichero sigue en el buzón. Para meterlo en su sitio:
+#        fichero = 50740020703.txt   ·   entorno = produccion   ·   modo = ensayo
+#    y, si el ensayo cuadra, el mismo disparo con modo = aplicar.
+#    ⚠️ HAY QUE HACERLO **ANTES** DE CARGAR NINGUNA FOTO MÁS NUEVA. `guarda_no_retroceder`
+#       impide cargar una foto anterior a la que ya está: en cuanto entre la del 8-sep,
+#       la del 7 ya no se puede meter y ese día queda para siempre fuera del histórico.
+#    ⚠️ Y OJO: en el buzón hay CUATRO .txt subidos el 7-sep (50738020703, 50740020703,
+#       50742020703 y una copia de este último). Los cuatro llevan fecha_foto del 7 —la
+#       fecha es la de subida—, así que se carga el que Fernando diga POR SU NOMBRE; sin
+#       el input `fichero` se cargaría «el más reciente», que aquí es una lotería.
+#
 # 🔒 EL BUZÓN LO ABRE `migraciones/2026-08-23_jubilar_salud_fba.sql`, que mete
 #    `informes/inventario_fba/` en `moloka_buzones_fase0()` y saca de ahí a
 #    `salud_fba` — un relevo, 8 carpetas antes y 8 después. De esa función cuelgan
@@ -57,6 +70,21 @@ on:
         default: 'no'
       exigir_inbound:
         description: 'ABORTAR si el informe no trae NADA en tránsito, en vez de sólo gritarlo (Guarda 7b).'
+        type: choice
+        options: ['no', 'si']
+        default: 'no'
+      # 🔴 ESTAS DOS FALTABAN AQUÍ, Y LAS DOS EXISTÍAN YA EN EL CÓDIGO. Se leen del
+      #    entorno desde su PR, pero no se podían poner desde este botón: o sea que la
+      #    única forma de usarlas era editar el .py, que es exactamente lo que el trato
+      #    de las válvulas dice que no se hace. Una válvula que no está a la vista se
+      #    salta sin que quede constancia.
+      permitir_salto:
+        description: 'Cargar aunque el disponible caiga mas de lo que se vendio (Guarda 10). Solo si el salto es REAL.'
+        type: choice
+        options: ['no', 'si']
+        default: 'no'
+      permitir_modelo_nuevo:
+        description: 'Cargar aunque la cabecera no sea ninguno de los dos modelos conocidos, el de 26 ni el de 24 (Guarda 14).'
         type: choice
         options: ['no', 'si']
         default: 'no'
@@ -106,4 +134,6 @@ jobs:
           DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
           PERMITIR_UMBRAL_BAJO: ${{ inputs.permitir_umbral_bajo == 'si' && '1' || '0' }}
           EXIGIR_INBOUND: ${{ inputs.exigir_inbound == 'si' && '1' || '0' }}
+          PERMITIR_SALTO: ${{ inputs.permitir_salto == 'si' && '1' || '0' }}
+          PERMITIR_MODELO_NUEVO: ${{ inputs.permitir_modelo_nuevo == 'si' && '1' || '0' }}
         run: python -u procesador_inventario_fba.py
