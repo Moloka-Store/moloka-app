@@ -27,6 +27,15 @@
 --   producción devolvía antes del 2b — longitud 46.179 caracteres, md5
 --   944763a901b1931faff1f0e131b07ace. No es «parecido»: es el mismo.
 --
+-- 🔴 `CREATE OR REPLACE VIEW` **BORRA LAS OPCIONES DE LA VISTA**, `security_invoker`
+--   incluido. No es una suposición: lo cazó el número de control de este mismo
+--   fichero en el ensayo de staging el 7-sep-2026, con `reloptions: (sin opciones)`
+--   después del REPLACE. Por eso hay un `ALTER VIEW ... SET (security_invoker=true)`
+--   justo detrás, y por eso la guarda lo comprueba.
+--   ⚠️ Sin esa guarda, la vista habría vuelto a leer con los permisos de su dueño
+--   (`postgres`) saltándose la RLS, en silencio y sin que nada fallara. Una opción
+--   de seguridad que se pierde no da error: deja de proteger.
+--
 -- PROBADA EN STAGING el 7-sep-2026 con la secuencia completa: aplicar el 2b →
 --   lanzar esto → comprobar por SQL que la vista vuelve a su texto de partida.
 -- ============================================================================
@@ -1269,6 +1278,11 @@ CREATE OR REPLACE VIEW public.v_trackeador_pantalla AS
             ELSE NULL::text
         END AS trabajo_fila
    FROM fila3 k;
+
+-- 🔴 IMPRESCINDIBLE: el REPLACE de arriba se ha llevado por delante las
+--    opciones de la vista. Sin esta linea, `security_invoker` se pierde y la
+--    vista vuelve a leer como su dueno, saltandose la RLS, en silencio.
+ALTER VIEW public.v_trackeador_pantalla SET (security_invoker = true);
 
 -- ── EL NÚMERO DE CONTROL, DENTRO DE LA TRANSACCIÓN ──────────────────────────
 DO $$

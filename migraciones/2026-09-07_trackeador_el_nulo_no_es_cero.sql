@@ -88,6 +88,15 @@
 --   marcados, y nada más. Si hubiera cambiado una coma por descuido, esos dos
 --   números no coincidirían.
 --
+-- 🔴 `CREATE OR REPLACE VIEW` **BORRA LAS OPCIONES DE LA VISTA**, `security_invoker`
+--   incluido. No es una suposición: lo cazó el número de control de este mismo
+--   fichero en el ensayo de staging el 7-sep-2026, con `reloptions: (sin opciones)`
+--   después del REPLACE. Por eso hay un `ALTER VIEW ... SET (security_invoker=true)`
+--   justo detrás, y por eso la guarda lo comprueba.
+--   ⚠️ Sin esa guarda, la vista habría vuelto a leer con los permisos de su dueño
+--   (`postgres`) saltándose la RLS, en silencio y sin que nada fallara. Una opción
+--   de seguridad que se pierde no da error: deja de proteger.
+--
 -- ESCALERA: staging ensayo → staging aplicar → verificación por SQL → producción
 --   ensayo → producción aplicar → verificación por SQL → Fernando abre la pantalla.
 -- ============================================================================
@@ -1369,6 +1378,11 @@ CREATE OR REPLACE VIEW public.v_trackeador_pantalla AS
             ELSE NULL::text
         END AS trabajo_fila
    FROM fila3 k;
+
+-- 🔴 IMPRESCINDIBLE: el REPLACE de arriba se ha llevado por delante las
+--    opciones de la vista. Sin esta linea, `security_invoker` se pierde y la
+--    vista vuelve a leer como su dueno, saltandose la RLS, en silencio.
+ALTER VIEW public.v_trackeador_pantalla SET (security_invoker = true);
 
 COMMENT ON COLUMN public.v_trackeador_pantalla.stock_fc_transfer IS
   'Unidades en transferencia entre centros de Amazon. NULO cuando el informe FBA no '
