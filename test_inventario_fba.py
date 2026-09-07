@@ -23,12 +23,18 @@
 """
 import datetime
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from procesador_inventario_fba import (analizar, avisar_inbound, Aborta,  # noqa: E402
-                                       UMBRAL_FILAS, N_COLUMNAS, TIPADAS, NUMERICAS,
-                                       CABECERA_ESPERADA)
+from procesador_inventario_fba import (  # noqa: E402
+    analizar, avisar_inbound, Aborta, UMBRAL_FILAS, TIPADAS, NUMERICAS,
+    CABECERA_ESPERADA, ESPERADAS, HEADER_FC, ORIGEN_INFORME, ORIGEN_DESCONOCIDO,
+    DERIVADAS_COLS, HIST_COLS, HIST_PK, TABLA_HIST, sql_crear_tabla_historico,
+    censo_cabecera, misma_version, guarda_continuidad, guarda_transito_desconocido,
+    guarda_salto_a_transito_dentro, modelo_del_disponible,
+    MODELO_TRANSITO_APARTE, MODELO_TRANSITO_DESCONOCIDO,
+    TECHO_CAIDA_VENDIBLE_DIA, TECHO_CAIDA_ALMACEN_DIA, CAIDA_MAX_FICHAS)
 
 fallos = []
 HOY = datetime.date(2026, 8, 23)
@@ -67,6 +73,17 @@ CABECERA = [
 ]
 POR = {h: i for i, h in enumerate(CABECERA)}
 
+# 🔬 LA VERSION DEGRADADA, la que Amazon sirvio el 7-sep-2026: las mismas columnas
+#    MENOS las dos que se fue. Se construye QUITANDO de la de arriba, no copiando
+#    otra lista a mano: dos listas escritas a mano se separan en cuanto una cambia.
+CABECERA_24 = [h for h in CABECERA if h not in ESPERADAS]
+
+
+def sin_esperadas(filas):
+    """Las mismas filas, sin las columnas que el 7-sep no vinieron."""
+    quitar = {POR[h] for h in ESPERADAS}
+    return [[c for i, c in enumerate(f) if i not in quitar] for f in filas]
+
 
 def fila(n, inbound=0, **cambios):
     """Una fila sana. `n` la hace unica; `cambios` la rompe por un sitio concreto."""
@@ -94,6 +111,12 @@ def fila(n, inbound=0, **cambios):
     f[POR['afn-total-quantity']] = str(5 + inbound)
     f[POR['afn-inbound-shipped-quantity']] = str(inbound)
     f[POR['per-unit-volume']] = '1657.06'
+    # 🔬 El testigo de Amazon cumple SU identidad, medida el 6-sep-2026 sobre las
+    #    381 filas reales: afn-onhand-buyable = vendible + transito, desvio 0. Una
+    #    fila sana que no la cumpliera haria gritar al contraste en cada prueba, y
+    #    un aviso que sale siempre deja de leerse.
+    f[POR['afn-onhand-buyable-quantity']] = str(
+        int(f[POR['afn-fulfillable-quantity']]) + int(f[POR['afn-fc-transfer-quantity']]))
     for h, v in cambios.items():
         f[POR[h.replace('_', '-')]] = v
     return f
@@ -114,9 +137,22 @@ SANO = fichero(SANAS)
 
 print('== 0) LO QUE SE MIDIO EN EL FICHERO REAL (anclas, 23-ago-2026) ==')
 # Si Amazon cambia la forma del informe, esto salta antes que nada y dice por donde.
-eq('(0) el informe declara 26 columnas', N_COLUMNAS, 26)
-eq('(0) los 16 encabezados tipados son de la cabecera real',
+# 🔴 AQUI YA NO SE ANCLA UN NUMERO DE COLUMNAS, y es el cambio de fondo del
+#    7-sep-2026. Habia una constante `N_COLUMNAS = 26` que NINGUNA guarda leia (la
+#    guarda 3 mide contra la cabecera del propio fichero), asi que parecia proteger
+#    el ancho del informe y no protegia nada. Y ademas dejo de ser cierta: ese dia
+#    Amazon sirvio 24. Un ancla que nadie lee no es un ancla; quien registra la
+#    forma del informe ahora es el CENSO (Guarda 11), que ademas guarda CUALES.
+eq('(0) las 26 columnas de la version larga y las 24 de la corta',
+   (len(CABECERA), len(CABECERA_24)), (26, 24))
+eq('(0) los encabezados OBLIGATORIOS son de la cabecera real',
    [h for h in CABECERA_ESPERADA if h not in CABECERA], [])
+# 🔑 Y la particion del contrato: las dos esperadas NO estan entre las que abortan.
+eq('(0) las esperadas quedan fuera de la Guarda 1',
+   sorted(h for h in ESPERADAS if h in CABECERA_ESPERADA), [])
+eq('(0) … y son exactamente las dos que Amazon se llevo',
+   sorted(ESPERADAS),
+   ['afn-fc-transfer-quantity', 'afn-onhand-buyable-quantity'])
 eq('(0) la PK es el sku', TIPADAS[0][:2], ('sku', 'sku'))
 eq('(0) inbound_shipped viene de afn-inbound-shipped-quantity',
    [c for h, c, _ in TIPADAS if h == 'afn-inbound-shipped-quantity'], ['inbound_shipped'])
@@ -229,7 +265,6 @@ print('\n== 8) GUARDA 6 · las numericas del inventario ==')
 #    el informe dejo de contestar; «no es un numero» dice que trae basura.
 for col, valor, que, marca in (
         ('afn-inbound-shipped-quantity', '', 'vacia', 'viene VACÍA'),
-        ('your-price', '', 'precio vacio', 'viene VACÍA'),
         ('afn-fulfillable-quantity', 'N/A', 'no numerica', 'no es un número'),
         ('afn-total-quantity', '-3', 'negativa', '(negativo)')):
     rotas = [fila(n) for n in range(1, UMBRAL_FILAS + 6)]
@@ -243,6 +278,29 @@ ceros = [fila(n) for n in range(1, UMBRAL_FILAS + 6)]
 ceros[5][POR['afn-inbound-shipped-quantity']] = '0'
 corto, _ = corta(fichero(ceros))
 eq('(8) un 0 explicito NO aborta (vacio != cero)', corto, False)
+# 🔑 EL PRECIO ES LA EXCEPCION, Y TIENE PAREJA EN LAS DOS DIRECCIONES. Un hueco
+#    en `your-price` NO aborta —un precio ausente no es stock y no puede tumbar el
+#    inventario de un almacen— pero tampoco se traga: va a NULL y queda anotado.
+#    Caso real: XQ-QJXG-7UQ1 el 7-sep-2026, 1 fila de 381.
+precio = [fila(n) for n in range(1, UMBRAL_FILAS + 6)]
+precio[5][POR['your-price']] = ''
+corto, _ = corta(fichero(precio))
+eq('(8) your-price vacio: NO aborta', corto, False)
+sin_precio = analizar(fichero(precio), 'p.txt', HOY)
+eq('(8) … el precio queda a NULO, no a 0',
+   sin_precio['filas'][5]['registro']['your_price'], None)
+eq('(8) … y la ficha queda anotada con su sku',
+   [sku for sku, _ in sin_precio['precios_vacios']], ['SKU-00006'])
+eq('(8) … y solo esa (las demas conservan su precio)',
+   sin_precio['filas'][4]['registro']['your_price'], 19.99)
+# 🔴 La pareja que impide que esto se convierta en «los huecos ya no importan»:
+#    una CANTIDAD vacia sigue abortando exactamente igual que antes.
+cantidad = [fila(n) for n in range(1, UMBRAL_FILAS + 6)]
+cantidad[5][POR['afn-warehouse-quantity']] = ''
+corto, msg = corta(fichero(cantidad))
+eq('(8) … pero una CANTIDAD vacia sigue abortando', corto, True)
+eq('(8) … y por la razon de siempre', 'viene VACÍA' in msg, True)
+
 # Y las columnas que el fichero real trae vacias de serie no molestan: no se tipan.
 huecos = [fila(n) for n in range(1, UMBRAL_FILAS + 6)]
 for f in huecos:
@@ -332,8 +390,10 @@ eq('(12) crudo trae las 26 columnas', len(sano['filas'][0]['crudo']), 26)
 eq('(12) … incluidas las que hoy no se tipan',
    all(h in sano['filas'][0]['crudo'] for h in
        ('per-unit-volume', 'afn-researching-quantity', 'mfn-fulfillable-quantity')), True)
-eq('(12) … y se tipan 16 de las 26', len(TIPADAS), 16)
-eq('(12) … de las que 10 son numericas', len(NUMERICAS), 10)
+eq('(12) … y se tipan 17 de las 26', len(TIPADAS), 17)
+eq('(12) … de las que 11 son numericas', len(NUMERICAS), 11)
+eq('(12) … y 15 de las 17 abortan si faltan; 2 son esperadas',
+   (len(CABECERA_ESPERADA), len(ESPERADAS)), (15, 2))
 
 
 print('\n== 13) EL FICHERO LLEGA EN CRLF (medido) y se lee igual en LF ==')
@@ -369,7 +429,20 @@ for linea in cuerpo.split('\n'):
 
 eq('(14) el recorte del CREATE TABLE trae columnas (si no, no comprueba nada)',
    len(cols_sql) > 0, True)
+# 🔑 Las columnas que anade una migracion POSTERIOR cuentan igual: la tabla la
+#    describe el conjunto de las migraciones, no solo la que la creo. Sin esto,
+#    anadir una columna dejaria este cotejo en rojo para siempre o —peor— invitaria
+#    a reescribir una migracion ya aplicada.
+MIG_NUEVA = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'migraciones',
+                         '2026-09-07_inventario_fba_esperadas_y_censo.sql')
+with open(MIG_NUEVA, encoding='utf-8') as fh:
+    sql_nueva = sin_comentarios(fh.read())
+anadidas = set(re.findall(r'ADD COLUMN IF NOT EXISTS\s+(\w+)', sql_nueva))
+eq('(14) la migracion nueva anade columnas (si no, no comprueba nada)',
+   len(anadidas) > 0, True)
+cols_sql |= anadidas
 cols_py = {c for _, c, _ in TIPADAS} | {'fichero', 'fecha_foto', 'crudo', 'procesado_at'}
+cols_py |= set(DERIVADAS_COLS)
 eq('(14) las que el procesador escribe y la tabla no tiene', sorted(cols_py - cols_sql), [])
 eq('(14) las que la tabla tiene y el procesador no escribe', sorted(cols_sql - cols_py), [])
 # La PK tambien: si la migracion la pusiera en otra columna, el ON CONFLICT (sku)
@@ -396,9 +469,6 @@ print('\n== 15) EL HISTORICO: PELICULA, no otra foto ==')
 #    clave —solo (sku), sin fecha_foto— cada carga pisaria la anterior y esto
 #    dejaria de ser una pelicula SIN QUE NADIE SE ENTERE: la tabla existiria, se
 #    llenaria, y solo tendria el ultimo dia. Es el fallo mudo peor de este PR.
-from procesador_inventario_fba import (HIST_COLS, HIST_PK, TABLA_HIST,  # noqa: E402
-                                       sql_crear_tabla_historico)
-
 eq('(15) la PK del historico lleva fecha_foto', HIST_PK, ('sku', 'fecha_foto'))
 eq('(15) … y el DDL tambien', 'PRIMARY KEY (sku, fecha_foto)' in sql_crear_tabla_historico(), True)
 # 🔒 Anclado sobre lo que NO debe aparecer: preguntar «¿esta sku en la PK?» saldria
@@ -422,6 +492,7 @@ for linea in cuerpo_h.split('\n'):
     if linea and not linea.lower().startswith('primary key'):
         cols_h.add(linea.split()[0].strip(','))
 eq('(15) el recorte del CREATE TABLE trae columnas', len(cols_h) > 0, True)
+cols_h |= anadidas
 py_h = set(HIST_COLS) | {'capturado_en'}
 eq('(15) las que el procesador escribe y la tabla no tiene', sorted(py_h - cols_h), [])
 eq('(15) las que la tabla tiene y el procesador no escribe', sorted(cols_h - py_h), [])
@@ -534,6 +605,193 @@ with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
     codigo = sin_almohadillas(fh.read())
 eq('(17) 🔴 y main() le pasa FICHERO de verdad, no una cadena vacia',
    'elegir_fichero(txts, FICHERO)' in codigo, True)
+
+
+print('\n== 18) EL CONTRATO PARTIDO: lo que aborta y lo que se echa en falta ==')
+# 🔴 LAS DOS DIRECCIONES, y aqui la segunda es la que de verdad importa: que el
+#    fichero degradado ENTRE (para que la carga diaria no se pare) pero que lo que
+#    falta NO se rellene con un cero.
+degradado = analizar(fichero(sin_esperadas(SANAS), cabecera=CABECERA_24), 'p.txt', HOY)
+eq('(18) el fichero de 24 columnas ENTRA', len(degradado['filas']), len(SANAS))
+eq('(18) … y dice cuales le faltan',
+   degradado['esperadas_ausentes'],
+   ['afn-fc-transfer-quantity', 'afn-onhand-buyable-quantity'])
+# 🔑 EL ASSERT QUE VALE MAS DE TODO EL FICHERO: NULL, no 0. Un `== 0` aqui saldria
+#    verde con la version que rellena ceros, que es justo el fallo que se persigue.
+eq('(18) 🔴 el transito queda a NULO en TODAS las filas, no a 0',
+   {f['registro']['fc_transfer'] for f in degradado['filas']}, {None})
+eq('(18) … y ninguna es 0 (que seria «no hay», y es otra cosa)',
+   any(f['registro']['fc_transfer'] == 0 for f in degradado['filas']), False)
+eq('(18) … el origen lo dice en el dato, no solo en el log',
+   {f['registro']['fc_transfer_origen'] for f in degradado['filas']}, {ORIGEN_DESCONOCIDO})
+eq('(18) … y el testigo de Amazon tambien queda a NULO',
+   {f['registro']['onhand_buyable'] for f in degradado['filas']}, {None})
+# La pareja: con la version larga, todo eso se llena y el origen es el informe.
+eq('(18) con las 26 columnas el transito viene del informe',
+   {f['registro']['fc_transfer_origen'] for f in sano['filas']}, {ORIGEN_INFORME})
+eq('(18) … y el transito es un numero, no un nulo',
+   sano['filas'][0]['registro']['fc_transfer'], 0)
+eq('(18) … y el testigo llega, cuadrando con vendible + transito',
+   sano['filas'][0]['registro']['onhand_buyable'], 5)
+# 🔴 Y LO QUE **NO** HA CAMBIADO: una OBLIGATORIA que falta sigue abortando. Sin
+#    esto, «partir el contrato» seria un eufemismo de «quitar la guarda 1».
+sin_vendible = [h for h in CABECERA if h != 'afn-fulfillable-quantity']
+quita = POR['afn-fulfillable-quantity']
+filas_sv = [[c for i, c in enumerate(f) if i != quita] for f in SANAS]
+corto, msg = corta(fichero(filas_sv, cabecera=sin_vendible))
+eq('(18) 🔒 una columna OBLIGATORIA que falta sigue abortando', corto, True)
+eq('(18) … y por la Guarda 1 de siempre', '[Guarda 1]' in msg, True)
+# El modelo del disponible lo decide la version, no una constante.
+eq('(18) con la columna del transito, el modelo es «aparte»',
+   modelo_del_disponible(CABECERA), MODELO_TRANSITO_APARTE)
+eq('(18) sin ella, el modelo es «desconocido» (NO el modelo nuevo)',
+   modelo_del_disponible(CABECERA_24), MODELO_TRANSITO_DESCONOCIDO)
+
+
+print('\n== 19) GUARDA 11 · el censo de la cabecera, y la VERSION ==')
+eq('(19) sin carga anterior no se inventa comparacion',
+   censo_cabecera(CABECERA_24, None), (None, None))
+eq('(19) … y entonces la version NO se da por igual',
+   misma_version(CABECERA_24, None), False)
+eq('(19) misma cabecera = misma version', misma_version(CABECERA, CABECERA), True)
+eq('(19) el caso del 7-sep: faltan dos, no sobra ninguna',
+   censo_cabecera(CABECERA_24, CABECERA),
+   (['afn-fc-transfer-quantity', 'afn-onhand-buyable-quantity'], []))
+eq('(19) … y por tanto NO es la misma version',
+   misma_version(CABECERA_24, CABECERA), False)
+# 🔑 El caso al reves, que es el que nadie vio venir: Amazon METIO esas dos
+#    columnas en su dia y nadie se entero. Sobrar no aborta, pero se censa.
+eq('(19) el caso de vuelta: sobran dos, no falta ninguna',
+   censo_cabecera(CABECERA, CABECERA_24),
+   ([], ['afn-fc-transfer-quantity', 'afn-onhand-buyable-quantity']))
+
+
+print('\n== 20) GUARDA 10 · continuidad contra la foto anterior ==')
+AYER, HOY10 = datetime.date(2026, 9, 6), datetime.date(2026, 9, 7)
+# 🔴 EL CASO REAL DEL 7-sep, y las dos lecturas del MISMO dato:
+#    almacen 6.881 → 6.635 (−246) · vendible 6.437 → 6.453 (+16).
+#    Con otra version se compara el vendible y PASA; con la misma version se
+#    compararia el almacen y ABORTA. Las dos direcciones sobre las mismas cifras.
+eq('(20) 7-sep con version distinta (mira el vendible): PASA',
+   guarda_continuidad(AYER, HOY10, False, 6437, 6453, 6881, 6635, 381, 381,
+                      permitir_salto=False), [])
+try:
+    guarda_continuidad(AYER, HOY10, True, 6437, 6453, 6881, 6635, 381, 381,
+                       permitir_salto=False)
+    eq('(20) 7-sep con la MISMA version (mira el almacen): ABORTA', False, True)
+except Aborta as e:
+    eq('(20) 7-sep con la MISMA version (mira el almacen): ABORTA', True, True)
+    eq('(20) … y lo dice en castellano y sin nombres de columna',
+       'El almacen ha caido 246 unidades en 1 dia(s)' in str(e), True)
+    eq('(20) … y dice cual era el techo', 'son %d' % TECHO_CAIDA_ALMACEN_DIA in str(e), True)
+    eq('(20) … sin colar el nombre de la columna en esa primera linea',
+       'warehouse' in str(e).split('\n')[0], False)
+# El techo del vendible, justo por debajo y justo por encima.
+eq('(20) el vendible cayendo justo el techo: NO aborta',
+   guarda_continuidad(AYER, HOY10, False, 6437, 6437 - TECHO_CAIDA_VENDIBLE_DIA,
+                      6881, 6881, 381, 381, permitir_salto=False), [])
+try:
+    guarda_continuidad(AYER, HOY10, False, 6437, 6437 - TECHO_CAIDA_VENDIBLE_DIA - 1,
+                       6881, 6881, 381, 381, permitir_salto=False)
+    eq('(20) … y una unidad mas: ABORTA', False, True)
+except Aborta:
+    eq('(20) … y una unidad mas: ABORTA', True, True)
+# 🔑 Se normaliza POR DIA: los huecos del historico van de 1 a 3 dias, y una caida
+#    de dos dias no puede juzgarse con el techo de uno.
+eq('(20) con dos dias de hueco, el techo es el doble',
+   guarda_continuidad(datetime.date(2026, 9, 5), HOY10, False,
+                      6437, 6437 - 2 * TECHO_CAIDA_VENDIBLE_DIA, 6881, 6881,
+                      381, 381, permitir_salto=False), [])
+# El catalogo: 20% menos fichas aborta, 5% menos no.
+try:
+    guarda_continuidad(AYER, HOY10, True, 6437, 6437, 6881, 6881, 381, 305,
+                       permitir_salto=False)
+    eq('(20) 20% menos fichas: ABORTA', False, True)
+except Aborta as e:
+    eq('(20) 20% menos fichas: ABORTA', True, True)
+    eq('(20) … y dice el porcentaje perdido', '19.9%' in str(e), True)
+eq('(20) 5% menos fichas: NO aborta',
+   guarda_continuidad(AYER, HOY10, True, 6437, 6437, 6881, 6881, 381, 362,
+                      permitir_salto=False), [])
+# 🔴 La primera carga NO se juzga: no hay contra que comparar, y una comprobacion
+#    sin nada que comparar no comprueba nada. La cubre el suelo de la Guarda 4.
+eq('(20) sin foto anterior: no aplica',
+   guarda_continuidad(None, HOY10, False, 0, 6453, 0, 6635, 0, 381,
+                      permitir_salto=False), [])
+eq('(20) la misma fecha (recarga de la misma foto): no aplica',
+   guarda_continuidad(HOY10, HOY10, True, 6437, 1, 6881, 1, 381, 381,
+                      permitir_salto=False), [])
+# La valvula, con nombre y dejando rastro.
+motivos = guarda_continuidad(AYER, HOY10, True, 6437, 6453, 6881, 6635, 381, 381,
+                             permitir_salto=True, escribir=lambda *a: None)
+eq('(20) PERMITIR_SALTO=1 la deja pasar…', len(motivos), 1)
+eq('(20) … pero devuelve el motivo, no lo borra', 'ha caido 246' in motivos[0], True)
+
+
+print('\n== 21) GUARDA 12 · el cerrojo mientras las vistas lean el nulo como 0 ==')
+# 🔴 Que `fc_transfer` pueda ser NULL ya funciona (bloque 18). Lo que NO funciona
+#    todavia es quien lo LEE: medido el 7-sep-2026 en produccion, cuatro objetos
+#    hacen COALESCE(fc_transfer, 0). Abrir la carga hoy cambiaria un aborto ruidoso
+#    por un disponible ~250 uds corto y creible.
+try:
+    guarda_transito_desconocido(ORIGEN_DESCONOCIDO)
+    eq('(21) con el transito desconocido: ABORTA', False, True)
+except Aborta as e:
+    eq('(21) con el transito desconocido: ABORTA', True, True)
+    eq('(21) … y nombra los objetos que hay que arreglar',
+       all(v in str(e) for v in ('salud_fba', 'v_salud_asin', 'v_trackeador_pantalla')), True)
+    eq('(21) … y dice como se abre', 'VISTAS_QUE_LEEN_NULO_COMO_CERO' in str(e), True)
+# 🔑 Las dos parejas calladas: con el transito leido no estorba, y el dia que se
+#    arreglen las vistas se abre vaciando la lista — sin tocar ninguna guarda.
+eq('(21) con el transito leido del informe: no dice nada',
+   guarda_transito_desconocido(ORIGEN_INFORME), None)
+eq('(21) con la lista vacia (vistas ya arregladas): se abre',
+   guarda_transito_desconocido(ORIGEN_DESCONOCIDO, vistas=[]), None)
+
+
+print('\n== 22) GUARDA 13 · el dia en que sumar empieza a contar doble ==')
+# 🔴 El cambio que Amazon anuncio: las unidades en transferencia entre centros
+#    dejan de estar aparte porque pasan a ser comprables. El dia que aparezcan
+#    dentro del vendible, `vendible + transito` cuenta DOBLE.
+try:
+    guarda_salto_a_transito_dentro(6437, 6692, 248, 248, 255, 1)
+    eq('(22) el vendible absorbe el transito de ayer: ABORTA', False, True)
+except Aborta as e:
+    eq('(22) el vendible absorbe el transito de ayer: ABORTA', True, True)
+    eq('(22) … y dice cuanto no lo explica ninguna entrega',
+       '255 de ellas NO las explica' in str(e), True)
+    eq('(22) … y manda cambiar el modelo, no forzar la guarda',
+       'MODELO_TRANSITO_DENTRO' in str(e), True)
+# 🔑 LA PAREJA QUE HACE QUE ESTA GUARDA MIDA ALGO: una ENTREGA grande sube el
+#    vendible igual de golpe. Si abortara tambien ahi, seria ruido cada vez que
+#    llega un camion y se aprenderia a forzarla. La diferencia esta en que en una
+#    entrega los entrantes BAJAN justo lo que sube el vendible.
+eq('(22) una entrega grande (los entrantes bajan igual): NO aborta',
+   guarda_salto_a_transito_dentro(6437, 6692, 500, 245, 255, 1), False)
+eq('(22) un dia normal (+16): NO aborta',
+   guarda_salto_a_transito_dentro(6437, 6453, 248, 248, 255, 1), False)
+eq('(22) el mejor dia de subida medido (+40): NO aborta',
+   guarda_salto_a_transito_dentro(6437, 6477, 248, 248, 255, 1), False)
+eq('(22) sin transito ayer no hay nada que absorber: NO aborta',
+   guarda_salto_a_transito_dentro(6437, 6900, 248, 248, 0, 1), False)
+
+
+print('\n== 23) EL TESTIGO: el disponible que calcula Amazon ==')
+# 🔬 Medido el 6-sep-2026: afn-onhand-buyable-quantity = vendible + transito en las
+#    381 filas, desvio 0. Aqui se comprueba que la discrepancia se GRITA con las
+#    dos cifras — es lo unico que permite saber cual de las dos falla.
+testigo = [fila(n) for n in range(1, UMBRAL_FILAS + 6)]
+testigo[3][POR['afn-onhand-buyable-quantity']] = '99'   # deberia ser 5 + 0
+con_ruido = analizar(fichero(testigo), 'p.txt', HOY)
+eq('(23) la discrepancia se anota con sku y las dos cifras',
+   con_ruido['onhand_discrepa'], [('SKU-00004', 99, 5)])
+eq('(23) … y NO aborta (es un testigo, no una fuente)', len(con_ruido['filas']),
+   len(testigo))
+eq('(23) cuando cuadra, no dice nada', sano['onhand_discrepa'], [])
+# 🔴 Y con el transito DESCONOCIDO no se contrasta: comparar contra un nulo leido
+#    como 0 daria una discrepancia falsa en cada fila.
+eq('(23) con el transito desconocido no se inventa discrepancia',
+   degradado['onhand_discrepa'], [])
 
 
 print('')
