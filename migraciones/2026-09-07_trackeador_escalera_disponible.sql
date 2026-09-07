@@ -111,12 +111,15 @@
 --           B003UWY00Q (1 ud) · B09V85CK5Q (6) · B0BCFMZ8WR (12) · B0CDJGVPCL (2)
 --     · Con la ESCALERA el puente recupera TRES de los cuatro:
 --           B003UWY00Q (estimado 1) · B0BCFMZ8WR (12) · B0CDJGVPCL (2)
---       ⚠️ El encargo esperaba DOS (B0BCFMZ8WR y B0CDJGVPCL). Son tres, medido el
---       7-sep contra la tabla ya rellenada: `B003UWY00Q` tiene un unico SKU con
---       available 0, fc_transfer 1 y disponible_estimado 1.
---     · El que NO se recupera es `B09V85CK5Q`, y por un motivo correcto: sus 6
+--       El cuarto, `B09V85CK5Q`, NO se recupera, y por un motivo correcto: sus 6
 --       unidades estan en `inbound_shipped` y el puente RESTA los entrantes para no
 --       contarlos dos veces, asi que su estimado es 0. El puente no se inventa nada.
+--     · Y hay un QUINTO caso que no sale en esa consulta y conviene tener escrito:
+--       `B071NJ764Q` tiene vendible 0 y transito 0 —o sea que HOY la pantalla le ve
+--       cero— pero su estimado es 4. Con el informe recortado la escalera le
+--       devolveria esas 4 unidades. La consulta de abajo no lo encuentra porque
+--       filtra por «tiene stock hoy»; se anota aqui para que no parezca una
+--       sorpresa el dia que la carga se abra.
 --     La consulta esta al final del fichero, para poder repetirla.
 --
 -- 🔬 Y SE HA CORRIDO EN STAGING ANTES DE ABRIR EL PR, con los quince cambios
@@ -133,10 +136,46 @@
 --   del bloque DO y Postgres abortaba con «column reference "n" is ambiguous».
 --   Leyendo el fichero no se ve; corriendolo, si.
 --
+-- 🔴 LA COMPROBACION DE LA LINEA, QUE ES LA QUE CIERRA LA TRANSCRIPCION. Ademas de
+--   la huella de los datos, la guarda 10 fotografia LAS 1.243 LINEAS de la
+--   definicion antes de tocarla y despues compara las dos listas linea a linea,
+--   con `EXCEPT ALL` en los dos sentidos. Lo que exige:
+--       · se van EXACTAMENTE 6 lineas, y las 6 son suelos de dos peldaños
+--         (llevan `stock_fba_eu` y `stock_vendible`);
+--       · llegan EXACTAMENTE 18: las 6 reescritas y las 12 del peldaño nuevo. De
+--         esas 18, 16 llevan «estimad»; las otras dos son `CASE` y
+--         `ELSE NULL::bigint`, que es como Postgres parte el agregado nuevo.
+--   Si se hubiera colado un cambio en cualquier otra linea, apareceria en una de
+--   las dos listas y esto ABORTA. Medido en staging: 6 · 0 inesperadas · 18 · 0
+--   inesperadas · 1.255 lineas al final.
+--   🔑 Y va por listas y no por un md5 escrito a mano a proposito: una huella de
+--   texto obliga a acertar tambien el FORMATO del deparser, y el deparser parte el
+--   `CASE` en cuatro lineas. Una guarda que se cae por el formato de Postgres no
+--   mide la transcripcion: mide otra cosa.
+--
 -- 🔒 QUE **NO** TOCA ESTE FICHERO:
---     · `mv_trackeador_pantalla`. Ni se recrea ni se refresca: no cambia ninguna
---       columna y hoy no cambia ningun valor, asi que lo que tiene guardado ya es
---       lo que produce la vista nueva. Lo recogera en su refresco de siempre.
+--     · 🔴 `mv_trackeador_pantalla` — NI SE RECREA, NI SE REFRESCA, y las dos cosas
+--       estan medidas, no supuestas:
+--         (1) `fn_trackeador_refrescar()` hace `refresh materialized view
+--             CONCURRENTLY`, y Postgres NO admite eso dentro de una transaccion.
+--             Este workflow corre con `--single-transaction`, asi que llamarla desde
+--             aqui reventaria la migracion entera. El cerrojo 4 ni siquiera lo
+--             cazaria: la palabra CONCURRENTLY no esta en este fichero, esta dentro
+--             del cuerpo de la funcion. Se descubriria a mitad del aplicado.
+--             Ademas esa funcion hace mas cosas —`fn_fee_override_refresh()`,
+--             escribe en `trackeador_refrescos` y llena `precio_historico`—, que no
+--             es el trabajo de esta migracion.
+--         (2) Y aunque se pudiera, HOY NO SE DEBE. La copia congelada lleva desde
+--             el refresco de anoche y los datos de debajo se han movido durante el
+--             dia: refrescarla ahora cambiaria **26 filas** (15 de `accion` y 20 de
+--             `bloque`) y las fichas por bloque pasarian de 508/480/220/568 a
+--             496/488/224/568. Nada de eso lo causa la escalera —la vista da hoy
+--             exactamente lo mismo antes y despues—, pero se mezclaria con ella y
+--             haria fallar la propia comprobacion de «mismas fichas por bloque».
+--       Lo que SI se hace es COMPROBAR la copia: la guarda 11 la fotografia antes y
+--       exige que salga intacta despues. La copia recogera la escalera en su
+--       refresco de siempre, el de las 19:45, sin que se note: la vista nueva y la
+--       vieja dan hoy el mismo resultado.
 --     · La Guarda 12 del procesador. La carga sigue CERRADA. Se abre en el paso 4
 --       (encargo F), y ese paso no se hace hasta que este este dentro: abrir con el
 --       suelo puesto y sin el estimado daria reposiciones con un disponible corto.
@@ -210,6 +249,26 @@ SELECT count(*) FILTER (WHERE c.relkind = 'v') AS vistas,
   FROM pg_class c
   JOIN pg_namespace n ON n.oid = c.relnamespace
  WHERE n.nspname = 'public';
+
+-- 🔴 LAS 1.243 LINEAS DE LA DEFINICION, UNA A UNA. Esto es lo que cierra la
+--    transcripcion: despues se comparan las dos listas con EXCEPT ALL en los dos
+--    sentidos y se exige que se vayan exactamente 6 lineas (los suelos viejos) y
+--    lleguen exactamente 18 (las 6 reescritas y las 12 del peldaño nuevo). Cualquier
+--    otra linea movida aparece en una de las dos listas y aborta.
+--    🔑 Por listas y NO por un md5 escrito a mano: una huella de texto obliga a
+--    acertar tambien como parte las lineas el deparser de Postgres, que rompe el
+--    `CASE` del agregado en cuatro. Una guarda que se cae por el formato no mide la
+--    transcripcion, mide el formato.
+CREATE TEMP TABLE _lineas_antes ON COMMIT DROP AS
+SELECT linea FROM unnest(string_to_array(
+         pg_get_viewdef('public.v_trackeador_pantalla'::regclass, true), chr(10))) AS linea;
+
+-- Y LA COPIA CONGELADA, que es lo que Elena mira de verdad. Esta migracion NO la
+-- refresca (el porque, con las dos mediciones, en la cabecera): lo que se exige es
+-- que salga INTACTA. Se fotografia por dominio, accion y bloque.
+CREATE TEMP TABLE _copia_antes ON COMMIT DROP AS
+SELECT m.dominio, m.accion, m.bloque, count(*) AS fichas
+  FROM public.mv_trackeador_pantalla m GROUP BY 1, 2, 3;
 
 CREATE OR REPLACE VIEW public.v_trackeador_pantalla AS
  WITH ven_pais AS (
@@ -1690,11 +1749,65 @@ BEGIN
     RAISE EXCEPTION 'ABORTA: mv_trackeador_pantalla esta VACIA.';
   END IF;
 
+  -- 10 · 🔴 LA TRANSCRIPCION, LINEA A LINEA. Es la guarda que no se puede engañar
+  --      con datos: compara la lista de lineas de ANTES contra la de AHORA en los
+  --      dos sentidos. Se tienen que ir 6 (los suelos viejos) y llegar 18 (las 6
+  --      reescritas y las 12 del peldaño nuevo). Cualquier otra linea tocada sale
+  --      aqui. Medido en staging: 6 · 0 · 18 · 0.
+  DECLARE
+    se_van int; se_van_raras int; llegan int; llegan_raras int;
+  BEGIN
+    CREATE TEMP TABLE _lineas_despues ON COMMIT DROP AS
+    SELECT linea FROM unnest(string_to_array(
+             pg_get_viewdef('public.v_trackeador_pantalla'::regclass, true), chr(10))) AS linea;
+
+    SELECT count(*), count(*) FILTER (WHERE NOT (linea LIKE '%stock_fba_eu%'
+                                            AND linea LIKE '%stock_vendible%'))
+      INTO se_van, se_van_raras
+      FROM (SELECT linea FROM _lineas_antes EXCEPT ALL SELECT linea FROM _lineas_despues) x;
+    IF se_van <> 6 OR se_van_raras <> 0 THEN
+      RAISE EXCEPTION 'ABORTA: desaparecen % lineas (y % no son suelos de dos '
+                      'peldaños). Tenian que irse 6 y solo esas.', se_van, se_van_raras;
+    END IF;
+
+    -- Las unicas dos lineas nuevas que no llevan «estimad» son como Postgres parte
+    -- el agregado del CAMBIO 1: `CASE` y `ELSE NULL::bigint`. Van escritas enteras.
+    SELECT count(*), count(*) FILTER (WHERE linea NOT ILIKE '%estimad%'
+                                        AND linea <> '                CASE'
+                                        AND linea <> '                    ELSE NULL::bigint')
+      INTO llegan, llegan_raras
+      FROM (SELECT linea FROM _lineas_despues EXCEPT ALL SELECT linea FROM _lineas_antes) x;
+    IF llegan <> 18 OR llegan_raras <> 0 THEN
+      RAISE EXCEPTION 'ABORTA: aparecen % lineas nuevas (y % no tienen nada que ver '
+                      'con el peldaño). Tenian que llegar 18 y solo esas.',
+                      llegan, llegan_raras;
+    END IF;
+  END;
+
+  -- 11 · LA COPIA CONGELADA SALE INTACTA. Esta migracion no la refresca a proposito
+  --      —`fn_trackeador_refrescar()` hace REFRESH ... CONCURRENTLY, que Postgres no
+  --      admite dentro de una transaccion, y hoy un refresco moveria 26 filas de
+  --      Elena por datos que no tienen nada que ver con la escalera—. Lo que se
+  --      exige aqui es justo lo contrario: que NO se haya movido.
+  SELECT count(*) INTO movidas FROM (
+    (SELECT dominio, accion, bloque, fichas FROM _copia_antes
+     EXCEPT
+     SELECT m.dominio, m.accion, m.bloque, count(*) FROM public.mv_trackeador_pantalla m GROUP BY 1, 2, 3)
+    UNION ALL
+    (SELECT m.dominio, m.accion, m.bloque, count(*) FROM public.mv_trackeador_pantalla m GROUP BY 1, 2, 3
+     EXCEPT
+     SELECT dominio, accion, bloque, fichas FROM _copia_antes)) d;
+  IF movidas <> 0 THEN
+    RAISE EXCEPTION 'ABORTA: la copia congelada se ha movido en % combinaciones '
+                    '(dominio, accion, bloque). Esta migracion no la toca.', movidas;
+  END IF;
+
   RAISE NOTICE 'Numero de control OK: las % filas con la huella EXACTA de antes, '
                'las acciones por dominio y los bloques sin mover una ficha, 0 suelos '
-               'de dos peldaños y 6 escaleras de tres, la vista dependiendo de '
+               'de dos peldaños y 6 escaleras de tres, la definicion con 6 lineas '
+               'menos y 18 mas y ninguna otra tocada, la vista dependiendo de '
                'inventario_fba.disponible_estimado, security_invoker y el SELECT en '
-               'su sitio, y la materializada con datos.',
+               'su sitio, y la copia congelada intacta.',
                (SELECT filas FROM _pantalla_antes);
 END $$;
 
@@ -1737,6 +1850,25 @@ END $$;
 --     from sf where (vendible + fc) > 0 and vendible = 0 order by asin;
 --   -- → 4 ASIN; el suelo pierde los 4, la escalera recupera 3 (B003UWY00Q,
 --   --   B0BCFMZ8WR, B0CDJGVPCL). B09V85CK5Q no, porque sus 6 uds son entrantes.
+--
+--   -- 4) LA TRANSCRIPCION, LINEA A LINEA, contra la foto de antes. Sin foto ya no
+--   --    se puede repetir despues, asi que la version de fuera compara contra las
+--   --    cifras conocidas de la definicion del 2b:
+--   select count(*) as lineas,
+--          count(*) filter (where linea ilike '%estimad%') as con_estimado,
+--          count(*) filter (where linea like '%stock_fba_eu%'
+--                             and linea like '%stock_vendible%') as con_las_dos
+--     from unnest(string_to_array(
+--            pg_get_viewdef('public.v_trackeador_pantalla'::regclass, true), chr(10))) as linea;
+--   -- antes del 2c → 1243 · 0 · 7      despues del 2c → 1255 · 16 · 7
+--
+--   -- 5) LA COPIA CONGELADA no la toca esta migracion, asi que despues de aplicar
+--   --    tiene que seguir EXACTAMENTE como estaba (en PROD, 7-sep: 1.776 filas y
+--   --    508/480/220/568 por bloque). Recogera la escalera en su refresco de las
+--   --    19:45, y no se notara: la vista nueva y la vieja dan hoy lo mismo.
+--   select bloque, count(*) as fichas from public.mv_trackeador_pantalla
+--    group by bloque order by bloque;
+--   -- → 1:508 · 2:480 · 3:220 · 4:568   (y 1.776 en total)
 --
 --   -- LO QUE NO SE PUEDE COMPROBAR DESDE AQUI: que Elena vea filas. Se mira
 --   -- abriendo el Trackeador. Es la unica prueba que vale.
