@@ -12,6 +12,34 @@ name: Moloka - Procesar INVENTARIO_FBA
 #    (crea la tabla CERRADA). El procesador NO activa
 #    la RLS —era un lock exclusivo en cada carga— y aborta pidiéndola si no está.
 #
+# 🔴 EL RESCATE DEL 7-sep-2026, Y EL ORDEN IMPORTA. Ese día Amazon sirvió el informe
+#    con 24 columnas, la Guarda 1 lo rechazó y la carga se quedó cerrada: la foto viva
+#    es del 6-sep. El fichero sigue en el buzón. Para meterlo en su sitio:
+#        fichero = 50742020703.txt   ·   entorno = produccion   ·   modo = ensayo
+#    🔴 ESE NOMBRE SE CORRIGIÓ EL 7-sep-2026 Y CONVIENE SABER POR QUÉ: el encargo
+#       decía `50740020703.txt`, que es el contenido de las 09:2x. Fernando eligió el
+#       de las 09:56. Más abajo, en las mediciones, `50740020703.txt` sigue citado a
+#       propósito: es el fichero sobre el que se midió el informe de 24 columnas ese
+#       día, y eso no se reescribe. Lo que se carga es el otro.
+#    y, si el ensayo cuadra, el mismo disparo con modo = aplicar.
+#    ⚠️ HAY QUE HACERLO **ANTES** DE CARGAR NINGUNA FOTO MÁS NUEVA. `guarda_no_retroceder`
+#       impide cargar una foto anterior a la que ya está: en cuanto entre la del 8-sep,
+#       la del 7 ya no se puede meter y ese día queda para siempre fuera del histórico.
+#    ⚠️ Y OJO: en el buzón hay CUATRO .txt subidos el 7-sep, pero sólo DOS contenidos
+#       (medido por el eTag, que es el MD5): 50738020703 y 50740020703 son el mismo
+#       fichero, y 50742020703 y su copia (1) son el mismo. Fernando eligió el de las
+#       09:56, **50742020703.txt**. Se carga POR SU NOMBRE; sin el input `fichero` se
+#       cargaría «el más reciente», que aquí es una lotería.
+#
+# 🔑 EL ORDEN CON EL LEDGER, Y POR QUÉ IMPORTA (medido el 7-sep-2026). La Guarda 10
+#    compara la caída del disponible contra lo que salió del almacén, y eso lo dice
+#    `ledger_movimientos` — que **no tiene reloj**: `procesar-ledger.yml` es sólo
+#    `workflow_dispatch` y se carga cuando alguien pulsa el botón. Además su último día
+#    viene siempre cortado a la hora de la descarga.
+#    Consecuencia práctica: **si quieres que opine el ledger, cárgalo ANTES que el
+#    inventario**. Si no, opina la película del propio inventario, que es un dato
+#    completo pero describe el pasado. Las dos cosas las dice el log, con su nombre.
+#
 # 🔒 EL BUZÓN LO ABRE `migraciones/2026-08-23_jubilar_salud_fba.sql`, que mete
 #    `informes/inventario_fba/` en `moloka_buzones_fase0()` y saca de ahí a
 #    `salud_fba` — un relevo, 8 carpetas antes y 8 después. De esa función cuelgan
@@ -57,6 +85,34 @@ on:
         default: 'no'
       exigir_inbound:
         description: 'ABORTAR si el informe no trae NADA en tránsito, en vez de sólo gritarlo (Guarda 7b).'
+        type: choice
+        options: ['no', 'si']
+        default: 'no'
+      # 🔴 ESTAS DOS FALTABAN AQUÍ, Y LAS DOS EXISTÍAN YA EN EL CÓDIGO. Se leen del
+      #    entorno desde su PR, pero no se podían poner desde este botón: o sea que la
+      #    única forma de usarlas era editar el .py, que es exactamente lo que el trato
+      #    de las válvulas dice que no se hace. Una válvula que no está a la vista se
+      #    salta sin que quede constancia.
+      permitir_salto:
+        description: 'Cargar aunque el disponible caiga mas de lo que se vendio (Guarda 10). Solo si el salto es REAL.'
+        type: choice
+        options: ['no', 'si']
+        default: 'no'
+      permitir_modelo_nuevo:
+        description: 'Cargar aunque la cabecera no sea ninguno de los dos modelos conocidos, el de 26 ni el de 24 (Guarda 14).'
+        type: choice
+        options: ['no', 'si']
+        default: 'no'
+      # 🔴 LA SEGUNDA LLAVE DEL CERROJO (Guarda 12), Y NO ES UNA VALVULA COMO LAS
+      #    OTRAS. Las de arriba SALTAN una guarda; esta no salta nada: es la mitad
+      #    humana de una decision que tiene dos mitades. El procesador mide si algun
+      #    consumidor sigue leyendo el nulo como cero — y esa medicion puede mantener
+      #    CERRADO, pero **no puede abrir**. Abrir lo activa Fernando, aqui.
+      #    🔑 Por que: la medicion mira UNA expresion en CUATRO objetos. Si el nulo se
+      #       leyera como cero en un sitio que no mira, diria «limpio» y la carga se
+      #       abriria sola con el disponible ~250 uds corto.
+      abrir_transito_desconocido:
+        description: 'Dejar entrar una foto SIN el transito entre centros (Guarda 12). Solo con Fernando delante y las vistas ya arregladas.'
         type: choice
         options: ['no', 'si']
         default: 'no'
@@ -106,4 +162,7 @@ jobs:
           DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
           PERMITIR_UMBRAL_BAJO: ${{ inputs.permitir_umbral_bajo == 'si' && '1' || '0' }}
           EXIGIR_INBOUND: ${{ inputs.exigir_inbound == 'si' && '1' || '0' }}
+          PERMITIR_SALTO: ${{ inputs.permitir_salto == 'si' && '1' || '0' }}
+          PERMITIR_MODELO_NUEVO: ${{ inputs.permitir_modelo_nuevo == 'si' && '1' || '0' }}
+          ABRIR_TRANSITO_DESCONOCIDO: ${{ inputs.abrir_transito_desconocido == 'si' && '1' || '0' }}
         run: python -u procesador_inventario_fba.py
