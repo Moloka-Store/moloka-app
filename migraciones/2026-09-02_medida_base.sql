@@ -49,6 +49,12 @@ CREATE TABLE IF NOT EXISTS medida_base (
     creado_en          timestamptz NOT NULL DEFAULT now()
 );
 
+-- ── RLS: esta migración no lo llevaba (se activó fuera del fichero, a mano). Se
+--   deja aquí para que una reaplicación o una restauración no lo vuelva a perder;
+--   sin políticas, con REVOKE/GRANT de abajo basta (único escritor: SUPABASE_DB_URL,
+--   owner de la base, al que RLS no le afecta). ──
+ALTER TABLE medida_base ENABLE ROW LEVEL SECURITY;
+
 -- ── SEGURIDAD: REVOCAR antes de conceder (§4). Solo SELECT para authenticated. ──
 REVOKE ALL ON medida_base FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON medida_base TO authenticated;
