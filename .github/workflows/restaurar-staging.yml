@@ -151,7 +151,8 @@ jobs:
               motivo        text,
               fichero       text,
               run_url       text
-            );" 2>/dev/null || echo "(no se pudo asegurar la tabla; se continua)"
+            );
+            alter table public.staging_restauraciones enable row level security;" 2>/dev/null || echo "(no se pudo asegurar la tabla; se continua)"
           echo "--- Ultimas restauraciones de staging ---"
           psql "$STAGING_DB_URL" -c "
             select restaurado_en, quien, coalesce(motivo,'-') as motivo
@@ -1020,6 +1021,7 @@ jobs:
               fichero       text,
               run_url       text
             );
+            alter table public.staging_restauraciones enable row level security;
             comment on table public.staging_restauraciones is
               'Quien ha restaurado staging y cuando. Vive SOLO en staging y NO viene en el
                backup de produccion, asi que sobrevive a la propia restauracion. Existe
