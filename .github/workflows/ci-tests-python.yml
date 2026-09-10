@@ -233,6 +233,16 @@ jobs:
       - name: 22 quater) test_escaner_cuadre_memoria.py
         run: python -u test_escaner_cuadre_memoria.py
 
+      # El banco del centinela del proveedor mudo. Saca con `ast` las tres
+      # funciones puras de centinela_escaner.py y las corre con las fechas del
+      # apagon del 9-sep-2026 y con un sabado-a-lunes de verdad (los tres
+      # proveedores de fichero no trabajan los domingos: sin descontar esas horas,
+      # el umbral tendria que ser de 50 h y el aviso llegaria dos dias tarde). Y
+      # corre el centinela entero tres veces con dobles de supabase y requests.
+      # Sin red, sin secretos, sin tocar produccion.
+      - name: 22 quinquies) test_centinela_mudo.py
+        run: python -u test_centinela_mudo.py
+
       - name: 23) test_disparar.mjs
         run: node test_disparar.mjs
 
@@ -290,6 +300,7 @@ jobs:
             test_escaner_pelicula_factura.py
             test_escaner_llave_servicio.py
             test_escaner_cuadre_memoria.py
+            test_centinela_mudo.py
             test_claude_md_candado.py
             test_paginacion_buzon.py
           )
