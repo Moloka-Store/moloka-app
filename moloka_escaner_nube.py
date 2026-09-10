@@ -17,7 +17,7 @@
 #   - Actualiza la memoria viva del proveedor (presentes / agotados).
 #   - Limpia el buzon del escaner (VERIFICADO).
 #
-# Variables de entorno (GitHub Secrets): KEEPA_API_KEY, SUPABASE_URL, SUPABASE_KEY
+# Variables de entorno (GitHub Secrets): KEEPA_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY
 # ============================================================
 
 import os, sys, time, json, re
@@ -36,6 +36,17 @@ try:
 except Exception:
     pass
 
+
+def abortar(motivo):
+    """Un run que NO escanea no es verde: sale en ROJO y con una linea grepable.
+    Las cuatro salidas del arranque (recado ilegible, proveedor desconocido,
+    catalogo ausente, columnas no detectadas) hacian sys.exit(0), o sea que
+    GitHub pintaba el run en VERDE y nadie se enteraba de que no se escaneo
+    nada. Un fallo que se ve igual que un exito no es un fallo: es un silencio."""
+    print(f"ESCANEO_NO_EJECUTADO: {motivo}")
+    sys.exit(1)
+
+
 # ============================================================
 # CREDENCIALES (entorno, no Colab)
 # ============================================================
@@ -47,7 +58,7 @@ print(">>> ARRANCANDO escaner. Creando cliente Keepa...", flush=True)
 api = keepa.Keepa(os.environ['KEEPA_API_KEY'],
                   timeout=float(os.environ.get('KEEPA_TIMEOUT', '120')))
 print(">>> Cliente Keepa creado. Conectando a Supabase...", flush=True)
-# 🔴 LA LLAVE DE SERVICIO PRIMERO, Y LA ANONIMA SOLO DE RESPALDO (10-sep-2026).
+# 🔴 LA LLAVE DE SERVICIO, Y NINGUNA OTRA (10-sep-2026).
 # El escaner NO es un navegador: corre desatendido en Actions con los secretos del
 # repo. Y en la Celda 5 lee `productos` para saber que fichas son de la casa.
 #
@@ -68,13 +79,26 @@ print(">>> Cliente Keepa creado. Conectando a Supabase...", flush=True)
 #    cliente ESCRIBE. Un INSERT frenado por la RLS tampoco lanza: devuelve 200 con
 #    cero filas. Ese fallo saldria VERDE. Con la llave de servicio no llega a pasar.
 #
-# El respaldo a SUPABASE_KEY mantiene vivo cualquier lanzamiento que no pase la de
-# servicio. Es el mismo idioma que `moloka_escaner_pro_nube.py` y
-# `moloka_tracker_cerebro.py` ya usan para lo mismo.
+# 🔴 Y SIN RESPALDO A LA ANONIMA: SIN LLAVE DE SERVICIO NO SE ESCANEA.
+# El #291 dejo `SUPABASE_SERVICE_KEY or SUPABASE_KEY`. Ese respaldo era prudencia
+# el dia que se escribio -- si el secreto no llegaba, el escaneo seguia vivo con
+# la anonima -- y se convierte en el fallo en cuanto se aplique la tanda 3, que
+# cierra a `anon` las TRES puertas por las que este cliente ESCRIBE en
+# `escaner_memoria` (`em_insert`, `em_select`, `em_update`; medidas por Cowork en
+# produccion). A partir de ahi, un lanzamiento sin la llave de servicio no
+# revienta: el upsert devuelve 200 con cero filas y el run sale VERDE con la
+# memoria intacta del dia anterior. O sea, la misma clase de silencio que el #291
+# vino a cerrar, pero por la puerta de la escritura y sin nadie mirando.
+# Basta con que el secreto falte, caduque o que alguien quite esa linea del
+# workflow. Un respaldo que solo se usa cuando el escaneo ya no puede funcionar
+# no es un respaldo: es un mudo. Mejor ROJO en el arranque, sin gastar un token,
+# que verde sobre una tabla que no se ha tocado.
 _llave_svc = os.environ.get('SUPABASE_SERVICE_KEY')
-sb  = create_client(os.environ['SUPABASE_URL'], _llave_svc or os.environ['SUPABASE_KEY'])
-print(">>> Supabase conectado con llave de %s. Consultando saldo real de tokens..."
-      % ('SERVICIO' if _llave_svc else 'ANONIMA (la RLS decide)'), flush=True)
+if not _llave_svc:
+    abortar('sin llave de servicio')
+sb  = create_client(os.environ['SUPABASE_URL'], _llave_svc)
+print(">>> Supabase conectado con la llave de SERVICIO. Consultando saldo real de tokens...",
+      flush=True)
 api.update_status()   # consulta el saldo REAL al servidor (el cliente nace con 0)
 print(f">>> Tokens Keepa disponibles AHORA: {api.tokens_left}", flush=True)
 
@@ -117,14 +141,9 @@ MEMORIA_LOTES_FALLIDOS = []  # lotes de escaner_memoria que NO se pudieron graba
 # estructura, no por texto) y las EJECUTA. Si cambian, el banco se pone rojo.
 # ============================================================
 
-def abortar(motivo):
-    """Un run que NO escanea no es verde: sale en ROJO y con una linea grepable.
-    Las cuatro salidas del arranque (recado ilegible, proveedor desconocido,
-    catalogo ausente, columnas no detectadas) hacian sys.exit(0), o sea que
-    GitHub pintaba el run en VERDE y nadie se enteraba de que no se escaneo
-    nada. Un fallo que se ve igual que un exito no es un fallo: es un silencio."""
-    print(f"ESCANEO_NO_EJECUTADO: {motivo}")
-    sys.exit(1)
+# `abortar()` NO esta aqui: vive ARRIBA, antes de las credenciales. La primera
+# guarda que la usa es la de la llave de servicio, y esa tiene que decidir
+# ANTES de que nazca el cliente de Supabase.
 
 
 def presentes_en_memoria(mem):
@@ -2334,10 +2353,10 @@ if not PERFIL.get('efimero'):
     print("PELICULA: omitida (pasada de proveedor; solo se guarda en factura).")
 else:
     try:
-        # 🔒 escaner_detalle lleva pa/beneficio/margen (precio de COSTE): se escribe con la SERVICE KEY,
-        #    NUNCA con la anon (`sb`, linea 50; `anon` esta REVOCADA de la tabla a proposito). Es la regla
-        #    de la casa, la misma que el puente de chase (linea 1527). Sin la key: AVISO y NO se escribe
-        #    (no se abre anon por un informe); el escaneo y el Excel siguen intactos.
+        # 🔒 escaner_detalle lleva pa/beneficio/margen (precio de COSTE): se escribe con la SERVICE KEY
+        #    (`anon` esta REVOCADA de la tabla a proposito). Es la regla de la casa, la misma que el puente
+        #    de chase. Desde el 10-sep el ARRANQUE ya exige esa llave, asi que la rama de abajo sin key no
+        #    llega a darse; se deja porque no cuesta nada y no depende de aquella guarda para ser correcta.
         _svc_det = os.environ.get('SUPABASE_SERVICE_KEY')
         sb_det = create_client(os.environ['SUPABASE_URL'], _svc_det) if _svc_det else None
         _ejec_det = _EJECUCION   # id de la pasada: recado['ejecucion'] (app). Ver el contrato mas arriba.

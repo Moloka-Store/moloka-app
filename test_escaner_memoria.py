@@ -168,11 +168,13 @@ eq('(C) el motivo viaja entero', correr_abortar('falta el catalogo de TCG')[1],
 #      arranque de este encargo (recado ilegible, proveedor desconocido, catalogo
 #      ausente, columnas no detectadas). Las dos de la Celda 5 llegaron el
 #      3-sep-2026 con la guarda del catalogo propio (lectura fallida y 0 filas)
-#      y tienen su banco aparte, en test_escaner_catalogo_propio.py.
+#      y tienen su banco aparte, en test_escaner_catalogo_propio.py. La septima
+#      es la de la llave de servicio (10-sep-2026), la primera de todas: sin ella
+#      el cliente no nace, y su banco es test_escaner_llave_servicio.py.
 _llamadas_abortar = [n for n in ast.walk(ARBOL)
                      if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
                      and n.func.id == 'abortar']
-eq('(D1) las 6 salidas sin escaneo van por abortar()', len(_llamadas_abortar), 6)
+eq('(D1) las 7 salidas sin escaneo van por abortar()', len(_llamadas_abortar), 7)
 
 # (D2) El bucle que graba la memoria salta los EAN con pais perdido.
 #      Se busca el `for f in filas_hoy:` en el arbol y se mira SU cuerpo.
