@@ -47,8 +47,34 @@ print(">>> ARRANCANDO escaner. Creando cliente Keepa...", flush=True)
 api = keepa.Keepa(os.environ['KEEPA_API_KEY'],
                   timeout=float(os.environ.get('KEEPA_TIMEOUT', '120')))
 print(">>> Cliente Keepa creado. Conectando a Supabase...", flush=True)
-sb  = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
-print(">>> Supabase conectado. Consultando saldo real de tokens...", flush=True)
+# 🔴 LA LLAVE DE SERVICIO PRIMERO, Y LA ANONIMA SOLO DE RESPALDO (10-sep-2026).
+# El escaner NO es un navegador: corre desatendido en Actions con los secretos del
+# repo. Y en la Celda 5 lee `productos` para saber que fichas son de la casa.
+#
+# QUE PASO. El 10-sep, entre las 06:02 y las 06:30 UTC, se retiraron de `productos`
+# las dos politicas permisivas por las que entraba `anon` ("Acceso publico
+# productos" y "anon_full_access"). Con la RLS puesta y ninguna politica que le
+# toque, `anon` no recibe un error: recibe CERO FILAS, con su 200. Los cuatro
+# directores murieron ahi mismo, en la guarda del catalogo propio, con exit 1
+# (DBLine #249-252, TCG #442-443, HEO #248, OcioStock #322-324).
+#
+# POR QUE ESTO LO ARREGLA Y NO REABRE NADA. `service_role` es BYPASSRLS -- medido
+# en `pg_roles` el 10-sep-2026 --, asi que la lectura vuelve a pasar sin devolverle
+# a `anon` la puerta que se le acaba de quitar. La llave no es un secreto nuevo:
+# ya viaja en estos mismos workflows, en el paso de preparar.
+#
+# 🔒 Y ADEMAS ADELANTA EL GOLPE QUE VIENE: la tanda 3 del mismo cierre toca
+#    `escaner_memoria` y `escaner_resultados`, que son las dos tablas donde este
+#    cliente ESCRIBE. Un INSERT frenado por la RLS tampoco lanza: devuelve 200 con
+#    cero filas. Ese fallo saldria VERDE. Con la llave de servicio no llega a pasar.
+#
+# El respaldo a SUPABASE_KEY mantiene vivo cualquier lanzamiento que no pase la de
+# servicio. Es el mismo idioma que `moloka_escaner_pro_nube.py` y
+# `moloka_tracker_cerebro.py` ya usan para lo mismo.
+_llave_svc = os.environ.get('SUPABASE_SERVICE_KEY')
+sb  = create_client(os.environ['SUPABASE_URL'], _llave_svc or os.environ['SUPABASE_KEY'])
+print(">>> Supabase conectado con llave de %s. Consultando saldo real de tokens..."
+      % ('SERVICIO' if _llave_svc else 'ANONIMA (la RLS decide)'), flush=True)
 api.update_status()   # consulta el saldo REAL al servidor (el cliente nace con 0)
 print(f">>> Tokens Keepa disponibles AHORA: {api.tokens_left}", flush=True)
 
