@@ -1,0 +1,64 @@
+# ============================================================
+# Moloka - Centinela del proveedor mudo
+# Ubicacion: .github/workflows/centinela-escaner.yml
+#
+# QUE HACE: lanza centinela_escaner.py, que mira la ULTIMA escritura de cada
+# director en `escaner_memoria` y avisa por TELEGRAM si alguno lleva mas horas
+# calladas que su umbral. Sale en ROJO cuando avisa.
+#
+# POR QUE: el 9-sep-2026 DBLine dejo de escribir a las 10:31 UTC y OcioStock a
+# las 15:01; no se supo hasta el 10-sep por la tarde. Dos dias. El run de cada
+# director salia rojo en Actions, pero un rojo en Actions no llega a donde esta
+# Fernando, y "Que reponer" seguia ensenando el catalogo de anteayer.
+#
+# HORARIO (el cron de GitHub va en UTC; en verano Espana = UTC+2):
+#   cada 2 h de 06:00 a 20:00 UTC == de 08:00 a 22:00 hora peninsular (verano).
+#   Ocho pasadas, todas en horas en las que Fernando puede hacer algo con el
+#   aviso. Los umbrales son de 22-26 h, asi que la frecuencia no es para
+#   detectar antes: es para que el aviso no espere tres horas mas de la cuenta
+#   una vez que el plazo ya ha vencido.
+#   OJO: en invierno (UTC+1) esto se corre 1 h antes en hora local. Aceptable.
+#
+# BLINDAJE:
+#   - concurrency: dos pasadas no se pisan (cancel-in-progress: false).
+#   - timeout-minutes: 10 => son cuatro consultas; mas que eso es que algo cuelga.
+#   - workflow_dispatch: se puede lanzar a mano para probar.
+#
+# 🔒 LA LLAVE DE SERVICIO, como el escaner desde el 10-sep-2026. Un centinela que
+#    lea con la anonima puede recibir 200 con CERO FILAS y declarar mudos a los
+#    cuatro (o, peor, no ver la tabla y callarse). Sin la llave no arranca.
+# ============================================================
+name: Moloka - Centinela del proveedor mudo
+
+on:
+  schedule:
+    - cron: '0 6-20/2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: centinela-escaner
+  cancel-in-progress: false
+
+jobs:
+  centinela:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install supabase requests
+
+      - name: Mirar la ultima escritura de cada director
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          TELEGRAM_TOKEN:       ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -u centinela_escaner.py
