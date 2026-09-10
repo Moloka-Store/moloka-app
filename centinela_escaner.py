@@ -7,6 +7,12 @@
 # proveedor lleva mas horas que su umbral sin escribir, avisa por Telegram y el
 # run sale en ROJO.
 #
+# EL AVISO, UNO POR PROVEEDOR Y DIA (10-sep-2026): el centinela arranca 8 veces
+# al dia y un mudo lo es durante horas, asi que sin freno el movil suena 8 veces
+# por el mismo silencio. El run sigue saliendo ROJO las 8: lo que se silencia es
+# el movil, nunca el registro. Y el freno FALLA EN ABIERTO -- ver la marca, mas
+# abajo.
+#
 # POR QUE EXISTE. El 9-sep-2026 por la manana los cuatro directores se quedaron
 # sin poder leer `productos` y empezaron a morir en el arranque. DBLine dejo de
 # escribir el 9-sep a las 10:31 UTC y OcioStock a las 15:01; no se supo hasta el
@@ -23,6 +29,7 @@
 # TELEGRAM_CHAT_ID.
 # ============================================================
 
+import json
 import os
 import sys
 from datetime import datetime, timedelta, timezone
@@ -81,9 +88,34 @@ HORARIOS = {
                   'franja': '07-15 UTC, L a S', 'medido_h': 18.00},
 }
 
+# ============================================================
+# LA MARCA: UN AVISO POR PROVEEDOR Y DIA
+# ------------------------------------------------------------
+# El centinela arranca 8 veces al dia. Un proveedor mudo de verdad lo esta
+# durante horas, asi que sin freno el movil suena 8 veces por el mismo silencio
+# -- y un aviso que suena ocho veces se aprende a ignorar en quince dias, que es
+# la manera mas cara de perder un centinela.
+#
+# La marca es un JSON en Storage, {proveedor: 'AAAA-MM-DD' del ultimo aviso}. En
+# el bucket `informes`, que es donde el escaner ya escribe: ni tabla nueva, ni
+# migracion, ni un secreto mas.
+#
+# 🔴 FALLA EN ABIERTO, Y ESTO NO SE NEGOCIA (condicion de Fernando, 10-sep-2026).
+#    Si la marca no se puede leer, se avisa IGUAL. Si no se puede escribir, el
+#    aviso puede repetirse hoy, y se prefiere repetir. Un mecanismo hecho para
+#    hablar MENOS no puede convertirse en uno que se CALLA cuando algo va mal:
+#    esa es exactamente la clase de silencio que costo dos dias el 9-sep
+#    (`productos` devolviendo cero filas sin error).
+#
+# El dia es el UTC. Con el centinela corriendo de 06:00 a 20:00 UTC, ese dia y el
+# de Espana son siempre el mismo (06:00 UTC son las 07:00/08:00; 20:00 UTC, las
+# 21:00/22:00), asi que no hay que elegir entre dos calendarios.
+MARCA_BUCKET = 'informes'
+MARCA_RUTA = 'centinela/ultimo_aviso.json'
+
 
 # ============================================================
-# LAS TRES DECISIONES, COMO FUNCIONES PURAS
+# LAS DECISIONES, COMO FUNCIONES PURAS
 # ------------------------------------------------------------
 # No tocan red, ni reloj, ni globales: se les pasa todo. Tienen banco --
 # test_centinela_mudo.py las saca de ESTE fichero con `ast` (por estructura, no
@@ -130,6 +162,86 @@ def esta_mudo(horas, umbral_h):
     if horas is None:
         return True
     return horas > umbral_h
+
+
+def avisos_de_hoy(marca, hoy, mudos):
+    """Reparte los mudos en (los que TOCA avisar, los que ya se avisaron hoy).
+
+    `marca` es {proveedor: 'AAAA-MM-DD' del ultimo aviso} y `mudos`, una lista de
+    nombres. Es por PROVEEDOR: que hoy ya se avisara de DBLine no calla a HEO si
+    se cae dentro de un rato.
+
+    🔴 FALLA EN ABIERTO: si la marca no se pudo leer, quien llama pasa {} y aqui
+    salen TODOS a avisar. Nunca al reves."""
+    a_avisar, ya_avisados = [], []
+    for proveedor in mudos:
+        if marca.get(proveedor) == hoy:
+            ya_avisados.append(proveedor)
+        else:
+            a_avisar.append(proveedor)
+    return a_avisar, ya_avisados
+
+
+def linea_de_aviso(fila):
+    """La linea que llega al movil. Empieza por CUANTO lleva callado, no por el
+    nombre del estado: con un aviso al dia, saber si acaba de empezar o si lleva
+    dos dias es la mitad de la informacion (Fernando, 10-sep-2026).
+
+    Las horas BRUTAS son las que se ven en un reloj y las que uno espera leer.
+    Las descontadas son las que se comparan con el plazo, y solo se nombran
+    cuando difieren -- si no, la frase seria ruido en el 95% de los avisos y una
+    contradiccion aparente en el resto ("lleva 34 h y su plazo son 26, ¿por que
+    avisa ahora?")."""
+    if fila['ultima'] is None:
+        return ('• <b>%s</b> — sin dato (%s). Su plazo son %d h.'
+                % (fila['proveedor'], fila['motivo'], fila['umbral']))
+    cabeza = ('• <b>%s</b> — lleva %.0f h sin escribir (última: %s UTC). '
+              % (fila['proveedor'], fila['brutas'],
+                 fila['ultima'].strftime('%Y-%m-%d %H:%M')))
+    if fila['brutas'] - fila['horas'] > 0.05:
+        plazo = ('%.0f h sin contar los domingos, que es lo que se compara con su plazo '
+                 'de %d h. ' % (fila['horas'], fila['umbral']))
+    else:
+        plazo = 'Su plazo son %d h. ' % fila['umbral']
+    return cabeza + plazo + 'Horario: %s.' % fila['franja']
+
+
+# ============================================================
+# LA MARCA EN STORAGE (lo unico de aqui que toca la red aparte de la consulta)
+# ============================================================
+
+def leer_marca(sb):
+    """Devuelve ({proveedor: 'AAAA-MM-DD'}, se_pudo_leer).
+
+    🔴 FALLA EN ABIERTO: cualquier tropiezo -- que el fichero no exista todavia,
+    que Storage no responda, que el JSON este roto -- devuelve marca vacia, y con
+    marca vacia se avisa de todos. El coste de equivocarse por este lado es un
+    Telegram de mas; por el otro, dos dias de silencio."""
+    try:
+        crudo = sb.storage.from_(MARCA_BUCKET).download(MARCA_RUTA)
+        marca = json.loads(crudo.decode('utf-8'))
+        if not isinstance(marca, dict):
+            raise ValueError('el JSON de la marca no es un objeto')
+        return marca, True
+    except Exception as ex:
+        print('  AVISO: la marca de avisos no se pudo leer (no existe todavia, o: %s).' % ex)
+        print('         Se avisa IGUAL. Callar por un fallo de la marca seria el silencio')
+        print('         que este centinela viene a cerrar.')
+        return {}, False
+
+
+def escribir_marca(sb, marca):
+    """Guarda la marca. Si falla, el aviso podra repetirse hoy: se prefiere
+    repetir a callar, asi que no cambia el resultado del run."""
+    try:
+        sb.storage.from_(MARCA_BUCKET).upload(
+            MARCA_RUTA, json.dumps(marca, indent=1, sort_keys=True).encode('utf-8'),
+            {'upsert': 'true', 'content-type': 'application/json'})
+        return True
+    except Exception as ex:
+        print('  AVISO: no se pudo guardar la marca (%s). Consecuencia: hoy puede volver a'
+              ' avisar de lo mismo. Se prefiere repetir a callar.' % ex)
+        return False
 
 
 # ============================================================
@@ -195,33 +307,47 @@ def main():
         print('CENTINELA OK: los %d directores han escrito dentro de su plazo.' % len(filas))
         return 1 if fallo_lectura else 0
 
-    lineas = ['🔴 <b>Escaner: %d proveedor(es) callado(s)</b>' % len(mudos)]
-    for f in mudos:
-        if f['ultima'] is None:
-            lineas.append('• <b>%s</b> — sin dato (%s)' % (f['proveedor'], f['motivo']))
-        else:
-            lineas.append('• <b>%s</b> — última escritura %s UTC, hace %.0f h '
-                          '(su plazo son %d h; su horario, %s)'
-                          % (f['proveedor'], f['ultima'].strftime('%d-%m %H:%M'),
-                             f['horas'], f['umbral'], f['franja']))
+    print('CENTINELA_MUDO: ' + ', '.join(f['proveedor'] for f in mudos))
+
+    # 🔴 EL RUN SALE EN ROJO LAS 8 VECES, avise o no. Lo que se silencia es el
+    #    movil, nunca el registro: un proveedor mudo que se viera VERDE en
+    #    Actions el resto del dia seria el mismo silencio con otra cara.
+    hoy = ahora.strftime('%Y-%m-%d')
+    marca, marca_leida = leer_marca(sb)
+    a_avisar, ya_avisados = avisos_de_hoy(marca if marca_leida else {}, hoy,
+                                          [f['proveedor'] for f in mudos])
+    if ya_avisados:
+        print('  ya avisados hoy (no se repite el Telegram): ' + ', '.join(ya_avisados))
+    if not a_avisar:
+        print('CENTINELA: nada que enviar, de los %d mudos ya se avisó hoy.' % len(mudos))
+        return 1
+
+    lineas = ['🔴 <b>Escaner: %d proveedor(es) callado(s)</b>' % len(a_avisar)]
+    lineas += [linea_de_aviso(f) for f in mudos if f['proveedor'] in a_avisar]
     lineas.append('Mira el run del director en Actions: si sale verde y la fecha no se '
                   'mueve, es que escribe en el vacío.')
     texto = '\n'.join(lineas)
-    print('CENTINELA_MUDO: ' + ', '.join(f['proveedor'] for f in mudos))
 
     tg_token = os.environ.get('TELEGRAM_TOKEN')
     tg_chat = os.environ.get('TELEGRAM_CHAT_ID')
-    if tg_token and tg_chat:
-        try:
-            import requests
-            requests.post('https://api.telegram.org/bot%s/sendMessage' % tg_token,
-                          data={'chat_id': tg_chat, 'text': texto, 'parse_mode': 'HTML',
-                                'disable_web_page_preview': 'true'}, timeout=20)
-            print('>>> Telegram enviado.')
-        except Exception as ex:
-            print('AVISO Telegram (no se envio):', ex)
-    else:
-        print('>>> Telegram: sin claves en este paso -> no se envia.')
+    if not (tg_token and tg_chat):
+        print('>>> Telegram: sin claves en este paso -> no se envia (y la marca no se toca).')
+        return 1
+    try:
+        import requests
+        requests.post('https://api.telegram.org/bot%s/sendMessage' % tg_token,
+                      data={'chat_id': tg_chat, 'text': texto, 'parse_mode': 'HTML',
+                            'disable_web_page_preview': 'true'}, timeout=20)
+        print('>>> Telegram enviado: ' + ', '.join(a_avisar))
+    except Exception as ex:
+        # 🔒 La marca NO se toca: si el envio fallo, el aviso no ha llegado, y
+        #    apuntarlo como enviado seria callarse el resto del dia.
+        print('AVISO Telegram (no se envio, la marca queda intacta):', ex)
+        return 1
+
+    for proveedor in a_avisar:
+        marca[proveedor] = hoy
+    escribir_marca(sb, marca)
     return 1
 
 
