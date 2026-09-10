@@ -7,11 +7,14 @@
 # proveedor lleva mas horas que su umbral sin escribir, avisa por Telegram y el
 # run sale en ROJO.
 #
-# EL AVISO, UNO POR PROVEEDOR Y DIA (10-sep-2026): el centinela arranca 8 veces
-# al dia y un mudo lo es durante horas, asi que sin freno el movil suena 8 veces
-# por el mismo silencio. El run sigue saliendo ROJO las 8: lo que se silencia es
-# el movil, nunca el registro. Y el freno FALLA EN ABIERTO -- ver la marca, mas
-# abajo.
+# CUANDO MIRA: 06:00, 10:00, 14:00 y 18:00 UTC. Cuatro pasadas, ninguna de noche
+# -- el porque, y por que el hueco nocturno no retrasa nada, esta en el cron de
+# `.github/workflows/centinela-escaner.yml`.
+#
+# EL AVISO, UNO POR PROVEEDOR Y DIA (10-sep-2026): un mudo lo es durante horas,
+# asi que sin freno el movil suena en cada pasada por el mismo silencio. El run
+# sigue saliendo ROJO en las cuatro: lo que se silencia es el movil, nunca el
+# registro. Y el freno FALLA EN ABIERTO -- ver la marca, mas abajo.
 #
 # POR QUE EXISTE. El 9-sep-2026 por la manana los cuatro directores se quedaron
 # sin poder leer `productos` y empezaron a morir en el arranque. DBLine dejo de
@@ -61,6 +64,25 @@ from datetime import datetime, timedelta, timezone
 # ningun hueco descontado llego a la X de su proveedor (DBLine tuvo 2 por encima
 # de 22 h y ninguno de 24; HEO, 1; OcioStock y TCG, ninguno de mas de 18).
 #
+# 🔬 Y DE AQUI SALE EL RELOJ DEL CENTINELA (06/10/14/18 UTC). La franja en la que
+#    cada uno escribe, mas su X, da la ventana en la que su plazo puede vencerse.
+#    Las cuatro ventanas caen dentro de 04:00-15:00 UTC, asi que mirar cuatro
+#    veces entre las 06:00 y las 18:00 basta, y el hueco de noche no retrasa nada:
+#
+#      proveedor  | escribe (UTC) |  X   | su plazo vence entre | demora | detectado en
+#      -----------+---------------+------+----------------------+--------+-------------
+#      TCG        | 06-16         | 22 h |   04:00 y 14:00      |  ≤ 4 h |   ≤ 26 h
+#      DBLINE     | 06-11         | 26 h |   08:00 y 13:00      |  ≤ 4 h |   ≤ 30 h
+#      HEO        | 05-13         | 26 h |   07:00 y 15:00      |  ≤ 4 h |   ≤ 30 h
+#      OCIOSTOCK  | 07-15         | 22 h |   05:00 y 13:00      |  ≤ 4 h |   ≤ 26 h
+#
+#    Con un domingo por medio la ventana se corre al lunes (el reloj descontado
+#    esta parado el domingo entero) y cae entre las 05:00 y las 15:00 UTC del
+#    lunes: la misma franja, asi que la demora tampoco cambia.
+#    🔒 Esto NO se queda en un comentario: el banco saca la ventana de estas
+#       cifras, la cruza con el cron de verdad y exige que la demora no pase de
+#       4 h. Si manana se toca una franja, una X o el cron, se pone rojo.
+#
 # 🔑 POR ESO SE DESCUENTA EL DOMINGO, y no es un adorno. Con el hueco BRUTO, el
 #    umbral de DBLine tendria que ser 50 h para no dar un falso aviso cada lunes
 #    -- o sea, exactamente los dos dias de silencio que costo el apagon del
@@ -77,24 +99,28 @@ from datetime import datetime, timedelta, timezone
 #    y avisado. Se supo por la tarde del dia 10. No es inmediato -- ni puede
 #    serlo: DBLine se calla 23 h de por si entre el sabado y el lunes --, pero
 #    son horas en vez de dos dias.
+# `primera_h`/`ultima_h` son la franja en la que ese proveedor ESCRIBE, en horas
+# UTC, y no son adorno: de ellas sale la ventana en la que su plazo puede
+# vencerse, y de esa ventana sale a que horas tiene sentido que el centinela
+# mire. El banco lo comprueba contra el cron del workflow.
 HORARIOS = {
-    'TCG':       {'umbral_h': 22, 'descansa_domingo': False,
-                  'franja': '06-16 UTC, todos los dias', 'medido_h': 18.00},
-    'DBLINE':    {'umbral_h': 26, 'descansa_domingo': True,
-                  'franja': '06-11 UTC, L a S', 'medido_h': 23.00},
-    'HEO':       {'umbral_h': 26, 'descansa_domingo': True,
-                  'franja': '05-13 UTC, L a S', 'medido_h': 22.03},
-    'OCIOSTOCK': {'umbral_h': 22, 'descansa_domingo': True,
-                  'franja': '07-15 UTC, L a S', 'medido_h': 18.00},
+    'TCG':       {'umbral_h': 22, 'descansa_domingo': False, 'medido_h': 18.00,
+                  'primera_h': 6, 'ultima_h': 16, 'dias': 'todos los dias'},
+    'DBLINE':    {'umbral_h': 26, 'descansa_domingo': True, 'medido_h': 23.00,
+                  'primera_h': 6, 'ultima_h': 11, 'dias': 'L a S'},
+    'HEO':       {'umbral_h': 26, 'descansa_domingo': True, 'medido_h': 22.03,
+                  'primera_h': 5, 'ultima_h': 13, 'dias': 'L a S'},
+    'OCIOSTOCK': {'umbral_h': 22, 'descansa_domingo': True, 'medido_h': 18.00,
+                  'primera_h': 7, 'ultima_h': 15, 'dias': 'L a S'},
 }
 
 # ============================================================
 # LA MARCA: UN AVISO POR PROVEEDOR Y DIA
 # ------------------------------------------------------------
-# El centinela arranca 8 veces al dia. Un proveedor mudo de verdad lo esta
-# durante horas, asi que sin freno el movil suena 8 veces por el mismo silencio
-# -- y un aviso que suena ocho veces se aprende a ignorar en quince dias, que es
-# la manera mas cara de perder un centinela.
+# El centinela arranca 4 veces al dia. Un proveedor mudo de verdad lo esta
+# durante horas, asi que sin freno el movil sonaria en las cuatro por el mismo
+# silencio -- y un aviso que suena cuatro veces al dia se aprende a ignorar en
+# quince dias, que es la manera mas cara de perder un centinela.
 #
 # La marca es un JSON en Storage, {proveedor: 'AAAA-MM-DD' del ultimo aviso}. En
 # el bucket `informes`, que es donde el escaner ya escribe: ni tabla nueva, ni
@@ -107,9 +133,9 @@ HORARIOS = {
 #    esa es exactamente la clase de silencio que costo dos dias el 9-sep
 #    (`productos` devolviendo cero filas sin error).
 #
-# El dia es el UTC. Con el centinela corriendo de 06:00 a 20:00 UTC, ese dia y el
-# de Espana son siempre el mismo (06:00 UTC son las 07:00/08:00; 20:00 UTC, las
-# 21:00/22:00), asi que no hay que elegir entre dos calendarios.
+# El dia es el UTC. Con el centinela corriendo de 06:00 a 18:00 UTC, ese dia y el
+# de Espana son siempre el mismo (06:00 UTC son las 07:00/08:00; 18:00 UTC, las
+# 19:00/20:00), asi que no hay que elegir entre dos calendarios.
 MARCA_BUCKET = 'informes'
 MARCA_RUTA = 'centinela/ultimo_aviso.json'
 
@@ -162,6 +188,15 @@ def esta_mudo(horas, umbral_h):
     if horas is None:
         return True
     return horas > umbral_h
+
+
+def franja_de(cfg):
+    """El horario del proveedor, en texto, para el aviso: '06-11 UTC, L a S'.
+
+    Sale de las MISMAS cifras que usa el banco para comprobar el cron. Si se
+    escribiera a mano en un campo aparte, un dia diria una cosa y el calculo
+    otra, y el aviso mentiria sobre el horario justo del que se queja."""
+    return '%02d-%02d UTC, %s' % (cfg['primera_h'], cfg['ultima_h'], cfg['dias'])
 
 
 def avisos_de_hoy(marca, hoy, mudos):
@@ -286,7 +321,7 @@ def main():
         brutas = None if ultima is None else (ahora - ultima).total_seconds() / 3600.0
         filas.append({'proveedor': proveedor, 'ultima': ultima, 'horas': horas,
                       'brutas': brutas, 'umbral': cfg['umbral_h'], 'motivo': motivo,
-                      'mudo': esta_mudo(horas, cfg['umbral_h']), 'franja': cfg['franja']})
+                      'mudo': esta_mudo(horas, cfg['umbral_h']), 'franja': franja_de(cfg)})
 
     # 🔴 LOS CUATRO SIEMPRE AL LOG, hablen o callen. Misma disciplina que el
     #    blindaje anti-vaciado del escaner: un centinela que solo escribe cuando
@@ -309,7 +344,7 @@ def main():
 
     print('CENTINELA_MUDO: ' + ', '.join(f['proveedor'] for f in mudos))
 
-    # 🔴 EL RUN SALE EN ROJO LAS 8 VECES, avise o no. Lo que se silencia es el
+    # 🔴 EL RUN SALE EN ROJO EN LAS CUATRO, avise o no. Lo que se silencia es el
     #    movil, nunca el registro: un proveedor mudo que se viera VERDE en
     #    Actions el resto del dia seria el mismo silencio con otra cara.
     hoy = ahora.strftime('%Y-%m-%d')
