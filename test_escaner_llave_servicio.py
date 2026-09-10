@@ -79,11 +79,24 @@ QUE SE PRUEBA, Y COMO:
       `moloka_tracker_snapshot.py`: ese se lanza a mano desde el portatil, donde
       NO hay secretos del repo, y el respaldo a la anonima es lo que lo mantiene
       usable. Por eso su fila dice `servicio-con-respaldo` y no es un descuido.
-  (G) Y QUE LA GUARDA ESTE, Y ESTE ANTES. Exigir la llave sin abortar cuando falta
-      no aprieta nada: `create_client(url, None)` revienta por dentro con un
-      mensaje que no dice de que va. Se comprueba por estructura que cada programa
-      de `solo-servicio` tiene un `if not <llave>:` que SALE, y que esta por
-      encima de la linea que crea el cliente.
+  (G) Y QUE LA GUARDA ESTE, Y ESTE ANTES DE TODO CLIENTE. Exigir la llave sin
+      abortar cuando falta no aprieta nada: `create_client(url, None)` revienta
+      por dentro con un mensaje que no dice de que va. Se comprueba por estructura
+      que cada programa de `solo-servicio` tiene un `if not <llave>:` que SALE, y
+      que esta por encima de la PRIMERA linea que crea un cliente de RED.
+      🔴 «El primero», no «el de la base» (10-sep-2026, por la tarde). Hasta ese
+      dia (G) miraba solo el `create_client`, y con eso DOS de los seis salian
+      verdes teniendo el cliente de Keepa POR ENCIMA de la guarda:
+      `moloka_detector_bems.py` y `moloka_escaner_nube.py` lo construian antes de
+      saber si podian trabajar. Medido con los dobles de (E) ese dia: un arranque
+      SIN llave construia igualmente UN cliente de Keepa antes de morir; ahora
+      construye CERO. Tokens no gastaba ninguna de las dos versiones -- el saldo
+      se pide despues, en `update_status()` --, y lo que el constructor de la
+      libreria haga por dentro no se ha medido; lo que no hace falta medir es que
+      una guarda que solo cubre la segunda mitad del arranque no es la guarda del
+      arranque. Los dos ficheros llevan la guarda arriba del todo desde ese dia;
+      la lista de constructores que (G) reconoce vive en `CONSTRUCTORES_DE_RED`,
+      y se comprueba que ENCUENTRA los dos que nombra.
   (B) POR ESTRUCTURA, con `yaml`: que TODO paso de TODO workflow cuyo `run`
       lance uno de esos programas lleve `SUPABASE_SERVICE_KEY` en SU PROPIO `env`.
       Por el paso, no por el fichero: en los directores la llave ya viajaba en el
@@ -175,11 +188,18 @@ PROGRAMAS = [
 def hijo(caso):
     import atexit
 
-    CUENTA = {'keepa': 0, 'clientes': 0}
+    CUENTA = {'keepa': 0, 'clientes': 0, 'clientes_keepa': 0}
     LLAVES = []
 
     class _FakeKeepa:
         def __init__(self, key, timeout=None):
+            # 🔴 CONSTRUIR el cliente cuenta aparte de PREGUNTARLE (10-sep-2026, por
+            # la tarde). Hasta esa tarde aqui solo se contaba `query()`, asi que
+            # (E1) salia verde con el cliente de Keepa naciendo por encima de la
+            # guarda: cero tokens gastados, si, pero el viaje a la red ya hecho.
+            # Un contador que solo mira la segunda mitad del arranque no ve la
+            # primera.
+            CUENTA['clientes_keepa'] += 1
             self.tokens_left = 1500
 
         def update_status(self):
@@ -228,6 +248,7 @@ def hijo(caso):
     @atexit.register
     def _informe():
         print('CLIENTES_SUPABASE=%d' % CUENTA['clientes'])
+        print('CLIENTES_KEEPA=%d' % CUENTA['clientes_keepa'])
         print('LLAMADAS_KEEPA=%d' % CUENTA['keepa'])
         print('LLAVES=%s' % ','.join(str(k) for k in LLAVES))
 
@@ -364,27 +385,65 @@ def _sale(cuerpo):
     return False
 
 
-def aborta_sin_llave(fuente, var='sb'):
+# Los constructores de CLIENTE DE RED que se usan hoy en estos programas:
+# `create_client(...)` (Supabase) y `keepa.Keepa(...)` (Keepa). La (G) mira el
+# PRIMERO de todos, no el de la base.
+#
+# 🔴 POR QUE EL PRIMERO Y NO EL DE SUPABASE. Hasta el 10-sep-2026 la (G) exigia la
+#    guarda por encima del `create_client` y nada mas, y con eso dos de los seis
+#    salian verdes teniendo el cliente de Keepa POR ENCIMA de la guarda: el
+#    programa lo construia antes de saber si podia trabajar. Tokens no gastaba --
+#    el saldo se pide despues, en `update_status()` --, y lo que el constructor de
+#    la libreria haga por dentro no se ha medido; la guarda que decia proteger el
+#    arranque protegia solo su segunda mitad, y eso se ve sin medir nada.
+#
+# 🔴 ESTA LISTA ES LA MITAD QUE PUEDE QUEDARSE CORTA el dia que entre otra libreria
+#    de red. Por eso abajo se comprueba que los dos nombres que dice conocer
+#    APARECEN de verdad en los ficheros: una lista mal escrita no encontraria
+#    ninguno y (G) saldria verde sin haber mirado nada -- validar la nada siempre
+#    sale bien.
+CONSTRUCTORES_DE_RED = ('create_client', 'Keepa')
+
+
+def clientes_de_red(arbol):
+    """Las lineas que CONSTRUYEN un cliente de red, ordenadas: [(linea, nombre)].
+
+    Por estructura sobre el arbol, no por texto: cuenta igual `Keepa(...)` que
+    `keepa.Keepa(...)`, y no cuenta el nombre escrito dentro de un comentario.
+    """
+    salida = []
+    for nodo in ast.walk(arbol):
+        if not isinstance(nodo, ast.Call):
+            continue
+        f = nodo.func
+        nom = (f.id if isinstance(f, ast.Name)
+               else f.attr if isinstance(f, ast.Attribute) else None)
+        if nom in CONSTRUCTORES_DE_RED:
+            salida.append((nodo.lineno, nom))
+    return sorted(salida)
+
+
+def aborta_sin_llave(fuente):
     """True si hay un `if not <llave de servicio>:` que SALE, y esta ANTES de la
-    linea que crea el cliente.
+    PRIMERA linea que crea un cliente de RED -- el de Keepa incluido, no solo el
+    de la base.
 
     🔒 Lo de "antes" no es formalismo: una guarda por debajo del
        `create_client` no impide que el cliente nazca con `None`, y entonces lo
        que revienta es la libreria, con un mensaje que no habla de la llave.
+       Y por debajo del cliente de Keepa tampoco impide el viaje a la red.
     """
     arbol = ast.parse(fuente)
-    nombres, linea_cliente = {}, None
+    nombres = {}
     for nodo in ast.walk(arbol):
-        if not (isinstance(nodo, ast.Assign) and len(nodo.targets) == 1
+        if (isinstance(nodo, ast.Assign) and len(nodo.targets) == 1
                 and isinstance(nodo.targets[0], ast.Name)):
-            continue
-        nombres[nodo.targets[0].id] = nodo.value
-        if (nodo.targets[0].id == var and isinstance(nodo.value, ast.Call)
-                and isinstance(nodo.value.func, ast.Name)
-                and nodo.value.func.id == 'create_client'):
-            linea_cliente = nodo.lineno
-    if linea_cliente is None:
-        return False
+            nombres[nodo.targets[0].id] = nodo.value
+
+    clientes = clientes_de_red(arbol)
+    if not clientes:
+        return False        # sin cliente que proteger, esto no ha mirado nada
+    linea_cliente = clientes[0][0]
 
     llaves = {n for n, v in nombres.items() if _resuelve_a_servicio(v, nombres)}
     for nodo in ast.walk(arbol):
@@ -400,15 +459,31 @@ def aborta_sin_llave(fuente, var='sb'):
 
 
 print("(A) el cliente de cada programa, por estructura")
+_VISTOS = set()
 for _script, _forma, _n in PROGRAMAS:
     with io.open(_script, encoding='utf-8') as fh:
         _fuente = fh.read()
     eq('(A) 🔴 %-28s `sb` nace %s' % (_script, _forma),
        llave_del_cliente(_fuente), _forma)
+    _clientes = clientes_de_red(ast.parse(_fuente))
+    _VISTOS.update(_nom for _l, _nom in _clientes)
     if _forma == 'solo-servicio':
-        # (G) exigir la llave sin abortar cuando falta no aprieta nada.
-        eq('(G) 🔴 %-28s aborta ANTES de crear el cliente' % _script,
+        # (G) exigir la llave sin abortar cuando falta no aprieta nada. Se dice
+        # CUAL es el primer cliente y en que linea: si manana entra uno nuevo por
+        # encima, esta linea lo enseña sin tener que abrir el fichero.
+        print("      · primer cliente de red: %s"
+              % ('%s (linea %d)' % (_clientes[0][1], _clientes[0][0])
+                 if _clientes else 'NINGUNO -- (G) no puede mirar nada'))
+        eq('(G) 🔴 %-28s aborta ANTES del PRIMER cliente de red' % _script,
            aborta_sin_llave(_fuente), True)
+
+# (D) contra el verde vacio de (G): que la lista de constructores ENCUENTRE los
+# dos nombres que dice conocer. Con la lista mal escrita, `clientes_de_red` no
+# devolveria nada, (G) diria False y el arreglo pareceria no estar puesto -- pero
+# el dia que alguien la "arregle" al reves (aflojando (G) para que un fichero sin
+# cliente pase), esta cuenta es la que lo caza.
+eq('(D) …y los dos constructores de la lista aparecen de verdad en los ficheros',
+   sorted(_VISTOS), sorted(CONSTRUCTORES_DE_RED))
 
 # (C) las otras direcciones: los DOS codigos viejos, tal cual estaban.
 _ANTES = ("from supabase import create_client\n"
@@ -448,6 +523,37 @@ _CON_GUARDA = ("_k = os.environ.get('SUPABASE_SERVICE_KEY')\n"
                "if not _k:\n    sys.exit(1)\n"
                "sb = create_client(os.environ['SUPABASE_URL'], _k)\n")
 eq('(C) …y la guarda bien puesta si cuenta', aborta_sin_llave(_CON_GUARDA), True)
+
+# (C) LA DIRECCION QUE ABRE EL 10-sep POR LA TARDE, y es el estado exacto en que
+# estaban `moloka_detector_bems.py` y `moloka_escaner_nube.py` esa mañana: la
+# guarda por encima del cliente de la BASE -- (G) salia verde -- y por DEBAJO del
+# de Keepa. Con la (G) vieja esto pasaba; con la de ahora, no.
+_TRAS_KEEPA = ("api = keepa.Keepa(os.environ['KEEPA_API_KEY'])\n"
+               "_k = os.environ.get('SUPABASE_SERVICE_KEY')\n"
+               "if not _k:\n    sys.exit(1)\n"
+               "sb = create_client(os.environ['SUPABASE_URL'], _k)\n")
+eq('(C) 🔴 …y una guarda por encima del cliente de la BASE pero por DEBAJO del de Keepa NO cuenta',
+   aborta_sin_llave(_TRAS_KEEPA), False)
+# Y la vuelta, que es la unica que prueba que el rojo de arriba mide el ORDEN y no
+# la mera presencia de Keepa: el mismo fichero con la guarda subida sale verde.
+_ANTES_DE_TODO = ("_k = os.environ.get('SUPABASE_SERVICE_KEY')\n"
+                  "if not _k:\n    sys.exit(1)\n"
+                  "api = keepa.Keepa(os.environ['KEEPA_API_KEY'])\n"
+                  "sb = create_client(os.environ['SUPABASE_URL'], _k)\n")
+eq('(C) …y con la guarda por encima de los DOS, si',
+   aborta_sin_llave(_ANTES_DE_TODO), True)
+# El constructor cuenta se llame como se llame: `Keepa(...)` a pelo, sin el modulo.
+_KEEPA_PELADO = ("from keepa import Keepa\n"
+                 "api = Keepa(os.environ['KEEPA_API_KEY'])\n"
+                 "_k = os.environ.get('SUPABASE_SERVICE_KEY')\n"
+                 "if not _k:\n    sys.exit(1)\n"
+                 "sb = create_client(os.environ['SUPABASE_URL'], _k)\n")
+eq('(C) 🔴 …y da igual que Keepa se importe pelado: sigue siendo un cliente de red',
+   aborta_sin_llave(_KEEPA_PELADO), False)
+# (D) y un fichero sin NINGUN cliente de red no pasa por defecto: falla cerrado.
+eq('(D) 🔴 …y un fichero sin ningun cliente de red NO pasa (G) por no tener nada que mirar',
+   aborta_sin_llave("_k = os.environ.get('SUPABASE_SERVICE_KEY')\n"
+                    "if not _k:\n    sys.exit(1)\n"), False)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # (B) LA LLAVE, EN EL PASO QUE LANZA EL ESCANER
@@ -537,6 +643,7 @@ def correr(caso):
     _ll = re.search(r'^LLAVES=(.*)$', out, re.M)
     return {'codigo': p.returncode, 'salida': out,
             'clientes': cifra('CLIENTES_SUPABASE'), 'keepa': cifra('LLAMADAS_KEEPA'),
+            'clientes_keepa': cifra('CLIENTES_KEEPA'),
             'llaves': [x for x in (_ll.group(1).strip() if _ll else '').split(',') if x]}
 
 
@@ -547,9 +654,16 @@ eq('(E1) 🔴 con la linea exacta, grepable',
 eq('(E1) 🔴 y NO nace ningun cliente de Supabase (ni con la anonima de respaldo)',
    _sin['clientes'], 0)
 eq('(E1) 🔴 cero llamadas a Keepa: no se gasta ni un token', _sin['keepa'], 0)
+# 🔴 Y CERO CLIENTES DE KEEPA, que es otra cosa que cero llamadas: el cliente se
+#    construye sin gastar un token, asi que «cero llamadas» salia verde igual con
+#    el cliente ya nacido. Devuelto el escaner a como estaba esa mañana, este
+#    assert da 1 y se pone ROJO; es el unico de (E1) que lo hace.
+eq('(E1) 🔴 y ni siquiera se CONSTRUYE el cliente de Keepa: no se sale a la red',
+   _sin['clientes_keepa'], 0)
 
 _con = correr('con-llave')
 eq('(E2) 🔴 con la llave, el arranque la PASA: el cliente nace', _con['clientes'], 1)
+eq('(E2) …y el de Keepa tambien, ahora por DEBAJO de la guarda', _con['clientes_keepa'], 1)
 eq('(E2) 🔴 y nace con la llave de SERVICIO, no con la anonima',
    _con['llaves'], ['FAKE-SERVICE'])
 eq('(E2) 🔴 el escaner muere mas abajo y por OTRO motivo (buzon vacio)',

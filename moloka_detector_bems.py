@@ -64,9 +64,6 @@ KEEPA_ESPERAS = [5, 15, 40, 90]
 # ============================================================
 # CLIENTES
 # ============================================================
-print(">>> ARRANCANDO detector BEMS. Cliente Keepa...", flush=True)
-api = keepa.Keepa(os.environ['KEEPA_API_KEY'])
-print(">>> Keepa OK. Conectando Supabase...", flush=True)
 # 🔴 LA LLAVE DE SERVICIO, O NO SE CORRE (10-sep-2026, la regla del #292).
 # Corre desatendido en Actions, donde el secreto SIEMPRE esta: un lanzamiento sin la
 # llave no es un caso a sobrevivir, es un fallo de configuracion, y vale mas que muera
@@ -75,10 +72,25 @@ print(">>> Keepa OK. Conectando Supabase...", flush=True)
 # toque, `anon` recibe 0 filas SIN ERROR (medido en staging el 10-sep-2026; de las
 # cuatro operaciones solo el INSERT lanza). El porque entero, con la medicion y con lo
 # que implica para los `upsert`, en `test_escaner_llave_servicio.py`.
+#
+# 🔒 Y VA LA PRIMERA DE TODAS, POR ENCIMA DE TODO CLIENTE (10-sep-2026, por la tarde).
+#    Hasta esta tarde estaba aqui debajo, entre el cliente de Keepa y el de la base:
+#    protegia el de la base y dejaba pasar el otro. MEDIDO con dobles ese dia: un
+#    arranque SIN llave construia igualmente el cliente de Keepa (uno) antes de morir;
+#    ahora construye CERO. Tokens no gasta ninguna de las dos versiones -- el saldo se
+#    pide abajo, en `update_status()` --, y lo que el constructor de la libreria haga
+#    por dentro no se ha medido aqui; lo que no hace falta medir es que una guarda que
+#    solo cubre la segunda mitad del arranque no es la guarda del arranque. La (G) del
+#    banco lo exige ahora sobre el PRIMER cliente de red, no sobre el de la base, y por
+#    eso esto no se puede volver a bajar sin que salte.
 _LLAVE_SVC = os.environ.get('SUPABASE_SERVICE_KEY')
 if not _LLAVE_SVC:
     print('DETECTOR_NO_EJECUTADO: sin llave de servicio')
     sys.exit(1)
+
+print(">>> ARRANCANDO detector BEMS. Cliente Keepa...", flush=True)
+api = keepa.Keepa(os.environ['KEEPA_API_KEY'])
+print(">>> Keepa OK. Conectando Supabase...", flush=True)
 sb  = create_client(os.environ['SUPABASE_URL'], _LLAVE_SVC)
 api.update_status()
 print(f">>> Tokens Keepa AHORA: {api.tokens_left}", flush=True)

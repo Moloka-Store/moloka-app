@@ -50,14 +50,6 @@ def abortar(motivo):
 # ============================================================
 # CREDENCIALES (entorno, no Colab)
 # ============================================================
-print(">>> ARRANCANDO escaner. Creando cliente Keepa...", flush=True)
-# 🔒 timeout EXPLICITO: la libreria keepa trae 10.0s por defecto (keepa_sync.py,
-# __init__), insuficiente para un lote de 100 ASIN con stats=90. Ese default es
-# el origen de los "Read timed out" que hacian saltar lotes enteros (run 27-jul:
-# 86 de 186 productos nunca preguntados). Ajustable por entorno sin desplegar.
-api = keepa.Keepa(os.environ['KEEPA_API_KEY'],
-                  timeout=float(os.environ.get('KEEPA_TIMEOUT', '120')))
-print(">>> Cliente Keepa creado. Conectando a Supabase...", flush=True)
 # 🔴 LA LLAVE DE SERVICIO, Y NINGUNA OTRA (10-sep-2026).
 # El escaner NO es un navegador: corre desatendido en Actions con los secretos del
 # repo. Y en la Celda 5 lee `productos` para saber que fichas son de la casa.
@@ -93,9 +85,29 @@ print(">>> Cliente Keepa creado. Conectando a Supabase...", flush=True)
 # workflow. Un respaldo que solo se usa cuando el escaneo ya no puede funcionar
 # no es un respaldo: es un mudo. Mejor ROJO en el arranque, sin gastar un token,
 # que verde sobre una tabla que no se ha tocado.
+#
+# 🔒 Y VA LA PRIMERA DE TODAS, POR ENCIMA DE TODO CLIENTE (10-sep-2026, por la tarde).
+#    Hasta esta tarde estaba aqui debajo, con el cliente de Keepa creado cuarenta lineas
+#    mas arriba: protegia el de la base y dejaba pasar el otro. MEDIDO con los dobles
+#    del banco ese dia: la (E1) -- arranque SIN llave -- construia igualmente el cliente
+#    de Keepa (uno) antes de morir; ahora construye CERO, y hay un assert que lo exige.
+#    Tokens no gasta ninguna de las dos versiones -- el saldo se pide abajo, en
+#    `update_status()` --, y lo que el constructor de la libreria haga por dentro no se
+#    ha medido aqui; lo que no hace falta medir es que una guarda que solo cubre la
+#    segunda mitad del arranque no es la guarda del arranque. La (G) del banco lo exige
+#    ahora sobre el PRIMER cliente de red, no sobre el de la base.
 _llave_svc = os.environ.get('SUPABASE_SERVICE_KEY')
 if not _llave_svc:
     abortar('sin llave de servicio')
+
+print(">>> ARRANCANDO escaner. Creando cliente Keepa...", flush=True)
+# 🔒 timeout EXPLICITO: la libreria keepa trae 10.0s por defecto (keepa_sync.py,
+# __init__), insuficiente para un lote de 100 ASIN con stats=90. Ese default es
+# el origen de los "Read timed out" que hacian saltar lotes enteros (run 27-jul:
+# 86 de 186 productos nunca preguntados). Ajustable por entorno sin desplegar.
+api = keepa.Keepa(os.environ['KEEPA_API_KEY'],
+                  timeout=float(os.environ.get('KEEPA_TIMEOUT', '120')))
+print(">>> Cliente Keepa creado. Conectando a Supabase...", flush=True)
 sb  = create_client(os.environ['SUPABASE_URL'], _llave_svc)
 print(">>> Supabase conectado con la llave de SERVICIO. Consultando saldo real de tokens...",
       flush=True)
