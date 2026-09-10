@@ -11,12 +11,19 @@
 # director salia rojo en Actions, pero un rojo en Actions no llega a donde esta
 # Fernando, y "Que reponer" seguia ensenando el catalogo de anteayer.
 #
-# HORARIO (el cron de GitHub va en UTC; en verano Espana = UTC+2):
-#   cada 2 h de 06:00 a 20:00 UTC == de 08:00 a 22:00 hora peninsular (verano).
-#   Ocho pasadas, todas en horas en las que Fernando puede hacer algo con el
-#   aviso. Los umbrales son de 22-26 h, asi que la frecuencia no es para
-#   detectar antes: es para que el aviso no espere tres horas mas de la cuenta
-#   una vez que el plazo ya ha vencido.
+# HORARIO: CUATRO PASADAS, 06:00 / 10:00 / 14:00 / 18:00 UTC (el cron de GitHub
+# va en UTC; en verano Espana = UTC+2, o sea 08:00 / 12:00 / 16:00 / 20:00).
+#   - La primera, a primera hora espanola. La ultima, a las 18:00 UTC: ningun
+#     aviso llega a una hora en la que ya no se puede hacer nada con el.
+#   - Y NO HAY PASADAS DE NOCHE A PROPOSITO. El hueco de 18:00 a 06:00 no retrasa
+#     nada: con los horarios reales de los cuatro directores, el plazo de ninguno
+#     puede vencerse entre las 15:00 y las 04:00 UTC (su franja de escritura mas
+#     su umbral cae siempre dentro de 04:00-15:00). Lo comprueba el banco, que
+#     saca la ventana de las cifras de HORARIOS y la cruza con ESTE cron.
+#   - Bajo de 8 pasadas a 4 el 10-sep-2026: con umbrales de 22 y 26 h, la demora
+#     maxima del aviso pasa de 2 h a 4 h y no cambia ninguna decision -- cuando
+#     salta, el proveedor lleva casi un dia callado --, y a cambio los correos de
+#     fallo de GitHub de un dia mudo bajan de 8 a 4.
 #   OJO: en invierno (UTC+1) esto se corre 1 h antes en hora local. Aceptable.
 #
 # BLINDAJE:
@@ -32,7 +39,7 @@ name: Moloka - Centinela del proveedor mudo
 
 on:
   schedule:
-    - cron: '0 6-20/2 * * *'
+    - cron: '0 6,10,14,18 * * *'
   workflow_dispatch:
 
 concurrency:

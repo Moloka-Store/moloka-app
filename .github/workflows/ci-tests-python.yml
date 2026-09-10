@@ -86,7 +86,9 @@ jobs:
         #    un grep no distingue ese paso del de al lado. No lo trae ninguna otra
         #    dependencia de esta linea (medido: nadie lo declara como requisito),
         #    asi que se pone. Y NO esta en requirements.txt -- el escaner no lo usa,
-        #    solo su banco --, asi que la version se fija aqui y punto.
+        #    solo su banco --, asi que la version se fija aqui y punto. Desde el
+        #    10-sep lo usan DOS: `test_centinela_mudo.py` lee el cron del workflow
+        #    del centinela por estructura, para cruzarlo con los horarios medidos.
         run: pip install --quiet psycopg2-binary openpyxl==3.1.5 supabase==2.31.0 pandas==3.0.0 pyyaml==6.0.3
 
       - name: 4) Los modulos importan

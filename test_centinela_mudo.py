@@ -62,6 +62,14 @@ QUE SE PRUEBA, Y COMO:
   (F) LA LINEA DEL AVISO, como funcion pura: que empiece por las horas, que lleve
       la fecha de la ultima escritura, y que solo nombre el descuento del domingo
       cuando de verdad cambia el numero.
+  (G) EL RELOJ. El cron se lee del .yml de VERDAD y la ventana en la que el plazo
+      de cada proveedor puede vencerse sale de las cifras de HORARIOS (su franja
+      de escritura + su X). Se exige que las cuatro pasadas cubran esa ventana con
+      4 h de demora como mucho, y que ninguna ventana caiga de noche -- que es lo
+      que permite no mirar entre las 18:00 y las 06:00 sin retrasar nada. Sin
+      esto, «no hay pasadas de noche porque ningun plazo vence de noche» seria una
+      frase bonita en un comentario; asi, si manana se mueve una franja, una X o
+      una hora del cron, el banco se pone rojo solo.
 
 Las horas del caso [mudo] son 200 a proposito (mas de ocho dias) y no 40: con 40,
 este banco cambiaria de resultado segun el dia de la semana en que se corriera.
@@ -75,6 +83,8 @@ import subprocess
 import sys
 import types
 from datetime import datetime, timedelta, timezone
+
+import yaml
 
 RUTA = 'centinela_escaner.py'
 
@@ -203,7 +213,7 @@ def _nodo(nombre):
 
 
 NOMBRES = ('horas_en_domingo', 'horas_de_silencio', 'esta_mudo',
-           'avisos_de_hoy', 'linea_de_aviso')
+           'avisos_de_hoy', 'linea_de_aviso', 'franja_de')
 _ns = {'timedelta': timedelta}
 exec(compile(ast.fix_missing_locations(ast.Module(body=[_nodo(n) for n in NOMBRES],
                                                   type_ignores=[])), RUTA, 'exec'), _ns)
@@ -212,6 +222,7 @@ horas_de_silencio = _ns['horas_de_silencio']
 esta_mudo = _ns['esta_mudo']
 avisos_de_hoy = _ns['avisos_de_hoy']
 linea_de_aviso = _ns['linea_de_aviso']
+franja_de = _ns['franja_de']
 HORARIOS = ast.literal_eval(_nodo('HORARIOS').value)
 print('extraidas de %s: %s, HORARIOS' % (RUTA, ', '.join(NOMBRES)))
 print()
@@ -285,7 +296,7 @@ print()
 
 def fila(brutas, horas, ultima=APAGON, proveedor='DBLINE'):
     return {'proveedor': proveedor, 'ultima': ultima, 'brutas': brutas, 'horas': horas,
-            'umbral': 26, 'franja': '06-11 UTC, L a S', 'motivo': None}
+            'umbral': 26, 'franja': franja_de(HORARIOS['DBLINE']), 'motivo': None}
 
 
 _sin_domingo = linea_de_aviso(fila(27.48, 27.48))
@@ -324,6 +335,89 @@ for _p in sorted(HORARIOS):
        % (_p, _cfg['umbral_h'], _cfg['medido_h']), _cfg['umbral_h'] > _cfg['medido_h'], True)
     eq('(B) [%s] …y el margen no pasa de 6 h (una X floja no avisa a tiempo)' % _p,
        _cfg['umbral_h'] - _cfg['medido_h'] <= 6, True)
+
+# ---------------------------------------------------------------------------
+# (G) EL RELOJ: que las cuatro pasadas del cron cubran de verdad la ventana en la
+#     que cada plazo puede vencerse, con 4 h de demora como mucho.
+# ---------------------------------------------------------------------------
+# 🔴 ESTO ES LO QUE IMPIDE QUE EL HORARIO SEA UNA AFIRMACION. El cron se leyo
+#    del .yml de verdad y la ventana sale de las cifras de HORARIOS: si manana
+#    alguien mueve una franja, una X o una hora del cron, esto se pone rojo solo.
+#    Sin esto, «no hay pasadas de noche porque ningun plazo vence de noche» seria
+#    una frase bonita en un comentario.
+print()
+_doc = yaml.safe_load(io.open(os.path.join('.github', 'workflows', 'centinela-escaner.yml'),
+                              encoding='utf-8'))
+# 🔑 En un .yml, `on:` se lee como el BOOLEANO True (el problema de Noruega).
+_on = _doc.get('on', _doc.get(True)) or {}
+_crons = [x['cron'] for x in (_on.get('schedule') or [])]
+eq('(G) hay UN cron, no cero ni tres', len(_crons), 1)
+_horas_cron = sorted(int(h) for h in _crons[0].split()[1].split(','))
+print('    el cron del workflow mira a las: %s UTC'
+      % ', '.join('%02d:00' % h for h in _horas_cron))
+eq('(G) 🔴 son CUATRO pasadas al dia', len(_horas_cron), 4)
+eq('(G) 🔴 la primera, a primera hora española (06:00 UTC = 07:00/08:00 en casa)',
+   _horas_cron[0], 6)
+eq('(G) 🔴 y la ultima no pasa de las 18:00 UTC: ningun aviso a deshora',
+   _horas_cron[-1] <= 18, True)
+eq('(G) el cron corre TODOS los dias (un mudo del domingo se caza el lunes)',
+   _crons[0].split()[2:], ['*', '*', '*'])
+
+
+def ventana_de_vencimiento(cfg):
+    """Horas UTC (inicio, fin) en las que el plazo de ese proveedor puede vencerse.
+
+    Escribe entre `primera_h` y `ultima_h`; si deja de escribir, su plazo vence
+    `umbral_h` despues de la ultima que llego a hacer. Se devuelve en horas del
+    dia, que es lo que hay que cruzar con el cron."""
+    return ((cfg['primera_h'] + cfg['umbral_h']) % 24,
+            (cfg['ultima_h'] + cfg['umbral_h']) % 24)
+
+
+def ventana_tras_domingo(cfg):
+    """La misma ventana cuando hay un domingo por medio: el reloj descontado esta
+    parado el domingo entero, asi que lo que faltaba se consume el lunes desde las
+    00:00. Escribio el sabado a la hora h -> le faltan `umbral - (24 - h)` horas."""
+    return (cfg['umbral_h'] - 24 + cfg['primera_h'],
+            cfg['umbral_h'] - 24 + cfg['ultima_h'])
+
+
+def demora_maxima(ini, fin, horas_cron):
+    """Cuanto puede tardar el aviso desde que el plazo vence, en horas, si el
+    vencimiento cae en cualquier minuto de [ini, fin]. Se mira minuto a minuto:
+    con horas redondas se podria colar un caso de borde justo despues de una
+    pasada, que es exactamente el que importa."""
+    peor = 0.0
+    minuto = ini * 60
+    while minuto <= fin * 60:
+        espera = min(((h * 60 - minuto) % (24 * 60)) or 24 * 60 for h in horas_cron)
+        # Un vencimiento JUSTO en la hora del cron se avisa en esa pasada: 0 h.
+        if any(h * 60 == minuto for h in horas_cron):
+            espera = 0
+        peor = max(peor, espera / 60.0)
+        minuto += 1
+    return peor
+
+
+for _p in sorted(HORARIOS):
+    _cfg = HORARIOS[_p]
+    _ini, _fin = ventana_de_vencimiento(_cfg)
+    _dem = demora_maxima(_ini, _fin, _horas_cron)
+    print('    %-10s escribe %02d-%02d UTC, X=%d h -> vence entre %02d:00 y %02d:00, demora %.2f h'
+          % (_p, _cfg['primera_h'], _cfg['ultima_h'], _cfg['umbral_h'], _ini, _fin, _dem))
+    eq('(G) [%s] 🔴 el aviso no se retrasa mas de 4 h' % _p, _dem <= 4.0, True)
+    eq('(G) [%s] 🔴 su plazo NUNCA vence de noche (04:00-15:00 UTC)' % _p,
+       (4 <= _ini <= 15, 4 <= _fin <= 15), (True, True))
+    if _cfg['descansa_domingo']:
+        _i2, _f2 = ventana_tras_domingo(_cfg)
+        _d2 = demora_maxima(_i2, _f2, _horas_cron)
+        eq('(G) [%s] …y con un domingo por medio tampoco (vence el lunes entre %02d:00 y %02d:00)'
+           % (_p, _i2, _f2), (_d2 <= 4.0, 4 <= _i2 and _f2 <= 15), (True, True))
+
+# La otra direccion: un cron que se dejara la tarde SI tendria que salir mal.
+eq('(G) 🔴 …y un cron que se dejara la tarde daria una demora enorme',
+   demora_maxima(*ventana_de_vencimiento(HORARIOS['HEO']), horas_cron=[6, 8]) > 4.0, True)
+
 
 # ---------------------------------------------------------------------------
 # (C) De punta a punta, ocho veces, cada una en su proceso
