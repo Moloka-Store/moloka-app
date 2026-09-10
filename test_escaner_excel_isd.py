@@ -398,7 +398,13 @@ sys.modules['supabase'].create_client = lambda url, key: _Cliente()
 os.environ['KEEPA_API_KEY'] = 'FAKE'
 os.environ['SUPABASE_URL'] = 'https://doble.local'
 os.environ['SUPABASE_KEY'] = 'FAKE'
-for _v in ('SUPABASE_SERVICE_KEY', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID', 'AUTORELANZAR_MIN'):
+# 🔴 LA LLAVE DE SERVICIO, PUESTA. Hasta el 10-sep este banco la QUITABA, y
+#    podia: el escaner tiraba de la anonima como respaldo. Cerrado el respaldo
+#    mudo, quitarla aborta en el ARRANQUE, y estos casos moririan por un motivo
+#    que no es el que vienen a probar. De la guarda de la llave se ocupa
+#    test_escaner_llave_servicio.py, que es donde se prueba a proposito.
+os.environ['SUPABASE_SERVICE_KEY'] = 'FAKE-SERVICE'
+for _v in ('TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID', 'AUTORELANZAR_MIN'):
     os.environ.pop(_v, None)
 
 import runpy
