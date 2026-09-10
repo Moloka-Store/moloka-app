@@ -222,6 +222,17 @@ jobs:
       - name: 22 ter) test_escaner_llave_servicio.py
         run: python -u test_escaner_llave_servicio.py
 
+      # El banco del CUADRE de escaner_memoria (Celda 10). Un upsert frenado por
+      # una politica NO lanza: contesta 200 con cero filas, y desde el escaner se
+      # ve igual que uno bueno. Corre el escaner de punta a punta TRES veces con
+      # perfil DINOTOYS (un proveedor de verdad: MIS_COMPRAS es efimero y no toca
+      # la memoria) sobre una tabla de mentira que guarda, cuenta y honra los
+      # filtros: cuando la escritura se frena, o cuando el conteo no se puede
+      # hacer, el run tiene que salir en ROJO. Sin red, sin secretos, sin tocar
+      # produccion.
+      - name: 22 quater) test_escaner_cuadre_memoria.py
+        run: python -u test_escaner_cuadre_memoria.py
+
       - name: 23) test_disparar.mjs
         run: node test_disparar.mjs
 
@@ -278,6 +289,7 @@ jobs:
             test_escaner_catalogo_propio.py
             test_escaner_pelicula_factura.py
             test_escaner_llave_servicio.py
+            test_escaner_cuadre_memoria.py
             test_claude_md_candado.py
             test_paginacion_buzon.py
           )

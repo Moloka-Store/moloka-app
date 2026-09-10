@@ -127,6 +127,7 @@ LOTES_PERDIDOS = []          # [{'fase','etiqueta','lote','n_codigos'}]
 EANS_NO_PREGUNTADOS = set()  # ean_in cuyo lote de Fase 1 se perdio
 PAISES_PERDIDOS = []         # [(asin, dominio)] de Fase 2
 MEMORIA_LOTES_FALLIDOS = []  # lotes de escaner_memoria que NO se pudieron grabar (ni tras reintento)
+MEMORIA_CUADRE = None        # descuadre entre lo que dijo el cliente y lo que hay en la BD (None = cuadra o no aplica)
 
 # ============================================================
 # LAS GUARDAS, COMO FUNCIONES Y NO COMO NOTAS
@@ -2642,6 +2643,46 @@ else:
                   f"({sum(x['fichas'] for x in MEMORIA_LOTES_FALLIDOS)} fichas) [{PROVEEDOR}/{MARCA}].")
             for _x in MEMORIA_LOTES_FALLIDOS:
                 print(f"    - lote {_x['lote']} ({_x['fichas']} fichas): {_x['error']}")
+        # 🔴 Y AHORA SE CUENTA LO QUE HA ENTRADO DE VERDAD.
+        # El upsert de arriba no prueba NADA por si solo: un upsert frenado por
+        # una politica no lanza, devuelve 200 con cero filas, y desde aqui se ve
+        # exactamente igual que uno bueno. `n_ok` es lo que el CLIENTE dice; la
+        # unica cifra que no opina es la que devuelve la tabla.
+        # De esta tabla salen "Que reponer" y el trackeador: si miente, la
+        # decision de compra se toma sobre un catalogo inventado.
+        # COMO SE CUENTA: todas las filas de esta pasada llevan la MISMA `fecha`
+        # (`ahora`, una sola vez arriba), asi que esa fecha es la huella de la
+        # pasada. Se cuenta por (proveedor, fecha) -- que ademas no se pisa con
+        # otro director corriendo a la vez.
+        # 🔒 En hora 'Z' y no '+00:00': el filtro viaja en la URL, y un '+' sin
+        #    codificar se lee como un espacio. Hoy httpx lo manda como %2B (medido con
+        #    supabase 2.31.0), asi que el '+00:00' tambien pasaria; la 'Z' es el MISMO
+        #    instante y no depende de eso. Lo que se GRABA no cambia: sigue siendo `ahora`.
+        # Las tres cifras SIEMPRE al log, cuadren o no -- misma disciplina que el
+        # blindaje anti-vaciado: un cuadre que solo habla cuando falla no se
+        # puede auditar, porque el dia que calla no se distingue "esta bien" de
+        # "no llego a mirar".
+        _n_base, _err_cuadre = None, None
+        try:
+            _r_cuadre = (sb.table('escaner_memoria')
+                           .select('id', count='exact')
+                           .eq('proveedor', PROVEEDOR)
+                           .eq('fecha', ahora.replace('+00:00', 'Z'))
+                           .limit(1).execute())
+            _n_base = _r_cuadre.count
+        except Exception as _ex_cuadre:
+            _err_cuadre = _ex_cuadre
+        print(f"CUADRE memoria [{PROVEEDOR}/{MARCA}]: queriamos={len(regs)} | el cliente dijo OK={n_ok}"
+              f" | en la tabla con la fecha de esta pasada="
+              f"{_n_base if _n_base is not None else 'n/d'}")
+        if _n_base is None:
+            # No poder contar NO es prueba de que la escritura fuera bien. Rojo,
+            # con su motivo: una escritura sin verificar no es una escritura
+            # verificada, y este es justo el silencio que se viene a cerrar.
+            MEMORIA_CUADRE = {'ok': n_ok, 'base': None, 'motivo': str(_err_cuadre)
+                              or 'la tabla no devolvio el conteo'}
+        elif _n_base != n_ok:
+            MEMORIA_CUADRE = {'ok': n_ok, 'base': _n_base, 'motivo': None}
 
 # ============================================================
 # LIMPIAR EL BUZON DEL ESCANER (recado + catalogo) - VERIFICADO
@@ -2799,6 +2840,28 @@ if MEMORIA_LOTES_FALLIDOS:
     print("  El Excel SI esta subido y el buzon SI se limpio: lo que falta es la MEMORIA.")
     print("  Esas fichas conservan su estado ANTERIOR (pa y fecha viejos). No es un vaciado:")
     print("  siguen contando como presentes, y el proximo escaneo las vuelve a grabar.")
+    print("=" * 64)
+    _SALIDA_ROJA = True
+# 🔒 Y LA ESCRITURA QUE DIJO QUE SI PERO NO ESTA. El bloque de arriba solo ve
+# los lotes que LANZARON. Un upsert frenado por una politica no lanza: contesta
+# 200 con cero filas y el escaneo lo cuenta como bueno. Se distingue contando en
+# la tabla (Celda 10) y se cobra aqui, con el Excel ya subido y el buzon limpio,
+# igual que la memoria a medias.
+if MEMORIA_CUADRE:
+    print("")
+    print("=" * 64)
+    if MEMORIA_CUADRE['base'] is None:
+        print(f"MEMORIA_SIN_VERIFICAR: el upsert dijo OK ({MEMORIA_CUADRE['ok']} fichas) pero NO se "
+              f"ha podido contar lo que hay en escaner_memoria [{PROVEEDOR}/{MARCA}].")
+        print(f"  Motivo: {MEMORIA_CUADRE['motivo']}")
+        print("  Una escritura sin verificar no es una escritura verificada: de esta tabla salen")
+        print("  'Que reponer' y el trackeador, y un catalogo inventado se compra igual de caro.")
+    else:
+        print(f"MEMORIA_DESCUADRADA: el upsert dijo OK ({MEMORIA_CUADRE['ok']} fichas) y en la tabla "
+              f"hay {MEMORIA_CUADRE['base']} con la fecha de esta pasada [{PROVEEDOR}/{MARCA}].")
+        print("  Una escritura frenada por una politica NO lanza: contesta 200 con cero filas. Si")
+        print("  la cifra de la tabla es 0, mira los permisos de escaner_memoria y la llave con la")
+        print("  que corre el escaner ANTES de fiarte de la pantalla de reponer.")
     print("=" * 64)
     _SALIDA_ROJA = True
 if _SALIDA_ROJA:

@@ -151,8 +151,9 @@ def hijo(caso, destino):
             return []
 
     class _Resp:
-        def __init__(self, data):
+        def __init__(self, data, count=None):
             self.data = data
+            self.count = count
 
     class _Query:
         """Doble tonto a proposito, calcado de test_escaner_catalogo_propio.py: acepta
@@ -161,6 +162,7 @@ def hijo(caso, destino):
         contesta a `productos`/`escaner_resultados` lo que necesitan para no abortar."""
         def __init__(self, tabla):
             self.tabla = tabla
+            self.conteo = None
 
         def insert(self, filas):
             filas = filas if isinstance(filas, list) else [filas]
@@ -168,14 +170,33 @@ def hijo(caso, destino):
             FILAS[self.tabla] = FILAS.get(self.tabla, 0) + len(filas)
             return self
 
+        def upsert(self, filas, **k):
+            filas = filas if isinstance(filas, list) else [filas]
+            ESCRITURAS.append('%s.upsert' % self.tabla)
+            FILAS[self.tabla] = FILAS.get(self.tabla, 0) + len(filas)
+            return self
+
+        def select(self, *a, **k):
+            self.conteo = k.get('count')
+            return self
+
         def __getattr__(self, nombre):
-            if nombre in ('upsert', 'update', 'delete'):
+            if nombre in ('update', 'delete'):
                 ESCRITURAS.append('%s.%s' % (self.tabla, nombre))
             return lambda *a, **k: self
 
         def execute(self):
             if self.tabla == 'productos':
                 return _Resp(PRODUCTOS)
+            # 🔒 El cuadre de la Celda 10 (10-sep-2026) cuenta lo que ha entrado en
+            #    escaner_memoria y sale en ROJO si no cuadra con lo que dijo el
+            #    cliente. El caso [proveedor] de este banco SI escribe memoria, asi
+            #    que el doble tiene que saber contestar al conteo o el run acabaria
+            #    rojo por un motivo que no es el suyo. Devuelve lo que se le mando:
+            #    aqui el cuadre no es lo que se mide -- de eso va
+            #    test_escaner_cuadre_memoria.py, que si lleva tabla de verdad.
+            if self.tabla == 'escaner_memoria' and self.conteo:
+                return _Resp([], count=FILAS.get('escaner_memoria', 0))
             return _Resp([{'id': 1}] if self.tabla == 'escaner_resultados' else [])
 
     class _Cliente:
