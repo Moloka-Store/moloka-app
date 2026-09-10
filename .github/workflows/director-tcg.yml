@@ -78,6 +78,7 @@ jobs:
         env:
           SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY:      ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           KEEPA_API_KEY:     ${{ secrets.KEEPA_API_KEY }}
           GH_PAT:            ${{ secrets.GH_PAT }}
           AUTORELANZAR_MIN:  '315'

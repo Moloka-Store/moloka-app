@@ -78,7 +78,16 @@ jobs:
         #    `moloka_escaner_nube.py` ENTERO (con dobles de keepa/supabase) para leer
         #    el .xlsx que sale. El escaner importa pandas en la linea 24, asi que el
         #    cierre de imports de los tests ya lo alcanza. Version, la de requirements.
-        run: pip install --quiet psycopg2-binary openpyxl==3.1.5 supabase==2.31.0 pandas==3.0.0
+        #
+        # 🔴 `pyyaml` entro el 10-sep-2026 con `test_escaner_llave_servicio.py`, que
+        #    lee los workflows del repo POR ESTRUCTURA (jobs -> steps -> env) y no
+        #    con un grep sobre el texto. La diferencia no es de estilo: lo que hay
+        #    que comprobar es que la llave este en EL PASO que lanza el escaner, y
+        #    un grep no distingue ese paso del de al lado. No lo trae ninguna otra
+        #    dependencia de esta linea (medido: nadie lo declara como requisito),
+        #    asi que se pone. Y NO esta en requirements.txt -- el escaner no lo usa,
+        #    solo su banco --, asi que la version se fija aqui y punto.
+        run: pip install --quiet psycopg2-binary openpyxl==3.1.5 supabase==2.31.0 pandas==3.0.0 pyyaml==6.0.3
 
       - name: 4) Los modulos importan
         # Va ANTES de los tests para que un fallo de dependencia se lea como lo
@@ -203,6 +212,16 @@ jobs:
       - name: 22 bis) test_escaner_pelicula_factura.py
         run: python -u test_escaner_pelicula_factura.py
 
+      # El banco de la llave con la que el escaner lee `productos`. El 10-sep-2026
+      # los cuatro directores cayeron a la vez porque `productos` dejo de tener
+      # politica para `anon`, y un SELECT sin politica no lanza: devuelve 200 con
+      # CERO FILAS. Exige las dos mitades del arreglo -- el script pidiendo
+      # SUPABASE_SERVICE_KEY, y los cinco pasos que lanzan el escaner pasandosela
+      # -- porque ninguna de las dos sola lo arregla: HEO ya tenia la segunda el
+      # dia del fallo. No toca la red ni Supabase: lee ficheros del repo.
+      - name: 22 ter) test_escaner_llave_servicio.py
+        run: python -u test_escaner_llave_servicio.py
+
       - name: 23) test_disparar.mjs
         run: node test_disparar.mjs
 
@@ -258,6 +277,7 @@ jobs:
             test_escaner_excel_isd.py
             test_escaner_catalogo_propio.py
             test_escaner_pelicula_factura.py
+            test_escaner_llave_servicio.py
             test_claude_md_candado.py
             test_paginacion_buzon.py
           )
