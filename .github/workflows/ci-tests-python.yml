@@ -245,6 +245,17 @@ jobs:
       - name: 22 quinquies) test_centinela_mudo.py
         run: python -u test_centinela_mudo.py
 
+      # El banco del freno del Actualizador TCG (moloka_actualizar_tcg.py). Saca
+      # con `ast` decidir_freno() y ejemplos_despublicar() y las corre con las
+      # cifras reales del 10-sep-2026 (103 de 475 activas, 21,7%, limpieza por
+      # mudanza de proveedor): el freno VIEJO (40 fijo) saltaba con eso, el
+      # NUEVO (35%, el mismo corte del blindaje del escaner) no. Y por
+      # estructura: que el freno frena SOLO el bucle que despublica -- precios
+      # y reactivaciones se aplican SIEMPRE, sin `return` que los corte. Sin
+      # red, sin secretos, sin tocar produccion.
+      - name: 22 sexies) test_actualizador_tcg_freno.py
+        run: python -u test_actualizador_tcg_freno.py
+
       - name: 23) test_disparar.mjs
         run: node test_disparar.mjs
 
@@ -303,6 +314,7 @@ jobs:
             test_escaner_llave_servicio.py
             test_escaner_cuadre_memoria.py
             test_centinela_mudo.py
+            test_actualizador_tcg_freno.py
             test_claude_md_candado.py
             test_paginacion_buzon.py
           )

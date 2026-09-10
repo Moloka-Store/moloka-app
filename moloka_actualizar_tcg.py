@@ -12,8 +12,11 @@
 # BLINDAJE A FUEGO:
 #   - SOLO toca filas con origen='tcg'. JAMAS origen='fabrica' (las joyas de Elena
 #     se filtran en la propia consulta -> imposible tocarlas).
-#   - FRENO: si una pasada fuera a despublicar mas de UMBRAL_FRENO de golpe, NO
-#     aplica nada y avisa (Excel corrupto / a medias).
+#   - FRENO: si una pasada fuera a despublicar mas del UMBRAL_FRENO_PCT de las
+#     fichas ACTIVAS de origen='tcg', NO despublica nada de eso y avisa (Excel
+#     corrupto / a medias). El freno es SOLO de la retirada: precios y
+#     reactivaciones se aplican igual, siempre (medido el 10-sep-2026: pararlos
+#     tambien dejo la web sin refrescar precios un dia entero).
 #   - MODO 'preview': calcula y avisa lo que HARIA, sin tocar la web (para la
 #     primera pasada de prueba). MODO 'aplicar': ejecuta de verdad.
 #
@@ -42,7 +45,16 @@ COSTE_ESTANDAR        = 8.55     # coste normal fijo de un Funko Pop! estandar (
 MARGEN                = 1.75
 SUELO_OFERTA_ESTANDAR = 11.95
 STOCK_MIN             = 2        # < 2 (0 o 1) NO se publica: una unidad es jugarsela
-UMBRAL_FRENO          = 40       # si despublicaria mas de esto de golpe -> ALTO
+# UMBRAL_FRENO_PCT: % de las fichas ACTIVAS de origen='tcg' que se pueden
+# despublicar de golpe antes de frenar la retirada. Un numero fijo (el viejo
+# UMBRAL_FRENO=40) salta con cualquier limpieza normal de catalogo: el
+# 10-sep-2026, con el proveedor de mudanza de almacen, 103 de 475 activas
+# (21,7%) eran limpieza real y un freno fijo las habria bloqueado igual que a
+# un Excel corrupto. No hay serie diaria de despublicaciones con la que medir
+# un corte propio (verificado 10-sep-2026: sin tabla de log para este robot),
+# asi que se usa el mismo corte que el blindaje del escaner
+# (UMBRAL_PARCIAL en moloka_escaner_nube.py): 35%.
+UMBRAL_FRENO_PCT      = 0.35
 ESTADOS_OK            = ('disponible', 'oferta', 'saldo')   # PreOrder/Backorder = fuera
 
 TELEGRAM_TOKEN   = os.environ.get('TELEGRAM_TOKEN')
@@ -99,6 +111,22 @@ def calcular_oferta(es_estandar, precio_web, precio_tcg, estado):
 def _num(x):
     try: return float(str(x).replace(',', '.').strip())
     except (TypeError, ValueError, AttributeError): return None
+
+# --- decide el freno: PORCENTAJE de las activas, no un numero fijo ---
+def decidir_freno(n_despublicar, n_activas, umbral_pct=UMBRAL_FRENO_PCT):
+    """(frenado, pct_baja) - pct_baja es None si no hay activas con que medir."""
+    if not n_activas:
+        return (False, None)
+    pct = n_despublicar / n_activas
+    return (pct > umbral_pct, round(pct * 100, 1))
+
+# --- hasta N ejemplos con nombre, para que el Telegram no obligue a abrir el log ---
+def ejemplos_despublicar(lista, n=8):
+    out = []
+    for f, motivo in lista[:n]:
+        nombre = str(f.get('nombre') or f.get('ean') or '?')[:60]
+        out.append(f"  • {nombre} ({motivo})")
+    return "\n".join(out)
 
 # --- lee el Excel crudo de TCG con TODO lo que necesita el mantenimiento ---
 def cargar_catalogo_tcg():
@@ -194,7 +222,10 @@ def main():
             recios.append((f, pw, pof))
 
     # --- resumen ---
-    print(f"\n>>> Despublicaria: {len(despublicar)} | Reactivaria: {len(reactivar)} | Reprecaria: {len(recios)}")
+    activas_hoy = sum(1 for f in fichas if f.get('activo'))
+    frenado, pct_baja = decidir_freno(len(despublicar), activas_hoy)
+    resumen_baja = f"{len(despublicar)}/{activas_hoy}" + (f" ({pct_baja}%)" if pct_baja is not None else "")
+    print(f"\n>>> Despublicaria: {resumen_baja} | Reactivaria: {len(reactivar)} | Reprecaria: {len(recios)}")
     for f, m in despublicar[:60]:
         print(f"   [OFF] {f.get('ean')} {str(f.get('nombre') or '')[:42]} ({m})")
     for f, pw, pof in recios[:60]:
@@ -202,24 +233,34 @@ def main():
         print(f"   [€]   {f.get('ean')} {str(f.get('nombre') or '')[:36]} -> {pw}{ofe}")
     for f, pw, pof in reactivar[:60]:
         print(f"   [ON]  {f.get('ean')} {str(f.get('nombre') or '')[:42]} -> {pw}")
-
-    # --- FRENO de seguridad ---
-    if len(despublicar) > UMBRAL_FRENO:
-        avisar(f"🛑 Actualizador TCG PARADO: iba a despublicar {len(despublicar)} fichas "
-               f"(mas del limite {UMBRAL_FRENO}). NO he tocado nada. Revisa el Excel de TCG "
-               f"(¿incompleto o mal descargado?) y vuelve a subirlo.")
-        return
+    if frenado:
+        print(f"\n🛑 FRENO: {resumen_baja} supera el limite del {UMBRAL_FRENO_PCT*100:.0f}% de las activas.")
 
     if modo == 'preview':
-        avisar(f"👁️ <b>Actualizador TCG (PRUEBA, sin tocar nada)</b>\n"
-               f"Despublicaria: {len(despublicar)}\nReactivaria: {len(reactivar)}\n"
-               f"Ajustaria precio: {len(recios)}\n\nSi te cuadra, lo paso a automatico.")
+        cuerpo = (f"👁️ <b>Actualizador TCG (PRUEBA, sin tocar nada)</b>\n"
+                  f"Despublicaria: {resumen_baja}\nReactivaria: {len(reactivar)}\n"
+                  f"Ajustaria precio: {len(recios)}\n")
+        if frenado:
+            cuerpo += (f"\n🛑 Supera el limite del freno ({UMBRAL_FRENO_PCT*100:.0f}% de las activas): "
+                       f"en modo APLICAR no se despublicaria nada de esto; precios y reactivaciones si.\n")
+        if despublicar:
+            cuerpo += f"\nEjemplos a despublicar:\n{ejemplos_despublicar(despublicar)}\n"
+        cuerpo += "\nSi te cuadra, lo paso a automatico."
+        avisar(cuerpo)
         print("\nMODO PREVIEW: no se ha tocado la web.")
         return
 
     # --- APLICAR (solo origen='tcg', fila a fila por id) ---
+    # El freno para SOLO la retirada: precios y reactivaciones se aplican igual.
+    if frenado:
+        avisar(f"🛑 <b>Actualizador TCG: freno por porcentaje</b>\n"
+               f"Despublicaria {resumen_baja} de las activas (limite {UMBRAL_FRENO_PCT*100:.0f}%). "
+               f"NO se despublica nada de esto; precios y reactivaciones se aplican igual. "
+               f"Revisa el Excel de TCG (¿incompleto o mal descargado?) o confirma que es limpieza real.\n\n"
+               f"Ejemplos:\n{ejemplos_despublicar(despublicar)}")
+
     n_off = n_on = n_eur = 0
-    for f, _m in despublicar:
+    for f, _m in ([] if frenado else despublicar):
         try: sb.table('web_productos').update({'activo': False}).eq('id', f['id']).eq('origen', 'tcg').execute(); n_off += 1
         except Exception as ex: print("ERR off", f.get('ean'), ex)
     for f, pw, pof in reactivar:
@@ -251,9 +292,10 @@ def main():
 
     avisar(f"✅ <b>Actualizador TCG</b>\n"
            f"Despublicados: {n_off}\nReactivados: {n_on}\nPrecios ajustados: {n_eur}"
+           + (f"\n🛑 Freno: {len(despublicar)} fichas NO despublicadas (ver aviso anterior)." if frenado else "")
            + ("\n🔄 Reconstruyendo la web…" if web_reconstruida else
               ("\n⚠️ Cambios guardados, pero reconstruye la web a mano (faltó el deploy hook)." if (n_off+n_on+n_eur) > 0 else "")))
-    print(f"\nAPLICADO: off={n_off} on={n_on} eur={n_eur} | web_rebuild={web_reconstruida}")
+    print(f"\nAPLICADO: off={n_off} on={n_on} eur={n_eur} | frenado={frenado} | web_rebuild={web_reconstruida}")
 
 if __name__ == '__main__':
     main()
