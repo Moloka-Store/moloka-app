@@ -36,6 +36,10 @@ jobs:
         env:
           SUPABASE_URL:          ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY:          ${{ secrets.SUPABASE_KEY }}
+          # 🔴 La otra mitad del arreglo. Sin esta linea el script lee `productos` como
+          # `anon`, que desde el 10-sep-2026 recibe CERO FILAS sin error: el cruce se
+          # haria contra un catalogo vacio y el run saldria VERDE (#291).
+          SUPABASE_SERVICE_KEY:  ${{ secrets.SUPABASE_SERVICE_KEY }}
           KEEPA_API_KEY:         ${{ secrets.KEEPA_API_KEY }}
           MIRAVIA_APP_KEY:       ${{ secrets.MIRAVIA_APP_KEY }}
           MIRAVIA_APP_SECRET:    ${{ secrets.MIRAVIA_APP_SECRET }}

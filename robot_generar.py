@@ -26,9 +26,20 @@ SUPABASE_URL = os.environ['SUPABASE_URL']
 BUCKET  = "fotos-fabrica"
 HEADERS = {"User-Agent": "Mozilla/5.0"}   # Keepa/Amazon sirve imágenes con UA de navegador
 
-sb      = create_client(SUPABASE_URL, os.environ['SUPABASE_KEY'])          # leer/escribir (anon)
+# 🔴 LA LLAVE DE SERVICIO PRIMERO, Y LA ANONIMA SOLO DE RESPALDO (10-sep-2026).
+# Este programa NO es un navegador: corre desatendido con los secretos del repo, y
+# cruza contra `productos`. Ese dia se retiraron de `public.productos` las dos
+# politicas permisivas de `anon`; con la RLS puesta y ninguna politica que le toque,
+# un SELECT de `anon` NO lanza: devuelve 200 con CERO FILAS. `service_role` es
+# BYPASSRLS -- medido en `pg_roles` el 10-sep --, asi que la lectura vuelve sin
+# reabrirle a `anon` la puerta que se le acaba de quitar. Mismo idioma que el #291.
+# Aqui la otra mitad YA estaba: `fabrica-generar.yml` pasa SUPABASE_SERVICE_KEY desde
+# siempre (la usa `admin` para el Storage). Lo que faltaba era que la pidiera `sb`.
+sb      = create_client(SUPABASE_URL,
+                        os.environ.get('SUPABASE_SERVICE_KEY') or os.environ['SUPABASE_KEY'])
 admin   = create_client(SUPABASE_URL, os.environ['SUPABASE_SERVICE_KEY'])  # subir al Storage
-print("Anthropic + Supabase (anon + service) conectados OK")
+print("Anthropic + Supabase conectados OK "
+      "(sb=%s · admin=SERVICIO)" % ('SERVICIO' if os.environ.get('SUPABASE_SERVICE_KEY') else 'ANONIMA'))
 
 # ====================================================================
 # BLOQUE REDACCIÓN  -> centralizado en fabrica_cerebro.py

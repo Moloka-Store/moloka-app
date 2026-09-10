@@ -14,7 +14,9 @@
 #   <csv por pais>       -> uno o VARIOS CSV del Visualizador por pais (Keepa exporta de
 #                           5.000 en 5.000); el robot los FUNDE -> UN solo Excel por escaneo.
 #
-# Secrets (GitHub -> env): SUPABASE_URL, SUPABASE_KEY (o SUPABASE_SERVICE_KEY).
+# Secrets (GitHub -> env): SUPABASE_URL, SUPABASE_SERVICE_KEY (y SUPABASE_KEY de respaldo).
+# 🔴 La de SERVICIO hace falta de verdad: sin ella se lee `productos` como `anon`, que
+#    desde el 10-sep-2026 no tiene politica y recibe CERO FILAS sin error.
 
 import os, sys, json, tempfile
 from datetime import datetime, timezone
@@ -25,7 +27,17 @@ from supabase import create_client
 from moloka_escaner_pro import (leer_proveedor, escanear_pro, escribir_excel, norm, PERFILES)
 
 SUPABASE_URL = os.environ['SUPABASE_URL']
-SUPABASE_KEY = os.environ.get('SUPABASE_SERVICE_KEY') or os.environ['SUPABASE_KEY']
+# 🔴 LA LLAVE DE SERVICIO PRIMERO, Y LA ANONIMA SOLO DE RESPALDO. El script ya lo hacia
+# el 10-sep-2026; lo que faltaba era la OTRA MITAD -- `escaner-pro.yml` no le pasaba
+# `SUPABASE_SERVICE_KEY`, asi que el `or` caia siempre del lado anonimo. Ninguna de las
+# dos mitades sola arregla esto: HEO tenia la llave en el workflow y el script solo leia
+# la anonima, y cayo igual (#291).
+_LLAVE_SVC = os.environ.get('SUPABASE_SERVICE_KEY')
+SUPABASE_KEY = _LLAVE_SVC or os.environ['SUPABASE_KEY']
+# De que llave nacio el cliente. Va al log en cada pasada y al motivo del aborto: sin
+# esto, "cero fichas propias" no se puede distinguir de "no he podido leerlas" leyendo
+# el log de un run pasado, que es justo lo que falto el 10-sep.
+_ORIGEN_LLAVE = 'SERVICIO' if _LLAVE_SVC else 'ANONIMA (la RLS decide)'
 BUCKET = 'informes'
 BUZON = 'escaner_pro'
 CARPETA_RESULTADOS = 'resultados'
@@ -46,19 +58,61 @@ def leer_recado():
     data = sb.storage.from_(BUCKET).download(f'{BUZON}/_solicitud_pro.json')
     return json.loads(data.decode('utf-8'))
 
+def abortar(motivo):
+    """Un run que NO escanea no es verde: sale en ROJO y con una linea grepable.
+    La linea es la MISMA que la de `moloka_escaner_nube.py` a proposito: quien
+    busque `ESCANEO_NO_EJECUTADO` en los logs tiene que encontrar los dos
+    escaneres, no solo el de tokens."""
+    print(f"ESCANEO_NO_EJECUTADO: {motivo}")
+    sys.exit(1)
+
+
 def leer_productos_propios():
-    sup = {}
+    """Las fichas de la casa, para la columna «En mi BD» del Excel.
+
+    🔴 CERO FILAS NO ES «NO TENGO FICHAS»: ES «NO HE PODIDO LEERLAS». El try/except
+    de antes solo saltaba con EXCEPCION, y el fallo que de verdad ocurre no lanza.
+    El 10-sep-2026, entre las 06:02 y las 06:30 UTC, se retiraron de
+    `public.productos` las dos politicas permisivas por las que entraba `anon`
+    («Acceso publico productos» y «anon_full_access»). `anon` conserva sus GRANT
+    -- medido el 10-sep: SELECT, INSERT, UPDATE y DELETE siguen concedidos --, asi
+    que con la RLS puesta y ninguna politica que le toque, el SELECT no da error:
+    devuelve 200 CON CERO FILAS.
+
+    Aqui eso salia por la puerta de siempre: `sup` vacio, ni un aviso, el boton
+    VERDE y un Excel con la columna «En mi BD» en blanco de arriba abajo -- o sea,
+    todas las filas del proveedor pareciendo articulos que no tenemos. Los cuatro
+    directores se comieron el mismo dato y murieron en rojo porque el escaner de
+    tokens SI tiene esta guarda (#291). Este no la tenia.
+
+    🔬 `productos` no puede dar 0 legitimamente: 518 fichas, 493 activas (medido en
+    produccion el 10-sep-2026, 14:02 hora espanola). Un 0 aqui es siempre un
+    filtro, un permiso o una tabla que no responde, nunca un catalogo vacio.
+    """
+    filas = []
     try:
         d = 0
         while True:
             res = sb.table('productos').select('ean,stock_moloka,stock_fba').eq('activo', True).range(d, d+999).execute()
             if not res.data: break
-            for p in res.data:
-                if p.get('ean'): sup[norm(p['ean'])] = p
+            filas.extend(res.data)
             if len(res.data) < 1000: break
             d += 1000
     except Exception as ex:
-        print('AVISO: no se pudieron leer productos propios:', ex)
+        print(f"CATALOGO_PROPIO: filas=ERROR | con_ean=ERROR | llave={_ORIGEN_LLAVE}")
+        abortar(f'catalogo propio ilegible: la lectura de productos lanzo '
+                f'{type(ex).__name__}: {ex}')
+    sup = {}
+    for p in filas:
+        if p.get('ean'): sup[norm(p['ean'])] = p
+    # 🔴 LAS CIFRAS AL LOG, SALGA O NO EL ABORTO. Sin ellas, "se leyo el catalogo
+    # propio" no es comprobable en el log de un run pasado: el AVISO viejo solo
+    # aparecia cuando fallaba, y el caso de 0 filas no imprimia nada de nada.
+    print(f"CATALOGO_PROPIO: filas={len(filas)} | con_ean={len(sup)} | llave={_ORIGEN_LLAVE}")
+    if not filas:
+        abortar('catalogo propio ilegible: productos devolvio 0 filas con activo=true '
+                f'y la llave era {_ORIGEN_LLAVE}. No es un catalogo vacio (10-sep-2026: '
+                '518 fichas, 493 activas): huele a filtro, permiso o tabla que no responde')
     return sup
 
 def leer_memoria(prov):

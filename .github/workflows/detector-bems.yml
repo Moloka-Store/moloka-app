@@ -59,6 +59,9 @@ jobs:
         env:
           SUPABASE_URL:     ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY:     ${{ secrets.SUPABASE_KEY }}
+          # 🔴 La otra mitad del arreglo (10-sep-2026): sin ella el detector cruza
+          # contra un `productos` vacio y escribe la memoria como si nada (#291).
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           KEEPA_API_KEY:    ${{ secrets.KEEPA_API_KEY }}
           BEMS_LOGIN:       ${{ secrets.BEMS_LOGIN }}
           BEMS_PASSWORD:    ${{ secrets.BEMS_PASSWORD }}

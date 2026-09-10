@@ -21,7 +21,7 @@
 # cambiarlas sin tocar codigo. Si no existe la clave, cae a una lista por defecto.
 #
 # Variables de entorno (GitHub Secrets):
-#   KEEPA_API_KEY, SUPABASE_URL, SUPABASE_KEY,
+#   KEEPA_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY (y SUPABASE_KEY de respaldo),
 #   BEMS_LOGIN, BEMS_PASSWORD, BEMS_SECRET_KEY,
 #   TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 # ============================================================
@@ -67,7 +67,15 @@ KEEPA_ESPERAS = [5, 15, 40, 90]
 print(">>> ARRANCANDO detector BEMS. Cliente Keepa...", flush=True)
 api = keepa.Keepa(os.environ['KEEPA_API_KEY'])
 print(">>> Keepa OK. Conectando Supabase...", flush=True)
-sb  = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
+# 🔴 LA LLAVE DE SERVICIO PRIMERO, Y LA ANONIMA SOLO DE RESPALDO (10-sep-2026).
+# Este programa NO es un navegador: corre desatendido con los secretos del repo, y
+# cruza contra `productos`. Ese dia se retiraron de `public.productos` las dos
+# politicas permisivas de `anon`; con la RLS puesta y ninguna politica que le toque,
+# un SELECT de `anon` NO lanza: devuelve 200 con CERO FILAS. `service_role` es
+# BYPASSRLS -- medido en `pg_roles` el 10-sep --, asi que la lectura vuelve sin
+# reabrirle a `anon` la puerta que se le acaba de quitar. Mismo idioma que el #291.
+sb  = create_client(os.environ['SUPABASE_URL'],
+                    os.environ.get('SUPABASE_SERVICE_KEY') or os.environ['SUPABASE_KEY'])
 api.update_status()
 print(f">>> Tokens Keepa AHORA: {api.tokens_left}", flush=True)
 
