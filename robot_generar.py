@@ -26,20 +26,26 @@ SUPABASE_URL = os.environ['SUPABASE_URL']
 BUCKET  = "fotos-fabrica"
 HEADERS = {"User-Agent": "Mozilla/5.0"}   # Keepa/Amazon sirve imágenes con UA de navegador
 
-# 🔴 LA LLAVE DE SERVICIO PRIMERO, Y LA ANONIMA SOLO DE RESPALDO (10-sep-2026).
-# Este programa NO es un navegador: corre desatendido con los secretos del repo, y
-# cruza contra `productos`. Ese dia se retiraron de `public.productos` las dos
-# politicas permisivas de `anon`; con la RLS puesta y ninguna politica que le toque,
-# un SELECT de `anon` NO lanza: devuelve 200 con CERO FILAS. `service_role` es
-# BYPASSRLS -- medido en `pg_roles` el 10-sep --, asi que la lectura vuelve sin
-# reabrirle a `anon` la puerta que se le acaba de quitar. Mismo idioma que el #291.
+# 🔴 LA LLAVE DE SERVICIO, O NO SE CORRE (10-sep-2026, la regla del #292).
+# Corre desatendido en Actions, donde el secreto SIEMPRE esta: un lanzamiento sin la
+# llave no es un caso a sobrevivir, es un fallo de configuracion, y vale mas que muera
+# en el arranque que que salga VERDE sobre un catalogo vacio.
+# El peligro esta en la LECTURA, que calla: con la RLS puesta y ninguna politica que le
+# toque, `anon` recibe 0 filas SIN ERROR (medido en staging el 10-sep-2026; de las
+# cuatro operaciones solo el INSERT lanza). El porque entero, con la medicion y con lo
+# que implica para los `upsert`, en `test_escaner_llave_servicio.py`.
 # Aqui la otra mitad YA estaba: `fabrica-generar.yml` pasa SUPABASE_SERVICE_KEY desde
-# siempre (la usa `admin` para el Storage). Lo que faltaba era que la pidiera `sb`.
-sb      = create_client(SUPABASE_URL,
-                        os.environ.get('SUPABASE_SERVICE_KEY') or os.environ['SUPABASE_KEY'])
-admin   = create_client(SUPABASE_URL, os.environ['SUPABASE_SERVICE_KEY'])  # subir al Storage
-print("Anthropic + Supabase conectados OK "
-      "(sb=%s · admin=SERVICIO)" % ('SERVICIO' if os.environ.get('SUPABASE_SERVICE_KEY') else 'ANONIMA'))
+# siempre, porque la usa `admin` para el Storage. Lo que faltaba era que la pidiera `sb`.
+# 🔒 Los dos clientes nacen ya de LA MISMA llave. Se quedan con sus dos nombres porque
+#    asi los llama el resto del fichero; unificarlos es un renombrado, y eso es otro
+#    trabajo.
+_LLAVE_SVC = os.environ.get('SUPABASE_SERVICE_KEY')
+if not _LLAVE_SVC:
+    print('GENERAR_NO_EJECUTADO: sin llave de servicio')
+    sys.exit(1)
+sb      = create_client(SUPABASE_URL, _LLAVE_SVC)   # fichas de fabrica y web_productos
+admin   = create_client(SUPABASE_URL, _LLAVE_SVC)   # subir al Storage
+print("Anthropic + Supabase conectados OK (los dos clientes, con la llave de SERVICIO)")
 
 # ====================================================================
 # BLOQUE REDACCIÓN  -> centralizado en fabrica_cerebro.py

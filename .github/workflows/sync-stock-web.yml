@@ -24,5 +24,10 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          # 🔴 La otra mitad. Sin esta linea el script lee `productos` como `anon`,
+          # que desde el 10-sep-2026 recibe CERO FILAS sin error: el inventario llega
+          # vacio, todas las fichas calculan stock 0, y del destrozo solo salva el
+          # freno del 40% -- avisando por la razon equivocada y en VERDE.
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
         run: python moloka_sync_stock_web.py

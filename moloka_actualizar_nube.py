@@ -13,14 +13,18 @@ from collections import defaultdict
 from supabase import create_client
 
 SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://ogfbjjdxcltzpygzuyla.supabase.co')
-# 🔴 LA LLAVE DE SERVICIO PRIMERO, Y LA ANONIMA SOLO DE RESPALDO (10-sep-2026).
-# Este programa NO es un navegador: corre desatendido con los secretos del repo, y
-# cruza contra `productos`. Ese dia se retiraron de `public.productos` las dos
-# politicas permisivas de `anon`; con la RLS puesta y ninguna politica que le toque,
-# un SELECT de `anon` NO lanza: devuelve 200 con CERO FILAS. `service_role` es
-# BYPASSRLS -- medido en `pg_roles` el 10-sep --, asi que la lectura vuelve sin
-# reabrirle a `anon` la puerta que se le acaba de quitar. Mismo idioma que el #291.
-SUPABASE_KEY = os.environ.get('SUPABASE_SERVICE_KEY') or os.environ['SUPABASE_KEY']
+# 🔴 LA LLAVE DE SERVICIO, O NO SE CORRE (10-sep-2026, la regla del #292).
+# Corre desatendido en Actions, donde el secreto SIEMPRE esta: un lanzamiento sin la
+# llave no es un caso a sobrevivir, es un fallo de configuracion, y vale mas que muera
+# en el arranque que que salga VERDE sobre un catalogo vacio.
+# El peligro esta en la LECTURA, que calla: con la RLS puesta y ninguna politica que le
+# toque, `anon` recibe 0 filas SIN ERROR (medido en staging el 10-sep-2026; de las
+# cuatro operaciones solo el INSERT lanza). El porque entero, con la medicion y con lo
+# que implica para los `upsert`, en `test_escaner_llave_servicio.py`.
+SUPABASE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
+if not SUPABASE_KEY:
+    print('ACTUALIZAR_NO_EJECUTADO: sin llave de servicio')
+    import sys; sys.exit(1)
 
 BASE = os.path.abspath('./moloka_run')
 INPUTS = f'{BASE}/inputs'

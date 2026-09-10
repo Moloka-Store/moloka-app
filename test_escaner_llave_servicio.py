@@ -32,29 +32,58 @@ y esa lista vive abajo en `PROGRAMAS`, con la forma de llave que se le exige a
 cada uno. Anadir un programa desatendido que lea `productos` y no tocar esa
 lista es la unica forma que le queda a este fallo de repetirse.
 
-EL SEGUNDO FALLO, EL QUE CIERRA ESTE PR (10-sep-2026, mismo dia). El #291 dejo
-el cliente naciendo de `SUPABASE_SERVICE_KEY or SUPABASE_KEY`. Ese respaldo era
-prudencia mientras `anon` aun podia escribir. Deja de serlo en cuanto se aplique
-la tanda 3 del cierre del invitado, que cierra a `anon` las TRES puertas por las
-que el escaner ESCRIBE en `escaner_memoria` (`em_insert`, `em_select`,
-`em_update`; medidas por Cowork en produccion): desde ese dia, un lanzamiento SIN
-la llave de servicio no revienta -- el upsert devuelve 200 con cero filas -- y el
-run sale VERDE sobre una tabla que no se ha tocado. Basta con que el secreto
-falte, caduque, o que alguien quite esa linea del workflow. Ahora el escaner
-ABORTA en el arranque, sin gastar un token:
+EL SEGUNDO FALLO, EL QUE CERRO EL #292 (10-sep-2026, mismo dia). El #291 dejo el
+cliente naciendo de `SUPABASE_SERVICE_KEY or SUPABASE_KEY`. Ese respaldo era
+prudencia mientras `anon` aun podia entrar. Deja de serlo en cuanto se aplique la
+tanda 3 del cierre del invitado, que cierra a `anon` las TRES puertas por las que
+el escaner toca `escaner_memoria` (`em_insert`, `em_select`, `em_update`; medidas
+en produccion). Basta con que el secreto falte, caduque, o que alguien quite esa
+linea del workflow. Ahora el escaner ABORTA en el arranque, sin gastar un token:
 
     ESCANEO_NO_EJECUTADO: sin llave de servicio
+
+🔴 Y AQUI VA CORREGIDO EL PORQUE, QUE SE VENIA CONTANDO MAL. Se decia -- en el
+#292, en el encabezado de la tanda 3 y en varios apuntes -- que "un INSERT frenado
+por la RLS devuelve 200 con cero filas". ES FALSO, y esta medido: el 10-sep-2026
+en STAGING, sobre una tabla nueva con RLS activa, los cuatro GRANT a `anon` y
+NINGUNA politica -- el escenario exacto que deja la tanda 3 --, ejecutando como
+`anon`:
+
+    SELECT  -> 0 filas, sin error   MUDO
+    INSERT  -> ERROR 42501: new row violates row-level security policy   LANZA
+    UPDATE  -> 0 filas, sin error   MUDO
+    DELETE  -> 0 filas, sin error   MUDO
+
+Nada de lo hecho se cae, pero el argumento correcto es otro y es el que hay que
+repetir: EL PELIGRO DE CERRAR UNA TABLA ESTA EN LA LECTURA, que calla. Por ahi
+entro el fallo del 10-sep y por ahi murieron los cuatro directores: por un SELECT
+que devolvio cero sin quejarse. Y contar despues de escribir sigue haciendo falta
+por la misma razon, no por la contraria: en un `upsert`, la mitad que puede fallar
+en silencio no es la que escribe -- esa lanza --, sino la que MIRA si la fila ya
+existe.
+
+ESTE ES EL SITIO DONDE VIVE ESE PORQUE. Los seis programas de `PROGRAMAS` llevan
+junto a su llave la version corta y un puntero a este fichero: repetir la
+medicion entera seis veces no es explicarla, es copiarla, y el dia que cambie
+habria que acordarse de seis sitios.
 
 QUE SE PRUEBA, Y COMO:
   (A) POR ESTRUCTURA, con `ast` sobre el fichero real (no con un grep sobre el
       texto: el comentario que hay junto a la linea nombra las dos variables, y
       un grep contaria la explicacion como si fuera codigo): que el cliente de
-      cada programa de `PROGRAMAS` nace de la llave que le toca. Al escaner se le
-      exige `SUPABASE_SERVICE_KEY` Y NADA MAS; a los otros cinco, de momento, la
-      de servicio con respaldo a la anonima. 🔴 Esa diferencia esta declarada a
-      proposito y es la pregunta abierta: el argumento del #292 vale igual para
-      los cinco -- todos ESCRIBEN en tablas que la tanda 3 cierra --, pero
-      apretarlos es una decision de Fernando, no un efecto colateral.
+      cada programa de `PROGRAMAS` nace de la llave que le toca. A los SEIS que
+      corren desatendidos en Actions se les exige `SUPABASE_SERVICE_KEY` Y NADA
+      MAS: ahi el secreto siempre esta, asi que un lanzamiento sin llave no es un
+      caso a sobrevivir sino un fallo de configuracion, y vale mas que muera en el
+      arranque. 🔒 La unica excepcion, decidida el 10-sep, es
+      `moloka_tracker_snapshot.py`: ese se lanza a mano desde el portatil, donde
+      NO hay secretos del repo, y el respaldo a la anonima es lo que lo mantiene
+      usable. Por eso su fila dice `servicio-con-respaldo` y no es un descuido.
+  (G) Y QUE LA GUARDA ESTE, Y ESTE ANTES. Exigir la llave sin abortar cuando falta
+      no aprieta nada: `create_client(url, None)` revienta por dentro con un
+      mensaje que no dice de que va. Se comprueba por estructura que cada programa
+      de `solo-servicio` tiene un `if not <llave>:` que SALE, y que esta por
+      encima de la linea que crea el cliente.
   (B) POR ESTRUCTURA, con `yaml`: que TODO paso de TODO workflow cuyo `run`
       lance uno de esos programas lleve `SUPABASE_SERVICE_KEY` en SU PROPIO `env`.
       Por el paso, no por el fichero: en los directores la llave ya viajaba en el
@@ -115,13 +144,23 @@ RUTA = 'moloka_escaner_nube.py'
 #    desde el portatil y no lo lanza ningun workflow (medido el 10-sep-2026
 #    sobre los 57 ficheros de .github/workflows). Su mitad (A) se le exige
 #    igual; la (B) no existe. El dia que alguien le ponga un workflow, este
-#    cero se pone rojo y obliga a mirar si le pasa la llave.
+#    cero se pone rojo y obliga a mirar si le pasa la llave -- y entonces habra
+#    que apretarlo a `solo-servicio` como a los demas, porque ya correria donde
+#    el secreto esta.
+#
+# 🔴 `moloka_sync_stock_web.py` entro el 10-sep-2026 y no lo trajo ningun
+#    encargo: lo saco el barrido POR LA LLAVE. Lee `productos` en su linea 50,
+#    pero la tabla no va escrita en la llamada -- va por variable, dentro de
+#    `_paginar(sb, 'productos', ...)` --, asi que ningun grep de
+#    `.table('productos')` lo veia. Esa es la razon de que este censo se haga por
+#    el cliente y no por el nombre de la tabla.
 PROGRAMAS = [
     (RUTA,                         'solo-servicio',         5),   # 4 directores + escaner-app
-    ('moloka_escaner_pro_nube.py', 'servicio-con-respaldo', 1),   # escaner-pro
-    ('moloka_actualizar_nube.py',  'servicio-con-respaldo', 1),   # actualizar-app
-    ('moloka_detector_bems.py',    'servicio-con-respaldo', 1),   # detector-bems
-    ('robot_generar.py',           'servicio-con-respaldo', 1),   # fabrica-generar
+    ('moloka_escaner_pro_nube.py', 'solo-servicio',         1),   # escaner-pro
+    ('moloka_actualizar_nube.py',  'solo-servicio',         1),   # actualizar-app
+    ('moloka_detector_bems.py',    'solo-servicio',         1),   # detector-bems
+    ('robot_generar.py',           'solo-servicio',         1),   # fabrica-generar
+    ('moloka_sync_stock_web.py',   'solo-servicio',         1),   # sync-stock-web
     ('moloka_tracker_snapshot.py', 'servicio-con-respaldo', 0),   # a mano: ningun workflow
 ]
 
@@ -272,11 +311,14 @@ def llave_del_cliente(fuente, var='sb'):
         return 'no-encontrado'
 
     arg = llamada.args[1]
-    # Un Name se sigue hasta su asignacion ANTES de clasificar: si no, un
+    # Un Name se sigue hasta el fondo ANTES de clasificar: si no, un
     # `SUPABASE_KEY = <servicio> or <anonima>` usado por nombre se leeria como
-    # 'no-encontrado' y este banco saldria verde sin haber mirado nada.
-    if isinstance(arg, ast.Name) and arg.id in nombres:
+    # 'no-encontrado'. Y hasta el FONDO, no un salto: una cadena de alias
+    # (`A = B`, `B = os.environ.get(...)`) dejaria al banco sin ver nada.
+    _saltos = 0
+    while isinstance(arg, ast.Name) and arg.id in nombres and _saltos < 4:
         arg = nombres[arg.id]
+        _saltos += 1
 
     if _es_environ_idx(arg, 'SUPABASE_KEY') or _es_environ_get(arg, 'SUPABASE_KEY'):
         return 'solo-anonima'
@@ -297,12 +339,76 @@ def llave_del_cliente(fuente, var='sb'):
     return 'no-encontrado'
 
 
+def _resuelve_a_servicio(nodo, nombres, prof=0):
+    """`nodo` acaba, siguiendo variables, en `os.environ.get('SUPABASE_SERVICE_KEY')`."""
+    if prof > 4:
+        return False
+    if isinstance(nodo, ast.Name):
+        return _resuelve_a_servicio(nombres.get(nodo.id), nombres, prof + 1)
+    if isinstance(nodo, ast.BoolOp) and isinstance(nodo.op, ast.Or) and nodo.values:
+        return _resuelve_a_servicio(nodo.values[0], nombres, prof + 1)
+    return _es_environ_get(nodo, 'SUPABASE_SERVICE_KEY')
+
+
+def _sale(cuerpo):
+    """El cuerpo del `if` termina el programa: abortar(), sys.exit(), raise SystemExit."""
+    for n in ast.walk(ast.Module(body=list(cuerpo), type_ignores=[])):
+        if isinstance(n, ast.Raise):
+            return True
+        if isinstance(n, ast.Call):
+            f = n.func
+            if isinstance(f, ast.Name) and f.id in ('abortar', 'exit', 'quit'):
+                return True
+            if isinstance(f, ast.Attribute) and f.attr == 'exit':
+                return True
+    return False
+
+
+def aborta_sin_llave(fuente, var='sb'):
+    """True si hay un `if not <llave de servicio>:` que SALE, y esta ANTES de la
+    linea que crea el cliente.
+
+    🔒 Lo de "antes" no es formalismo: una guarda por debajo del
+       `create_client` no impide que el cliente nazca con `None`, y entonces lo
+       que revienta es la libreria, con un mensaje que no habla de la llave.
+    """
+    arbol = ast.parse(fuente)
+    nombres, linea_cliente = {}, None
+    for nodo in ast.walk(arbol):
+        if not (isinstance(nodo, ast.Assign) and len(nodo.targets) == 1
+                and isinstance(nodo.targets[0], ast.Name)):
+            continue
+        nombres[nodo.targets[0].id] = nodo.value
+        if (nodo.targets[0].id == var and isinstance(nodo.value, ast.Call)
+                and isinstance(nodo.value.func, ast.Name)
+                and nodo.value.func.id == 'create_client'):
+            linea_cliente = nodo.lineno
+    if linea_cliente is None:
+        return False
+
+    llaves = {n for n, v in nombres.items() if _resuelve_a_servicio(v, nombres)}
+    for nodo in ast.walk(arbol):
+        if not isinstance(nodo, ast.If):
+            continue
+        t = nodo.test
+        if not (isinstance(t, ast.UnaryOp) and isinstance(t.op, ast.Not)
+                and isinstance(t.operand, ast.Name) and t.operand.id in llaves):
+            continue
+        if nodo.lineno < linea_cliente and _sale(nodo.body):
+            return True
+    return False
+
+
 print("(A) el cliente de cada programa, por estructura")
 for _script, _forma, _n in PROGRAMAS:
     with io.open(_script, encoding='utf-8') as fh:
         _fuente = fh.read()
     eq('(A) 🔴 %-28s `sb` nace %s' % (_script, _forma),
        llave_del_cliente(_fuente), _forma)
+    if _forma == 'solo-servicio':
+        # (G) exigir la llave sin abortar cuando falta no aprieta nada.
+        eq('(G) 🔴 %-28s aborta ANTES de crear el cliente' % _script,
+           aborta_sin_llave(_fuente), True)
 
 # (C) las otras direcciones: los DOS codigos viejos, tal cual estaban.
 _ANTES = ("from supabase import create_client\n"
@@ -325,6 +431,23 @@ eq('(C) 🔴 … y la llave anonima guardada en una variable TAMBIEN se ve',
 # Y que el predicado no diga que si a todo: un fichero sin cliente.
 eq('(C) …y un fichero sin cliente sale "no-encontrado"',
    llave_del_cliente("x = 1\n"), 'no-encontrado')
+
+# (C) las dos direcciones de (G). El caso malo es el que de verdad pasa cuando
+# alguien "aprieta" a medias: pide solo la de servicio y no comprueba que este.
+_SIN_GUARDA = ("_k = os.environ.get('SUPABASE_SERVICE_KEY')\n"
+               "sb = create_client(os.environ['SUPABASE_URL'], _k)\n")
+eq('(C) 🔴 …y un solo-servicio SIN guarda lo caza (G)',
+   aborta_sin_llave(_SIN_GUARDA), False)
+# Y el caso peor de todos, porque parece que esta: la guarda POR DEBAJO del cliente.
+_GUARDA_TARDE = ("_k = os.environ.get('SUPABASE_SERVICE_KEY')\n"
+                 "sb = create_client(os.environ['SUPABASE_URL'], _k)\n"
+                 "if not _k:\n    sys.exit(1)\n")
+eq('(C) 🔴 …y una guarda puesta DESPUES del cliente no cuenta',
+   aborta_sin_llave(_GUARDA_TARDE), False)
+_CON_GUARDA = ("_k = os.environ.get('SUPABASE_SERVICE_KEY')\n"
+               "if not _k:\n    sys.exit(1)\n"
+               "sb = create_client(os.environ['SUPABASE_URL'], _k)\n")
+eq('(C) …y la guarda bien puesta si cuenta', aborta_sin_llave(_CON_GUARDA), True)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # (B) LA LLAVE, EN EL PASO QUE LANZA EL ESCANER
@@ -375,7 +498,7 @@ for _script, _forma, _esperados in PROGRAMAS:
 
 eq('(B) 🔴 ningun paso lanza ninguno de estos programas sin la llave de servicio',
    _incumplen, [])
-eq('(D) …y en total se han mirado los NUEVE pasos que existen, no cero', _total, 9)
+eq('(D) …y en total se han mirado los DIEZ pasos que existen, no cero', _total, 10)
 
 # (C) la otra direccion: un paso que lanza el escaner sin la llave tiene que
 # salir en la lista. Este es el estado exacto de `director-dbline.yml` ayer.
@@ -520,11 +643,18 @@ eq('(F) …y devuelve las dos fichas indexadas por EAN normalizado', sorted(_sup
 eq('(F) …y el log deja las cifras y la llave',
    'CATALOGO_PROPIO: filas=2 | con_ean=2 | llave=SERVICIO' in _log, True)
 
-_sup, _log, _codigo = correr_guarda(_MOD_PRO, _SB([]))
-eq('(F) 🔴 CERO FILAS con la llave anonima: aborta en ROJO', _codigo, 1)
+# Con la llave de servicio, cero filas ya no puede ser una puerta cerrada
+# (`service_role` es BYPASSRLS): seria un catalogo vacio, que tampoco existe. Aborta igual.
+_sup, _log, _codigo = correr_guarda(_MOD_PRO, _SB([]), llave='SERVICIO')
+eq('(F) 🔴 CERO FILAS aunque la llave sea la de SERVICIO: aborta en ROJO', _codigo, 1)
 eq('(F) …con la linea grepable de los dos escaneres',
    'ESCANEO_NO_EJECUTADO' in _log, True)
 eq('(F) …y el motivo dice con que llave se leyo',
+   'SERVICIO' in _log.split('ESCANEO_NO_EJECUTADO')[-1], True)
+# Y el rotulo es DERIVADO, no fijo: si manana alguien quita la guarda de la llave,
+# el log tiene que contarlo en vez de seguir diciendo SERVICIO.
+_sup, _log, _codigo = correr_guarda(_MOD_PRO, _SB([]))
+eq('(F) …y si se leyera con la anonima, el motivo lo diria',
    'ANONIMA' in _log.split('ESCANEO_NO_EJECUTADO')[-1], True)
 
 _sup, _log, _codigo = correr_guarda(_MOD_PRO, _SB([], error=RuntimeError('conexion caida')))
@@ -562,5 +692,5 @@ if FALLOS:
     for _f in FALLOS:
         print("  - " + _f)
     sys.exit(1)
-print("VERDE: los seis programas piden su llave, los nueve pasos se la dan\n"
-      "       y la guarda del Pro aborta cuando `productos` viene vacio.")
+print("VERDE: los siete programas piden su llave y abortan si falta, los diez\n"
+      "       pasos se la dan, y la guarda del Pro aborta con `productos` vacio.")
