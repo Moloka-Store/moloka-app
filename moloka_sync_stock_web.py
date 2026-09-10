@@ -43,7 +43,19 @@ def _paginar(sb, tabla, cols, filtro_origen=None):
     return filas
 
 def main():
-    sb = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
+    # 🔴 LA LLAVE DE SERVICIO, O NO SE CORRE (10-sep-2026, la regla del #292).
+    # Corre desatendido en Actions, donde el secreto SIEMPRE esta: un lanzamiento sin la
+    # llave no es un caso a sobrevivir, es un fallo de configuracion, y vale mas que muera
+    # en el arranque que que salga VERDE sobre un catalogo vacio.
+    # El peligro esta en la LECTURA, que calla: con la RLS puesta y ninguna politica que le
+    # toque, `anon` recibe 0 filas SIN ERROR (medido en staging el 10-sep-2026; de las
+    # cuatro operaciones solo el INSERT lanza). El porque entero, con la medicion y con lo
+    # que implica para los `upsert`, en `test_escaner_llave_servicio.py`.
+    _LLAVE_SVC = os.environ.get('SUPABASE_SERVICE_KEY')
+    if not _LLAVE_SVC:
+        print('SYNC_STOCK_NO_EJECUTADO: sin llave de servicio')
+        sys.exit(1)
+    sb = create_client(os.environ['SUPABASE_URL'], _LLAVE_SVC)
 
     # 1) Stock físico desde el inventario, sumado por (ean_norm, es_chase)
     inv = {}

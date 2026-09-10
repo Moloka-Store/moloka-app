@@ -34,4 +34,10 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          # 🔴 LA OTRA MITAD DEL ARREGLO, Y EN ESTE PASO. El script ya prefiere la de
+          # servicio, pero aqui no viajaba: el `or` caia siempre del lado anonimo y la
+          # lectura de `productos` volvia vacia sin error desde el 10-sep-2026. Cambiar
+          # solo el script no arregla nada en un workflow que no le pase la llave -- HEO
+          # demostro lo contrario el dia del fallo, y cayo igual (#291).
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python -u moloka_escaner_pro_nube.py

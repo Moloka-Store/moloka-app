@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Banco: el escaner corre con la llave de SERVICIO, o no corre.
+"""Banco: los programas desatendidos corren con la llave de SERVICIO, o no corren.
 
 EL PRIMER FALLO, EL QUE CERRO EL #291 (10-sep-2026). Los cuatro directores
 llevaban un dia y medio en rojo. Ninguno llego a preguntarle nada a Keepa:
@@ -22,28 +22,72 @@ leia `SUPABASE_KEY`. Y al reves: cambiar el script no sirve de nada en un
 workflow que no le pase la llave. Ninguna de las dos mitades sola arregla esto,
 asi que este banco exige LAS DOS.
 
-EL SEGUNDO FALLO, EL QUE CIERRA ESTE PR (10-sep-2026, mismo dia). El #291 dejo
-el cliente naciendo de `SUPABASE_SERVICE_KEY or SUPABASE_KEY`. Ese respaldo era
-prudencia mientras `anon` aun podia escribir. Deja de serlo en cuanto se aplique
-la tanda 3 del cierre del invitado, que cierra a `anon` las TRES puertas por las
-que el escaner ESCRIBE en `escaner_memoria` (`em_insert`, `em_select`,
-`em_update`; medidas por Cowork en produccion): desde ese dia, un lanzamiento SIN
-la llave de servicio no revienta -- el upsert devuelve 200 con cero filas -- y el
-run sale VERDE sobre una tabla que no se ha tocado. Basta con que el secreto
-falte, caduque, o que alguien quite esa linea del workflow. Ahora el escaner
-ABORTA en el arranque, sin gastar un token:
+🔴 Y NO ERAN CUATRO PROGRAMAS: ERAN NUEVE. El #291 arreglo el escaner de tokens,
+que es el que corren los directores, porque fue el que se puso ROJO. Los otros
+cinco lectores desatendidos de `productos` no se pusieron rojos por la misma
+razon por la que son PEORES: no tienen guarda. Se quedaron leyendo un catalogo
+vacio y siguiendo adelante en verde. Por eso este banco ya no habla de "el
+escaner": habla de la LISTA de programas que leen `productos` sin nadie delante,
+y esa lista vive abajo en `PROGRAMAS`, con la forma de llave que se le exige a
+cada uno. Anadir un programa desatendido que lea `productos` y no tocar esa
+lista es la unica forma que le queda a este fallo de repetirse.
+
+EL SEGUNDO FALLO, EL QUE CERRO EL #292 (10-sep-2026, mismo dia). El #291 dejo el
+cliente naciendo de `SUPABASE_SERVICE_KEY or SUPABASE_KEY`. Ese respaldo era
+prudencia mientras `anon` aun podia entrar. Deja de serlo en cuanto se aplique la
+tanda 3 del cierre del invitado, que cierra a `anon` las TRES puertas por las que
+el escaner toca `escaner_memoria` (`em_insert`, `em_select`, `em_update`; medidas
+en produccion). Basta con que el secreto falte, caduque, o que alguien quite esa
+linea del workflow. Ahora el escaner ABORTA en el arranque, sin gastar un token:
 
     ESCANEO_NO_EJECUTADO: sin llave de servicio
+
+🔴 Y AQUI VA CORREGIDO EL PORQUE, QUE SE VENIA CONTANDO MAL. Se decia -- en el
+#292, en el encabezado de la tanda 3 y en varios apuntes -- que "un INSERT frenado
+por la RLS devuelve 200 con cero filas". ES FALSO, y esta medido: el 10-sep-2026
+en STAGING, sobre una tabla nueva con RLS activa, los cuatro GRANT a `anon` y
+NINGUNA politica -- el escenario exacto que deja la tanda 3 --, ejecutando como
+`anon`:
+
+    SELECT  -> 0 filas, sin error   MUDO
+    INSERT  -> ERROR 42501: new row violates row-level security policy   LANZA
+    UPDATE  -> 0 filas, sin error   MUDO
+    DELETE  -> 0 filas, sin error   MUDO
+
+Nada de lo hecho se cae, pero el argumento correcto es otro y es el que hay que
+repetir: EL PELIGRO DE CERRAR UNA TABLA ESTA EN LA LECTURA, que calla. Por ahi
+entro el fallo del 10-sep y por ahi murieron los cuatro directores: por un SELECT
+que devolvio cero sin quejarse. Y contar despues de escribir sigue haciendo falta
+por la misma razon, no por la contraria: en un `upsert`, la mitad que puede fallar
+en silencio no es la que escribe -- esa lanza --, sino la que MIRA si la fila ya
+existe.
+
+ESTE ES EL SITIO DONDE VIVE ESE PORQUE. Los seis programas de `PROGRAMAS` llevan
+junto a su llave la version corta y un puntero a este fichero: repetir la
+medicion entera seis veces no es explicarla, es copiarla, y el dia que cambie
+habria que acordarse de seis sitios.
 
 QUE SE PRUEBA, Y COMO:
   (A) POR ESTRUCTURA, con `ast` sobre el fichero real (no con un grep sobre el
       texto: el comentario que hay junto a la linea nombra las dos variables, y
-      un grep contaria la explicacion como si fuera codigo): que el cliente que
-      se llama `sb` nace de `SUPABASE_SERVICE_KEY` y DE NADA MAS.
+      un grep contaria la explicacion como si fuera codigo): que el cliente de
+      cada programa de `PROGRAMAS` nace de la llave que le toca. A los SEIS que
+      corren desatendidos en Actions se les exige `SUPABASE_SERVICE_KEY` Y NADA
+      MAS: ahi el secreto siempre esta, asi que un lanzamiento sin llave no es un
+      caso a sobrevivir sino un fallo de configuracion, y vale mas que muera en el
+      arranque. 🔒 La unica excepcion, decidida el 10-sep, es
+      `moloka_tracker_snapshot.py`: ese se lanza a mano desde el portatil, donde
+      NO hay secretos del repo, y el respaldo a la anonima es lo que lo mantiene
+      usable. Por eso su fila dice `servicio-con-respaldo` y no es un descuido.
+  (G) Y QUE LA GUARDA ESTE, Y ESTE ANTES. Exigir la llave sin abortar cuando falta
+      no aprieta nada: `create_client(url, None)` revienta por dentro con un
+      mensaje que no dice de que va. Se comprueba por estructura que cada programa
+      de `solo-servicio` tiene un `if not <llave>:` que SALE, y que esta por
+      encima de la linea que crea el cliente.
   (B) POR ESTRUCTURA, con `yaml`: que TODO paso de TODO workflow cuyo `run`
-      lance el escaner lleve `SUPABASE_SERVICE_KEY` en SU PROPIO `env`. Por el
-      paso, no por el fichero: en los directores la llave ya viajaba en el paso
-      de preparar, y ahi no le sirve de nada al escaner.
+      lance uno de esos programas lleve `SUPABASE_SERVICE_KEY` en SU PROPIO `env`.
+      Por el paso, no por el fichero: en los directores la llave ya viajaba en el
+      paso de preparar, y ahi no le sirve de nada al escaner.
   (C) LAS DOS DIRECCIONES. Cada comprobacion se corre ademas contra los casos
       malos -- el codigo de antes del #291, el del propio #291 (el del respaldo)
       y un paso sin la llave -- y tiene que RECHAZARLOS. Sin esto, (A) y (B)
@@ -63,10 +107,18 @@ QUE SE PRUEBA, Y COMO:
            con OTRA linea. Sin este segundo caso, el primero saldria verde
            tambien si el escaner abortase siempre.
 
+  (F) LA GUARDA DEL CATALOGO PROPIO DEL ESCANER PRO, EJECUTADA. La llave es la
+      mitad que arregla; la guarda es la que AVISA el dia que la llave falte. Se
+      sacan `abortar` y `leer_productos_propios` del fichero real con `ast` y se
+      corren con un Supabase de mentira: cero filas tiene que abortar en ROJO, y
+      la version de antes -- guardada ahi tal cual estaba -- tiene que NO abortar.
+
 LAS DOS DIRECCIONES, MEDIDAS. (E1) se ha visto rojo devolviendo a mano el
 respaldo del #291 (`_llave_svc or os.environ['SUPABASE_KEY']`): el proceso deja
 de abortar, nace el cliente con la anonima y las tres comprobaciones del caso
-caen a la vez.
+caen a la vez. (A), (B) y (F) se han visto rojas deshaciendo cada mitad por
+separado: la llave del paso de `escaner-pro.yml`, la del cliente del detector y
+la guarda del Pro devuelta a su version de antes.
 """
 import ast
 import io
@@ -75,10 +127,42 @@ import re
 import subprocess
 import sys
 import types
+from contextlib import redirect_stdout
 
 import yaml
 
 RUTA = 'moloka_escaner_nube.py'
+
+# ---------------------------------------------------------------------------
+# LA LISTA. Un programa desatendido que lee `productos`, la forma de llave que
+# se le exige, y cuantos pasos lo lanzan HOY.
+# ---------------------------------------------------------------------------
+# La cuenta de pasos es la mitad (D), contra el verde vacio: si manana nace uno
+# mas, ese numero sube A PROPOSITO, no por descuido.
+#
+# 🔒 El cero de `moloka_tracker_snapshot.py` NO es un descuido: se corre a mano
+#    desde el portatil y no lo lanza ningun workflow (medido el 10-sep-2026
+#    sobre los 57 ficheros de .github/workflows). Su mitad (A) se le exige
+#    igual; la (B) no existe. El dia que alguien le ponga un workflow, este
+#    cero se pone rojo y obliga a mirar si le pasa la llave -- y entonces habra
+#    que apretarlo a `solo-servicio` como a los demas, porque ya correria donde
+#    el secreto esta.
+#
+# 🔴 `moloka_sync_stock_web.py` entro el 10-sep-2026 y no lo trajo ningun
+#    encargo: lo saco el barrido POR LA LLAVE. Lee `productos` en su linea 50,
+#    pero la tabla no va escrita en la llamada -- va por variable, dentro de
+#    `_paginar(sb, 'productos', ...)` --, asi que ningun grep de
+#    `.table('productos')` lo veia. Esa es la razon de que este censo se haga por
+#    el cliente y no por el nombre de la tabla.
+PROGRAMAS = [
+    (RUTA,                         'solo-servicio',         5),   # 4 directores + escaner-app
+    ('moloka_escaner_pro_nube.py', 'solo-servicio',         1),   # escaner-pro
+    ('moloka_actualizar_nube.py',  'solo-servicio',         1),   # actualizar-app
+    ('moloka_detector_bems.py',    'solo-servicio',         1),   # detector-bems
+    ('robot_generar.py',           'solo-servicio',         1),   # fabrica-generar
+    ('moloka_sync_stock_web.py',   'solo-servicio',         1),   # sync-stock-web
+    ('moloka_tracker_snapshot.py', 'servicio-con-respaldo', 0),   # a mano: ningun workflow
+]
 
 
 # ===========================================================================
@@ -194,36 +278,54 @@ def _es_environ_idx(nodo, clave):
             and isinstance(nodo.slice, ast.Constant) and nodo.slice.value == clave)
 
 
-def llave_del_cliente(fuente):
+def llave_del_cliente(fuente, var='sb'):
     """Devuelve ('solo-servicio' | 'servicio-con-respaldo' | 'solo-anonima' |
     'no-encontrado').
 
-    Busca la asignacion a `sb` cuyo valor sea `create_client(...)`, resuelve el
+    Busca la asignacion a `var` cuyo valor sea `create_client(...)`, resuelve el
     segundo argumento y, si es un Name, lo sigue hasta su asignacion. Eso ultimo
-    no es adorno: la linea real guarda la llave en `_llave_svc` antes de usarla,
-    y un test que solo mirase dentro del `create_client` no veria de donde sale.
+    no es adorno: hay ficheros que guardan la llave en una variable antes de
+    usarla, y un test que solo mirase dentro del `create_client` no veria de
+    donde sale.
+
+    🔒 Se busca LA ASIGNACION QUE ES UN create_client, no la ultima asignacion
+       a ese nombre. En `moloka_tracker_snapshot.py` el cliente vive dentro de
+       `main()` y unas lineas mas arriba hay un `sb = None`; quedarse con la
+       ultima de la lista dependeria del orden en que `ast.walk` baja por el
+       arbol, que no es el orden del fichero.
     """
     arbol = ast.parse(fuente)
     nombres = {}
+    llamada = None
     for nodo in ast.walk(arbol):
-        if isinstance(nodo, ast.Assign) and len(nodo.targets) == 1 \
-                and isinstance(nodo.targets[0], ast.Name):
-            nombres[nodo.targets[0].id] = nodo.value
+        if not (isinstance(nodo, ast.Assign) and len(nodo.targets) == 1
+                and isinstance(nodo.targets[0], ast.Name)):
+            continue
+        nombres[nodo.targets[0].id] = nodo.value
+        if (nodo.targets[0].id == var and isinstance(nodo.value, ast.Call)
+                and isinstance(nodo.value.func, ast.Name)
+                and nodo.value.func.id == 'create_client'):
+            llamada = nodo.value
 
-    llamada = nombres.get('sb')
-    if not (isinstance(llamada, ast.Call)
-            and isinstance(llamada.func, ast.Name) and llamada.func.id == 'create_client'
-            and len(llamada.args) == 2):
+    if llamada is None or len(llamada.args) != 2:
         return 'no-encontrado'
 
     arg = llamada.args[1]
+    # Un Name se sigue hasta el fondo ANTES de clasificar: si no, un
+    # `SUPABASE_KEY = <servicio> or <anonima>` usado por nombre se leeria como
+    # 'no-encontrado'. Y hasta el FONDO, no un salto: una cadena de alias
+    # (`A = B`, `B = os.environ.get(...)`) dejaria al banco sin ver nada.
+    _saltos = 0
+    while isinstance(arg, ast.Name) and arg.id in nombres and _saltos < 4:
+        arg = nombres[arg.id]
+        _saltos += 1
+
     if _es_environ_idx(arg, 'SUPABASE_KEY') or _es_environ_get(arg, 'SUPABASE_KEY'):
         return 'solo-anonima'
 
-    # El caso de HOY: un Name que se resuelve a `os.environ.get('SUPABASE_SERVICE_KEY')`
-    # y a nada mas. Sin `or`, que es lo que este PR viene a quitar.
-    suelto = nombres.get(arg.id) if isinstance(arg, ast.Name) else arg
-    if _es_environ_get(suelto, 'SUPABASE_SERVICE_KEY'):
+    # El caso del escaner desde el #292: `os.environ.get('SUPABASE_SERVICE_KEY')`
+    # y nada mas. Sin `or`.
+    if _es_environ_get(arg, 'SUPABASE_SERVICE_KEY'):
         return 'solo-servicio'
 
     # El caso del #291: `<servicio> or <anonima>`.
@@ -237,11 +339,76 @@ def llave_del_cliente(fuente):
     return 'no-encontrado'
 
 
-print("(A) el cliente del escaner, por estructura")
-with io.open(RUTA, encoding='utf-8') as fh:
-    _fuente = fh.read()
-eq('(A) 🔴 `sb` nace de SUPABASE_SERVICE_KEY y de nada mas',
-   llave_del_cliente(_fuente), 'solo-servicio')
+def _resuelve_a_servicio(nodo, nombres, prof=0):
+    """`nodo` acaba, siguiendo variables, en `os.environ.get('SUPABASE_SERVICE_KEY')`."""
+    if prof > 4:
+        return False
+    if isinstance(nodo, ast.Name):
+        return _resuelve_a_servicio(nombres.get(nodo.id), nombres, prof + 1)
+    if isinstance(nodo, ast.BoolOp) and isinstance(nodo.op, ast.Or) and nodo.values:
+        return _resuelve_a_servicio(nodo.values[0], nombres, prof + 1)
+    return _es_environ_get(nodo, 'SUPABASE_SERVICE_KEY')
+
+
+def _sale(cuerpo):
+    """El cuerpo del `if` termina el programa: abortar(), sys.exit(), raise SystemExit."""
+    for n in ast.walk(ast.Module(body=list(cuerpo), type_ignores=[])):
+        if isinstance(n, ast.Raise):
+            return True
+        if isinstance(n, ast.Call):
+            f = n.func
+            if isinstance(f, ast.Name) and f.id in ('abortar', 'exit', 'quit'):
+                return True
+            if isinstance(f, ast.Attribute) and f.attr == 'exit':
+                return True
+    return False
+
+
+def aborta_sin_llave(fuente, var='sb'):
+    """True si hay un `if not <llave de servicio>:` que SALE, y esta ANTES de la
+    linea que crea el cliente.
+
+    🔒 Lo de "antes" no es formalismo: una guarda por debajo del
+       `create_client` no impide que el cliente nazca con `None`, y entonces lo
+       que revienta es la libreria, con un mensaje que no habla de la llave.
+    """
+    arbol = ast.parse(fuente)
+    nombres, linea_cliente = {}, None
+    for nodo in ast.walk(arbol):
+        if not (isinstance(nodo, ast.Assign) and len(nodo.targets) == 1
+                and isinstance(nodo.targets[0], ast.Name)):
+            continue
+        nombres[nodo.targets[0].id] = nodo.value
+        if (nodo.targets[0].id == var and isinstance(nodo.value, ast.Call)
+                and isinstance(nodo.value.func, ast.Name)
+                and nodo.value.func.id == 'create_client'):
+            linea_cliente = nodo.lineno
+    if linea_cliente is None:
+        return False
+
+    llaves = {n for n, v in nombres.items() if _resuelve_a_servicio(v, nombres)}
+    for nodo in ast.walk(arbol):
+        if not isinstance(nodo, ast.If):
+            continue
+        t = nodo.test
+        if not (isinstance(t, ast.UnaryOp) and isinstance(t.op, ast.Not)
+                and isinstance(t.operand, ast.Name) and t.operand.id in llaves):
+            continue
+        if nodo.lineno < linea_cliente and _sale(nodo.body):
+            return True
+    return False
+
+
+print("(A) el cliente de cada programa, por estructura")
+for _script, _forma, _n in PROGRAMAS:
+    with io.open(_script, encoding='utf-8') as fh:
+        _fuente = fh.read()
+    eq('(A) 🔴 %-28s `sb` nace %s' % (_script, _forma),
+       llave_del_cliente(_fuente), _forma)
+    if _forma == 'solo-servicio':
+        # (G) exigir la llave sin abortar cuando falta no aprieta nada.
+        eq('(G) 🔴 %-28s aborta ANTES de crear el cliente' % _script,
+           aborta_sin_llave(_fuente), True)
 
 # (C) las otras direcciones: los DOS codigos viejos, tal cual estaban.
 _ANTES = ("from supabase import create_client\n"
@@ -252,8 +419,35 @@ eq('(C) 🔴 … y el codigo de antes del #291 (solo anonima) lo RECHAZA',
 _291 = ("from supabase import create_client\n"
         "_llave_svc = os.environ.get('SUPABASE_SERVICE_KEY')\n"
         "sb  = create_client(os.environ['SUPABASE_URL'], _llave_svc or os.environ['SUPABASE_KEY'])\n")
-eq('(C) 🔴 … y el del #291 (con respaldo mudo a la anonima) TAMBIEN lo rechaza',
+eq('(C) 🔴 … y el del #291 (con respaldo mudo a la anonima) sale con SU nombre',
    llave_del_cliente(_291), 'servicio-con-respaldo')
+
+# La forma en que estaba escrito ANTES en los otros cinco: la llave anonima
+# guardada en una variable. Sin resolver el Name, esto salia 'no-encontrado'.
+_ANTES_VARIABLE = ("SUPABASE_KEY = os.environ['SUPABASE_KEY']\n"
+                   "sb = create_client(SUPABASE_URL, SUPABASE_KEY)\n")
+eq('(C) 🔴 … y la llave anonima guardada en una variable TAMBIEN se ve',
+   llave_del_cliente(_ANTES_VARIABLE), 'solo-anonima')
+# Y que el predicado no diga que si a todo: un fichero sin cliente.
+eq('(C) …y un fichero sin cliente sale "no-encontrado"',
+   llave_del_cliente("x = 1\n"), 'no-encontrado')
+
+# (C) las dos direcciones de (G). El caso malo es el que de verdad pasa cuando
+# alguien "aprieta" a medias: pide solo la de servicio y no comprueba que este.
+_SIN_GUARDA = ("_k = os.environ.get('SUPABASE_SERVICE_KEY')\n"
+               "sb = create_client(os.environ['SUPABASE_URL'], _k)\n")
+eq('(C) 🔴 …y un solo-servicio SIN guarda lo caza (G)',
+   aborta_sin_llave(_SIN_GUARDA), False)
+# Y el caso peor de todos, porque parece que esta: la guarda POR DEBAJO del cliente.
+_GUARDA_TARDE = ("_k = os.environ.get('SUPABASE_SERVICE_KEY')\n"
+                 "sb = create_client(os.environ['SUPABASE_URL'], _k)\n"
+                 "if not _k:\n    sys.exit(1)\n")
+eq('(C) 🔴 …y una guarda puesta DESPUES del cliente no cuenta',
+   aborta_sin_llave(_GUARDA_TARDE), False)
+_CON_GUARDA = ("_k = os.environ.get('SUPABASE_SERVICE_KEY')\n"
+               "if not _k:\n    sys.exit(1)\n"
+               "sb = create_client(os.environ['SUPABASE_URL'], _k)\n")
+eq('(C) …y la guarda bien puesta si cuenta', aborta_sin_llave(_CON_GUARDA), True)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # (B) LA LLAVE, EN EL PASO QUE LANZA EL ESCANER
@@ -261,44 +455,50 @@ eq('(C) 🔴 … y el del #291 (con respaldo mudo a la anonima) TAMBIEN lo recha
 ESCANER = 'moloka_escaner_nube.py'
 
 
-def pasos_del_escaner(doc):
-    """Todo paso de `doc` cuyo `run` lance el escaner, con su `env` propio."""
+def pasos_del_escaner(doc, script=ESCANER):
+    """Todo paso de `doc` cuyo `run` lance `script`, con su `env` propio."""
     salida = []
     for job in (doc.get('jobs') or {}).values():
         for paso in (job.get('steps') or []):
-            if ESCANER in (paso.get('run') or ''):
+            if script in (paso.get('run') or ''):
                 salida.append(paso)
     return salida
 
 
-def sin_llave(doc):
-    """Los pasos que lanzan el escaner y NO llevan la llave de servicio."""
-    return [p for p in pasos_del_escaner(doc)
+def sin_llave(doc, script=ESCANER):
+    """Los pasos que lanzan `script` y NO llevan la llave de servicio."""
+    return [p for p in pasos_del_escaner(doc, script)
             if 'SUPABASE_SERVICE_KEY' not in (p.get('env') or {})]
 
 
-print("\n(B) la llave de servicio, en el paso que lanza el escaner")
+print("\n(B) la llave de servicio, en el paso que lanza cada programa")
 _dir = os.path.join('.github', 'workflows')
-_mirados, _incumplen = [], []
+_docs = []
 for _f in sorted(os.listdir(_dir)):
     if not _f.endswith(('.yml', '.yaml')):
         continue
     with io.open(os.path.join(_dir, _f), encoding='utf-8') as fh:
-        _doc = yaml.safe_load(fh) or {}
-    for _p in pasos_del_escaner(_doc):
-        _mirados.append('%s :: %s' % (_f, _p.get('name') or '(sin nombre)'))
-    for _p in sin_llave(_doc):
-        _incumplen.append('%s :: %s' % (_f, _p.get('name') or '(sin nombre)'))
+        _docs.append((_f, yaml.safe_load(fh) or {}))
 
-print("    pasos que lanzan el escaner: %d" % len(_mirados))
-for _m in _mirados:
-    print("      · " + _m)
+_incumplen, _total = [], 0
+for _script, _forma, _esperados in PROGRAMAS:
+    _mirados = []
+    for _f, _doc in _docs:
+        for _p in pasos_del_escaner(_doc, _script):
+            _mirados.append('%s :: %s' % (_f, _p.get('name') or '(sin nombre)'))
+        for _p in sin_llave(_doc, _script):
+            _incumplen.append('%s :: %s' % (_f, _p.get('name') or '(sin nombre)'))
+    _total += len(_mirados)
+    print("    %-28s %d paso(s)" % (_script, len(_mirados)))
+    for _m in _mirados:
+        print("      · " + _m)
+    # (D) contra el verde vacio, programa a programa.
+    eq('(D) …y de %-28s se han mirado sus %d paso(s)' % (_script, _esperados),
+       len(_mirados), _esperados)
 
-eq('(B) 🔴 ningun paso lanza el escaner sin la llave de servicio', _incumplen, [])
-
-# (D) contra el verde vacio. Los cinco son los cuatro directores + `escaner-app`.
-# Si mañana nace un sexto, este numero sube A PROPOSITO, no por descuido.
-eq('(D) …y se han mirado los CINCO pasos que existen, no cero', len(_mirados), 5)
+eq('(B) 🔴 ningun paso lanza ninguno de estos programas sin la llave de servicio',
+   _incumplen, [])
+eq('(D) …y en total se han mirado los DIEZ pasos que existen, no cero', _total, 10)
 
 # (C) la otra direccion: un paso que lanza el escaner sin la llave tiene que
 # salir en la lista. Este es el estado exacto de `director-dbline.yml` ayer.
@@ -357,10 +557,140 @@ eq('(E2) 🔴 el escaner muere mas abajo y por OTRO motivo (buzon vacio)',
     and 'ESCANEO_NO_EJECUTADO: recado ilegible o ausente' in _con['salida']), True)
 
 # ─────────────────────────────────────────────────────────────────────────────
+# (F) LA GUARDA DEL CATALOGO PROPIO DEL ESCANER PRO, EJECUTADA
+# ─────────────────────────────────────────────────────────────────────────────
+# `moloka_escaner_pro_nube.py` no se puede importar: crea el cliente de Supabase
+# con la llave del entorno nada mas arrancar. Asi que las dos funciones se sacan
+# del fichero REAL con `ast` -- por estructura, buscando el `def` por su nombre en
+# el arbol -- y se EJECUTAN. No se prueba una copia: se prueba lo que corre.
+PRO = 'moloka_escaner_pro_nube.py'
+_ARBOL_PRO = ast.parse(io.open(PRO, encoding='utf-8').read(), PRO)
+
+
+def sacar_def(nombre):
+    for n in _ARBOL_PRO.body:
+        if isinstance(n, ast.FunctionDef) and n.name == nombre:
+            return n
+    print('  FALLA  (F) la funcion %s() ya no esta en %s (o dejo de ser de nivel superior)'
+          % (nombre, PRO))
+    sys.exit(1)
+
+
+class _Resp:
+    def __init__(self, data):
+        self.data = data
+
+
+class _Consulta:
+    """Imita la cadena select().eq().range().execute() de supabase-py."""
+
+    def __init__(self, filas, error):
+        self._filas, self._error, self._desde = filas, error, 0
+
+    def select(self, *a, **k):
+        return self
+
+    def eq(self, *a, **k):
+        return self
+
+    def range(self, desde, hasta):
+        self._desde = desde
+        return self
+
+    def execute(self):
+        if self._error is not None:
+            raise self._error
+        # La primera pagina trae todo; la segunda viene vacia, como en la vida real.
+        return _Resp(self._filas if self._desde == 0 else [])
+
+
+class _SB:
+    def __init__(self, filas=(), error=None):
+        self._filas, self._error = list(filas), error
+
+    def table(self, nombre):
+        assert nombre == 'productos', 'la guarda no deberia mirar otra tabla: ' + nombre
+        return _Consulta(self._filas, self._error)
+
+
+def correr_guarda(fuente_defs, sb, llave='ANONIMA (la RLS decide)'):
+    """Ejecuta `leer_productos_propios()` -> (resultado, salida, codigo de salida).
+
+    `codigo` es None si NO aborto, o el codigo con el que salio si aborto."""
+    ns = {'sys': sys, 'sb': sb, '_ORIGEN_LLAVE': llave,
+          'norm': lambda v: str(v or '').strip().lstrip('0')}
+    exec(compile(fuente_defs, PRO, 'exec'), ns)
+    buf = io.StringIO()
+    try:
+        with redirect_stdout(buf):
+            return ns['leer_productos_propios'](), buf.getvalue(), None
+    except SystemExit as ex:
+        return None, buf.getvalue(), ex.code
+
+
+_MOD_PRO = ast.fix_missing_locations(
+    ast.Module(body=[sacar_def('abortar'), sacar_def('leer_productos_propios')], type_ignores=[]))
+
+print("\n(F) la guarda del catalogo propio del escaner Pro, ejecutada")
+
+_FICHAS = [{'ean': '0074427811266', 'stock_moloka': 3, 'stock_fba': 7},
+           {'ean': '8412345678905', 'stock_moloka': 0, 'stock_fba': 1}]
+
+_sup, _log, _codigo = correr_guarda(_MOD_PRO, _SB(_FICHAS), llave='SERVICIO')
+eq('(F) con fichas: NO aborta', _codigo, None)
+eq('(F) …y devuelve las dos fichas indexadas por EAN normalizado', sorted(_sup or {}),
+   ['74427811266', '8412345678905'])
+eq('(F) …y el log deja las cifras y la llave',
+   'CATALOGO_PROPIO: filas=2 | con_ean=2 | llave=SERVICIO' in _log, True)
+
+# Con la llave de servicio, cero filas ya no puede ser una puerta cerrada
+# (`service_role` es BYPASSRLS): seria un catalogo vacio, que tampoco existe. Aborta igual.
+_sup, _log, _codigo = correr_guarda(_MOD_PRO, _SB([]), llave='SERVICIO')
+eq('(F) 🔴 CERO FILAS aunque la llave sea la de SERVICIO: aborta en ROJO', _codigo, 1)
+eq('(F) …con la linea grepable de los dos escaneres',
+   'ESCANEO_NO_EJECUTADO' in _log, True)
+eq('(F) …y el motivo dice con que llave se leyo',
+   'SERVICIO' in _log.split('ESCANEO_NO_EJECUTADO')[-1], True)
+# Y el rotulo es DERIVADO, no fijo: si manana alguien quita la guarda de la llave,
+# el log tiene que contarlo en vez de seguir diciendo SERVICIO.
+_sup, _log, _codigo = correr_guarda(_MOD_PRO, _SB([]))
+eq('(F) …y si se leyera con la anonima, el motivo lo diria',
+   'ANONIMA' in _log.split('ESCANEO_NO_EJECUTADO')[-1], True)
+
+_sup, _log, _codigo = correr_guarda(_MOD_PRO, _SB([], error=RuntimeError('conexion caida')))
+eq('(F) 🔴 y si la lectura LANZA, tambien aborta en ROJO', _codigo, 1)
+eq('(F) …diciendo que lanzo, no que venia vacia',
+   'RuntimeError' in _log and 'conexion caida' in _log, True)
+
+# (C) la otra direccion, y es la que importa: EL CODIGO DE ANTES DEL ARREGLO,
+# copiado tal cual estaba en `a981a69`. Con cero filas devolvia {} tan tranquilo,
+# el boton salia VERDE y el Excel llevaba la columna «En mi BD» vacia entera.
+_ANTES_GUARDA = '''
+def leer_productos_propios():
+    sup = {}
+    try:
+        d = 0
+        while True:
+            res = sb.table('productos').select('ean,stock_moloka,stock_fba').eq('activo', True).range(d, d+999).execute()
+            if not res.data: break
+            for p in res.data:
+                if p.get('ean'): sup[norm(p['ean'])] = p
+            if len(res.data) < 1000: break
+            d += 1000
+    except Exception as ex:
+        print('AVISO: no se pudieron leer productos propios:', ex)
+    return sup
+'''
+_sup, _log, _codigo = correr_guarda(_ANTES_GUARDA, _SB([]))
+eq('(C) 🔴 …y el codigo de antes NO abortaba: seguia con el catalogo vacio', _codigo, None)
+eq('(C) …devolviendo {} y sin imprimir ni un aviso', (_sup, _log.strip()), ({}, ''))
+
+# ─────────────────────────────────────────────────────────────────────────────
 print()
 if FALLOS:
     print("ROJO: %d comprobacion(es) fallan:" % len(FALLOS))
     for _f in FALLOS:
         print("  - " + _f)
     sys.exit(1)
-print("VERDE: el escaner exige la llave de servicio, y los cinco pasos se la dan.")
+print("VERDE: los siete programas piden su llave y abortan si falta, los diez\n"
+      "       pasos se la dan, y la guarda del Pro aborta con `productos` vacio.")

@@ -14,7 +14,7 @@
 #
 # Uso:
 #   python -u moloka_tracker_snapshot.py --fba informe.txt --keepa keepa.csv [--pais ES] [--dry-run]
-# Variables de entorno (GitHub Secrets): SUPABASE_URL, SUPABASE_KEY
+# Variables de entorno: SUPABASE_URL, SUPABASE_SERVICE_KEY (y SUPABASE_KEY de respaldo)
 # ============================================================================
 
 import os, sys, argparse, json
@@ -337,7 +337,14 @@ def main():
     venta_tx = {}
     if not args.dry_run:
         from supabase import create_client
-        sb = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
+        # 🔴 LA LLAVE DE SERVICIO PRIMERO (10-sep-2026). A este no lo lanza ningun
+        # workflow -- se corre a mano --, asi que no hay segunda mitad que anadir: el
+        # respaldo a la anonima deja el lanzamiento manual igual que estaba. Lee el PVD
+        # y el IVA de `productos`, que desde ese dia no tiene politica para `anon` y le
+        # devolveria CERO FILAS sin error -- o sea, una tanda entera de snapshots sin
+        # margen, escrita en verde.
+        sb = create_client(os.environ['SUPABASE_URL'],
+                           os.environ.get('SUPABASE_SERVICE_KEY') or os.environ['SUPABASE_KEY'])
         print("[3/4] Leyendo PVD/IVA de Supabase (productos)...")
         prod = leer_productos_supabase(sb); print(f"      {len(prod)} productos con coste")
         venta_tx = leer_venta_actual_supabase(sb)
