@@ -1,6 +1,14 @@
 name: Moloka - Comprimir CSV antiguos de Keepa
 
 # ============================================================================
+# 🔴 DESDE EL 11-SEP-2026 EL DISPARO AUTOMATICO BORRA DE VERDAD, y solo lo hace
+#    si la guarda del paso 4 salio VERDE. Antes no borraba nunca -- ni queriendo:
+#    la expresion del MODO caia a 'ensayo' siempre, y las 21 corridas
+#    automaticas fueron simulacros. El motivo entero, con el run medido, esta en
+#    el `env:` del paso 5. Lo de abajo sigue valiendo palabra por palabra, y
+#    ahora mas: es la red de la que cuelga ese borrado.
+#
+# ============================================================================
 # 🔴 POR QUE CUELGA DEL BACKUP Y NO DE UN CRON PROPIO
 #   Este workflow BORRA originales. La unica red que hay debajo es la copia en
 #   Cloudflare R2 que deja `backup-bd.yml` (paso 6), y esa copia se hace
@@ -100,21 +108,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PYTHONIOENCODING: utf-8
-      # 🔴 EL DISPARO AUTOMATICO NO BORRA NUNCA. `workflow_run` corre SIEMPRE en
-      #    ensayo y deja su informe; la pasada de verdad solo sale de un
-      #    `workflow_dispatch` MANUAL. Un borrado en produccion desatendido no
-      #    pasa en esta casa: lo decide Fernando y se ejecuta con el delante.
-      #
-      #    La primera version de este fichero cayo en `github.event.inputs.modo`
-      #    a secas con respaldo al modo de aplicar: en `workflow_run` no hay
-      #    inputs, asi que el respaldo ganaba y la NOCHE SIGUIENTE A FUSIONAR
-      #    habria borrado su primera tanda sin que nadie mirase. Lo caza
-      #    test_comprimir_keepa.py, seccion (I), para que no vuelva.
-      #
-      #    La forma `A && B || C` de GitHub: si el evento no es dispatch, la
-      #    izquierda es falsa y queda 'ensayo'. Y si es dispatch pero el input
-      #    llega vacio, tambien queda 'ensayo'. Falla CERRADO por los dos lados.
-      MODO:   ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.modo || 'ensayo' }}
+      # 🔴 MODO YA NO VIVE AQUI, Y NO ES UN DETALLE DE ESTILO. Desde el
+      #    11-sep-2026 depende de lo que MIDIO la guarda del paso 4, y el `env`
+      #    del job se resuelve ANTES de que exista ningun paso: no puede ver
+      #    `steps.*`. Se decide en el `env` del paso 5, que es donde esta
+      #    escrito el motivo entero. No lo devuelvas aqui.
       DIAS:   ${{ github.event.inputs.dias   || '2' }}
       LIMITE: ${{ github.event.inputs.limite || '20' }}
       # Sin input (o sea, en el disparo automatico) -> `posponer`, que es el lado
@@ -137,6 +135,10 @@ jobs:
         run: pip install --quiet psycopg2-binary supabase==2.31.0
 
       - name: 4) La guarda ANTES (si ya venimos rotos, no se toca nada)
+        # 🔒 Lleva `id` porque el paso 5 decide con lo que esta guarda MIDE: el
+        #    script deja `guarda_verde=true|false` (y las dos cifras de
+        #    huerfanas) en $GITHUB_OUTPUT. Ver el motivo largo en el paso 5.
+        id: guarda
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -145,17 +147,66 @@ jobs:
         run: python -u comprimir_keepa_antiguos.py
 
       - name: 5) La pasada
+        id: pasada
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           DB_URL:       ${{ secrets.SUPABASE_DB_URL }}
-        run: python -u comprimir_keepa_antiguos.py
+          GUARDA_VERDE: ${{ steps.guarda.outputs.guarda_verde }}
+          # ==================================================================
+          # 🔴 EL DISPARO AUTOMATICO SI BORRA -- PERO SOLO SI LA GUARDA DEL
+          #    PASO 4 SALIO VERDE. Cambiado el 11-sep-2026. Hasta ese dia aqui
+          #    ponia "el disparo automatico no borra nunca", y hay que leer POR
+          #    QUE dejo de ser verdad antes de tocar la linea de abajo.
+          #
+          #    LO QUE ESTABA ROTO. La forma vieja era
+          #      github.event_name == 'workflow_dispatch' && github.event.inputs.modo || 'ensayo'
+          #    y en `workflow_run` NO HAY `inputs`: la izquierda era falsa
+          #    siempre, asi que el automatico caia a 'ensayo' SIEMPRE. Medido:
+          #    21 corridas automaticas seguidas, las 21 simulacros (run
+          #    34574217878, job 103182910140, paso 5: MODO=ensayo, alcance 99
+          #    en el buzon, 20 "a tocar", 8.724 filas a reapuntar y de cierre
+          #    "ENSAYO: no se ha escrito nada"). La limpieza que este fichero
+          #    existe para hacer NO se hacia, y no lo noto nadie porque el run
+          #    salia VERDE. Esa mitad -- que no se note -- la arregla el paso 7.
+          #
+          #    LO QUE SUSTITUYE A "no borra nunca" COMO RED. No es que el
+          #    automatico no pueda borrar: es que no puede borrar A CIEGAS. Son
+          #    tres cosas, y ninguna es esta linea sola:
+          #      · el `if:` del job -- solo si el backup de esta noche acabo en
+          #        VERDE, porque esa copia en R2 es la unica red que hay debajo;
+          #      · el paso 4 -- la guarda de integridad tiene que salir verde, y
+          #        lo dice ELLA en `guarda_verde`, no su codigo de salida, que
+          #        vale 1 tanto por huerfanas como por un secreto que falta;
+          #      · DIAS, el LIMITE de 20 por tanda y la exclusion de lo citado
+          #        en la tabla viva, que no se han tocado.
+          #
+          #    FALLA CERRADO, Y ESO ES LO QUE HAY QUE CONSERVAR. Si
+          #    `guarda_verde` no vale EXACTAMENTE la cadena 'true' -- porque
+          #    valga 'false', porque el paso 4 muriera antes de escribirla, o
+          #    porque alguien le cambie el nombre al output -- la expresion cae
+          #    a 'ensayo'. El respaldo NUNCA es 'aplicar'. Lo caza
+          #    test_comprimir_keepa.py, seccion (I), leyendo este fichero POR
+          #    ESTRUCTURA (jobs -> steps -> env), no con un grep sobre el texto.
+          #
+          #    Y `workflow_dispatch` NO CAMBIA: manda su input `modo`, con
+          #    'ensayo' de defecto y de respaldo si llegara vacio.
+          # ==================================================================
+          MODO: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.modo || 'ensayo') || (steps.guarda.outputs.guarda_verde == 'true' && 'aplicar' || 'ensayo') }}
+        run: |
+          # El modo de verdad se apunta ANTES de correr: si la pasada muere a
+          # mitad, el veredicto del paso 7 tiene que poder decir en que modo
+          # murio. Y se imprime, para que el log no obligue a deducirlo.
+          echo "modo=$MODO" >> "$GITHUB_OUTPUT"
+          echo "MODO=$MODO  ·  guarda_verde=${GUARDA_VERDE:-(sin medir)}"
+          python -u comprimir_keepa_antiguos.py
 
       - name: 6) La guarda DESPUES
         # 🔒 El paso 5 ya la corre al final, pero se repite aqui como paso
         #    SUELTO: si el 5 muriera a mitad por cualquier razon, su guarda
         #    final no llegaria a ejecutarse y el workflow acabaria rojo sin
         #    decir en que estado quedo el historico. Este paso lo dice.
+        id: guarda_despues
         if: always()
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -164,7 +215,77 @@ jobs:
           MODO: guarda
         run: python -u comprimir_keepa_antiguos.py
 
-      - name: 7) Telegram FALLO
+      - name: 7) EL VEREDICTO, en la PRIMERA linea del resumen de la corrida
+        # 🔴 POR QUE EXISTE ESTE PASO. Durante 21 corridas seguidas el
+        #    automatico no comprimio ni un fichero, y no lo noto nadie: el run
+        #    salia VERDE, y lo unico que lo decia era el `env` del paso 5 y la
+        #    ultima linea de su log ("ENSAYO: no se ha escrito nada"). Un dato
+        #    que hay que ir a buscar no es un dato que se mire. Desde aqui, la
+        #    PRIMERA linea del resumen dice si se escribio algo -- y si no, por
+        #    que no.
+        #
+        # 🔒 `if: always()` porque el caso que mas falta hace contar es justo el
+        #    que acaba en rojo: guarda roja, o paso 5 caido a mitad.
+        #
+        # 🔒 Ningun paso anterior escribe en $GITHUB_STEP_SUMMARY, y eso es lo
+        #    que hace que esta sea LA PRIMERA linea. No se fuerza con un `>`
+        #    (que borraria lo que escribiera otro): se MIDE en
+        #    test_comprimir_keepa.py, seccion (L). Si manana alguien anade un
+        #    paso que escriba antes, el banco se pone rojo en vez de dejar el
+        #    veredicto enterrado en mitad del resumen.
+        if: always()
+        env:
+          EVENTO:       ${{ github.event_name }}
+          MODO_USADO:   ${{ steps.pasada.outputs.modo }}
+          GUARDA_VERDE: ${{ steps.guarda.outputs.guarda_verde }}
+          HUERFANAS_H:  ${{ steps.guarda.outputs.huerfanas_hist }}
+          HUERFANAS_V:  ${{ steps.guarda.outputs.huerfanas_viva }}
+          COMPRIMIDOS:  ${{ steps.pasada.outputs.comprimidos }}
+          RESULTADO:    ${{ steps.pasada.outcome }}
+          GUARDA_FINAL: ${{ steps.guarda_despues.outcome }}
+        run: |
+          # 🔴 EL ORDEN DE LAS PREGUNTAS NO ES COSMETICO: "¿se ha escrito algo?"
+          #    manda sobre "¿por que no?". Una pasada que arranco en aplicar y
+          #    murio a mitad NO puede leerse como un simulacro -- puede haber
+          #    ficheros ya comprimidos y originales ya borrados.
+          if [ "$MODO_USADO" = "aplicar" ] && [ "$RESULTADO" = "success" ]; then
+            LINEA="APLICADO: ${COMPRIMIDOS:-0} ficheros comprimidos"
+          elif [ "$MODO_USADO" = "aplicar" ]; then
+            LINEA="APLICADO A MEDIAS: la pasada arranco en aplicar y NO termino; puede haber ficheros ya comprimidos. Mirar el log del paso 5."
+          elif [ "$GUARDA_VERDE" = "false" ]; then
+            LINEA="SIMULACRO: no se ha escrito nada (motivo: guarda roja)"
+          elif [ -z "$GUARDA_VERDE" ]; then
+            LINEA="SIMULACRO: no se ha escrito nada (motivo: la guarda no llego a medir)"
+          elif [ "$MODO_USADO" = "ensayo" ] && [ "$EVENTO" = "workflow_dispatch" ]; then
+            LINEA="SIMULACRO: no se ha escrito nada (motivo: lanzamiento manual en ensayo)"
+          elif [ "$MODO_USADO" = "ensayo" ]; then
+            # 🔴 ESTE ES EL FALLO DE LAS 21 CORRIDAS, VUELTO. Con la guarda
+            #    verde el automatico tiene que aplicar; si llega aqui en ensayo
+            #    es que la expresion del MODO volvio a caerse sola, y esta vez
+            #    lo dice la primera linea en vez de callarlo un run verde.
+            LINEA="SIMULACRO: no se ha escrito nada (motivo: el disparo automatico cayo a ensayo con la guarda verde -- eso es el fallo viejo; mirar el MODO del paso 5)"
+          elif [ "$MODO_USADO" = "guarda" ]; then
+            LINEA="SIMULACRO: no se ha escrito nada (motivo: lanzamiento manual en modo guarda)"
+          else
+            LINEA="SIMULACRO: no se ha escrito nada (motivo: la pasada no llego a correr)"
+          fi
+          {
+            echo "$LINEA"
+            echo
+            echo '---'
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| disparo | ${EVENTO} |"
+            echo "| MODO del paso 5 | ${MODO_USADO:-(no llego a correr)} |"
+            echo "| guarda ANTES | ${GUARDA_VERDE:-(sin medir)} · huerfanas hist=${HUERFANAS_H:-?} viva=${HUERFANAS_V:-?} |"
+            echo "| paso 5 | ${RESULTADO:-skipped} |"
+            echo "| guarda DESPUES | ${GUARDA_FINAL:-skipped} |"
+            echo "| DIAS · LIMITE · SIN_HIST | ${DIAS} · ${LIMITE} · ${SIN_HIST} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "$LINEA"
+
+      - name: 8) Telegram FALLO
         if: failure()
         env:
           TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}

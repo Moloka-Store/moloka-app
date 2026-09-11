@@ -58,6 +58,12 @@
 #   MODO=ensayo   (por defecto) lista lo que haria y no escribe NADA.
 #   MODO=aplicar  ejecuta la pasada.
 #   MODO=guarda   solo el chequeo de integridad. Codigo 1 si hay huerfanas.
+#
+# LO QUE LE CUENTA AL WORKFLOW (ver _apuntar_salida)
+#   En `MODO=guarda`  -> guarda_verde=true|false, huerfanas_hist, huerfanas_viva
+#   Al final de una pasada de `aplicar` -> comprimidos=<n>
+#   Desde el 11-sep-2026 el disparo automatico APLICA si `guarda_verde` vale
+#   'true', asi que esas tres lineas ya no son informativas: son el permiso.
 # ============================================================================
 
 import gzip
@@ -236,6 +242,30 @@ def _sb():
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
+def _apuntar_salida(**pares):
+    """Deja `clave=valor` en $GITHUB_OUTPUT, que es como un paso de Actions le
+    cuenta algo al siguiente.
+
+    🔴 POR QUE NO VALE EL CODIGO DE SALIDA, QUE ERA LO FACIL. `MODO=guarda`
+    termina en 1 cuando hay huerfanas, pero tambien termina != 0 si falta un
+    secreto, si la base no responde o si el script revienta por cualquier otra
+    cosa. Quien decide si se puede BORRAR tiene que leer lo que la guarda
+    MIDIO, no el codigo con el que murio: son dos preguntas distintas y una de
+    ellas no se puede contestar desde fuera.
+
+    🔒 Y LA AUSENCIA ES EL LADO CERRADO. Si esto no llega a escribirse, el
+    workflow ve el output vacio, que no es 'true', y la pasada cae a `ensayo`.
+    Fuera de Actions la variable no existe y esta funcion no hace nada, asi que
+    el script se sigue pudiendo correr a mano y en el banco de pruebas igual
+    que antes."""
+    destino = os.environ.get('GITHUB_OUTPUT', '')
+    if not destino:
+        return
+    with io.open(destino, 'a', encoding='utf-8') as fh:
+        for clave, valor in pares.items():
+            fh.write(f'{clave}={valor}\n')
+
+
 def correr_guarda(cur):
     cur.execute(SQL_GUARDA)
     hist, viva = cur.fetchone()
@@ -272,6 +302,11 @@ def main():
     # roto anterior. Se para.
     ok, hist0, viva0 = correr_guarda(cur)
     if MODO == 'guarda':
+        # El veredicto se DICE, no se deduce del codigo de salida. Desde el
+        # 11-sep-2026 esta linea es el permiso del disparo automatico para
+        # aplicar; el motivo largo esta en el paso 5 del workflow.
+        _apuntar_salida(guarda_verde=('true' if ok else 'false'),
+                        huerfanas_hist=hist0, huerfanas_viva=viva0)
         cur.close(); con.close()
         sys.exit(0 if ok else 1)
     if not ok:
@@ -398,6 +433,10 @@ def main():
 
     # --- La guarda otra vez, que es lo unico que prueba que quedo bien ------
     ok, hist1, viva1 = correr_guarda(cur)
+    # La cifra que el paso 7 del workflow pone en la PRIMERA linea del resumen
+    # de la corrida. Aqui abajo ya estaba impresa; el problema era que solo
+    # estaba impresa.
+    _apuntar_salida(comprimidos=len(hechos))
     print(f"\n--- RESUMEN ---", flush=True)
     print(f"    ficheros comprimidos: {len(hechos)}", flush=True)
     print(f"    bytes antes: {sum(h['bytes'] for h in hechos)} · despues: "
