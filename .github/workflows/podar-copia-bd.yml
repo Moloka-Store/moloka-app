@@ -39,9 +39,12 @@ name: Moloka - Podar copia BD (v1)
 #    `workflow_dispatch` no se puede lanzar desde una rama (exige estar en
 #    `main`), así que la única forma real de comprobarlo es que la propia
 #    primera ejecución lo haga. El paso 4 crea un objeto de sondeo de un byte
-#    bajo `bd/` y lo borra; si el borrado falla, el job se para AQUÍ, sin
-#    listar ni tocar ni un volcado de verdad, y lo dice: la llave la amplía
-#    Fernando en Cloudflare, no se puede arreglar desde este workflow.
+#    bajo `_sondas/` (NUNCA `bd/`: si el borrado fallara y la sonda se
+#    quedara en `bd/`, la guarda de nombres inválidos vería ese objeto la
+#    próxima vez y dejaría la poda inutilizada para siempre) y lo borra; si
+#    el borrado falla, el job se para AQUÍ, sin listar ni tocar ni un volcado
+#    de verdad, y lo dice con la ruta exacta que ha quedado: la llave la
+#    amplía Fernando en Cloudflare, no se puede arreglar desde este workflow.
 #
 # `modo=aplicar` exige además teclear `BORRAR` en `confirmacion` (paso 3,
 # ANTES de gastar nada en R2): un cerrojo que se teclea a propósito, mismo
@@ -108,6 +111,15 @@ jobs:
         #    forma real de comprobarlo, y hacerlo también en ensayo es lo que
         #    convierte el primer lanzamiento en la propia comprobación que
         #    pedía el encargo antes de fiarse de este workflow.
+        # 🔴 AUDITORÍA DE COWORK (17-sep-2026): la sonda va en SU PROPIO
+        #    prefijo, `_sondas/`, nunca en `bd/`. Si viviera en `bd/` y el
+        #    borrado fallara, ese objeto se quedaría bajo `bd/` para siempre —
+        #    y `construir_plan()` lo vería la próxima vez como un nombre que
+        #    no casa el patrón del volcado, con lo que la guarda de "nombre
+        #    inválido" dejaría la poda inutilizada de forma permanente (además
+        #    de ensuciar el prefijo del que `restaurar-staging.yml` coge «el
+        #    último»). `_sondas/` no es `bd/`, `v2/` ni `storage/`: no lo mira
+        #    ningún otro workflow ni ninguna guarda de este.
         env:
           AWS_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -115,12 +127,13 @@ jobs:
         run: |
           set -euo pipefail
           EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          SONDA="${PREFIJO}/_permtest_$(date -u +%Y%m%d%H%M%S)_${GITHUB_RUN_ID}.tmp"
+          SONDA="_sondas/podar-copia-bd_$(date -u +%Y%m%d%H%M%S)_${GITHUB_RUN_ID}.tmp"
           echo "sonda de permiso" | aws s3 cp - "s3://${BUCKET_R2}/${SONDA}" \
             --endpoint-url "$EP" --region auto
           if ! aws s3 rm "s3://${BUCKET_R2}/${SONDA}" --endpoint-url "$EP" --region auto; then
             echo "::error::La llave R2 de la v1 (R2_ACCESS_KEY_ID) NO puede BORRAR objetos."
             echo "::error::Esto lo amplía Fernando en Cloudflare (el permiso del token), no se arregla desde aquí."
+            echo "::error::La sonda ha quedado en s3://${BUCKET_R2}/${SONDA} — Fernando la quita a mano."
             echo "::error::No se ha listado ni tocado ningún volcado de verdad."
             exit 1
           fi

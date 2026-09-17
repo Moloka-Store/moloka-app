@@ -216,10 +216,20 @@ def _fecha_de(o):
 
 
 def cargar_r2(ruta):
-    """{nombre: tamaño en bytes} de un TSV `nombre\\tbytes` (el que deja el
-    paso 4 del workflow). Ruta vacía, inexistente o con líneas que no cuadran
-    -> se ignoran esas líneas, nunca se revienta por una fila rara: es un
-    listado externo, no algo que este script controle."""
+    """{nombre: [tamaños vistos, en el orden del TSV]} de un TSV
+    `nombre\\tbytes` (el que deja el paso 4 del workflow, con los DOS
+    prefijos -- v1 y v2 -- concatenados en el mismo fichero).
+
+    🔴 AUDITORÍA DE COWORK (17-sep-2026): UNA LISTA, NO UN ÚNICO VALOR. El
+    mismo nombre puede aparecer en los dos prefijos con tamaños DISTINTOS
+    (una copia vieja y una nueva del mismo fichero), y `filtrar_por_r2()`
+    necesita ver los dos para decidir si ALGUNO cuadra con Supabase. Quedarse
+    con un solo tamaño por nombre (el último leído, con un dict a secas)
+    tapaba una copia buena con una mala sin decirlo.
+
+    Ruta vacía, inexistente o con líneas que no cuadran -> se ignoran esas
+    líneas, nunca se revienta por una fila rara: es un listado externo, no
+    algo que este script controle."""
     tabla = {}
     if not ruta or not os.path.isfile(ruta):
         return tabla
@@ -228,32 +238,52 @@ def cargar_r2(ruta):
             partes = linea.rstrip('\n').split('\t')
             if len(partes) != 2 or not partes[0]:
                 continue
+            # 🔴 EL int() VA ANTES DEL setdefault: si el tamaño no se puede
+            #    parsear, la línea se ignora entera. Al revés (setdefault
+            #    primero, int() dentro del append) deja una lista VACÍA
+            #    colgada para ese nombre -- una fila rara no debe crear una
+            #    entrada, ni vacía, que no estaba.
             try:
-                tabla[partes[0]] = int(partes[1])
+                tam = int(partes[1])
             except ValueError:
                 continue
+            tabla.setdefault(partes[0], []).append(tam)
     return tabla
 
 
 def filtrar_por_r2(elegidos, tam_supabase, tam_r2):
     """Separa `elegidos` en (aptos, sin_red), en el mismo orden.
 
-    `aptos`   : están en R2 (bajo cualquiera de los dos prefijos que cargó
-                `cargar_r2`) con el MISMO tamaño que en Supabase.
-    `sin_red` : [(nombre, motivo), ...] — falta, o pesa distinto.
+    `tam_r2`  : {nombre: [tamaños vistos en R2]}, el que da `cargar_r2()`.
+    `aptos`   : están en R2 (bajo cualquiera de los dos prefijos) y ALGUNO de
+                los tamaños vistos coincide con el de Supabase.
+    `sin_red` : [(nombre, motivo), ...] — falta de R2, tamaño desconocido en
+                Supabase, o ninguno de los tamaños de R2 coincide.
 
     🔴 SIN R2, NADA ES APTO. Si `tam_r2` viene vacío (listado que no se pudo
     leer, o los dos prefijos vacíos a la vez), TODOS caen a `sin_red`: fallar
     cerrado es la guarda; un listado vacío que dejara pasar todo no sería
-    ninguna."""
+    ninguna.
+
+    🔴 AUDITORÍA DE COWORK (17-sep-2026): TAMAÑO DESCONOCIDO EN SUPABASE
+    TAMBIÉN ES SIN_RED. Antes, si `tam_supabase` no traía el tamaño de un
+    fichero (`esperado is None`), el fichero pasaba como apto solo por
+    aparecer el nombre en R2 -- sin comparar nada. Eso no es una guarda: es
+    confiar en el nombre. Ahora, sin tamaño que comparar, no hay comparación
+    posible, y eso es exactamente un `sin_red` más."""
     aptos, sin_red = [], []
     for n in elegidos:
-        if n not in tam_r2:
+        vistos = tam_r2.get(n)
+        if not vistos:
             sin_red.append((n, 'no está en R2 (ni storage/ ni v2/storage/, bajo informes/keepa_escaparate/)'))
             continue
         esperado = tam_supabase.get(n)
-        if esperado is not None and tam_r2[n] != esperado:
-            sin_red.append((n, f'en R2 pesa distinto (Supabase {esperado} B / R2 {tam_r2[n]} B)'))
+        if esperado is None:
+            sin_red.append((n, 'no se conoce su tamaño en Supabase: no se puede comparar'))
+            continue
+        if esperado not in vistos:
+            sin_red.append((n, f'en R2 pesa distinto (Supabase {esperado} B / R2 '
+                               f'{", ".join(str(v) for v in vistos)} B)'))
             continue
         aptos.append(n)
     return aptos, sin_red

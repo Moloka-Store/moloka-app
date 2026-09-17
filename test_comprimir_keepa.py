@@ -593,6 +593,8 @@ eq('(M) … y sigue diciendolo en el log, como siempre',
 print("\n(N) la guarda por fichero contra R2")
 
 # cargar_r2: un TSV normal, con una linea rara que se ignora sin reventar.
+# 🔴 AUDITORÍA DE COWORK (17-sep-2026): devuelve LISTAS -- el mismo nombre
+#    puede venir de los dos prefijos (v1 y v2) con tamaños distintos.
 _tmp_r2 = tempfile.mkdtemp()
 _ruta_r2 = os.path.join(_tmp_r2, 'r2.tsv')
 with io.open(_ruta_r2, 'w', encoding='utf-8') as _fh:
@@ -600,15 +602,16 @@ with io.open(_ruta_r2, 'w', encoding='utf-8') as _fh:
     _fh.write('Y (1).csv\t999\n')          # nombre con espacios y parentesis
     _fh.write('linea rota sin tabulador\n')  # se ignora
     _fh.write('Z.csv\tno-es-un-numero\n')    # se ignora
-eq('(N) cargar_r2 lee nombre y tamaño', cargar_r2(_ruta_r2),
-   {'X.csv': 1234, 'Y (1).csv': 999})
+    _fh.write('X.csv\t1234\n')             # el mismo nombre, otra vez (v1 + v2)
+eq('(N) cargar_r2 lee nombre y tamaño, EN LISTAS', cargar_r2(_ruta_r2),
+   {'X.csv': [1234, 1234], 'Y (1).csv': [999]})
 eq('(N) 🔴 ruta vacía -> {} (no revienta)', cargar_r2(''), {})
 eq('(N) 🔴 ruta que no existe -> {} (no revienta)',
    cargar_r2(os.path.join(_tmp_r2, 'no_existe.tsv')), {})
 shutil.rmtree(_tmp_r2, ignore_errors=True)
 
 # filtrar_por_r2: presente y mismo tamaño -> apto.
-_aptos, _sin_red = filtrar_por_r2(['a.csv'], {'a.csv': 100}, {'a.csv': 100})
+_aptos, _sin_red = filtrar_por_r2(['a.csv'], {'a.csv': 100}, {'a.csv': [100]})
 eq('(N) en R2 con el mismo tamaño -> apto', (_aptos, _sin_red), (['a.csv'], []))
 
 # 🔴 no esta en R2 -> sin_red, con el motivo.
@@ -617,10 +620,36 @@ eq('(N) 🔴 no esta en R2 -> sin_red', _aptos, [])
 eq('(N) … y dice que no esta', 'no está en R2' in dict(_sin_red)['b.csv'], True)
 
 # 🔴 esta, pero pesa distinto -> sin_red, con las dos cifras.
-_aptos, _sin_red = filtrar_por_r2(['c.csv'], {'c.csv': 100}, {'c.csv': 50})
+_aptos, _sin_red = filtrar_por_r2(['c.csv'], {'c.csv': 100}, {'c.csv': [50]})
 eq('(N) 🔴 pesa distinto -> sin_red', _aptos, [])
 eq('(N) … y dice las dos cifras', ('100' in dict(_sin_red)['c.csv'] and
                                    '50' in dict(_sin_red)['c.csv']), True)
+
+# 🔴 AUDITORÍA DE COWORK (17-sep-2026), caso 1: tamaño DESCONOCIDO en
+#    Supabase (`esperado is None`) -> sin_red, NUNCA apto solo por el nombre.
+#    Antes de la auditoría esto pasaba como apto sin comparar nada.
+_aptos, _sin_red = filtrar_por_r2(['d.csv'], {}, {'d.csv': [500]})
+eq('(N) 🔴 sin tamaño en Supabase -> sin_red, no apto por el nombre solo', _aptos, [])
+eq('(N) … y lo dice: no se puede comparar',
+   'no se puede comparar' in dict(_sin_red)['d.csv'], True)
+# La direccion VERDE del mismo caso: CON tamaño, el mismo fichero SI pasa.
+_aptos_verde, _ = filtrar_por_r2(['d.csv'], {'d.csv': 500}, {'d.csv': [500]})
+eq('(N) … y con el tamaño puesto, el mismo fichero SI es apto', _aptos_verde, ['d.csv'])
+
+# 🔴 AUDITORÍA DE COWORK (17-sep-2026), caso 2: el mismo nombre en los DOS
+#    prefijos con tamaños DISTINTOS -> apto si ALGUNO cuadra con Supabase,
+#    sin importar el orden en que se leyeron (antes ganaba "el ultimo leido",
+#    en silencio).
+_aptos, _sin_red = filtrar_por_r2(['e.csv'], {'e.csv': 500}, {'e.csv': [999, 500]})
+eq('(N) 🔴 dos tamaños en R2, el SEGUNDO cuadra -> apto', (_aptos, _sin_red), (['e.csv'], []))
+_aptos, _sin_red = filtrar_por_r2(['e.csv'], {'e.csv': 500}, {'e.csv': [500, 999]})
+eq('(N) 🔴 … y si cuadra el PRIMERO, tambien -> apto (no importa el orden)',
+   (_aptos, _sin_red), (['e.csv'], []))
+_aptos, _sin_red = filtrar_por_r2(['e.csv'], {'e.csv': 500}, {'e.csv': [111, 222]})
+eq('(N) 🔴 … y si NINGUNO cuadra -> sin_red, con los dos vistos',
+   _aptos, [])
+eq('(N) … los dos tamaños en el motivo', ('111' in dict(_sin_red)['e.csv'] and
+                                          '222' in dict(_sin_red)['e.csv']), True)
 
 # 🔒 SIN R2, NADA ES APTO — el listado vacío no deja pasar nada por omisión.
 _aptos, _sin_red = filtrar_por_r2(['a.csv', 'b.csv'], {'a.csv': 1, 'b.csv': 2}, {})
@@ -630,9 +659,9 @@ eq('(N) … los dos, no solo uno', sorted(n for n, _ in _sin_red), ['a.csv', 'b.
 # El orden se conserva, y una lista vacía de partida no revienta nada.
 _aptos, _sin_red = filtrar_por_r2(['z.csv', 'a.csv'],
                                   {'z.csv': 1, 'a.csv': 2},
-                                  {'z.csv': 1, 'a.csv': 2})
+                                  {'z.csv': [1], 'a.csv': [2]})
 eq('(N) el orden de `elegidos` se conserva en `aptos`', _aptos, ['z.csv', 'a.csv'])
-eq('(N) elegidos=[] -> ([], [])', filtrar_por_r2([], {}, {'x': 1}), ([], []))
+eq('(N) elegidos=[] -> ([], [])', filtrar_por_r2([], {}, {'x': [1]}), ([], []))
 
 # --- (O) 🔒 Y CABLEADO DE VERDAD EN main(), no solo en la funcion pura -------
 # Ejecutando el main() real en ENSAYO (no toca la parte de la base que este
