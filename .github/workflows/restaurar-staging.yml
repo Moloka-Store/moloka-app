@@ -1254,6 +1254,16 @@ jobs:
           HECHAS=$(sed -n     's/^sentencias_ejecutadas|//p'           permisos_resumen.txt)
           RLS_NO=$(sed -n     's/^storage_rls_no_se_pudo|//p'          permisos_resumen.txt)
 
+          # 🔒 CERO NO ES «CERO PROBLEMAS», ES «NO HE PODIDO LEERLO». Si el resumen del
+          #    fichero no trae los recuentos, las comparaciones de abajo compararian
+          #    cadenas vacias y el veredicto diria que todo bien sin haber mirado.
+          for par in "sentencias_ejecutadas=$HECHAS" "storage_politicas_del_fichero=$POL_FICHERO"                      "storage_politicas_reemplazadas=$POL_REEMP" "storage_politicas_nuevas=$POL_NUEVAS"                      "storage_politicas_conservadas=$POL_CONS"; do
+            if [ -z "${par#*=}" ]; then
+              echo "::error::El resumen del fichero de permisos no trae '${par%%=*}'. Sin eso este veredicto no puede juzgar nada. Mira la salida del paso 4b."
+              exit 1
+            fi
+          done
+
           {
             echo ""
             echo "### 5b · ¿los permisos de staging son los de produccion?"
