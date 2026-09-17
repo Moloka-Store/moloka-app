@@ -1,0 +1,184 @@
+name: Moloka - Podar copia BD (v1)
+
+# ============================================================================
+# 🔴 17-SEP-2026 — LA PODA DE s3://moloka-backups/bd/. DECISIÓN DE FERNANDO.
+# ----------------------------------------------------------------------------
+#   `backup-bd.yml` llevaba desde el 14-jul-2026 subiendo un volcado por noche
+#   a `bd/` sin que nada los recortara nunca — 71 volcados medidos el
+#   17-sep-2026, ~27 MB cada uno y subiendo (~0,85 GB). Al apagar su
+#   `schedule` (mismo PR) esa acumulación se para, pero lo que ya hay sigue
+#   ahí. Este workflow lo recorta a mano, una vez, y queda disponible para
+#   relanzar si algún día hiciera falta (aunque con el `schedule` apagado ya
+#   no debería acumularse gran cosa más en `bd/`).
+#
+#   LA REGLA, LITERAL: conservar TRES copias — la más cercana a hace 7 días, a
+#   hace 15 y a hace 21, contados desde el día en que se ejecuta — y borrar
+#   TODAS las demás de `bd/`. La decide `podar_copia_bd.py` (banco de pruebas:
+#   `test_podar_copia_bd.py`); este workflow solo lista R2, le pasa el
+#   listado por stdin y ejecuta lo que el script dice que hay que borrar.
+#
+# 🔒 SOLO `bd/`, NUNCA `v2/` NI `storage/`. El prefijo va FIJO en el `env` del
+#    job (`PREFIJO: bd`), no llega de ningún input: no hay manera de pedirle a
+#    este workflow que toque el prefijo de la v2 o los ficheros. La poda de
+#    `v2/bd/` ya vive, aparte, en `copia-r2.yml` (paso 9, de la v2) — no se
+#    toca aquí ni se junta con esto.
+#
+# 🔴 DOS GUARDAS, Y LAS DOS PARAN TODO EL BORRADO (no fichero a fichero, al
+#    revés que la guarda de R2 del compresor de Keepa — aquí lo que se pierde
+#    es la ÚLTIMA copia de un volcado, no algo reprocesable):
+#      · menos de 4 objetos bajo bd/ -> no hay nada razonable que podar;
+#      · CUALQUIER objeto bajo bd/ que no tenga el nombre de un volcado
+#        (`moloka_AAAA-MM-DD_HHMM.sql.gz`) -> se para y se dice cuál, porque
+#        no se puede leer su fecha y "asumir que es viejo" es exactamente el
+#        error que este tipo de guarda existe para no cometer.
+#
+# 🔴 ANTES DE PODER PODAR, LA PRIMERA VEZ QUE ESTO CORRE COMPRUEBA SI LA LLAVE
+#    R2 DE LA v1 PUEDE BORRAR. `R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY` se
+#    dieron de alta hace meses solo para SUBIR (`backup-bd.yml`) — nadie ha
+#    probado nunca si el token de Cloudflare tiene permiso de borrado, y
+#    `workflow_dispatch` no se puede lanzar desde una rama (exige estar en
+#    `main`), así que la única forma real de comprobarlo es que la propia
+#    primera ejecución lo haga. El paso 4 crea un objeto de sondeo de un byte
+#    bajo `bd/` y lo borra; si el borrado falla, el job se para AQUÍ, sin
+#    listar ni tocar ni un volcado de verdad, y lo dice: la llave la amplía
+#    Fernando en Cloudflare, no se puede arreglar desde este workflow.
+#
+# `modo=aplicar` exige además teclear `BORRAR` en `confirmacion` (paso 3,
+# ANTES de gastar nada en R2): un cerrojo que se teclea a propósito, mismo
+# patrón que `aplicar-migracion.yml` con producción.
+#
+# TRAS FUSIONAR: se lanza SOLO el ensayo, y la lista (con fechas, tamaños y
+# total) va al parte y a la respuesta a Fernando. `aplicar` no se lanza hasta
+# que él, con esa lista delante, diga que sí con sus palabras.
+# ============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: 'ensayo = solo lista que conserva/borra · aplicar = borra de verdad'
+        type: choice
+        options: [ensayo, aplicar]
+        default: ensayo
+      confirmacion:
+        description: 'Para aplicar: escribe BORRAR (en mayúsculas, tal cual). En ensayo se ignora.'
+        default: ''
+
+concurrency:
+  group: podar-copia-bd
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  podar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # 🔒 FIJO AQUÍ, NUNCA DESDE UN INPUT: ver la cabecera.
+      PREFIJO: bd
+      BUCKET_R2: moloka-backups
+    steps:
+      - name: 1) Checkout
+        uses: actions/checkout@v4
+
+      - name: 2) Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 3) Cerrojo - aplicar se teclea a proposito (BORRAR)
+        # 🔒 Va ANTES de tocar R2 para nada: un `confirmacion` mal escrito para
+        #    todo el job aqui, sin gastar ni una llamada a Cloudflare.
+        env:
+          MODO: ${{ inputs.modo }}
+          CONFIRMACION: ${{ inputs.confirmacion }}
+        run: |
+          if [ "$MODO" = "aplicar" ] && [ "$CONFIRMACION" != "BORRAR" ]; then
+            echo "::error::Vas a BORRAR volcados de la copia de la v1 en R2 (s3://moloka-backups/bd/)."
+            echo "::error::Para seguir, escribe literalmente BORRAR en 'confirmacion'."
+            echo "::error::(Recibido: '${CONFIRMACION}'.) No es burocracia: es que lo mires."
+            exit 1
+          fi
+          echo "Cerrojo OK (modo=$MODO)."
+
+      - name: 4) Sonda - ¿puede esta llave BORRAR en R2?
+        # 🔴 VER LA CABECERA. Corre SIEMPRE (ensayo y aplicar): es la única
+        #    forma real de comprobarlo, y hacerlo también en ensayo es lo que
+        #    convierte el primer lanzamiento en la propia comprobación que
+        #    pedía el encargo antes de fiarse de este workflow.
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID:         ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          SONDA="${PREFIJO}/_permtest_$(date -u +%Y%m%d%H%M%S)_${GITHUB_RUN_ID}.tmp"
+          echo "sonda de permiso" | aws s3 cp - "s3://${BUCKET_R2}/${SONDA}" \
+            --endpoint-url "$EP" --region auto
+          if ! aws s3 rm "s3://${BUCKET_R2}/${SONDA}" --endpoint-url "$EP" --region auto; then
+            echo "::error::La llave R2 de la v1 (R2_ACCESS_KEY_ID) NO puede BORRAR objetos."
+            echo "::error::Esto lo amplía Fernando en Cloudflare (el permiso del token), no se arregla desde aquí."
+            echo "::error::No se ha listado ni tocado ningún volcado de verdad."
+            exit 1
+          fi
+          echo "La llave SI puede borrar (sonda creada y retirada: $SONDA)."
+
+      - name: 5) Listar bd/ en R2
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID:         ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          # 🔒 El nombre va al final, sin tocar por columnas (mismo patron que
+          #    copia-r2.yml, medido alli con nombres con espacios).
+          aws s3 ls "s3://${BUCKET_R2}/${PREFIJO}/" --endpoint-url "$EP" --region auto \
+            | awk '{ tam=$3; sub(/^[^ ]+ +[^ ]+ +[^ ]+ +/, ""); print $0 "\t" tam }' \
+            > /tmp/bd_listado.tsv
+          echo "Objetos bajo ${PREFIJO}/: $(wc -l < /tmp/bd_listado.tsv)"
+
+      - name: 6) El plan (podar_copia_bd.py) - que se conserva, que se borra
+        run: |
+          set -euo pipefail
+          export HOY=$(date -u +%Y-%m-%d)
+          export SALIDA_BORRAR=/tmp/a_borrar.txt
+          python -u podar_copia_bd.py < /tmp/bd_listado.tsv
+
+      - name: 7) Aplicar el borrado
+        if: ${{ inputs.modo == 'aplicar' }}
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID:         ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          N=$(wc -l < /tmp/a_borrar.txt)
+          echo "Borrando ${N} volcado(s) de ${PREFIJO}/..."
+          while IFS= read -r F; do
+            [ -z "$F" ] && continue
+            echo "  · $F"
+            aws s3 rm "s3://${BUCKET_R2}/${PREFIJO}/${F}" --endpoint-url "$EP" --region auto
+          done < /tmp/a_borrar.txt
+          echo "Borrado completo."
+
+      - name: 8) Volver a listar bd/ (lo que queda)
+        if: ${{ inputs.modo == 'aplicar' }}
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID:         ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 ls "s3://${BUCKET_R2}/${PREFIJO}/" --endpoint-url "$EP" --region auto \
+            > /tmp/bd_final.txt
+          N=$(wc -l < /tmp/bd_final.txt)
+          TOTAL=$(awk '{s+=$3} END{printf "%.2f", (s+0)/1048576}' /tmp/bd_final.txt)
+          echo "--- Lo que queda bajo ${PREFIJO}/ ---"
+          cat /tmp/bd_final.txt
+          echo "Quedan ${N} objeto(s), ${TOTAL} MB."

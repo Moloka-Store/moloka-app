@@ -1,30 +1,53 @@
 name: Moloka - Comprimir CSV antiguos de Keepa
 
 # ============================================================================
+# 🔴 17-SEP-2026 — RELOJ PROPIO, YA NO CUELGA DEL BACKUP. DECISIÓN DE FERNANDO.
+# ----------------------------------------------------------------------------
+#   Hasta hoy este workflow se disparaba por `workflow_run` cuando
+#   `backup-bd.yml` (v1) terminaba en éxito, y ESA era la red de seguridad: si
+#   el backup de esta noche copió `informes/` a R2, comprimir hoy es seguro.
+#
+#   Hoy se apaga el `schedule` de `backup-bd.yml` (parte del mismo PR): la
+#   copia de verdad se mudó a `moloka-app-v2` (`copia-r2.yml`, semanal, el
+#   LUNES, `s3://moloka-backups/v2/`). Un `workflow_run` NO CRUZA REPOS, así
+#   que ese workflow nuevo nunca podría disparar a este. Colgar de un backup
+#   que ya no corre a diario habría dejado esto sin disparo — huérfano de
+#   verdad, no solo de forma.
+#
+#   🔒 LA RED CAMBIA DE FORMA, Y ES POR ESO POR LO QUE HACE FALTA UN CRON
+#      PROPIO: ya no puede ser "el backup de esta noche salió bien" (no hay
+#      backup diario del que colgar), así que pasa a ser POR FICHERO — antes
+#      de borrar un CSV original, ESE objeto tiene que estar en R2 con el
+#      MISMO TAMAÑO, bajo `v2/storage/informes/keepa_escaparate/` (la copia
+#      viva, semanal) o bajo `storage/informes/keepa_escaparate/` (la copia
+#      vieja de la v1, congelada desde hoy pero con 71 volcados detrás). Ver
+#      el paso 4 (nuevo) y `filtrar_por_r2()` en comprimir_keepa_antiguos.py.
+#      Si un fichero no aparece en ninguno de los dos sitios, ESE no se toca
+#      — se compensa el resto de la tanda y el run acaba en ROJO nombrando
+#      cuál falta, para que no se lea como un verde con un hueco dentro.
+#
+#   CRON: MARTES, no lunes. `copia-r2.yml` de la v2 corre el lunes; esta pasada
+#   necesita que ESA copia ya esté en R2 antes de comprobar los ficheros de la
+#   semana. Un día entero de margen es de sobra pase lo que pase con el retraso
+#   medido de los `schedule` en esta cuenta (~5 h: el `15 2 * * 1` de la v2
+#   arranca de verdad hacia las 07:15-07:53 UTC del lunes). Se deja
+#   `15 4 * * 2` (martes 04:15 UTC nominal, arranca de verdad hacia las
+#   09-10 UTC) — más de 24 h después de que la copia del lunes haya aterrizado,
+#   y aunque el margen fallara la guarda por fichero no dejaría borrar nada sin
+#   copia: solo tardaría una semana más en comprimirse.
+#
 # 🔴 DESDE EL 11-SEP-2026 EL DISPARO AUTOMATICO BORRA DE VERDAD, y solo lo hace
-#    si la guarda del paso 4 salio VERDE. Antes no borraba nunca -- ni queriendo:
-#    la expresion del MODO caia a 'ensayo' siempre, y las 21 corridas
+#    si la guarda del paso 5 (antes 4) salio VERDE. Antes no borraba nunca -- ni
+#    queriendo: la expresion del MODO caia a 'ensayo' siempre, y las 21 corridas
 #    automaticas fueron simulacros. El motivo entero, con el run medido, esta en
-#    el `env:` del paso 5. Lo de abajo sigue valiendo palabra por palabra, y
-#    ahora mas: es la red de la que cuelga ese borrado.
+#    el `env:` del paso 6 (antes 5). Lo de abajo sigue valiendo palabra por
+#    palabra, y ahora mas: es la red de la que cuelga ese borrado. Esa guarda
+#    (`MODO=guarda`) mide otra cosa, y no ha cambiado: que `keepa_escaparate` y
+#    su histórico no citen ya un fichero que falte del bucket `informes` de
+#    SUPABASE — consistencia interna Supabase↔Supabase, nunca miró R2. La
+#    guarda por fichero del paso 4 es la que ahora vigila R2.
 #
 # ============================================================================
-# 🔴 POR QUE CUELGA DEL BACKUP Y NO DE UN CRON PROPIO
-#   Este workflow BORRA originales. La unica red que hay debajo es la copia en
-#   Cloudflare R2 que deja `backup-bd.yml` (paso 6), y esa copia se hace
-#   `aws s3 sync` SIN `--delete` a proposito -- o sea que lo que ya subio a R2
-#   sobrevive aunque se borre en Supabase.
-#
-#   Encadenarlo por `workflow_run` a que el backup TERMINE EN VERDE convierte
-#   esa red en una precondicion en vez de en una suposicion: no se comprime
-#   nada que no acabe de copiarse a R2 esta misma noche. Un cron independiente
-#   podria correr la noche que el backup fallo, que es justo la noche en la que
-#   no hay que borrar nada.
-#
-# 🔒 Y POR ESO NO VA DENTRO DE backup-bd.yml. Si esto se cayera, no puede
-#    arrastrar al backup: la copia es mas importante que el espacio. Workflows
-#    separados, uno depende del otro, y el que manda es el backup.
-#
 # 🔒 TAMPOCO VA PEGADO A procesar-keepa-escaparate.yml, que era la otra opcion
 #    obvia. Ese corre cuando Fernando sube un export -- justo cuando hay un
 #    fichero recien llegado y el buzon esta en su momento mas delicado. La
@@ -38,7 +61,10 @@ name: Moloka - Comprimir CSV antiguos de Keepa
 #
 # LIMITE=20 en la corrida automatica: por tandas, no porque no quepa -- los 64
 # ficheros en alcance ocupan 15,6 MB comprimidos y hay ~151 MiB libres -- sino
-# porque una tanda corta hace barato el arreglo si algo sale mal.
+# porque una tanda corta hace barato el arreglo si algo sale mal. Al pasar de
+# diario a semanal el ritmo de llegada no cambia (Fernando sigue subiendo
+# exports cuando le llegan), así que lo que se acumula entre pasadas es lo
+# nuevo a medir: ver el parte del encargo para la cifra del día del cambio.
 #
 # ============================================================================
 # 🔴 SIN_HIST=incluir NO SE EJECUTA. NUNCA. Y NO ES UN DESCUIDO.
@@ -67,9 +93,10 @@ name: Moloka - Comprimir CSV antiguos de Keepa
 # ============================================================================
 
 on:
-  workflow_run:
-    workflows: ["Moloka - Backup BD"]
-    types: [completed]
+  schedule:
+    # Martes 04:15 UTC nominal (arranca de verdad ~09-10 UTC). Ver la cabecera:
+    # más de 24 h después de que `copia-r2.yml` (v2, lunes) haya aterrizado.
+    - cron: '15 4 * * 2'
   workflow_dispatch:
     inputs:
       modo:
@@ -99,19 +126,20 @@ concurrency:
 
 jobs:
   comprimir:
-    # 🔴 Solo si el backup de esta noche acabo BIEN. Un `completed` incluye
-    #    `failure` y `cancelled`: sin este `if`, la noche que el backup se cae
-    #    seria exactamente la noche en la que borrariamos sin red.
+    # 🔴 YA NO HAY "el backup de esta noche acabo BIEN" DEL QUE COLGAR (ver la
+    #    cabecera: `workflow_run` no cruza repos). La lista blanca de eventos
+    #    se deja explícita a propósito, para que un disparador nuevo algún día
+    #    tenga que venir a decidir aquí si entra, en vez de colarse por omisión.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      github.event_name == 'schedule'
     runs-on: ubuntu-latest
     env:
       PYTHONIOENCODING: utf-8
       # 🔴 MODO YA NO VIVE AQUI, Y NO ES UN DETALLE DE ESTILO. Desde el
-      #    11-sep-2026 depende de lo que MIDIO la guarda del paso 4, y el `env`
+      #    11-sep-2026 depende de lo que MIDIO la guarda del paso 5, y el `env`
       #    del job se resuelve ANTES de que exista ningun paso: no puede ver
-      #    `steps.*`. Se decide en el `env` del paso 5, que es donde esta
+      #    `steps.*`. Se decide en el `env` del paso 6, que es donde esta
       #    escrito el motivo entero. No lo devuelvas aqui.
       DIAS:   ${{ github.event.inputs.dias   || '2' }}
       LIMITE: ${{ github.event.inputs.limite || '20' }}
@@ -134,10 +162,43 @@ jobs:
         # para el UPDATE del historico. requirements.txt no lleva psycopg2.
         run: pip install --quiet psycopg2-binary supabase==2.31.0
 
-      - name: 4) La guarda ANTES (si ya venimos rotos, no se toca nada)
-        # 🔒 Lleva `id` porque el paso 5 decide con lo que esta guarda MIDE: el
+      - name: 4) Listar R2 bajo informes/keepa_escaparate/ (v1 y v2)
+        # 🔴 LA GUARDA POR FICHERO (ver la cabecera). Se lista aqui, en shell,
+        #    igual que el resto de listados de R2 de este repo: el script de
+        #    Python no lleva credenciales de AWS, solo lee el TSV que este paso
+        #    deja. LOS DOS PREFIJOS A LA VEZ: la copia viva (`v2/storage/...`,
+        #    semanal desde la v2) y la vieja de la v1 (`storage/...`,
+        #    congelada desde hoy pero con meses de volcados detras). Que un
+        #    fichero este en CUALQUIERA de los dos basta.
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID:         ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          : > /tmp/r2_informes_keepa.tsv
+          # 🔒 EL NOMBRE VA AL FINAL, SIN TOCAR POR COLUMNAS (los export de
+          #    Keepa pueden llevar espacios y parentesis): se recorta la fecha
+          #    y la hora por delante con `sub`, nunca reconstruyendo con OFS.
+          #    Mismo patron que copia-r2.yml (v2), medido alli con nombres con
+          #    espacios antes de confiar en el.
+          for PREFIJO in "storage/informes/keepa_escaparate/" "v2/storage/informes/keepa_escaparate/"; do
+            aws s3 ls "s3://moloka-backups/${PREFIJO}" --recursive \
+                --endpoint-url "$EP" --region auto \
+              | awk '{ tam=$3; sub(/^[^ ]+ +[^ ]+ +[^ ]+ +/, ""); print $0 "\t" tam }' \
+              | sed "s|^${PREFIJO}||" >> /tmp/r2_informes_keepa.tsv
+          done
+          echo "R2_LISTADO=/tmp/r2_informes_keepa.tsv" >> "$GITHUB_ENV"
+          echo "Objetos vistos en R2 bajo informes/keepa_escaparate/ (v1+v2): $(wc -l < /tmp/r2_informes_keepa.tsv)"
+
+      - name: 5) La guarda ANTES (si ya venimos rotos, no se toca nada)
+        # 🔒 Lleva `id` porque el paso 6 decide con lo que esta guarda MIDE: el
         #    script deja `guarda_verde=true|false` (y las dos cifras de
-        #    huerfanas) en $GITHUB_OUTPUT. Ver el motivo largo en el paso 5.
+        #    huerfanas) en $GITHUB_OUTPUT. Ver el motivo largo en el paso 6.
+        #    🔴 Y ESTO NO MIRA R2 EN NINGUN MOMENTO: es consistencia interna
+        #    Supabase↔Supabase (que el historico y la tabla viva no citen ya un
+        #    fichero que falte del bucket). La guarda contra R2 es el paso 4.
         id: guarda
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -146,44 +207,50 @@ jobs:
           MODO: guarda
         run: python -u comprimir_keepa_antiguos.py
 
-      - name: 5) La pasada
+      - name: 6) La pasada
         id: pasada
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           DB_URL:       ${{ secrets.SUPABASE_DB_URL }}
           GUARDA_VERDE: ${{ steps.guarda.outputs.guarda_verde }}
+          R2_LISTADO:   ${{ env.R2_LISTADO }}
           # ==================================================================
           # 🔴 EL DISPARO AUTOMATICO SI BORRA -- PERO SOLO SI LA GUARDA DEL
-          #    PASO 4 SALIO VERDE. Cambiado el 11-sep-2026. Hasta ese dia aqui
+          #    PASO 5 SALIO VERDE. Cambiado el 11-sep-2026. Hasta ese dia aqui
           #    ponia "el disparo automatico no borra nunca", y hay que leer POR
           #    QUE dejo de ser verdad antes de tocar la linea de abajo.
           #
           #    LO QUE ESTABA ROTO. La forma vieja era
           #      github.event_name == 'workflow_dispatch' && github.event.inputs.modo || 'ensayo'
-          #    y en `workflow_run` NO HAY `inputs`: la izquierda era falsa
-          #    siempre, asi que el automatico caia a 'ensayo' SIEMPRE. Medido:
-          #    21 corridas automaticas seguidas, las 21 simulacros (run
+          #    y en el disparo automatico NO HAY `inputs`: la izquierda era
+          #    falsa siempre, asi que el automatico caia a 'ensayo' SIEMPRE.
+          #    Medido: 21 corridas automaticas seguidas, las 21 simulacros (run
           #    34574217878, job 103182910140, paso 5: MODO=ensayo, alcance 99
           #    en el buzon, 20 "a tocar", 8.724 filas a reapuntar y de cierre
           #    "ENSAYO: no se ha escrito nada"). La limpieza que este fichero
           #    existe para hacer NO se hacia, y no lo noto nadie porque el run
-          #    salia VERDE. Esa mitad -- que no se note -- la arregla el paso 7.
+          #    salia VERDE. Esa mitad -- que no se note -- la arregla el paso 8.
           #
           #    LO QUE SUSTITUYE A "no borra nunca" COMO RED. No es que el
           #    automatico no pueda borrar: es que no puede borrar A CIEGAS. Son
           #    tres cosas, y ninguna es esta linea sola:
-          #      · el `if:` del job -- solo si el backup de esta noche acabo en
-          #        VERDE, porque esa copia en R2 es la unica red que hay debajo;
-          #      · el paso 4 -- la guarda de integridad tiene que salir verde, y
+          #      · el `if:` del job -- solo `workflow_dispatch` o `schedule`;
+          #      · el paso 5 -- la guarda de integridad tiene que salir verde, y
           #        lo dice ELLA en `guarda_verde`, no su codigo de salida, que
           #        vale 1 tanto por huerfanas como por un secreto que falta;
+          #      · Y AHORA, DENTRO de la pasada, fichero a fichero: el paso 4
+          #        listo R2 y el script NO toca ninguno que no aparezca alli
+          #        con el mismo tamaño (`filtrar_por_r2()`). Esto sustituye a
+          #        "el backup de esta noche acabo en success", que ya no existe
+          #        (§ cabecera): antes la red era el run entero, ahora es cada
+          #        fichero por su cuenta.
           #      · DIAS, el LIMITE de 20 por tanda y la exclusion de lo citado
           #        en la tabla viva, que no se han tocado.
           #
           #    FALLA CERRADO, Y ESO ES LO QUE HAY QUE CONSERVAR. Si
           #    `guarda_verde` no vale EXACTAMENTE la cadena 'true' -- porque
-          #    valga 'false', porque el paso 4 muriera antes de escribirla, o
+          #    valga 'false', porque el paso 5 muriera antes de escribirla, o
           #    porque alguien le cambie el nombre al output -- la expresion cae
           #    a 'ensayo'. El respaldo NUNCA es 'aplicar'. Lo caza
           #    test_comprimir_keepa.py, seccion (I), leyendo este fichero POR
@@ -195,15 +262,15 @@ jobs:
           MODO: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.modo || 'ensayo') || (steps.guarda.outputs.guarda_verde == 'true' && 'aplicar' || 'ensayo') }}
         run: |
           # El modo de verdad se apunta ANTES de correr: si la pasada muere a
-          # mitad, el veredicto del paso 7 tiene que poder decir en que modo
+          # mitad, el veredicto del paso 8 tiene que poder decir en que modo
           # murio. Y se imprime, para que el log no obligue a deducirlo.
           echo "modo=$MODO" >> "$GITHUB_OUTPUT"
-          echo "MODO=$MODO  ·  guarda_verde=${GUARDA_VERDE:-(sin medir)}"
+          echo "MODO=$MODO  ·  guarda_verde=${GUARDA_VERDE:-(sin medir)}  ·  R2_LISTADO=${R2_LISTADO:-(vacio)}"
           python -u comprimir_keepa_antiguos.py
 
-      - name: 6) La guarda DESPUES
-        # 🔒 El paso 5 ya la corre al final, pero se repite aqui como paso
-        #    SUELTO: si el 5 muriera a mitad por cualquier razon, su guarda
+      - name: 7) La guarda DESPUES
+        # 🔒 El paso 6 ya la corre al final, pero se repite aqui como paso
+        #    SUELTO: si el 6 muriera a mitad por cualquier razon, su guarda
         #    final no llegaria a ejecutarse y el workflow acabaria rojo sin
         #    decir en que estado quedo el historico. Este paso lo dice.
         id: guarda_despues
@@ -215,17 +282,25 @@ jobs:
           MODO: guarda
         run: python -u comprimir_keepa_antiguos.py
 
-      - name: 7) EL VEREDICTO, en la PRIMERA linea del resumen de la corrida
+      - name: 8) EL VEREDICTO, en la PRIMERA linea del resumen de la corrida
         # 🔴 POR QUE EXISTE ESTE PASO. Durante 21 corridas seguidas el
         #    automatico no comprimio ni un fichero, y no lo noto nadie: el run
-        #    salia VERDE, y lo unico que lo decia era el `env` del paso 5 y la
+        #    salia VERDE, y lo unico que lo decia era el `env` del paso 6 y la
         #    ultima linea de su log ("ENSAYO: no se ha escrito nada"). Un dato
         #    que hay que ir a buscar no es un dato que se mire. Desde aqui, la
         #    PRIMERA linea del resumen dice si se escribio algo -- y si no, por
         #    que no.
         #
+        # 🔴 17-SEP-2026 — AÑADE SIN_RED: la pasada puede terminar TODO lo que
+        #    tenia que comprimir y aun asi acabar en ROJO, porque algun fichero
+        #    no tenia copia en R2 y se dejo sin tocar (§ cabecera del fichero).
+        #    Eso NO es "murio a mitad" (puede que ni un solo fichero se haya
+        #    quedado a medias) y decirlo como tal seria mentir sobre lo que
+        #    paso. Por eso esta pregunta va ANTES que "APLICADO A MEDIAS".
+        #
         # 🔒 `if: always()` porque el caso que mas falta hace contar es justo el
-        #    que acaba en rojo: guarda roja, o paso 5 caido a mitad.
+        #    que acaba en rojo: guarda roja, sin copia en R2, o paso 6 caido a
+        #    mitad.
         #
         # 🔒 Ningun paso anterior escribe en $GITHUB_STEP_SUMMARY, y eso es lo
         #    que hace que esta sea LA PRIMERA linea. No se fuerza con un `>`
@@ -241,17 +316,22 @@ jobs:
           HUERFANAS_H:  ${{ steps.guarda.outputs.huerfanas_hist }}
           HUERFANAS_V:  ${{ steps.guarda.outputs.huerfanas_viva }}
           COMPRIMIDOS:  ${{ steps.pasada.outputs.comprimidos }}
+          SIN_RED:      ${{ steps.pasada.outputs.sin_red }}
           RESULTADO:    ${{ steps.pasada.outcome }}
           GUARDA_FINAL: ${{ steps.guarda_despues.outcome }}
         run: |
           # 🔴 EL ORDEN DE LAS PREGUNTAS NO ES COSMETICO: "¿se ha escrito algo?"
           #    manda sobre "¿por que no?". Una pasada que arranco en aplicar y
           #    murio a mitad NO puede leerse como un simulacro -- puede haber
-          #    ficheros ya comprimidos y originales ya borrados.
+          #    ficheros ya comprimidos y originales ya borrados. Y una pasada
+          #    que TERMINO pero dejo fichero(s) sin copia en R2 no puede leerse
+          #    como "a medias": no murio, decidio no tocarlos.
           if [ "$MODO_USADO" = "aplicar" ] && [ "$RESULTADO" = "success" ]; then
             LINEA="APLICADO: ${COMPRIMIDOS:-0} ficheros comprimidos"
+          elif [ "$MODO_USADO" = "aplicar" ] && [ -n "${SIN_RED:-}" ] && [ "${SIN_RED:-0}" != "0" ]; then
+            LINEA="APLICADO CON EXCLUSIONES: ${COMPRIMIDOS:-0} ficheros comprimidos · ${SIN_RED} sin copia en R2, NO tocado(s) (mirar el log del paso 6 para saber cuales)"
           elif [ "$MODO_USADO" = "aplicar" ]; then
-            LINEA="APLICADO A MEDIAS: la pasada arranco en aplicar y NO termino; puede haber ficheros ya comprimidos. Mirar el log del paso 5."
+            LINEA="APLICADO A MEDIAS: la pasada arranco en aplicar y NO termino; puede haber ficheros ya comprimidos. Mirar el log del paso 6."
           elif [ "$GUARDA_VERDE" = "false" ]; then
             LINEA="SIMULACRO: no se ha escrito nada (motivo: guarda roja)"
           elif [ -z "$GUARDA_VERDE" ]; then
@@ -263,7 +343,7 @@ jobs:
             #    verde el automatico tiene que aplicar; si llega aqui en ensayo
             #    es que la expresion del MODO volvio a caerse sola, y esta vez
             #    lo dice la primera linea en vez de callarlo un run verde.
-            LINEA="SIMULACRO: no se ha escrito nada (motivo: el disparo automatico cayo a ensayo con la guarda verde -- eso es el fallo viejo; mirar el MODO del paso 5)"
+            LINEA="SIMULACRO: no se ha escrito nada (motivo: el disparo automatico cayo a ensayo con la guarda verde -- eso es el fallo viejo; mirar el MODO del paso 6)"
           elif [ "$MODO_USADO" = "guarda" ]; then
             LINEA="SIMULACRO: no se ha escrito nada (motivo: lanzamiento manual en modo guarda)"
           else
@@ -277,15 +357,16 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| disparo | ${EVENTO} |"
-            echo "| MODO del paso 5 | ${MODO_USADO:-(no llego a correr)} |"
-            echo "| guarda ANTES | ${GUARDA_VERDE:-(sin medir)} · huerfanas hist=${HUERFANAS_H:-?} viva=${HUERFANAS_V:-?} |"
-            echo "| paso 5 | ${RESULTADO:-skipped} |"
+            echo "| MODO del paso 6 | ${MODO_USADO:-(no llego a correr)} |"
+            echo "| guarda ANTES (Supabase↔Supabase) | ${GUARDA_VERDE:-(sin medir)} · huerfanas hist=${HUERFANAS_H:-?} viva=${HUERFANAS_V:-?} |"
+            echo "| sin copia en R2 (guarda por fichero) | ${SIN_RED:-0} |"
+            echo "| paso 6 | ${RESULTADO:-skipped} |"
             echo "| guarda DESPUES | ${GUARDA_FINAL:-skipped} |"
             echo "| DIAS · LIMITE · SIN_HIST | ${DIAS} · ${LIMITE} · ${SIN_HIST} |"
           } >> "$GITHUB_STEP_SUMMARY"
           echo "$LINEA"
 
-      - name: 8) Telegram FALLO
+      - name: 9) Telegram FALLO
         if: failure()
         env:
           TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
