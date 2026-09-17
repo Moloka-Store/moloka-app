@@ -92,6 +92,10 @@ on:
         description: "Para que restauras (lo veran las otras sesiones)"
         required: false
         default: ""
+      prefijo:
+        description: "Cajon de R2 a restaurar: 'bd' (v1, por defecto) o 'v2/bd'"
+        required: false
+        default: "bd"
 
 concurrency:
   group: restaurar-staging
@@ -118,6 +122,25 @@ jobs:
               echo "::error::Falta el secret STAGING_DB_URL"; exit 1;;
           esac
           echo "Cerrojo OK: no es produccion."
+
+      # 🔴 LISTA CERRADA, Y ANTES DE TOCAR NADA (encargo R, 17-sep-2026). El
+      #    `prefijo` decide de que cajon de R2 se restaura, asi que un valor que
+      #    no sea exactamente uno de los dos que existen hoy no se intenta
+      #    interpretar: se para aqui, antes de bajar nada de R2 y antes de tocar
+      #    staging. `bd` es la v1 (comportamiento de siempre, y el default);
+      #    `v2/bd` es la copia semanal de moloka-app-v2 (`copia-r2.yml`).
+      - name: 1b) Cerrojo de prefijo -- solo 'bd' o 'v2/bd'
+        env:
+          PREFIJO: ${{ github.event.inputs.prefijo }}
+        run: |
+          case "$PREFIJO" in
+            bd|v2/bd) echo "Prefijo OK: '$PREFIJO'." ;;
+            *)
+              echo "::error::Prefijo '$PREFIJO' no reconocido. Solo se admite 'bd' (v1) o 'v2/bd' (v2). Nada se ha tocado."
+              exit 1
+              ;;
+          esac
+          echo "PREFIJO=$PREFIJO" >> "$GITHUB_ENV"
 
       - name: 2) Instalar cliente Postgres 17
         run: |
@@ -173,13 +196,21 @@ jobs:
           FICHERO: ${{ github.event.inputs.fichero }}
         run: |
           EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          # 🔴 SE RESUELVE DENTRO DE `$PREFIJO` (encargo R, 17-sep-2026), tanto "el
+          #    ultimo" como el nombre a mano. Con el default ('bd') esto es, byte a
+          #    byte, lo de siempre; ya lo valido y lo cerro el paso 1b.
           if [ -z "$FICHERO" ]; then
-            FICHERO=$(aws s3 ls "s3://moloka-backups/bd/" --endpoint-url "$EP" --region auto \
+            FICHERO=$(aws s3 ls "s3://moloka-backups/${PREFIJO}/" --endpoint-url "$EP" --region auto \
                       | awk '{print $4}' | sort | tail -1)
           fi
-          echo "Restaurando: $FICHERO"
+          echo "Restaurando: $FICHERO (prefijo: $PREFIJO)"
           echo "BACKUP_FICHERO=$FICHERO" >> "$GITHUB_ENV"
-          aws s3 cp "s3://moloka-backups/bd/$FICHERO" backup.sql.gz \
+          # RUTA COMPLETA (prefijo incluido): es lo que se deja en el resumen del
+          # run y en staging_restauraciones.fichero -- esa tabla no tiene columna
+          # para el prefijo, asi que la ruta entera es la unica forma de que, mirando
+          # esa fila mas tarde, se sepa de que cajon vino sin tener que adivinarlo.
+          echo "BACKUP_RUTA=${PREFIJO}/$FICHERO" >> "$GITHUB_ENV"
+          aws s3 cp "s3://moloka-backups/${PREFIJO}/$FICHERO" backup.sql.gz \
             --endpoint-url "$EP" --region auto
 
       # ── 4) Vaciar y restaurar, TODO EN UNA TRANSACCION ────────────────────
@@ -925,7 +956,7 @@ jobs:
           {
             echo "### Simulacro de restauracion: veredicto"
             echo ""
-            echo "backup restaurado: \`${BACKUP_FICHERO:-?}\`"
+            echo "backup restaurado: \`${BACKUP_RUTA:-?}\`"
             echo ""
             echo "| | trae el backup | hay en staging |"
             echo "|---|---|---|"
@@ -1008,9 +1039,12 @@ jobs:
           STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
           QUIEN:   ${{ github.actor }}
           MOTIVO:  ${{ github.event.inputs.motivo }}
-          FICHERO: ${{ github.event.inputs.fichero }}
           RESULTADO: ${{ job.status }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # BACKUP_RUTA (prefijo/fichero) llega por GITHUB_ENV desde el paso 3 -- no
+          # hace falta redeclararla aqui. Si el paso 3 no llego a correr, queda vacia
+          # y el insert de abajo guarda NULL, que es lo correcto: no se sabe que
+          # fichero se iba a restaurar.
         run: |
           psql "$STAGING_DB_URL" -q -c "
             create table if not exists public.staging_restauraciones (
@@ -1029,11 +1063,16 @@ jobs:
                ensayo a quien este midiendo: al menos que se vea quien fue.';
             revoke all on public.staging_restauraciones from public, anon, authenticated;
             grant select on public.staging_restauraciones to authenticated;"
+          # 🔴 `fichero` GUARDA LA RUTA COMPLETA, CON PREFIJO (encargo R, 17-sep-2026):
+          #    esta tabla no tiene columna para el prefijo, asi que "v2/bd/moloka_...
+          #    .sql.gz" es la unica forma de saber, mirando esta fila manana, de que
+          #    cajon de R2 vino sin tener que adivinarlo. Antes se guardaba el input
+          #    crudo de `fichero`, que salia vacio siempre que se pedia "el ultimo".
           psql "$STAGING_DB_URL" -q -c "
             insert into public.staging_restauraciones (quien, motivo, fichero, run_url)
             values (nullif('$QUIEN',''),
                     nullif(trim(concat('$MOTIVO', ' [', '$RESULTADO', ']')),''),
-                    nullif('$FICHERO',''), '$RUN_URL');"
+                    nullif('$BACKUP_RUTA',''), '$RUN_URL');"
           echo "--- Rastro dejado ---"
           psql "$STAGING_DB_URL" -c "
             select restaurado_en, quien, coalesce(motivo,'-') as motivo
