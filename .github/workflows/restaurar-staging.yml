@@ -80,6 +80,24 @@ name: Moloka - Restaurar backup en STAGING
 #      deja staging igual a produccion EN EL INSTANTE DE LA COPIA, que es justo lo que
 #      hace que un ensayo signifique algo. Vigilar la deriva del dia a dia entre las
 #      dos bases es otra guarda distinta, y va en otro sitio.
+#
+# 🔴 CUARTO AGUJERO, EL QUE ESTE MISMO WORKFLOW LLEVABA MESES DICIENDO EN VOZ ALTA
+#   (encargo P, 17-sep-2026). Su veredicto terminaba con la frase «con N politicas de
+#   storage CONSERVADAS de staging, NO restauradas del backup», y nadie miraba lo
+#   otro: que el backup TAMPOCO devuelve los permisos, porque va con
+#   `pg_dump --no-privileges`. Medido sobre la staging recien restaurada del run
+#   35217707471: `authenticated` podia leer 1 de 161 relaciones y escribir en 0, y
+#   `anon` ninguna, contra las 137 que lee y las 70 que escribe en produccion.
+#   El simulacro salia VERDE dejando una base que no puede abrir NADIE — ni la v2
+#   (entra por `authenticated`) ni la v1 ni el escaner (entran por `anon`).
+#   🔒 Desde hoy hay un input `permisos` (no | si, por defecto NO: lo de siempre no
+#   cambia). Con `si`, el paso 4b aplica el `permisos_<FECHA>.sql` de ESA MISMA copia
+#   —el que sube `copia-r2.yml` de la v2 al lado del volcado— en su propia
+#   transaccion y todo-o-nada, y el paso 5b lo juzga: la huella del ACL de `public`
+#   de staging tiene que ser, linea a linea, la de produccion (leida en solo lectura
+#   forzada), y las politicas de storage tienen que venir DEL FICHERO, no de lo que
+#   staging conservase.
+#   ⚠️ Solo con `prefijo=v2/bd`: la copia de la v1 (`bd/`) no guarda permisos.
 
 on:
   workflow_dispatch:
@@ -96,6 +114,10 @@ on:
         description: "Cajon de R2 a restaurar: 'bd' (v1, por defecto) o 'v2/bd'"
         required: false
         default: "bd"
+      permisos:
+        description: "Aplicar tambien los permisos de esa copia ('no' por defecto; 'si' solo con prefijo v2/bd)"
+        required: false
+        default: "no"
 
 concurrency:
   group: restaurar-staging
@@ -129,9 +151,10 @@ jobs:
       #    interpretar: se para aqui, antes de bajar nada de R2 y antes de tocar
       #    staging. `bd` es la v1 (comportamiento de siempre, y el default);
       #    `v2/bd` es la copia semanal de moloka-app-v2 (`copia-r2.yml`).
-      - name: 1b) Cerrojo de prefijo -- solo 'bd' o 'v2/bd'
+      - name: 1b) Cerrojos de los inputs -- prefijo y permisos
         env:
           PREFIJO: ${{ github.event.inputs.prefijo }}
+          PERMISOS_INPUT: ${{ github.event.inputs.permisos }}
         run: |
           case "$PREFIJO" in
             bd|v2/bd) echo "Prefijo OK: '$PREFIJO'." ;;
@@ -141,6 +164,23 @@ jobs:
               ;;
           esac
           echo "PREFIJO=$PREFIJO" >> "$GITHUB_ENV"
+          # 🔴 Y EL OTRO INPUT, AQUI MISMO Y POR LO MISMO (encargo P, 17-sep-2026): lista
+          #    cerrada, y antes de bajar nada de R2. `permisos=si` solo tiene sentido con
+          #    `v2/bd`, porque el fichero `permisos_<FECHA>.sql` lo escribe `copia-r2.yml`
+          #    de la v2 y vive en `v2/permisos/`. La copia de la v1 (`bd/`) NO guarda
+          #    permisos: pedirselos seria buscar un fichero que no existe, y enterarse
+          #    DESPUES de haber vaciado staging.
+          case "$PERMISOS_INPUT" in
+            no|si) echo "Permisos: '$PERMISOS_INPUT'." ;;
+            *)
+              echo "::error::permisos='$PERMISOS_INPUT' no se reconoce. Solo 'no' (lo de siempre) o 'si'. Nada se ha tocado."
+              exit 1
+              ;;
+          esac
+          if [ "$PERMISOS_INPUT" = "si" ] && [ "$PREFIJO" != "v2/bd" ]; then
+            echo "::error::permisos=si solo funciona con prefijo='v2/bd'. Los permisos los guarda la copia de la v2 (encargo P); la copia de la v1 ('bd/') no los tiene. Nada se ha tocado."
+            exit 1
+          fi
 
       - name: 2) Instalar cliente Postgres 17
         run: |
@@ -523,6 +563,104 @@ jobs:
             echo "--- Avisos de psql (no han parado la restauracion) ---"
             head -60 restaurar_error.log
           fi
+
+      # ── 4b) LOS PERMISOS DE ESA MISMA COPIA (encargo P, 17-sep-2026) ──────
+      # 🔴 POR QUÉ EXISTE. Hasta hoy este workflow demostraba que el backup devuelve
+      #   los DATOS, y lo decía en su propio veredicto: «con N politicas de storage
+      #   CONSERVADAS de staging, NO restauradas del backup». Lo que no decía —porque
+      #   no lo miraba— es que tampoco devuelve los PERMISOS. Medido el 17-sep-2026
+      #   sobre la staging recién restaurada del run 35217707471:
+      #     · `authenticated` podía leer 1 de 161 relaciones y escribir en 0;
+      #     · `anon`, ninguna;
+      #   contra las 137 que lee y las 70 que escribe en producción. O sea que el
+      #   simulacro salía VERDE dejando una base que no puede abrir ni la v2 (entra
+      #   por `authenticated`) ni la v1 ni el escáner (entran por `anon`).
+      #
+      # 🔑 LO QUE SE APLICA ES EL FICHERO DE ESA COPIA, NO «el último». El nombre sale
+      #   del propio volcado (`moloka_<FECHA>.sql.gz` → `permisos_<FECHA>.sql`): son
+      #   pareja, y aplicar los permisos de otro día sobre los datos de este sería
+      #   exactamente el tipo de mezcla que esta casa lleva un año quitando de en medio.
+      #
+      # 🔒 VA DESPUÉS DEL PASO 4 Y NO ANTES: el fichero nombra tablas, vistas y
+      #   funciones de `public` que tienen que existir ya, y las políticas de `storage`
+      #   llaman a funciones de `public` (`moloka_buzones_fase0()`, `es_cuenta_servicio()`).
+      #   Aplicado antes del volcado no resolvería ni la primera línea.
+      #
+      # 🔒 TRANSACCIÓN PROPIA, TODO O NADA. No va dentro del psql del paso 4 a
+      #   propósito: si los permisos fallaran, lo que NO se quiere es perder también la
+      #   restauración de los datos, que es lo caro y lo que tarda. Y si fallan, este
+      #   paso se cae en rojo y staging se queda con los datos puestos y los permisos
+      #   como estaban — un estado que se ve y se puede repetir, no uno a medias.
+      - name: 4b) Aplicar los permisos de ESA copia (solo con permisos=si)
+        if: ${{ github.event.inputs.permisos == 'si' }}
+        env:
+          STAGING_DB_URL:        ${{ secrets.STAGING_DB_URL }}
+          AWS_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID:         ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          set -uo pipefail
+          EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+          # La FECHA sale del nombre del volcado que se acaba de restaurar. Si no casa
+          # el patrón, se para: un nombre raro aquí significa que se ha restaurado algo
+          # que no es una copia de la v2, y adivinar el fichero de permisos de eso sería
+          # inventárselo.
+          FECHA_COPIA=$(printf '%s' "$BACKUP_FICHERO" | sed 's/^moloka_//; s/\.sql\.gz$//')
+          case "$FECHA_COPIA" in
+            [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_[0-9][0-9][0-9][0-9]) ;;
+            *)
+              echo "::error::De '$BACKUP_FICHERO' no sale una FECHA de copia (AAAA-MM-DD_HHMM), asi que no se puede saber que fichero de permisos le toca. Los datos SI estan restaurados."
+              exit 1;;
+          esac
+          PERM="permisos_${FECHA_COPIA}.sql"
+          echo "Permisos de esta copia: v2/permisos/$PERM"
+
+          if ! aws s3 cp "s3://moloka-backups/v2/permisos/$PERM" "$PERM" \
+                 --endpoint-url "$EP" --region auto; then
+            echo "::error::No esta 'v2/permisos/$PERM' en R2. Esa copia se hizo ANTES del encargo P (17-sep-2026) o su run murio antes de subir los permisos. Los datos SI estan restaurados; lo que falta son los GRANT y las politicas de storage. Usa una copia posterior, o vuelve a lanzar este workflow con permisos=no si solo querias los datos."
+            exit 1
+          fi
+
+          # LAS MISMAS GUARDAS QUE AL SUBIRLO (paso 5b de `copia-r2.yml` en la v2), y
+          # aquí por una razón distinta: allí se comprueba lo que se sube, aquí lo que
+          # ha llegado. Entre las dos cosas hay una red y ocho semanas.
+          BYTES=$(wc -c < "$PERM")
+          echo "Fichero de permisos: $(wc -l < "$PERM") lineas, $BYTES bytes"
+          if [ "$BYTES" -lt 20000 ]; then
+            echo "::error::El fichero de permisos son $BYTES bytes (en produccion son ~80 KB). No se aplica."; exit 1
+          fi
+          grep -q 'GRANT ' "$PERM" || { echo "::error::El fichero de permisos no trae ni un GRANT. No se aplica."; exit 1; }
+          tail -n 5 "$PERM" | grep -q 'FIN DEL FICHERO DE PERMISOS' \
+            || { echo "::error::El fichero de permisos no termina con su cierre: llego cortado. No se aplica."; exit 1; }
+          echo "--- de donde viene ---"; grep -E '^-- (origen|generado|huella_acl_origen):' "$PERM" || true
+
+          # 🔒 TODO O NADA, y parando en el primer error. El fichero se salta —contándolo—
+          #   lo que no puede hacer (un rol que no exista aquí, un ALTER DEFAULT
+          #   PRIVILEGES de `supabase_admin`); cualquier OTRO error lo tumba entero.
+          if ! psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 --single-transaction -X -q -At \
+                 -f "$PERM" > permisos_resumen.txt 2> permisos_avisos.txt; then
+            echo "::error::Los permisos NO se han aplicado. Staging tiene los datos restaurados y los permisos como estaban."
+            echo "--- donde se paro ---"; head -40 permisos_avisos.txt
+            exit 1
+          fi
+          echo "--- resumen del fichero de permisos ---"; cat permisos_resumen.txt
+          echo "--- avisos (lo que se ha saltado, y por que) ---"; head -60 permisos_avisos.txt
+
+          # Los roles que no existen en staging viajan al veredicto: sin esto, la huella
+          # compararia lo incomparable y saldria roja SIEMPRE por una razon que no es un
+          # fallo (medido el 17-sep-2026: staging no tiene moloka_cargadores, moloka_copias
+          # ni moloka_detector_ro).
+          AUSENTES=$(sed -n 's/^roles_ausentes|//p' permisos_resumen.txt)
+          echo "PERMISOS_ROLES_AUSENTES=${AUSENTES}" >> "$GITHUB_ENV"
+          echo "PERMISOS_FICHERO=${PERM}" >> "$GITHUB_ENV"
+          {
+            echo ""
+            echo "### 4b · permisos aplicados desde \`v2/permisos/$PERM\`"
+            echo '```'
+            cat permisos_resumen.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # ── 5) EL VEREDICTO ───────────────────────────────────────────────────
       # Aqui es donde el simulacro deja de ser esperanzado.
@@ -1025,6 +1163,155 @@ jobs:
             echo ""
             echo "**resultado: VERIFICADO -- el backup reconstruye lo que contiene ($DTOT objetos, $TOTD filas),"
             echo "con $NPOL_FUERA politicas de storage CONSERVADAS de staging, NO restauradas del backup**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ════════════════════════════════════════════════════════════════════════
+      # 🔴 5b) VEREDICTO - ¿PUEDE ALGUIEN ABRIR LA BASE QUE ACABA DE VOLVER?
+      #
+      # El paso 5 demuestra que están los DATOS. Este demuestra lo otro, que hasta hoy
+      # no lo demostraba nadie: que quien tiene que poder leerlos, puede.
+      #
+      # 🔑 CÓMO SE JUZGA. Una línea por privilegio de `public` —relaciones, columnas,
+      #   funciones y el esquema—, sacadas con el MISMO fichero (`sql/huella_acl_public.sql`)
+      #   en los dos lados, ordenadas igual y comparadas. El md5 es el titular; las
+      #   líneas son lo que se arregla.
+      #
+      # 🔒 PRODUCCIÓN SE LEE EN SOLO LECTURA FORZADA, igual que en el paso 10:
+      #   `default_transaction_read_only=on` no es un acuerdo, es el servidor negándose.
+      #
+      # ⚠️ ROJO AQUÍ SIGNIFICA UNA DE DOS, Y HAY QUE SABER CUÁL:
+      #     · el fichero de permisos no ha devuelto lo que decía  → es un fallo de la COPIA;
+      #     · producción se ha movido DESDE que se hizo la copia  → no es un fallo, es
+      #       deriva, y se ve en la línea «produccion se ha movido» de aquí abajo, que
+      #       compara la huella de producción AHORA con la que el fichero anotó el día
+      #       que se generó.
+      #   Las dos salen rojas a propósito: un simulacro que no distingue no sirve, pero
+      #   uno que se calla porque «seguro que es deriva» sirve menos.
+      #
+      # ⚠️ LOS ROLES QUE NO EXISTEN EN STAGING SE SACAN DE LA COMPARACIÓN, y no es una
+      #   manga ancha: el propio fichero los ha dicho por su nombre y los ha contado en
+      #   el paso 4b. Medido el 17-sep-2026: staging no tiene `moloka_cargadores`,
+      #   `moloka_copias` ni `moloka_detector_ro`, así que sin esto el veredicto sería
+      #   rojo SIEMPRE y por algo que no es un fallo — y un rojo permanente se deja de
+      #   leer en dos semanas (la cara B de §3).
+      # ════════════════════════════════════════════════════════════════════════
+      - name: 5b) VEREDICTO - los permisos de staging son los de produccion
+        if: ${{ github.event.inputs.permisos == 'si' }}
+        env:
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+          PROD_DB_URL:    ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -uo pipefail
+          if [ -z "${PROD_DB_URL:-}" ]; then
+            echo "::error::Falta SUPABASE_DB_URL. Sin produccion no hay contra que comparar los permisos, y dar por bueno lo que no se ha mirado es justo lo que este paso evita."
+            exit 1
+          fi
+          AUSENTES="${PERMISOS_ROLES_AUSENTES:-}"
+          echo "Roles que no existen en staging y quedan fuera de la comparacion: ${AUSENTES:-(ninguno)}"
+
+          # 🔴 LC_ALL=C: `sort` ordena segun el idioma y el `diff` compara byte a byte.
+          #    Mismo motivo que en el paso 5.
+          PGOPTIONS='-c default_transaction_read_only=on' \
+            psql "$PROD_DB_URL" -X -q -At -v ON_ERROR_STOP=1 -v excluir="$AUSENTES" \
+                 -f sql/huella_acl_public.sql | LC_ALL=C sort > acl_prod.txt
+          psql "$STAGING_DB_URL" -X -q -At -v ON_ERROR_STOP=1 -v excluir="$AUSENTES" \
+                 -f sql/huella_acl_public.sql | LC_ALL=C sort > acl_stg.txt
+
+          # 🔒 CERO ES ROJO. Una huella vacia no es «todo cuadra», es «no he podido mirar».
+          if [ ! -s acl_prod.txt ] || [ ! -s acl_stg.txt ]; then
+            echo "::error::Una de las dos huellas ha salido VACIA (produccion: $(wc -l < acl_prod.txt) lineas, staging: $(wc -l < acl_stg.txt)). Esto no ha comprobado nada."
+            exit 1
+          fi
+          MD5_PROD=$(md5sum < acl_prod.txt | cut -d' ' -f1)
+          MD5_STG=$(md5sum  < acl_stg.txt  | cut -d' ' -f1)
+          echo "produccion: $(wc -l < acl_prod.txt) privilegios · md5 $MD5_PROD"
+          echo "staging:    $(wc -l < acl_stg.txt) privilegios · md5 $MD5_STG"
+
+          # ¿Se ha movido produccion desde que se hizo la copia? El fichero anoto su
+          # huella de origen (sin excluir a nadie), asi que se compara con la de ahora.
+          HUELLA_ORIGEN=$(sed -n 's/^-- huella_acl_origen: \([0-9a-f]*\).*/\1/p' "${PERMISOS_FICHERO}")
+          PGOPTIONS='-c default_transaction_read_only=on' \
+            psql "$PROD_DB_URL" -X -q -At -v ON_ERROR_STOP=1 -v excluir='' \
+                 -f sql/huella_acl_public.sql | LC_ALL=C sort > acl_prod_entera.txt
+          MD5_PROD_HOY=$(md5sum < acl_prod_entera.txt | cut -d' ' -f1)
+          if [ -n "$HUELLA_ORIGEN" ] && [ "$HUELLA_ORIGEN" = "$MD5_PROD_HOY" ]; then
+            MOVIDA="NO (la copia sigue siendo la foto de hoy)"
+          elif [ -n "$HUELLA_ORIGEN" ]; then
+            MOVIDA="SI (el fichero se genero con $HUELLA_ORIGEN y produccion esta hoy en $MD5_PROD_HOY)"
+          else
+            MOVIDA="no se sabe (el fichero no trae huella de origen)"
+          fi
+          echo "produccion se ha movido desde la copia: $MOVIDA"
+
+          # Las politicas de storage, del resumen que dejo el propio fichero en el 4b.
+          POL_FICHERO=$(sed -n 's/^storage_politicas_del_fichero|//p'  permisos_resumen.txt)
+          POL_REEMP=$(sed -n  's/^storage_politicas_reemplazadas|//p'  permisos_resumen.txt)
+          POL_NUEVAS=$(sed -n 's/^storage_politicas_nuevas|//p'        permisos_resumen.txt)
+          POL_CONS=$(sed -n   's/^storage_politicas_conservadas|//p'   permisos_resumen.txt)
+          POL_CONS_D=$(sed -n 's/^storage_politicas_conservadas_detalle|//p' permisos_resumen.txt)
+          SALT_ROL=$(sed -n   's/^sentencias_saltadas_rol|//p'         permisos_resumen.txt)
+          SALT_POT=$(sed -n   's/^sentencias_saltadas_potestad|//p'    permisos_resumen.txt)
+          HECHAS=$(sed -n     's/^sentencias_ejecutadas|//p'           permisos_resumen.txt)
+          RLS_NO=$(sed -n     's/^storage_rls_no_se_pudo|//p'          permisos_resumen.txt)
+
+          # 🔒 CERO NO ES «CERO PROBLEMAS», ES «NO HE PODIDO LEERLO». Si el resumen del
+          #    fichero no trae los recuentos, las comparaciones de abajo compararian
+          #    cadenas vacias y el veredicto diria que todo bien sin haber mirado.
+          for par in "sentencias_ejecutadas=$HECHAS" "storage_politicas_del_fichero=$POL_FICHERO"                      "storage_politicas_reemplazadas=$POL_REEMP" "storage_politicas_nuevas=$POL_NUEVAS"                      "storage_politicas_conservadas=$POL_CONS"; do
+            if [ -z "${par#*=}" ]; then
+              echo "::error::El resumen del fichero de permisos no trae '${par%%=*}'. Sin eso este veredicto no puede juzgar nada. Mira la salida del paso 4b."
+              exit 1
+            fi
+          done
+
+          {
+            echo ""
+            echo "### 5b · ¿los permisos de staging son los de produccion?"
+            echo ""
+            echo "| | produccion | staging |"
+            echo "|---|---|---|"
+            echo "| privilegios de \`public\` | $(wc -l < acl_prod.txt) | $(wc -l < acl_stg.txt) |"
+            echo "| huella md5 | \`$MD5_PROD\` | \`$MD5_STG\` |"
+            echo ""
+            echo "- roles fuera de la comparacion (no existen en staging): ${AUSENTES:-ninguno}"
+            echo "- sentencias del fichero: **$HECHAS** ejecutadas, $SALT_ROL saltadas por rol ausente, $SALT_POT por falta de potestad"
+            echo "- politicas de storage: **$POL_REEMP reemplazadas + $POL_NUEVAS nuevas = las $POL_FICHERO del fichero**, y $POL_CONS conservadas de staging (${POL_CONS_D:-ninguna})"
+            echo "- produccion se ha movido desde la copia: $MOVIDA"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # 🔴 QUE LAS POLITICAS VENGAN DEL FICHERO, NO DE LA BASE. Es el punto del
+          #    encargo: hasta hoy el veredicto decia «CONSERVADAS, NO restauradas del
+          #    backup». Si reemplazadas + nuevas no suman las del fichero, alguna se ha
+          #    dado por buena sin tocarla.
+          if [ "$((POL_REEMP + POL_NUEVAS))" -ne "$POL_FICHERO" ]; then
+            echo "::error::Las politicas de storage no cuadran: $POL_REEMP reemplazadas + $POL_NUEVAS nuevas no suman las $POL_FICHERO del fichero."
+            exit 1
+          fi
+          if [ "${RLS_NO:-0}" -gt 0 ]; then
+            echo "::error::En $RLS_NO tabla(s) de storage la RLS NO coincide con la de produccion y no se ha podido cambiar (hace falta ser su dueno, supabase_storage_admin). Mira los avisos del paso 4b."
+            exit 1
+          fi
+
+          if [ "$MD5_STG" != "$MD5_PROD" ]; then
+            echo "::error::Los permisos de staging NO son los de produccion. Lineas que difieren (< produccion, > staging):"
+            diff acl_prod.txt acl_stg.txt | head -40
+            {
+              echo ""
+              echo "**resultado: ROJO -- el ACL de staging no es el de produccion**"
+              echo '```'
+              diff acl_prod.txt acl_stg.txt | head -40
+              echo '```'
+              echo ""
+              echo "Dos lecturas, y la de arriba dice cual: si produccion NO se ha movido, el fichero de permisos no devuelve lo que dice. Si SI se ha movido, mira el diff: lo que sobre en produccion y no este en staging puede ser sencillamente lo que ha cambiado desde la copia."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "VERDE: los $(wc -l < acl_stg.txt) privilegios de staging son, uno a uno, los de produccion."
+          {
+            echo ""
+            echo "**resultado: VERIFICADO -- tras restaurar, quien tiene que poder leer la base PUEDE:"
+            echo "$(wc -l < acl_stg.txt) privilegios identicos a los de produccion, y las $POL_FICHERO politicas"
+            echo "de storage restauradas DEL FICHERO (ninguna dada por buena por conservarse)**"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # 🔒 El rastro se deja AL FINAL y con `if: always()`: si la restauración falla a
