@@ -1233,7 +1233,26 @@ jobs:
           PGOPTIONS='-c default_transaction_read_only=on' \
             psql "$PROD_DB_URL" -X -q -At -v ON_ERROR_STOP=1 -v excluir='' \
                  -f sql/huella_acl_public.sql | LC_ALL=C sort > acl_prod_entera.txt
-          MD5_PROD_HOY=$(md5sum < acl_prod_entera.txt | cut -d' ' -f1)
+          # 🔴 SIN EL SALTO DE LÍNEA FINAL, Y ESTO NO ES UNA FINURA: es la diferencia
+          #    entre una línea que informa y una que MIENTE SIEMPRE. `huella_acl_origen`
+          #    la calcula el exportador dentro de la base, con
+          #    `md5(string_agg(linea, <salto> ORDER BY linea COLLATE "C"))` — una cadena
+          #    que NO termina en salto. `md5sum < fichero` sí incluye el salto final que
+          #    tiene todo fichero de texto, así que los dos md5 no coinciden NUNCA y
+          #    esta línea decía «produccion se ha movido: SI» aunque no se hubiera
+          #    movido ni una coma.
+          #    🔬 Medido el 17-sep-2026 sobre el simulacro del encargo P (run
+          #    35228086083): el fichero traía `2ed2ca6e90378fd8b45d1889f2beb907` y aquí
+          #    salía `98c0980c19c1a8ee08ab3418fba7a5d3`. En producción, las MISMAS 3.990
+          #    líneas dan 2ed2ca6e… sin salto final y 98c0980c… con él. No se había
+          #    movido nada.
+          #    `$(cat …)` quita los saltos finales, que es justo lo que hace falta para
+          #    comparar con lo que calculó la base.
+          if [ ! -s acl_prod_entera.txt ]; then
+            echo "::error::La huella entera de produccion ha salido vacia. No se puede decir si se ha movido."
+            exit 1
+          fi
+          MD5_PROD_HOY=$(printf '%s' "$(cat acl_prod_entera.txt)" | md5sum | cut -d' ' -f1)
           if [ -n "$HUELLA_ORIGEN" ] && [ "$HUELLA_ORIGEN" = "$MD5_PROD_HOY" ]; then
             MOVIDA="NO (la copia sigue siendo la foto de hoy)"
           elif [ -n "$HUELLA_ORIGEN" ]; then
