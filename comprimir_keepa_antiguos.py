@@ -61,9 +61,26 @@
 #
 # LO QUE LE CUENTA AL WORKFLOW (ver _apuntar_salida)
 #   En `MODO=guarda`  -> guarda_verde=true|false, huerfanas_hist, huerfanas_viva
-#   Al final de una pasada de `aplicar` -> comprimidos=<n>
+#   Al final de una pasada de `aplicar` -> comprimidos=<n>, sin_red=<n>
 #   Desde el 11-sep-2026 el disparo automatico APLICA si `guarda_verde` vale
 #   'true', asi que esas tres lineas ya no son informativas: son el permiso.
+#
+# 🔴 17-SEP-2026 — LA GUARDA POR FICHERO CONTRA R2 (`filtrar_por_r2`)
+#   Hasta hoy la unica red era que ESTE workflow solo se disparaba si
+#   `backup-bd.yml` habia terminado en exito esa misma noche -- o sea, un
+#   permiso de una sola pieza para TODA la tanda. Desde que ese backup deja de
+#   correr a diario (CLAUDE.md / parte del 17-sep), ese permiso ya no existe, y
+#   lo que lo sustituye es mas fino: cada fichero se mira POR SU CUENTA contra
+#   un listado de R2 que trae el paso 4 del workflow (`R2_LISTADO`, un TSV
+#   `nombre\tbytes` de los DOS prefijos -- `storage/` de la v1 y
+#   `v2/storage/` de la v2 -- bajo informes/keepa_escaparate/). Si el nombre no
+#   aparece, o aparece con otro tamaño, ESE fichero no se comprime ni se borra
+#   esta vez: se deja para la semana que viene, cuando sí tenga copia.
+#   🔒 SIN R2, NADA ES APTO. Un listado vacio (secretos mal puestos, R2 caido,
+#   los dos prefijos vacios a la vez) hace que TODOS los candidatos caigan a
+#   `sin_red`: fallar cerrado es justo lo que separa una guarda de una
+#   suposicion. El script no lo distingue como caso aparte porque no hace
+#   falta: el resultado -- no tocar nada -- es el mismo que se busca.
 # ============================================================================
 
 import gzip
@@ -85,6 +102,9 @@ SIN_HIST = os.environ.get('SIN_HIST', 'posponer').strip().lower()
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
 DB_URL       = os.environ.get('DB_URL', '') or os.environ.get('SUPABASE_DB_URL', '')
+# TSV `nombre\tbytes` que deja el paso 4 del workflow (los dos prefijos de R2).
+# Vacio si no se paso (por ejemplo, corriendo el script suelto a mano).
+R2_LISTADO   = os.environ.get('R2_LISTADO', '')
 
 
 class Aborta(Exception):
@@ -193,6 +213,80 @@ def _fecha_de(o):
         except ValueError:
             continue
     return None
+
+
+def cargar_r2(ruta):
+    """{nombre: [tamaños vistos, en el orden del TSV]} de un TSV
+    `nombre\\tbytes` (el que deja el paso 4 del workflow, con los DOS
+    prefijos -- v1 y v2 -- concatenados en el mismo fichero).
+
+    🔴 AUDITORÍA DE COWORK (17-sep-2026): UNA LISTA, NO UN ÚNICO VALOR. El
+    mismo nombre puede aparecer en los dos prefijos con tamaños DISTINTOS
+    (una copia vieja y una nueva del mismo fichero), y `filtrar_por_r2()`
+    necesita ver los dos para decidir si ALGUNO cuadra con Supabase. Quedarse
+    con un solo tamaño por nombre (el último leído, con un dict a secas)
+    tapaba una copia buena con una mala sin decirlo.
+
+    Ruta vacía, inexistente o con líneas que no cuadran -> se ignoran esas
+    líneas, nunca se revienta por una fila rara: es un listado externo, no
+    algo que este script controle."""
+    tabla = {}
+    if not ruta or not os.path.isfile(ruta):
+        return tabla
+    with io.open(ruta, encoding='utf-8') as fh:
+        for linea in fh:
+            partes = linea.rstrip('\n').split('\t')
+            if len(partes) != 2 or not partes[0]:
+                continue
+            # 🔴 EL int() VA ANTES DEL setdefault: si el tamaño no se puede
+            #    parsear, la línea se ignora entera. Al revés (setdefault
+            #    primero, int() dentro del append) deja una lista VACÍA
+            #    colgada para ese nombre -- una fila rara no debe crear una
+            #    entrada, ni vacía, que no estaba.
+            try:
+                tam = int(partes[1])
+            except ValueError:
+                continue
+            tabla.setdefault(partes[0], []).append(tam)
+    return tabla
+
+
+def filtrar_por_r2(elegidos, tam_supabase, tam_r2):
+    """Separa `elegidos` en (aptos, sin_red), en el mismo orden.
+
+    `tam_r2`  : {nombre: [tamaños vistos en R2]}, el que da `cargar_r2()`.
+    `aptos`   : están en R2 (bajo cualquiera de los dos prefijos) y ALGUNO de
+                los tamaños vistos coincide con el de Supabase.
+    `sin_red` : [(nombre, motivo), ...] — falta de R2, tamaño desconocido en
+                Supabase, o ninguno de los tamaños de R2 coincide.
+
+    🔴 SIN R2, NADA ES APTO. Si `tam_r2` viene vacío (listado que no se pudo
+    leer, o los dos prefijos vacíos a la vez), TODOS caen a `sin_red`: fallar
+    cerrado es la guarda; un listado vacío que dejara pasar todo no sería
+    ninguna.
+
+    🔴 AUDITORÍA DE COWORK (17-sep-2026): TAMAÑO DESCONOCIDO EN SUPABASE
+    TAMBIÉN ES SIN_RED. Antes, si `tam_supabase` no traía el tamaño de un
+    fichero (`esperado is None`), el fichero pasaba como apto solo por
+    aparecer el nombre en R2 -- sin comparar nada. Eso no es una guarda: es
+    confiar en el nombre. Ahora, sin tamaño que comparar, no hay comparación
+    posible, y eso es exactamente un `sin_red` más."""
+    aptos, sin_red = [], []
+    for n in elegidos:
+        vistos = tam_r2.get(n)
+        if not vistos:
+            sin_red.append((n, 'no está en R2 (ni storage/ ni v2/storage/, bajo informes/keepa_escaparate/)'))
+            continue
+        esperado = tam_supabase.get(n)
+        if esperado is None:
+            sin_red.append((n, 'no se conoce su tamaño en Supabase: no se puede comparar'))
+            continue
+        if esperado not in vistos:
+            sin_red.append((n, f'en R2 pesa distinto (Supabase {esperado} B / R2 '
+                               f'{", ".join(str(v) for v in vistos)} B)'))
+            continue
+        aptos.append(n)
+    return aptos, sin_red
 
 
 def verificar_ida_y_vuelta(sha_antes, bytes_antes, crudo_recuperado):
@@ -304,7 +398,7 @@ def main():
     if MODO == 'guarda':
         # El veredicto se DICE, no se deduce del codigo de salida. Desde el
         # 11-sep-2026 esta linea es el permiso del disparo automatico para
-        # aplicar; el motivo largo esta en el paso 5 del workflow.
+        # aplicar; el motivo largo esta en el paso 6 del workflow.
         _apuntar_salida(guarda_verde=('true' if ok else 'false'),
                         huerfanas_hist=hist0, huerfanas_viva=viva0)
         cur.close(); con.close()
@@ -360,8 +454,19 @@ def main():
     for n, motivo in descartes:
         print(f"      · SE DEJA  {n}  ({motivo})", flush=True)
 
+    # --- La guarda por fichero contra R2 (ver la cabecera) ------------------
+    tam_r2 = cargar_r2(R2_LISTADO)
+    aptos, sin_red = filtrar_por_r2(elegidos, tam, tam_r2)
+    print(f"\n--- GUARDA POR FICHERO CONTRA R2 (objetos vistos en R2: {len(tam_r2)}) ---", flush=True)
+    if sin_red:
+        print(f"    🔴 {len(sin_red)} fichero(s) SIN COPIA en R2 — NO se tocan esta vez:", flush=True)
+        for n, motivo in sin_red:
+            print(f"      · {n}  ({motivo})", flush=True)
+    else:
+        print(f"    ✅ los {len(aptos)} del alcance tienen copia en R2 con el mismo tamaño.", flush=True)
+
     # 🔴 Lo que no es del Visualizador NO se borra ni se esconde: se dice.
-    raros = [n for n in elegidos if 'Visualizador' not in n]
+    raros = [n for n in aptos if 'Visualizador' not in n]
     if raros:
         print(f"\n⚠️  {len(raros)} fichero(s) del alcance NO son del Visualizador. Se "
               f"comprimen como los demas (NO se borran), pero quede dicho:", flush=True)
@@ -373,11 +478,13 @@ def main():
         cur.close(); con.close()
         return
 
-    # --- La pasada ---------------------------------------------------------
+    # --- La pasada -----------------------------------------------------------
+    # 🔴 SOBRE `aptos`, NO SOBRE `elegidos`: los de `sin_red` no se tocan esta
+    #    vez, y eso no es un fallo a mitad de nada — es la guarda decidiendo.
     hechos = []
-    for i, nombre in enumerate(elegidos, 1):
+    for i, nombre in enumerate(aptos, 1):
         ruta, ruta_gz = f'{CARPETA}/{nombre}', f'{CARPETA}/{nombre_gz(nombre)}'
-        print(f"\n[{i}/{len(elegidos)}] {nombre}", flush=True)
+        print(f"\n[{i}/{len(aptos)}] {nombre}", flush=True)
 
         # 1) original + sha
         crudo = descargar_buzon(sb, BUCKET, ruta)
@@ -433,10 +540,11 @@ def main():
 
     # --- La guarda otra vez, que es lo unico que prueba que quedo bien ------
     ok, hist1, viva1 = correr_guarda(cur)
-    # La cifra que el paso 7 del workflow pone en la PRIMERA linea del resumen
+    # La cifra que el paso 8 del workflow pone en la PRIMERA linea del resumen
     # de la corrida. Aqui abajo ya estaba impresa; el problema era que solo
-    # estaba impresa.
-    _apuntar_salida(comprimidos=len(hechos))
+    # estaba impresa. `sin_red` desde el 17-sep-2026: sin ella, el paso 8 no
+    # puede distinguir "murio a mitad" de "termino y dejo fichero(s) sin copia".
+    _apuntar_salida(comprimidos=len(hechos), sin_red=len(sin_red))
     print(f"\n--- RESUMEN ---", flush=True)
     print(f"    ficheros comprimidos: {len(hechos)}", flush=True)
     print(f"    bytes antes: {sum(h['bytes'] for h in hechos)} · despues: "
@@ -445,14 +553,25 @@ def main():
     for h in hechos:
         print(f"      {h['fichero']} · {h['bytes']} B · sha256 {h['sha256']} · "
               f"{h['filas_hist']} fila(s)", flush=True)
+    if sin_red:
+        print(f"    sin copia en R2, NO tocados: {len(sin_red)} — "
+              + ', '.join(n for n, _ in sin_red), flush=True)
     cur.close(); con.close()
     if not ok:
         sys.exit("\n❌ La guarda quedo ROJA despues de la pasada.")
+    if sin_red:
+        # 🔴 EL RESTO SI SE HA PROCESADO — esto no es "se para todo" como los
+        #    dos `sys.exit` de arriba. Es "termine, y aun asi tengo que salir
+        #    en rojo" para que un fichero sin red nunca se lea como un run
+        #    limpio. El paso 8 del workflow lo distingue de un fallo a mitad
+        #    por esta misma cuenta (`sin_red`), no por adivinar el motivo.
+        sys.exit(f"\n❌ {len(sin_red)} fichero(s) sin copia en R2 (ver arriba); NO se han "
+                 f"tocado. Los demas ({len(hechos)}) SI se han procesado.")
 
 
 def _quitar(sb, ruta, motivo):
     """Retirar un .gz que acabamos de subir y cuyo original SIGUE estando. Es el
-    unico borrado que este script hace fuera del paso 5, y es seguro justo por
+    unico borrado que este script hace fuera del paso 6, y es seguro justo por
     eso: se quita lo que sobra, nunca lo que es la unica copia."""
     print(f"    ↩️  {motivo}: {ruta}", flush=True)
     try:

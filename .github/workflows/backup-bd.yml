@@ -19,10 +19,33 @@ name: Moloka - Backup BD
 #    `anon` dentro de todo (§4 del CLAUDE.md). Restauras el incendio y te queda la
 #    casa abierta. No se toca en este PR a propósito, pero no es una nota al pie:
 #    está sin cerrar. Ver el PENDIENTE de §4.
+#
+# ============================================================================
+# 🔴 17-SEP-2026 — EL `schedule` SE APAGA. DECISIÓN DE FERNANDO.
+# ----------------------------------------------------------------------------
+#   La copia de verdad vive ahora en `Moloka-Store/moloka-app-v2`
+#   (`.github/workflows/copia-r2.yml`), **semanal, el lunes**, escribiendo en
+#   `s3://moloka-backups/v2/` (bd/ y storage/ separados del prefijo de aquí a
+#   propósito: no comparten poda ni restaurador). Se mudó y se probó entera el
+#   17-sep: run 35212180841 y restaurada en staging el mismo día — 335/335
+#   objetos, 366.830/366.830 filas (run 35217707471). No se esperó al lunes.
+#
+#   Este `.yml` se queda con `workflow_dispatch` como PLAN B manual — se puede
+#   relanzar a mano si algún día hiciera falta una copia de la v1 concreta —
+#   pero ya NO corre solo. Nada se ha borrado de R2 con este cambio: los 71
+#   volcados que ya había en `bd/` siguen ahí (ver el workflow nuevo de poda,
+#   mismo PR, que sí los recorta).
+#
+#   🔴 Y ESTO DEJA HUÉRFANO A `comprimir-keepa-antiguos.yml`: colgaba de que
+#      ESTE workflow terminara en éxito (`workflow_run`), y un `workflow_run`
+#      NO cruza repos — el `copia-r2.yml` de la v2 no lo puede disparar nunca.
+#      Mismo PR: ese fichero pasa a tener su propio `schedule` semanal y su
+#      propia guarda por fichero contra R2, ya no depende de esto. No hace
+#      falta tocarlo por este cambio, pero quien lea solo este fichero tiene
+#      que saberlo: ya no hay nada automático los días que no sea martes.
+# ============================================================================
 
 on:
-  schedule:
-    - cron: '15 2 * * *'
   workflow_dispatch:
 
 concurrency:

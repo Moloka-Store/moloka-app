@@ -23,7 +23,8 @@ import gzip
 import sys
 from datetime import datetime, timedelta, timezone
 
-from comprimir_keepa_antiguos import (SQL_GUARDA, es_comprimible, nombre_gz,
+from comprimir_keepa_antiguos import (SQL_GUARDA, cargar_r2, es_comprimible,
+                                      filtrar_por_r2, nombre_gz,
                                       seleccionar_antiguos,
                                       veredicto_guarda, verificar_ida_y_vuelta)
 
@@ -170,9 +171,9 @@ with io.open(_RUTA_WF, encoding='utf-8') as fh:
     _wf_crudo = fh.read()
 _wf = '\n'.join(l for l in _wf_crudo.split('\n') if not l.lstrip().startswith('#'))
 
-_N_GUARDA = '4) La guarda ANTES (si ya venimos rotos, no se toca nada)'
-_N_PASADA = '5) La pasada'
-_N_VEREDICTO = '7) EL VEREDICTO, en la PRIMERA linea del resumen de la corrida'
+_N_GUARDA = '5) La guarda ANTES (si ya venimos rotos, no se toca nada)'
+_N_PASADA = '6) La pasada'
+_N_VEREDICTO = '8) EL VEREDICTO, en la PRIMERA linea del resumen de la corrida'
 
 
 def pasos_de(doc):
@@ -204,7 +205,7 @@ eq('(I) los tres pasos que se miran existen, con su nombre exacto',
 
 eq('(I) 🔴 el paso que aplica exige que la guarda haya dicho `true`',
    exige_la_guarda(_DOC), True)
-eq('(I) 🔴 … y la guarda es el paso 4, que es quien lo escribe (`id: guarda`)',
+eq('(I) 🔴 … y la guarda es el paso 5, que es quien lo escribe (`id: guarda`)',
    _P_GUARDA.get('id'), 'guarda')
 eq('(I) … corriendo el script en MODO=guarda',
    (_P_GUARDA.get('env') or {}).get('MODO'), 'guarda')
@@ -304,29 +305,31 @@ eq('(K) el crudo SI habla de incluir (el motivo, en los comentarios)',
 # --- (L) 🔴 LA PRIMERA LINEA DEL RESUMEN NO PUEDE MENTIR ----------------------
 # Lo que se arregla aqui NO es que el workflow hiciera algo malo: es que hiciera
 # NADA y no se notara. 21 corridas automaticas seguidas fueron simulacros, y lo
-# unico que lo decia era el `env` del paso 5 (hay que desplegarlo para verlo) y
-# la ultima linea de su log. Desde el 11-sep-2026 el paso 7 lo pone en la
-# PRIMERA linea del resumen de la corrida.
+# unico que lo decia era el `env` del paso 6 (hay que desplegarlo para verlo) y
+# la ultima linea de su log. Desde el 11-sep-2026 el paso 8 lo pone en la
+# PRIMERA linea del resumen de la corrida. Y desde el 17-sep-2026, la misma
+# linea tambien tiene que distinguir "termine, pero exclui ficheros sin copia
+# en R2" de "me cai a mitad" -- son dos rojos con motivos distintos.
 #
 # 🔒 SE EJECUTA EL BASH DE VERDAD, sacado del .yml por estructura. Copiar aqui
 #    la cadena de `if` seria probar la copia: el dia que alguien cambie el
 #    workflow, el banco seguiria verde sobre el texto viejo.
-print("\n(L) el veredicto del paso 7, ejecutando SU bash")
+print("\n(L) el veredicto del paso 8, ejecutando SU bash")
 
 _BASH = shutil.which('bash')
-eq('(L) hay un bash con el que correr el paso 7 (en ubuntu del CI, siempre)',
+eq('(L) hay un bash con el que correr el paso 8 (en ubuntu del CI, siempre)',
    bool(_BASH), True)
 
 _VACIO = {'EVENTO': '', 'MODO_USADO': '', 'GUARDA_VERDE': '', 'HUERFANAS_H': '',
-          'HUERFANAS_V': '', 'COMPRIMIDOS': '', 'RESULTADO': '', 'GUARDA_FINAL': '',
-          'DIAS': '2', 'LIMITE': '20', 'SIN_HIST': 'posponer'}
+          'HUERFANAS_V': '', 'COMPRIMIDOS': '', 'SIN_RED': '', 'RESULTADO': '',
+          'GUARDA_FINAL': '', 'DIAS': '2', 'LIMITE': '20', 'SIN_HIST': 'posponer'}
 
 
 def veredicto(**entorno):
-    """La PRIMERA linea que el paso 7 deja en el resumen, para ese estado."""
+    """La PRIMERA linea que el paso 8 deja en el resumen, para ese estado."""
     guion = _P_VEREDICTO.get('run') or ''
     if not _BASH or not guion:
-        return '(no se ha podido ejecutar el paso 7)'
+        return '(no se ha podido ejecutar el paso 8)'
     tmp = tempfile.mkdtemp()
     try:
         resumen = os.path.join(tmp, 'resumen.md')
@@ -340,7 +343,7 @@ def veredicto(**entorno):
         p = subprocess.run([_BASH, '-e', sh], env=env, capture_output=True,
                            text=True, encoding='utf-8', errors='replace')
         if p.returncode != 0:
-            return 'EL PASO 7 SE CAYO: ' + ((p.stderr or '') + (p.stdout or '')).strip()
+            return 'EL PASO 8 SE CAYO: ' + ((p.stderr or '') + (p.stdout or '')).strip()
         with io.open(resumen, encoding='utf-8') as fh:
             return fh.readline().rstrip('\n')
     finally:
@@ -359,7 +362,19 @@ eq('(L) 🔴 … y si la pasada murio a mitad, NO dice simulacro',
    veredicto(EVENTO='workflow_run', MODO_USADO='aplicar', GUARDA_VERDE='true',
              RESULTADO='failure').startswith('APLICADO A MEDIAS'), True)
 
-# La guarda roja: el paso 5 ni corre, asi que MODO_USADO llega vacio.
+# 🔴 17-SEP-2026 — Y UNA PASADA QUE TERMINO PERO EXCLUYO FICHEROS SIN COPIA EN
+#    R2 TAMPOCO ES "A MEDIAS": no murio, decidio no tocarlos. Se distingue por
+#    SIN_RED, que solo se escribe si el bucle llego al final (§ el script).
+eq('(L) 🔴 … terminando pero con exclusiones por R2, lo dice DISTINTO de "a medias"',
+   veredicto(EVENTO='workflow_run', MODO_USADO='aplicar', GUARDA_VERDE='true',
+             COMPRIMIDOS='18', SIN_RED='2', RESULTADO='failure', GUARDA_FINAL='success'),
+   'APLICADO CON EXCLUSIONES: 18 ficheros comprimidos · 2 sin copia en R2, '
+   'NO tocado(s) (mirar el log del paso 6 para saber cuales)')
+eq('(L) 🔴 … y CON sin_red=0, sigue siendo "a medias" si el resultado es failure',
+   veredicto(EVENTO='workflow_run', MODO_USADO='aplicar', GUARDA_VERDE='true',
+             SIN_RED='0', RESULTADO='failure').startswith('APLICADO A MEDIAS'), True)
+
+# La guarda roja: el paso 6 ni corre, asi que MODO_USADO llega vacio.
 eq('(L) 🔴 guarda roja: lo dice, y dice el motivo',
    veredicto(EVENTO='workflow_run', GUARDA_VERDE='false', RESULTADO='skipped',
              HUERFANAS_H='7', HUERFANAS_V='0'),
@@ -382,7 +397,7 @@ eq('(L) el modo guarda a mano tambien es un simulacro, y con su motivo',
    'SIMULACRO: no se ha escrito nada (motivo: lanzamiento manual en modo guarda)')
 
 # 🔴 EL CASO QUE ORIGINO TODO ESTO, PUESTO A MANO: automatico, guarda VERDE y
-#    aun asi el paso 5 corriendo en ensayo. Con el arreglo eso no puede pasar,
+#    aun asi el paso 6 corriendo en ensayo. Con el arreglo eso no puede pasar,
 #    asi que si pasa es que la expresion del MODO se volvio a caer sola -- y
 #    entonces la primera linea tiene que GRITARLO, no decir "lanzamiento manual".
 _RECAIDA = veredicto(EVENTO='workflow_run', MODO_USADO='ensayo', GUARDA_VERDE='true',
@@ -400,9 +415,9 @@ for _p in (_JOB.get('steps') or []):
         break
     if 'GITHUB_STEP_SUMMARY' in (_p.get('run') or ''):
         _ANTES_DEL_7.append(_p.get('name'))
-eq('(L) 🔴 ningun paso anterior escribe en el resumen (por eso el 7 es el primero)',
+eq('(L) 🔴 ningun paso anterior escribe en el resumen (por eso el 8 es el primero)',
    _ANTES_DEL_7, [])
-eq('(L) … y el 7 SI escribe en el (si no, la linea de arriba seria verde por nada)',
+eq('(L) … y el 8 SI escribe en el (si no, la linea de arriba seria verde por nada)',
    'GITHUB_STEP_SUMMARY' in (_P_VEREDICTO.get('run') or ''), True)
 
 
@@ -418,8 +433,9 @@ print("\n(M) la guarda roja frena la pasada, con el main() de verdad")
 class CursorDeMentira:
     """Contesta a las consultas reales del script y GRABA todo lo que pasa."""
 
-    def __init__(self, huerfanas_hist, huerfanas_viva):
+    def __init__(self, huerfanas_hist, huerfanas_viva, historico=None):
         self.h, self.v = huerfanas_hist, huerfanas_viva
+        self.historico = historico or {}
         self.sql, self._ret, self.rowcount = [], [], 0
 
     def execute(self, q, args=None):
@@ -428,6 +444,12 @@ class CursorDeMentira:
         ql = limpio.lower()
         if 'huerfanas_hist' in ql:
             self._ret = [(self.h, self.v)]
+        elif 'group by fichero' in ql:
+            # `select fichero, count(*) from keepa_escaparate_hist ... group by
+            # fichero`. Sin esto, TODO fichero de la prueba cae en `sin_hist` y
+            # `posponer` lo excluye del plan antes de llegar a ninguna otra
+            # guarda -- el (O) de abajo lo necesita citado para probar R2.
+            self._ret = list(self.historico.items())
         else:
             self._ret = []
 
@@ -446,9 +468,9 @@ class ConexionDeMentira:
     def close(self):    pass
 
 
-def montar_stubs(huerfanas_hist, huerfanas_viva, objetos):
+def montar_stubs(huerfanas_hist, huerfanas_viva, objetos, historico=None):
     """psycopg2 y supabase de mentira. Devuelve el cuaderno de lo que paso."""
-    marcas = {'cur': CursorDeMentira(huerfanas_hist, huerfanas_viva),
+    marcas = {'cur': CursorDeMentira(huerfanas_hist, huerfanas_viva, historico),
               'clientes': 0, 'subidas': [], 'borrados': [], 'descargas': []}
 
     class _Bucket:
@@ -490,7 +512,7 @@ def montar_stubs(huerfanas_hist, huerfanas_viva, objetos):
     return marcas
 
 
-def correr_main(modo, huerfanas_hist=0, huerfanas_viva=0, objetos=()):
+def correr_main(modo, huerfanas_hist=0, huerfanas_viva=0, objetos=(), historico=None):
     """Importa el script de cero con ese MODO y ejecuta su main() REAL.
     Devuelve (codigo, salida, marcas, lineas de $GITHUB_OUTPUT)."""
     for m in ('comprimir_keepa_antiguos', 'foto_comun', 'supabase',
@@ -502,7 +524,7 @@ def correr_main(modo, huerfanas_hist=0, huerfanas_viva=0, objetos=()):
                        'SIN_HIST': 'posponer', 'SUPABASE_URL': 'http://de-mentira',
                        'SUPABASE_KEY': 'de-mentira', 'DB_URL': 'de-mentira',
                        'GITHUB_OUTPUT': salida_gh})
-    marcas = montar_stubs(huerfanas_hist, huerfanas_viva, list(objetos))
+    marcas = montar_stubs(huerfanas_hist, huerfanas_viva, list(objetos), historico)
     mod = importlib.import_module('comprimir_keepa_antiguos')
     buf, codigo = io.StringIO(), 0
     try:
@@ -533,7 +555,7 @@ for _modo in ('guarda', 'ensayo', 'aplicar'):
     eq(f'(M) 🔴 guarda ROJA + MODO={_modo}: ni se llega a abrir Storage',
        _m['clientes'], 0)
 
-# Y lo que el paso 4 le cuenta al workflow cuando esta roja.
+# Y lo que el paso 5 le cuenta al workflow cuando esta roja.
 _cod, _txt, _m, _ap = correr_main('guarda', huerfanas_hist=7, huerfanas_viva=2)
 eq('(M) 🔴 la guarda roja escribe guarda_verde=false', 'guarda_verde=false' in _ap, True)
 eq('(M) … con las dos cifras, para que el resumen no tenga que adivinarlas',
@@ -541,7 +563,7 @@ eq('(M) … con las dos cifras, para que el resumen no tenga que adivinarlas',
 
 # --- Y la direccion VERDE, que es lo que distingue "protege" de "no mira" ---
 _cod, _txt, _m, _ap = correr_main('guarda')
-eq('(M) guarda VERDE: el paso 4 sale en 0', _cod, 0)
+eq('(M) guarda VERDE: el paso 5 sale en 0', _cod, 0)
 eq('(M) 🔴 … y escribe guarda_verde=true, que es el permiso del automatico',
    'guarda_verde=true' in _ap, True)
 
@@ -562,6 +584,115 @@ eq('(M) guarda VERDE + ensayo: termina bien y lo dice', _cod, 0)
 eq('(M) … y no escribe nada', toco_algo(_m), [])
 eq('(M) … y sigue diciendolo en el log, como siempre',
    'ENSAYO: no se ha escrito nada' in _txt, True)
+
+# --- (N) 🔴 17-SEP-2026 — LA GUARDA POR FICHERO CONTRA R2 --------------------
+# `backup-bd.yml` deja de correr a diario (parte del 17-sep-2026), asi que la
+# vieja red -- "el backup de esta noche acabo en success" -- desaparece. Lo
+# que la sustituye es fichero a fichero: `cargar_r2()` lee el TSV que deja el
+# paso 4 del workflow, `filtrar_por_r2()` decide quien tiene copia.
+print("\n(N) la guarda por fichero contra R2")
+
+# cargar_r2: un TSV normal, con una linea rara que se ignora sin reventar.
+# 🔴 AUDITORÍA DE COWORK (17-sep-2026): devuelve LISTAS -- el mismo nombre
+#    puede venir de los dos prefijos (v1 y v2) con tamaños distintos.
+_tmp_r2 = tempfile.mkdtemp()
+_ruta_r2 = os.path.join(_tmp_r2, 'r2.tsv')
+with io.open(_ruta_r2, 'w', encoding='utf-8') as _fh:
+    _fh.write('X.csv\t1234\n')
+    _fh.write('Y (1).csv\t999\n')          # nombre con espacios y parentesis
+    _fh.write('linea rota sin tabulador\n')  # se ignora
+    _fh.write('Z.csv\tno-es-un-numero\n')    # se ignora
+    _fh.write('X.csv\t1234\n')             # el mismo nombre, otra vez (v1 + v2)
+eq('(N) cargar_r2 lee nombre y tamaño, EN LISTAS', cargar_r2(_ruta_r2),
+   {'X.csv': [1234, 1234], 'Y (1).csv': [999]})
+eq('(N) 🔴 ruta vacía -> {} (no revienta)', cargar_r2(''), {})
+eq('(N) 🔴 ruta que no existe -> {} (no revienta)',
+   cargar_r2(os.path.join(_tmp_r2, 'no_existe.tsv')), {})
+shutil.rmtree(_tmp_r2, ignore_errors=True)
+
+# filtrar_por_r2: presente y mismo tamaño -> apto.
+_aptos, _sin_red = filtrar_por_r2(['a.csv'], {'a.csv': 100}, {'a.csv': [100]})
+eq('(N) en R2 con el mismo tamaño -> apto', (_aptos, _sin_red), (['a.csv'], []))
+
+# 🔴 no esta en R2 -> sin_red, con el motivo.
+_aptos, _sin_red = filtrar_por_r2(['b.csv'], {'b.csv': 100}, {})
+eq('(N) 🔴 no esta en R2 -> sin_red', _aptos, [])
+eq('(N) … y dice que no esta', 'no está en R2' in dict(_sin_red)['b.csv'], True)
+
+# 🔴 esta, pero pesa distinto -> sin_red, con las dos cifras.
+_aptos, _sin_red = filtrar_por_r2(['c.csv'], {'c.csv': 100}, {'c.csv': [50]})
+eq('(N) 🔴 pesa distinto -> sin_red', _aptos, [])
+eq('(N) … y dice las dos cifras', ('100' in dict(_sin_red)['c.csv'] and
+                                   '50' in dict(_sin_red)['c.csv']), True)
+
+# 🔴 AUDITORÍA DE COWORK (17-sep-2026), caso 1: tamaño DESCONOCIDO en
+#    Supabase (`esperado is None`) -> sin_red, NUNCA apto solo por el nombre.
+#    Antes de la auditoría esto pasaba como apto sin comparar nada.
+_aptos, _sin_red = filtrar_por_r2(['d.csv'], {}, {'d.csv': [500]})
+eq('(N) 🔴 sin tamaño en Supabase -> sin_red, no apto por el nombre solo', _aptos, [])
+eq('(N) … y lo dice: no se puede comparar',
+   'no se puede comparar' in dict(_sin_red)['d.csv'], True)
+# La direccion VERDE del mismo caso: CON tamaño, el mismo fichero SI pasa.
+_aptos_verde, _ = filtrar_por_r2(['d.csv'], {'d.csv': 500}, {'d.csv': [500]})
+eq('(N) … y con el tamaño puesto, el mismo fichero SI es apto', _aptos_verde, ['d.csv'])
+
+# 🔴 AUDITORÍA DE COWORK (17-sep-2026), caso 2: el mismo nombre en los DOS
+#    prefijos con tamaños DISTINTOS -> apto si ALGUNO cuadra con Supabase,
+#    sin importar el orden en que se leyeron (antes ganaba "el ultimo leido",
+#    en silencio).
+_aptos, _sin_red = filtrar_por_r2(['e.csv'], {'e.csv': 500}, {'e.csv': [999, 500]})
+eq('(N) 🔴 dos tamaños en R2, el SEGUNDO cuadra -> apto', (_aptos, _sin_red), (['e.csv'], []))
+_aptos, _sin_red = filtrar_por_r2(['e.csv'], {'e.csv': 500}, {'e.csv': [500, 999]})
+eq('(N) 🔴 … y si cuadra el PRIMERO, tambien -> apto (no importa el orden)',
+   (_aptos, _sin_red), (['e.csv'], []))
+_aptos, _sin_red = filtrar_por_r2(['e.csv'], {'e.csv': 500}, {'e.csv': [111, 222]})
+eq('(N) 🔴 … y si NINGUNO cuadra -> sin_red, con los dos vistos',
+   _aptos, [])
+eq('(N) … los dos tamaños en el motivo', ('111' in dict(_sin_red)['e.csv'] and
+                                          '222' in dict(_sin_red)['e.csv']), True)
+
+# 🔒 SIN R2, NADA ES APTO — el listado vacío no deja pasar nada por omisión.
+_aptos, _sin_red = filtrar_por_r2(['a.csv', 'b.csv'], {'a.csv': 1, 'b.csv': 2}, {})
+eq('(N) 🔒 listado de R2 vacío -> todos a sin_red, ninguno apto', _aptos, [])
+eq('(N) … los dos, no solo uno', sorted(n for n, _ in _sin_red), ['a.csv', 'b.csv'])
+
+# El orden se conserva, y una lista vacía de partida no revienta nada.
+_aptos, _sin_red = filtrar_por_r2(['z.csv', 'a.csv'],
+                                  {'z.csv': 1, 'a.csv': 2},
+                                  {'z.csv': [1], 'a.csv': [2]})
+eq('(N) el orden de `elegidos` se conserva en `aptos`', _aptos, ['z.csv', 'a.csv'])
+eq('(N) elegidos=[] -> ([], [])', filtrar_por_r2([], {}, {'x': [1]}), ([], []))
+
+# --- (O) 🔒 Y CABLEADO DE VERDAD EN main(), no solo en la funcion pura -------
+# Ejecutando el main() real en ENSAYO (no toca la parte de la base que este
+# banco no sabe simular -- ver correr_main): un candidato SIN copia en R2 se
+# lista como tal y NO se cuenta entre los aptos; uno CON copia, si.
+print("\n(O) la guarda por fichero, cableada en main() (ensayo)")
+_tmp_o = tempfile.mkdtemp()
+_ruta_o = os.path.join(_tmp_o, 'r2.tsv')
+# Solo 'con_copia.csv' aparece en R2, y con el mismo tamaño que declara el
+# objeto de Storage de mentira (ver montar_stubs / obj()).
+with io.open(_ruta_o, 'w', encoding='utf-8') as _fh:
+    _fh.write('con_copia.csv\t500\n')
+os.environ['R2_LISTADO'] = _ruta_o
+try:
+    _objs = [dict(obj('con_copia.csv', 30), metadata={'size': 500}),
+             dict(obj('sin_copia.csv', 30), metadata={'size': 500})]
+    # Citados por el historico: si no, `posponer` los excluye del plan antes
+    # de que la guarda de R2 llegue a mirarlos (ver CursorDeMentira).
+    _cod, _txt, _m, _ap = correr_main(
+        'ensayo', objetos=_objs,
+        historico={'con_copia.csv': 3, 'sin_copia.csv': 2})
+finally:
+    os.environ.pop('R2_LISTADO', None)
+    shutil.rmtree(_tmp_o, ignore_errors=True)
+eq('(O) el ensayo con R2_LISTADO real termina bien', _cod, 0)
+# El script imprime cada sin_red como "      · <nombre>  (<motivo>)": un ancla
+# exacta, no un `in` suelto que confundiria "listado" con "excluido".
+eq('(O) 🔴 el que NO tiene copia en R2 se GRITA con su motivo',
+   '· sin_copia.csv  (no está en R2' in _txt, True)
+eq('(O) … y el que SI tiene copia NO sale marcado como sin copia',
+   '· con_copia.csv  (' not in _txt, True)
 
 print()
 if fallos:

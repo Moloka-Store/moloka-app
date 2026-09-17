@@ -279,6 +279,14 @@ jobs:
       - name: 25) test_paginacion_buzon.py
         run: python -u test_paginacion_buzon.py
 
+      # El banco de `podar_copia_bd.py` (encargo del 17-sep-2026, apagar la
+      # copia diaria de la v1): que se conserva, que se borra, y que un
+      # objeto bajo bd/ con un nombre que no se puede leer PARA todo el
+      # borrado, en vez de colarse. Sin red y sin secretos: solo stdin/stdout
+      # y ficheros temporales.
+      - name: 25 bis) test_podar_copia_bd.py
+        run: python -u test_podar_copia_bd.py
+
       - name: 26) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
@@ -317,6 +325,7 @@ jobs:
             test_actualizador_tcg_freno.py
             test_claude_md_candado.py
             test_paginacion_buzon.py
+            test_podar_copia_bd.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).
