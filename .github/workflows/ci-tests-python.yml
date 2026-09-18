@@ -45,10 +45,10 @@ jobs:
 
     steps:
       - name: 1) Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 2) Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           # 3.11 es la que usan 40 de los 52 workflows de este repo.
           python-version: '3.11'

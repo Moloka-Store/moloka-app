@@ -10,8 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Instalar dependencias
@@ -22,7 +22,7 @@ jobs:
           DBLINE_PASS: ${{ secrets.DBLINE_PASS }}
         run: python -u descargar_dbline.py
       - name: Guardar el Excel como artefacto
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dblinecatalog
           path: dblinecatalog.xlsx

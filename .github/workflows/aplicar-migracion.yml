@@ -120,7 +120,7 @@ jobs:
       # rama pero el CONTENIDO que se aplica es el de main. Regla 1: a la base solo
       # llega lo aprobado.
       - name: 1) Checkout de main (no del ref despachado)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 1

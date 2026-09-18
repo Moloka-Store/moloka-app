@@ -131,7 +131,7 @@ jobs:
       # que este workflow comparte con `backup-bd.yml`. Se escribe una vez y la
       # consumen los dos: aqui para CONSERVAR lo que el backup no cubre, y alli para
       # que la copia deje de tener ese agujero.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 1) Cerrojo anti-produccion
         env:
