@@ -7,8 +7,8 @@ jobs:
   catalogo:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Instalar dependencias
@@ -20,7 +20,7 @@ jobs:
           HEO_FULL: '1'
         run: python -u descargar_heo.py
       - name: Subir catalogo + EANs como artefactos
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: heo-catalogo
           path: |
