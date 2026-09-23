@@ -287,6 +287,14 @@ jobs:
       - name: 25 bis) test_podar_copia_bd.py
         run: python -u test_podar_copia_bd.py
 
+      - name: 25 ter) test_registro_ejecuciones.py
+        # 🔑 Encargo H (23-sep-2026): que el ULTIMO paso de los ocho procesar-*.yml
+        #    vigilados apunte su color real en registro_ejecuciones sin poder cambiarlo
+        #    (always, continue-on-error, tope corto, la misma DB_URL que la carga), y que
+        #    la guarda saltada llegue de la SALIDA del paso del procesador. Lee el YAML
+        #    con pyyaml, por estructura. Sin red y sin secretos.
+        run: python -u test_registro_ejecuciones.py
+
       - name: 26) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
@@ -326,6 +334,7 @@ jobs:
             test_claude_md_candado.py
             test_paginacion_buzon.py
             test_podar_copia_bd.py
+            test_registro_ejecuciones.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).

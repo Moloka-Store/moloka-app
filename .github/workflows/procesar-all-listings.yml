@@ -66,3 +66,55 @@ jobs:
           MODO: ${{ inputs.modo }}
           DB_URL: ${{ inputs.destino == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
         run: python -u procesador_all_listings.py
+
+      # ═══ LA LÍNEA DEL REGISTRO (encargo H, 23-sep-2026) · SIEMPRE EL ÚLTIMO PASO DEL JOB ═══
+      # 🔴 POR QUÉ: hasta hoy este procesador no dejaba en la base ninguna fila de «esto falló»: un
+      #    rollback no deja rastro (parte E, 23-sep, tabla a-bis). Este paso apunta en
+      #    `registro_ejecuciones` una línea con el color REAL del job (`job.status`) y el modo. La
+      #    lee la revisión mensual con el conector de solo lectura.
+      # 🔑 VA A LA MISMA BASE QUE LA CARGA: la misma expresión de `DB_URL` que el paso del procesador.
+      #    Un ensayo en staging se apunta en staging, y uno en producción en producción, con su modo:
+      #    un ensayo verde NO es una carga.
+      # 🔒 UN FALLO AL APUNTAR NUNCA CAMBIA EL COLOR DEL JOB NI LO RETRASA: `continue-on-error`, un
+      #    minuto de tope y 45 s para psql. Sin credenciales nuevas: la cadena de siempre, que entra
+      #    como `postgres`, el dueño de `registrar_ejecucion`.
+      - name: Apuntar la ejecución en el registro
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 1
+        env:
+          DB_URL: ${{ inputs.destino == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
+          R_RESULTADO: ${{ job.status }}
+          R_MODO: ${{ inputs.modo }}
+        run: |
+          set -uo pipefail
+          if [ -z "${DB_URL:-}" ]; then
+            echo "::warning title=Registro sin apuntar::Este run no tiene cadena de la base; la línea no se escribe y el job conserva su color."
+            exit 0
+          fi
+          wf="${GITHUB_WORKFLOW_REF%%@*}"; wf="${wf##*/}"
+          empezado=""
+          arranque="$(ps -o lstart= -C Runner.Worker 2>/dev/null | head -n1 || true)"
+          [ -n "$arranque" ] && empezado="$(date -u -d "$arranque" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+          guardas=""
+          filas=""
+          if timeout 45 psql "$DB_URL" -X -q -At -v ON_ERROR_STOP=1 \
+               -v repo="$GITHUB_REPOSITORY" -v workflow="$wf" -v job="$GITHUB_JOB" \
+               -v run_id="$GITHUB_RUN_ID" -v run_attempt="$GITHUB_RUN_ATTEMPT" -v evento="$GITHUB_EVENT_NAME" \
+               -v resultado="$R_RESULTADO" -v modo="${R_MODO:-}" -v filas="$filas" -v guardas="$guardas" \
+               -v empezado="$empezado" <<'SQL'
+          set statement_timeout = '15s';
+          select public.registrar_ejecucion(
+            p_repo => :'repo', p_workflow => :'workflow', p_job => :'job',
+            p_run_id => :'run_id'::bigint, p_run_attempt => :'run_attempt'::integer,
+            p_evento => :'evento', p_resultado => :'resultado', p_modo => nullif(:'modo', ''),
+            p_filas => nullif(:'filas', '')::jsonb, p_guardas_saltadas => nullif(:'guardas', '')::jsonb,
+            p_empezado_en => nullif(:'empezado', '')::timestamptz);
+          SQL
+          then
+            echo "Apuntado en registro_ejecuciones: ${wf} · ${GITHUB_JOB} · ${R_RESULTADO} · modo ${R_MODO:-—}${guardas:+ · guardas saltadas: $guardas}"
+          else
+            rc=$?
+            echo "::warning title=Registro sin apuntar::No se pudo escribir la línea en registro_ejecuciones (salida ${rc}). El job conserva su color."
+            exit "$rc"
+          fi

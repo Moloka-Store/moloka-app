@@ -102,6 +102,7 @@
 # ============================================================================
 
 import datetime
+import json
 import os, sys
 from collections import Counter
 
@@ -786,6 +787,7 @@ def analizar(texto, fichero, fecha_foto, umbral_filas=None):
             print(f"\n⚠️  [Guarda 4] {len(filas_datos)} filas, por debajo del umbral de "
                   f"{umbral_filas} — PERMITIR_UMBRAL_BAJO=1 la salta. Que conste.",
                   flush=True)
+            dejar_constancia(4, {'valvula': 'PERMITIR_UMBRAL_BAJO', 'filas': len(filas_datos), 'umbral': umbral_filas})
         else:
             raise Aborta(
                 f"[Guarda 4] El fichero trae {len(filas_datos)} filas de datos y el umbral "
@@ -1335,6 +1337,32 @@ def caida_maxima_de_la_pelicula(cur):
     return {'saltos': int(saltos or 0), 'peor': int(peor or 0)}
 
 
+def dejar_constancia(guarda, cifras):
+    """Deja en la salida del paso qué guarda se ha SALTADO y con qué cifras.
+
+    🔴 POR QUÉ (encargo H, 2 bis, 23-sep-2026): el 18-sep se relanzó esta carga a mano con
+       PERMITIR_SALTO=1 y se saltó la Guarda 10 (la caída era real: 234 uds a reservado).
+       Lo dijo el log —«Que conste»— y la base no guardó nada. Esto deja la misma
+       constancia donde la lee el ÚLTIMO paso del workflow, que la apunta en
+       `registro_ejecuciones`: `guarda_<n>=<json>` en `$GITHUB_OUTPUT`.
+    🔒 NO DECIDE NADA: se llama DESPUÉS de que la válvula haya dejado pasar, y sólo escribe.
+       Fuera de Actions (sin GITHUB_OUTPUT) no hace nada, y si no puede escribir lo dice
+       y sigue: una constancia que falla no puede tumbar la carga.
+    🔑 La SALIDA del paso y no su entorno ($GITHUB_ENV): la mesa de pruebas, que corre
+       antes en el mismo job, también salta guardas a propósito, y por el entorno esas
+       líneas llegarían al registro como si las hubiera saltado la carga.
+    """
+    ruta = os.environ.get('GITHUB_OUTPUT')
+    if not ruta:
+        return
+    try:
+        with open(ruta, 'a', encoding='utf-8') as fh:
+            fh.write('guarda_%s=%s\n' % (guarda, json.dumps(dict(cifras, guarda=str(guarda)),
+                                                            ensure_ascii=False, default=str)))
+    except OSError as e:
+        print(f"   · no se pudo dejar constancia de la Guarda {guarda}: {e}", flush=True)
+
+
 def guarda_continuidad(fecha_ant, fecha_nueva, disponible_ant, disponible_nuevo,
                        fichas_ant, fichas_nuevas, salidas=None, pelicula=None,
                        permitir_salto=None, escribir=print):
@@ -1403,6 +1431,7 @@ def guarda_continuidad(fecha_ant, fecha_nueva, disponible_ant, disponible_nuevo,
             escribir("AVISO  " + cuerpo)
             escribir("   PERMITIR_SALTO=1 la salta. Que conste, y que se mire.")
             escribir("")
+            dejar_constancia(10, {'valvula': 'PERMITIR_SALTO', 'caso': 'nadie_puede_juzgar', 'fecha_ant': fecha_ant, 'fecha_nueva': fecha_nueva, 'disponible_ant': disponible_ant, 'disponible_nuevo': disponible_nuevo, 'caida': caida})
             return [cuerpo]
         raise Aborta(cuerpo)
 
@@ -1442,6 +1471,7 @@ def guarda_continuidad(fecha_ant, fecha_nueva, disponible_ant, disponible_nuevo,
         escribir("AVISO  " + cuerpo)
         escribir("   PERMITIR_SALTO=1 la salta. Que conste, y que se mire.")
         escribir("")
+        dejar_constancia(10, {'valvula': 'PERMITIR_SALTO', 'fecha_ant': fecha_ant, 'fecha_nueva': fecha_nueva, 'disponible_ant': disponible_ant, 'disponible_nuevo': disponible_nuevo, 'caida': caida, 'techo': techo, 'fichas_ant': fichas_ant, 'fichas_nuevas': fichas_nuevas})
         return motivos
     raise Aborta(cuerpo + "\n   (Si el salto es REAL —una retirada grande, un cierre "
                           "de fichas— la puerta es PERMITIR_SALTO=1.)")

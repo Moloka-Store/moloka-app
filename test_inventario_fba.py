@@ -1530,6 +1530,73 @@ eq('(28) … tambien del degradado',
    cabecera_de(fichero(sin_esperadas(SANAS), cabecera=CABECERA_24)), CABECERA_24)
 eq('(28) … y de un fichero vacio sale vacia, sin reventar', cabecera_de(''), [])
 
+print('\n== 29) LA CONSTANCIA · una guarda saltada queda en la salida del paso (encargo H) ==')
+# 🔴 EL 18-sep SE SALTO LA GUARDA 10 CON PERMITIR_SALTO=1 Y LA BASE NO GUARDO NADA. Ahora la
+#    valvula que deja pasar escribe `guarda_<n>=<json>` en $GITHUB_OUTPUT, y el ultimo paso del
+#    workflow lo apunta en registro_ejecuciones. Se prueba EJECUTANDO la guarda, con un
+#    GITHUB_OUTPUT de mentira, en las dos direcciones: escribe cuando salta y calla cuando no.
+import json as _json  # noqa: E402
+import tempfile  # noqa: E402
+
+_salida_real = os.environ.get('GITHUB_OUTPUT')
+with tempfile.TemporaryDirectory() as _d:
+    _out = os.path.join(_d, 'salida')
+    os.environ['GITHUB_OUTPUT'] = _out
+
+    def _leidas():
+        if not os.path.exists(_out):
+            return {}
+        with open(_out, encoding='utf-8') as fh:
+            return {k: _json.loads(v) for k, v in
+                    (ln.rstrip('\n').split('=', 1) for ln in fh if ln.strip())}
+
+    # La pareja callada: el mismo dia, sin salto, no deja nada.
+    guarda_continuidad(AYER, HOY10, 6692, 6600, 381, 381,
+                       salidas=ledger(16, cubre=False), pelicula=peli(), permitir_salto=True,
+                       escribir=lambda *_: None)
+    eq('(29) sin salto no queda constancia', _leidas(), {})
+    # El caso del 7-sep con la valvula abierta: pasa, y deja la caida y el techo.
+    guarda_continuidad(AYER, HOY10, 6692, 6453, 381, 381,
+                       salidas=ledger(16, cubre=False), pelicula=peli(), permitir_salto=True,
+                       escribir=lambda *_: None)
+    _g10 = _leidas().get('guarda_10') or {}
+    eq('(29) Guarda 10 saltada: queda guarda_10 con la valvula',
+       (_g10.get('guarda'), _g10.get('valvula')), ('10', 'PERMITIR_SALTO'))
+    eq('(29) … con la caida y el techo que la guarda midio',
+       (_g10.get('caida'), _g10.get('techo')), (239, 177))
+    eq('(29) … y las dos fechas, legibles', (_g10.get('fecha_ant'), _g10.get('fecha_nueva')),
+       ('2026-09-06', '2026-09-07'))
+    # «Nadie puede juzgar» tambien es un salto, y se dice distinto.
+    os.remove(_out)
+    guarda_continuidad(AYER, HOY10, 6692, 6453, 381, 381,
+                       salidas=None, pelicula=peli(saltos=1), permitir_salto=True,
+                       escribir=lambda *_: None)
+    eq('(29) sin fuente que opine y con la valvula: queda el caso nadie_puede_juzgar',
+       (_leidas().get('guarda_10') or {}).get('caso'), 'nadie_puede_juzgar')
+    # La Guarda 4, por analizar(): 37 filas con PERMITIR_UMBRAL_BAJO=1.
+    os.remove(_out)
+    os.environ['PERMITIR_UMBRAL_BAJO'] = '1'
+    try:
+        corta(fichero(SANAS[:37]))
+    finally:
+        del os.environ['PERMITIR_UMBRAL_BAJO']
+    _g4 = _leidas().get('guarda_4') or {}
+    eq('(29) Guarda 4 saltada: queda guarda_4 con las filas y el umbral',
+       (_g4.get('valvula'), _g4.get('filas'), _g4.get('umbral')),
+       ('PERMITIR_UMBRAL_BAJO', 37, UMBRAL_FILAS))
+    # Y sin la valvula, la guarda aborta y no deja constancia de un salto que no hubo.
+    os.remove(_out)
+    corto, _ = corta(fichero(SANAS[:37]))
+    eq('(29) sin la valvula aborta y NO deja constancia', (corto, _leidas()), (True, {}))
+    # Fuera de Actions (sin GITHUB_OUTPUT) no escribe en ningun sitio ni revienta.
+    del os.environ['GITHUB_OUTPUT']
+    guarda_continuidad(AYER, HOY10, 6692, 6453, 381, 381,
+                       salidas=ledger(16, cubre=False), pelicula=peli(), permitir_salto=True,
+                       escribir=lambda *_: None)
+    eq('(29) sin GITHUB_OUTPUT no escribe nada', os.path.exists(_out), False)
+if _salida_real is not None:
+    os.environ['GITHUB_OUTPUT'] = _salida_real
+
 
 print('')
 if fallos:
