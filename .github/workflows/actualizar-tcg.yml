@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   actualizar:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15      # es comparacion de datos: minutos de sobra
     steps:
       - name: Descargar el repo

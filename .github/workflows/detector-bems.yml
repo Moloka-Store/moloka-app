@@ -41,7 +41,7 @@ concurrency:
 
 jobs:
   detectar:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25            # por debajo del intervalo de 30 min (anti-zombi)
     steps:
       - name: Descargar el repo

@@ -16,7 +16,7 @@ on:
 
 jobs:
   escanear:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 350     # margen para un "todo" largo (GitHub corta a 360)
     steps:
       - name: Descargar el repo
