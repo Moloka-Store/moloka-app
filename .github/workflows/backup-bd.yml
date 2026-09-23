@@ -54,7 +54,7 @@ concurrency:
 
 jobs:
   backup:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # Hasta hoy este job no bajaba el repo porque no ejecutaba nada de dentro.
       # Ahora sí: necesita backup_storage.py.

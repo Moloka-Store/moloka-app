@@ -125,7 +125,7 @@ concurrency:
 
 jobs:
   restaurar:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # Hace falta por `sql/capturar_politicas_fuera_de_public.sql`, que es la pieza
       # que este workflow comparte con `backup-bd.yml`. Se escribe una vez y la

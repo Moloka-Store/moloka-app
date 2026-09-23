@@ -76,7 +76,7 @@ permissions:
 
 jobs:
   podar:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       # 🔒 FIJO AQUÍ, NUNCA DESDE UN INPUT: ver la cabecera.

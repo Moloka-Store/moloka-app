@@ -27,7 +27,7 @@ on:
 
 jobs:
   cerebro:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Corre si es disparo manual, o si el snapshot encadenado acabo bien.
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     timeout-minutes: 30

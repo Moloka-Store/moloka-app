@@ -113,7 +113,7 @@ concurrency:
 
 jobs:
   aplicar:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # ── 1) El codigo SIEMPRE sale de main ────────────────────────────────
       # ref: main a proposito. Si despachas desde otra rama, el .yml sera el de esa

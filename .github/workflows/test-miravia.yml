@@ -6,7 +6,7 @@ on:
 
 jobs:
   test-miravia:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Descargar el repo
         uses: actions/checkout@v7

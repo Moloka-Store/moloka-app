@@ -67,7 +67,7 @@ concurrency:
 
 jobs:
   vacuum:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: 1) Instalar cliente Postgres 17
         run: |

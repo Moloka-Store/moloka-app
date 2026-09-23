@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       # En ubuntu la salida ya es UTF-8, pero se fija explicito: estos tests
       # imprimen flechas y emojis, y el dia que el runner cambie de locale el
