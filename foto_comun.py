@@ -252,7 +252,31 @@ def descargar_buzon(sb, bucket, ruta):
 #    6m57s = 3 IPs × ~139s para UN intento) y el reintento llegaba tarde o nunca. Con él,
 #    cada intento se rinde en `connect_timeout`s por host (libpq lo aplica POR host) y el
 #    reintento puede pillar la red ya recuperada.
+#
+# 🔴 connect_timeout SOLO VIGILA EL CONNECT. Una vez dentro, si la conexión se muere por
+#    el camino, el cliente espera la respuesta PARA SIEMPRE. Pasó el 24-sep-2026 (run
+#    35956134193 de procesar-ledger): con su refresco del Trackeador en marcha, Postgres de
+#    producción se reinició a las 06:35:16 (`pg_postmaster_start_time()`), y el procesador
+#    se quedó 71 min esperando por una conexión que ya no existía, hasta que lo cancelaron.
+#    De ahí los keepalives y el `tcp_user_timeout` (encargo AA). Qué hacen, medido contra un Postgres local cortando la red con iptables:
+#    · keepalives: con la conexión callada `idle` s, el sistema manda una sonda cada
+#      `interval` s. Si el otro extremo está VIVO, su núcleo la contesta aunque la
+#      consulta siga trabajando: una llamada larga LEGÍTIMA no se corta (probado con
+#      pg_sleep de 150 s). Si nadie contesta, la conexión se da por muerta.
+#    · tcp_user_timeout: tope a lo que un dato enviado puede quedar sin acuse. Cubre
+#      el caso que los keepalives no ven (el cable muere mientras ENVIAMOS) y en Linux
+#      manda también sobre el recuento de sondas.
+#    Con estos valores, una conexión muerta da error hacia los 90-100 s en vez de nunca.
+# 🔒 NO cortan una consulta lenta con la base viva, ni un servidor colgado en un
+#    bloqueo: eso lo corta el `timeout-minutes` del job, no esto.
 # ---------------------------------------------------------------------------
+_KEEPALIVES = dict(
+    keepalives=1,
+    keepalives_idle=30,        # s callada antes de la primera sonda
+    keepalives_interval=10,    # s entre sondas
+    keepalives_count=6,        # sondas sin respuesta → muerta (30 + 6×10 = 90 s)
+    tcp_user_timeout=90000,    # ms: lo enviado sin acuse más de 90 s → muerta
+)
 
 # SQLSTATE que, AL CONECTAR, son transitorios (merece reintentar). Toda la clase 08
 # (Connection Exception) se trata como transitoria vía el prefijo; estos son los del
@@ -286,7 +310,7 @@ def conectar_bd(db_url, esperas=_ESPERAS_REINTENTO, connect_timeout=10):
     ultimo = None
     for intento in range(1, intentos + 1):
         try:
-            con = psycopg2.connect(db_url, connect_timeout=connect_timeout)
+            con = psycopg2.connect(db_url, connect_timeout=connect_timeout, **_KEEPALIVES)
             if intento > 1:
                 print(f"⚠️  [BD] conexión: falló {intento - 1} vez/veces "
                       f"({ultimo}); intento {intento} OK.", flush=True)

@@ -295,6 +295,13 @@ jobs:
         #    con pyyaml, por estructura. Sin red y sin secretos.
         run: python -u test_registro_ejecuciones.py
 
+      - name: 25 quater) test_topes_cuelgue.py
+        # 🔑 Encargo AA (24-sep-2026): que todo procesar-*.yml tenga `timeout-minutes` en
+        #    el JOB (por encima del exito mas largo medido) y que `conectar_bd` abra con
+        #    keepalives y `tcp_user_timeout` que la libpq instalada conoce. El ledger se
+        #    quedo 71 min colgado sin nada de esto. Por estructura, sin red y sin secretos.
+        run: python -u test_topes_cuelgue.py
+
       - name: 26) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
@@ -335,6 +342,7 @@ jobs:
             test_paginacion_buzon.py
             test_podar_copia_bd.py
             test_registro_ejecuciones.py
+            test_topes_cuelgue.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).
