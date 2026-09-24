@@ -175,6 +175,9 @@ PROGRAMAS = [
     ('robot_generar.py',           'solo-servicio',         1),   # fabrica-generar
     ('moloka_sync_stock_web.py',   'solo-servicio',         1),   # sync-stock-web
     ('moloka_tracker_snapshot.py', 'servicio-con-respaldo', 0),   # a mano: ningun workflow
+    # 🆕 24-sep-2026 (encargo B, escaner 2 de HEO en sombra): el cruce lee `productos` para el
+    #    IVA de la ficha, igual que el escaner viejo, y corre desatendido en escaner2-heo-cruce.yml.
+    ('escaner2_heo_cruce.py',      'solo-servicio',         1),   # escaner2-heo-cruce
 ]
 
 
@@ -604,7 +607,7 @@ for _script, _forma, _esperados in PROGRAMAS:
 
 eq('(B) 🔴 ningun paso lanza ninguno de estos programas sin la llave de servicio',
    _incumplen, [])
-eq('(D) …y en total se han mirado los DIEZ pasos que existen, no cero', _total, 10)
+eq('(D) …y en total se han mirado los ONCE pasos que existen, no cero', _total, 11)
 
 # (C) la otra direccion: un paso que lanza el escaner sin la llave tiene que
 # salir en la lista. Este es el estado exacto de `director-dbline.yml` ayer.
@@ -806,5 +809,6 @@ if FALLOS:
     for _f in FALLOS:
         print("  - " + _f)
     sys.exit(1)
-print("VERDE: los siete programas piden su llave y abortan si falta, los diez\n"
-      "       pasos se la dan, y la guarda del Pro aborta con `productos` vacio.")
+print("VERDE: los %d programas piden su llave y abortan si falta, los %d\n"
+      "       pasos se la dan, y la guarda del Pro aborta con `productos` vacio."
+      % (len(PROGRAMAS), _total))

@@ -1,0 +1,63 @@
+# ============================================================
+# Moloka - Escaner 2 · CRUCE DE HEO con los CSV del Visualizador (en sombra, encargo B)
+#
+# Lo dispara la v2 (moloka-app-v2, /escaner/barrido-heo) al subir los CSV de amazon.es y/o
+# amazon.de. Lee los CSV con el lector del Escaner Pro, cruza con la foto de la pasada por
+# EAN normalizado, decide la puerta de cada EAN con calc_rentabilidad del escaner viejo,
+# comprueba el CUADRE contra la base y se compara con el ultimo Excel completo del viejo.
+#
+# 🔒 CERO tokens de Keepa y cero llamadas a Amazon: todo sale de los CSV.
+# 🔒 Solo LEE lo del escaner viejo (productos, escaner_resultados, informes/resultados/).
+# ============================================================
+name: Moloka - Escaner 2 · Cruce HEO
+
+on:
+  workflow_dispatch:
+    inputs:
+      pasada:
+        description: 'id de la pasada (escaner2_pasada.id) que se cruza con los CSV subidos'
+        type: string
+        required: true
+
+concurrency:
+  group: escaner2-heo
+  cancel-in-progress: false
+
+jobs:
+  cruzar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        # Versiones FIJADAS (las de requirements.txt). pandas y openpyxl los pide el lector del
+        # Escaner Pro al importarse; psycopg2, foto_comun (listar/descargar con reintento).
+        # numpy y psycopg2-binary, FIJADOS tambien (numpy 2.4.6 es con la que corrio en verde
+        # pandas 3.0.0, ver requirements.txt; psycopg2-binary 2.9.13, la de los tests).
+        run: pip install supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13
+
+      - name: Cruzar los CSV con la foto
+        # El tope va en el PASO (25 min), no solo en el job (30): asi, si se agota, el paso
+        # falla y el rescate de abajo tiene tiempo de correr.
+        timeout-minutes: 25
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PASADA:               ${{ inputs.pasada }}
+        run: python -u escaner2_heo_cruce.py
+
+      # 🔴 SI EL RUN MUERE A MEDIAS, LA FILA NO SE QUEDA COLGADA: sin esto, un cruce que se
+      #    queda en su estado de trabajo bloquea la pantalla de la v2 para siempre.
+      - name: Rescate · si el run ha fallado, la fila de este run queda 'fallida'
+        if: failure() || cancelled()
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python -u escaner2_rescate.py cruce
