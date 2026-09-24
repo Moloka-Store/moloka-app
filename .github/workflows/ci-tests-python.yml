@@ -102,8 +102,8 @@ jobs:
           python -u -c "
           import sys; sys.path.insert(0, 'scripts')
           import foto_comun, procesador_custom_analytics, procesador_inventario_fba
-          import anti_cero, censo_migraciones
-          print('importan: foto_comun, procesador_custom_analytics, procesador_inventario_fba, anti_cero, censo_migraciones')
+          import anti_cero, censo_migraciones, escaner2_motor
+          print('importan: foto_comun, procesador_custom_analytics, procesador_inventario_fba, anti_cero, censo_migraciones, escaner2_motor')
           "
 
       # ── Los tres del encargo ────────────────────────────────────────────
@@ -302,6 +302,24 @@ jobs:
         #    quedo 71 min colgado sin nada de esto. Por estructura, sin red y sin secretos.
         run: python -u test_topes_cuelgue.py
 
+      # ── El escaner 2 de HEO, en sombra (encargo B, 24-sep-2026) ───────────
+      # Saca del escaner viejo sus piezas con `ast` (formula, reglas de EAN/chase/caja, IVA)
+      # y las EJECUTA; el lector de CSV se prueba con un CSV sintetico con las cabeceras del
+      # Escaner Pro y del escaparate. Sin red, sin secretos y sin tocar produccion.
+      - name: 25 quinquies) test_escaner2_motor.py
+        run: python -u test_escaner2_motor.py
+
+      # Los dos programas de verdad (barrido y cruce), cada uno en su proceso, con una base y
+      # un Storage de mentira: sin llave no corren, y un cruce que NO CUADRA sale en ROJO.
+      - name: 25 sexies) test_escaner2_punta_a_punta.py
+        run: python -u test_escaner2_punta_a_punta.py
+
+      # La formula contra filas de `escaner_detalle`. En el CI solo el cotejador contra filas
+      # fabricadas (las reales llevan precio de coste y este repo es publico): las reales se
+      # corren con ESCANER2_FILAS_REALES, y su resultado va en el INFORME de la v2.
+      - name: 25 septies) test_escaner2_formula.py
+        run: python -u test_escaner2_formula.py
+
       - name: 26) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
@@ -343,6 +361,9 @@ jobs:
             test_podar_copia_bd.py
             test_registro_ejecuciones.py
             test_topes_cuelgue.py
+            test_escaner2_motor.py
+            test_escaner2_punta_a_punta.py
+            test_escaner2_formula.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).

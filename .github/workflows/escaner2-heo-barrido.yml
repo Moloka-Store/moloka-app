@@ -1,0 +1,52 @@
+# ============================================================
+# Moloka - Escaner 2 · BARRIDO DE HEO (en sombra, encargo B, 24-sep-2026)
+#
+# Lo dispara el boton «Barrer HEO» de la v2 (moloka-app-v2, /escaner/barrido-heo), con el
+# mismo mecanismo que el escaneo de factura (workflow_dispatch con GH_TOKEN). Vive aqui porque
+# aqui estan las credenciales de HEO.
+#
+# Baja el catalogo de HEO con descargar_heo.py (la misma funcion del director), aplica el
+# filtro de director_heo_prep.py y las reglas de EAN/chase/caja del escaner viejo (leidas de
+# sus ficheros, sin tocarlos), guarda la FOTO en escaner2_foto y deja la lista de EAN para el
+# Visualizador de Keepa en el bucket cerrado `escaner2`.
+#
+# 🔒 NO TOCA EL ESCANER VIEJO: ni director-heo.yml, ni su buzon, ni escaner_memoria, ni la
+#    puente de chase. Cero tokens de Keepa.
+# >>> SIN RELOJ <<<  Solo cuando se pulsa el boton (o a mano desde Actions).
+# ============================================================
+name: Moloka - Escaner 2 · Barrido HEO
+
+on:
+  workflow_dispatch:
+
+# 🔒 Barrido y cruce de HEO, de uno en uno: el cruce lee la foto que el barrido deja.
+concurrency:
+  group: escaner2-heo
+  cancel-in-progress: false
+
+jobs:
+  barrer:
+    runs-on: ubuntu-24.04
+    # La API de HEO son tres endpoints paginados de 500 en 500: minutos, no horas.
+    timeout-minutes: 30
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        # Las versiones FIJADAS de requirements.txt (requests: API de HEO · supabase: base y
+        # Storage). psycopg2 no hace falta: aqui no se habla con Postgres directamente.
+        run: pip install supabase==2.31.0 requests==2.34.2
+
+      - name: Barrer HEO y dejar la foto
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          HEO_USER:             ${{ secrets.HEO_USER }}
+          HEO_PASS:             ${{ secrets.HEO_PASS }}
+        run: python -u escaner2_heo_barrido.py
