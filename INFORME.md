@@ -2,7 +2,7 @@
 
 > **Lo lee:** Fernando y Cowork, al revisar el PR [Moloka-Store/moloka-app#308](https://github.com/Moloka-Store/moloka-app/pull/308), antes de decidir si se fusiona.
 > **Hora real:** 24-sep-2026, **09:10:33 Madrid** según Postgres (`now() at time zone 'Europe/Madrid'`); el reloj de la sesión decía 09:10:34. La hora de cierre va en §7.
-> 🔴 **Este fichero NO va a `main`.** Va solo, en el último commit de la rama. Antes de fusionar, se revierte ese commit o se borra el fichero. En `main` de la v1 **no existe** hoy (`git ls-tree origin/main` no lo lista).
+> 🔴 **Este fichero NO va a `main`.** Solo lo tocan commits suyos (4704360 y el del cierre). Antes de fusionar hay que **borrar el fichero** en un commit y, como `main` se fusiona por squash, **editar el mensaje de squash**: el que propone GitHub encadena los de todos los commits, incluido el «encargo AA» de cfee17f y los del INFORME. En `main` de la v1 **no existe** hoy (`git ls-tree origin/main` no lo lista).
 
 ---
 
@@ -20,7 +20,7 @@
 
 - **No los he lanzado yo.** En esta sesión no ha habido ni un REFRESH ni una llamada a `fn_trackeador_refrescar`.
 - Entre las 08:56 y las 09:00 entraron en producción tres migraciones: `amz_salud_resenas_y_avisos`, `ventas_puente_impuesto_cero` e `inicio_resumen`.
-- Que cada refresco tarde más que el anterior, en una máquina de 1 GB que se cayó a las 06:35, es lo que cabría esperar si la memoria no da abasto. Pero **no lo he medido**.
+- Que cada refresco tarde más que el anterior, en una máquina de 1 GB que se reinició sin apagado limpio a las 06:35, es lo que cabría esperar si la memoria no da abasto. Pero **no lo he medido**.
 - **Quien los esté lanzando debería saberlo ya.**
 
 ---
@@ -65,7 +65,7 @@ git ls-remote: refs/heads/claude/hopeful-brown-m8q1wk = cfee17f…, refs/heads/m
 Más `INFORME.md`, que no va a `main`.
 
 **Qué ha cambiado respecto a cfee17f (98c1836). Valores y lógica, sin tocar:**
-- **La letra:** «encargo AA» → «encargo AJ» en los comentarios de los 9 workflows, en el paso 25 quater del CI y en el docstring del test. `grep -rn --exclude-dir=.git "encargo AA" .` → **0**. Con `.git` incluido salen solo el mensaje del commit cfee17f y los reflogs, que no se reescriben.
+- **La letra:** «encargo AA» → «encargo AJ» en los comentarios de los 9 workflows, en el paso 25 quater del CI y en el docstring del test. `grep -rn --exclude-dir=.git "encargo AA" .` → **0 en el código** (medido en 98c1836). En la punta de la rama salen las citas de este INFORME, que no va a main. Con `.git` incluido salen además el mensaje del commit cfee17f y los reflogs, que no se reescriben.
 - **`foto_comun.py`, comentario del connect:** dice solo lo medido. La base de producción se reinició a las 06:35:16 Madrid (04:35:16 UTC, `pg_postmaster_start_time()`) y su registro dice «database system was not properly shut down; automatic recovery in progress». **La causa no está probada y no se afirma.**
 - **`foto_comun.py`, límite de los keepalives:** vigilan el tramo TCP hasta el **primer** extremo. Si `SUPABASE_DB_URL` pasa por el pooler (no se sabe: es un secreto), una base caída detrás de él no la ven, y ahí manda el `timeout-minutes` del job.
 - **`test_topes_cuelgue.py`:** el mismo cambio en su docstring.
@@ -78,6 +78,7 @@ Más `INFORME.md`, que no va a `main`.
 ## 3 · CI
 
 - **Run:** [35967565939](https://github.com/Moloka-Store/moloka-app/actions/runs/35967565939), sobre `98c1836`, evento `pull_request` (#308). Job `tests` 107529510409: **success**, con los 36 pasos en verde.
+- La punta con este INFORME (`4704360`) tiene también su run en verde, el 35968448369 (lo vio el auditor). El commit del cierre lanza otro: su resultado va en el PR.
 - **Censo:** `tests en el repo: 30 | declarados aqui: 30` · `Censo OK: los 30 tests del repo tienen su paso.`
 - **Salida de `test_topes_cuelgue.py` en el CI** (paso «25 quater»), literal:
 
@@ -194,7 +195,7 @@ Las versiones son UTC. La franja pedida, 23-sep de 08:39 a 21:45 Madrid, es de *
 
 Leído con `pg_get_functiondef('public.fn_trackeador_refrescar(boolean)'::regprocedure)`, en este orden:
 1. `insert` en `trackeador_refrescos` y el aviso de «cartero sin correr».
-2. `perform fn_fee_override_refresh()`: un `pg_advisory_xact_lock(hashtext('fee_override'))` y un `delete from fee_override`. **Ese cerrojo pone en fila dos refrescos a la vez**; por eso el 22 y el 23 la segunda llamada de las 06:33 tardó 30,4 s en vez de 16.
+2. `perform fn_fee_override_refresh()`: un `pg_advisory_xact_lock(hashtext('fee_override'))` y un `delete from fee_override`. **Ese cerrojo pone en fila dos refrescos a la vez.** Encaja con que el 22 y el 23 la segunda llamada de las 06:33 tardara 30,4 s en vez de 16, pero **la espera no la he medido**.
 3. `REFRESH MATERIALIZED VIEW CONCURRENTLY mv_escalon_fisico`, en su propio bloque.
 4. `… mv_escalon_peso`, en su bloque.
 5. `… mv_hechos_ficha_pais`, en su bloque.
@@ -330,7 +331,7 @@ nodo WindowAgg (línea 279 del plan VERBOSE, filas_est=5.176.995, coste 2.275.00
 **Descartado con el dato: la escalera del cartero no explica el salto.**
 - `amz_escalera_oferta` pasó de ~3.200 filas al día a **14.031** el 23-sep: el cartero miró 248 ASIN de ES en vez de 70.
 - Pero esas filas entraron **de 06:38 a 06:47**, según `amz_crudo.tomado_en`. Es decir, **antes** de los cuatro refrescos de 08:35-08:39, que tardaron 16,1-16,9 s, lo de siempre.
-- Por tanto el salto de 16 a 56 s vino **después de las 08:39**, y lo único que cambió en el camino del refresco fueron las dos migraciones de arriba.
+- Por tanto el salto de 16 a 56 s vino **después de las 08:39**. En ese tramo, las únicas **migraciones** que cambiaron el camino del refresco son las dos de arriba. Los datos de las tablas base también se mueven durante el día: eso no lo he descartado tabla a tabla.
 
 **La máquina** (`pg_settings`):
 - `shared_buffers` 256 MB, `work_mem` 3,5 MB, `hash_mem_multiplier` 2, `max_connections` 60, `jit` off.
@@ -338,7 +339,7 @@ nodo WindowAgg (línea 279 del plan VERBOSE, filas_est=5.176.995, coste 2.275.00
 
 ### 4.5 · Conclusión
 
-**Qué pieza creció:** `mv_trackeador_pantalla`. Las otras tres cuestan poco en el plan y no han cambiado el 23-sep; `mv_hechos_ficha_pais` solo por datos.
+**Qué pieza creció, según el plan (no hay tiempo medido por materializada):** `mv_trackeador_pantalla`. Las otras tres cuestan poco en el plan y sus definiciones no cambiaron el 23-sep.
 
 **Por qué, lo que está medido:**
 - La vista se escribe con 16 llamadas a `fn_fee_escalon`, y al aplanar sus 19 CTE el planificador las **copia 3.348 veces** en una sola expresión de 5 MB.
@@ -347,7 +348,7 @@ nodo WindowAgg (línea 279 del plan VERBOSE, filas_est=5.176.995, coste 2.275.00
 
 **Lo que NO está probado:**
 - Que sea esto y no `demanda_del_cartero`, ni cuántos de los 40 s pone cada una. Sin ejecutar no se ve.
-- **Y que la memoria que desborda en cada refresco (1,84 GB en una máquina de 1 GB) venga de aquí.** Es verosímil: una expresión de 5 MB se compila en memoria para cada ejecución. Pero no lo he medido.
+- **Y que el desbordamiento de memoria que el panel de Cowork ve en los refrescos venga de aquí.** Según el panel medido por Cowork, a las 06:34 había 1,84 GB comprometidos con un límite de 1,44 GB, en una máquina de 1 GB; eso no lo he medido yo. Es verosímil, porque una expresión de 5 MB se compila en memoria para cada ejecución, pero no lo he medido.
 
 ### 4.6 · Arreglos propuestos (ninguno aplicado)
 
@@ -357,7 +358,7 @@ nodo WindowAgg (línea 279 del plan VERBOSE, filas_est=5.176.995, coste 2.275.00
    - **Cómo se sabe que funciona:** en `EXPLAIN (VERBOSE)` las 3.348 copias bajan a unas 16 y el plan de 5,7 MB a una fracción; y el refresco en staging tarda menos.
    - **Es el que ataca el mecanismo medido.**
 2. **Un refresco por tanda, no uno por procesador.**
-   - **Qué:** hoy cada procesador llama a `fn_trackeador_refrescar`. A las 06:33 fueron dos seguidos (`all-listings` y ledger), con el segundo esperando al primero por el cerrojo de `fee_override`, y dos refrescos de ~50 s encadenados son dos minutos de memoria al límite. La idea: `pg_try_advisory_lock` y saltar si ya hay uno en marcha, o no refrescar si el último acabó hace menos de N minutos.
+   - **Qué:** hoy cada procesador llama a `fn_trackeador_refrescar`. A las 06:33 fueron dos seguidos (`all-listings` y ledger), con el segundo esperando al primero por el cerrojo de `fee_override`, y dos refrescos de ~50 s encadenados son el doble de tiempo con la carga del refresco (la memoria, según el panel de Cowork). La idea: `pg_try_advisory_lock` y saltar si ya hay uno en marcha, o no refrescar si el último acabó hace menos de N minutos.
    - **Coste:** pequeño. Un cambio en la función, en la v2, o en `_refrescar_trackeador` de `foto_comun.py`, en otro PR (aquí no se toca). Hay que decidir qué pasa con el dato del procesador que llega segundo.
 3. **Dar margen a la máquina: de MICRO (1 GB) a SMALL (2 GB).**
    - **Coste:** dinero cada mes (**no lo he consultado**: está en el panel de Supabase) y un reinicio de la base al cambiar, unos minutos, fuera del horario de Elena.
@@ -451,4 +452,33 @@ cross join lateral (select clock_timestamp() + 0*y.n * interval '1 s' b) z;
 
 ## 7 · Auditoría
 
-__AUDITOR__
+**Hora de cierre:** 24-sep-2026, **09:17:29 Madrid** según Postgres (`now() at time zone 'Europe/Madrid'`).
+
+Auditor: un subagente que no ha escrito ni una línea del código. Leyó el diff COMPLETO contra `origin/main` (13 ficheros, INFORME incluido), pasó en local cuatro mesas, rompió la mesa nueva en una copia desechable (roja en 5 casos) y leyó el CI. Sin tocar nada.
+
+**Primera pasada (punta 4704360), veredicto literal:**
+
+> VEREDICTO: FUSIONABLE — El diff de código hace exactamente lo que piden los puntos 1-2: los topes a nivel de job en los 9 procesadores, los keepalives, la letra AJ y comentarios que no afirman la causa y recogen el límite del pooler, sin tocar valores ni lógica. El test puede ponerse rojo, está registrado en el CI y en el censo, y el CI está en verde. Los fallos son menores y están en el INFORME (que se revierte) y en el mensaje de squash, que hay que editar al fusionar.
+
+**Sus hallazgos, todos [MENOR], y qué se ha hecho con cada uno:**
+
+| Hallazgo | Qué se ha hecho |
+|---|---|
+| El squash encadena el mensaje «encargo AA» de cfee17f | Avisado en la cabecera: **editar el mensaje de squash al fusionar** |
+| El grep «= 0» no es cierto en la punta (lo cita este INFORME) | Corregido: «0 en el código» |
+| Faltaba la hora de cierre en §7 | Puesta arriba |
+| Afirmaciones más allá de lo medido (el cerrojo de las 30,4 s, «lo único que cambió», «qué pieza creció», los 1,84 GB, «se cayó», «memoria al límite») | Reescritas como «encaja / según el plan / según el panel de Cowork / no medido» |
+| `test_topes_cuelgue.py:19` remitía a un INFORME que no llega a main | Ahora remite al PR #308 |
+| «(06:35:16)» sin zona en los 9 yml | Ahora «(06:35:16 Madrid)» |
+| Los keepalives llegan también a los tres scripts que usan `conectar_bd` | Informativo: es lo que pide el encargo |
+
+**Segunda pasada, sobre ese delta de comentarios, veredicto literal:**
+
+> VEREDICTO: FUSIONABLE — El delta nuevo solo toca comentarios, el YAML sigue válido y el test pasa; el código cumple los puntos 1-2 del encargo AJ. Antes de fusionar: commit y push, CI en verde, INFORME.md borrado y mensaje de squash editado.
+
+**Antes de fusionar** (lo dice también la regla de la casa):
+1. `gh pr checks 308` en verde sobre la punta.
+2. `git rev-list --count HEAD..origin/main` = 0.
+3. **Borrar INFORME.md** en un commit.
+4. **Editar el mensaje de squash.**
+5. **El visto bueno de Cowork.**
