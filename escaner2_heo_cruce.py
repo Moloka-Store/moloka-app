@@ -120,24 +120,35 @@ def main():
     print(f">>> Cruce {cruce} de la pasada {PASADA} abierto · umbral > {params['umbral']} caídas "
           f"en {' o '.join(params['paises'])}.", flush=True)
     try:
-        cierre, rojo = cruzar(cruce, params)
+        cierre, rojo = cruzar(cruce, params, pasada)
+        # 🔒 El cierre va DENTRO del try: si la base lo rechaza, el cruce queda 'fallida' con el
+        #    motivo, no colgado en 'cruzando' para siempre.
+        sb.table('escaner2_cruce').update(cierre).eq('id', cruce).execute()
     except Exception as ex:
         motivo = str(ex) if isinstance(ex, Fallo) else f'{type(ex).__name__}: {ex}'
         sb.table('escaner2_cruce').update({'estado': 'fallida', 'motivo_fallo': motivo[:2000],
                                            'terminado_en': _ahora().isoformat()}).eq('id', cruce).execute()
         abortar(f'cruce {cruce} fallido: {motivo}')
-    sb.table('escaner2_cruce').update(cierre).eq('id', cruce).execute()
     if cierre['estado'] != 'lista':
         abortar(f"cruce {cruce} fallido: {cierre.get('motivo_fallo')}")
-    print(f">>> CRUCE LISTO · entradas {cierre['n_entradas']} = "
+    print(f">>> CRUCE LISTO · crudo {cierre['n_crudo']} = previas {cierre['n_previas']} + "
+          f"entradas {cierre['n_entradas']} = "
           + ' + '.join(f"{p}:{cierre['n_' + p]}" for p in e2.PUERTAS), flush=True)
     if rojo:
         # Lo guardado vale; lo que falto (la comparacion) se ve en pantalla y el run sale ROJO.
         abortar('cruce guardado, pero con aviso: ' + cierre['aviso'])
 
 
-def cruzar(cruce, params):
+def cruzar(cruce, params, pasada):
     M = e2.cargar_motor()
+    # 🔴 El cuadre empieza en el catalogo CRUDO: sin el crudo y sus ocho puertas previas no se
+    #    puede afirmar nada, y se para aqui (NULL no es cero).
+    faltan = [k for k in ['n_crudo'] + ['p_' + p for p in e2.PUERTAS_PREVIAS] if pasada.get(k) is None]
+    if faltan:
+        raise Fallo('la pasada no trae el recuento de: ' + ', '.join(faltan))
+    n_crudo = int(pasada['n_crudo'])
+    previas = {p: int(pasada['p_' + p]) for p in e2.PUERTAS_PREVIAS}
+    n_previas = sum(previas.values())
     col_pais, col_caidas = e2.columnas_keepa()
     avisos, rojo = [], False
 
@@ -149,7 +160,10 @@ def cruzar(cruce, params):
         raise Fallo('no hay ningún CSV subido para esta pasada')
     tmp = tempfile.mkdtemp(prefix='escaner2_')
     ficheros, errores, rutas_por_pais, caidas_por_pais, fecha_datos = [], [], {}, {}, None
-    for o in sorted(objetos, key=lambda x: x['name']):
+    # 🔑 EL MAS RECIENTE MANDA: el nombre empieza por el sello de la subida (AAAAMMDD-HHMMSS, lo
+    #    pone la v2), y leyendo de mas nuevo a mas viejo la primera ficha que se ve de cada ASIN
+    #    —y sus caidas— es la del CSV mas fresco. Re-subir un pais corrige el cruce siguiente.
+    for o in sorted(objetos, key=lambda x: x['name'], reverse=True):
         datos = descargar_buzon(sb, BUCKET, f"{carpeta}/{o['name']}")
         if datos[:2] == b'\x1f\x8b':
             datos = gzip.decompress(datos)
@@ -177,13 +191,17 @@ def cruzar(cruce, params):
         rutas_por_pais.setdefault(ex['pais'], []).append(ruta)
         for asin, v in ex['caidas'].items():
             caidas_por_pais.setdefault(ex['pais'], {}).setdefault(asin, v)
-        if subido and (fecha_datos is None or subido > fecha_datos):
+        # La fecha del dato es la del CSV MAS VIEJO que se usa: una cifra no puede presumir de
+        # un dato mas fresco que el que la sostiene.
+        if subido and (fecha_datos is None or subido < fecha_datos):
             fecha_datos = subido
-    if errores:
-        raise Fallo('CSV que no se pueden usar → ' + ' | '.join(errores))
     usados = [p for p in params['paises'] if p in rutas_por_pais]
     if not usados:
-        raise Fallo('ningún CSV es de %s' % ' ni de '.join(params['paises']))
+        raise Fallo('ningún CSV es de %s' % ' ni de '.join(params['paises'])
+                    + ((' · CSV que no se pueden usar → ' + ' | '.join(errores)) if errores else ''))
+    # Un CSV ilegible NO tumba el cruce si hay otros buenos (sin poder borrar lo subido, un solo
+    # fichero malo bloquearia la pasada para siempre): se sigue, y el porque va en `ficheros`
+    # (la pantalla lo pinta como aviso, fichero a fichero) y en el Excel.
     for p in params['paises']:
         if p not in usados:
             avisos.append(f'Falta el CSV de {p}: se decide solo con {", ".join(usados)}')
@@ -244,16 +262,26 @@ def cruzar(cruce, params):
     n_c_pocas = _contar('escaner2_resultado_ean', cruce_id=cruce, motivo='c_pocas_caidas')
     n_c_sin = _contar('escaner2_resultado_ean', cruce_id=cruce, motivo='c_sin_dato')
     suma = sum(n_bd.values())
-    cuadra = (n_entradas == suma)
-    print(f"CUADRE puertas [HEO]: entradas={n_entradas} | suma de puertas={suma} ("
-          + ' '.join(f'{p}={n_bd[p]}' for p in e2.PUERTAS) + f") | en memoria {cq['suma']} de "
-          f"{cq['n_entradas']} → {'CUADRA' if (cuadra and cq['cuadra']) else 'NO CUADRA'}", flush=True)
+    # 🔴 Las dos igualdades, y las dos contadas en la base: la foto sale entera por las seis
+    #    puertas, y el catalogo crudo es puertas previas + las seis puertas.
+    cuadra = (n_entradas == suma and n_crudo == n_previas + suma)
+    listas_bd = {mo: _contar('escaner2_apartado', pasada_id=PASADA, motivo=mo) for mo in e2.MOTIVOS_APARTADO}
+    print(f"CUADRE [HEO]: crudo={n_crudo} | previas={n_previas} ("
+          + ' '.join(f'{p}={previas[p]}' for p in e2.PUERTAS_PREVIAS) + f") | entradas={n_entradas} | "
+          f"suma de puertas={suma} (" + ' '.join(f'{p}={n_bd[p]}' for p in e2.PUERTAS) + f") | en memoria "
+          f"{cq['suma']} de {cq['n_entradas']} → {'CUADRA' if (cuadra and cq['cuadra']) else 'NO CUADRA'}",
+          flush=True)
     motivo_fallo = None
     if not cq['cuadra']:
         motivo_fallo = ('NO CUADRA en el cálculo: faltan %d, sobran %d, repetidos %d, puertas raras %s'
                         % (len(cq['faltan']), len(cq['sobran']), len(cq['repetidos']), cq['puerta_rara']))
-    elif not cuadra:
+    elif n_entradas != suma:
         motivo_fallo = f'NO CUADRA en la base: {n_entradas} entradas y {suma} en las puertas'
+    elif n_crudo != n_previas + suma:
+        motivo_fallo = (f'NO CUADRA desde el catálogo crudo: {n_crudo} de HEO y {n_previas} en puertas '
+                        f'previas + {suma} en las seis puertas = {n_previas + suma}')
+    elif any(listas_bd[mo] != previas[mo] for mo in e2.MOTIVOS_APARTADO):
+        motivo_fallo = f'las listas de las puertas previas no son su recuento: {listas_bd} frente a {previas}'
     elif n_bd != cq['conteo']:
         motivo_fallo = f'la base no guarda lo calculado: {n_bd} frente a {cq["conteo"]}'
 
@@ -277,6 +305,9 @@ def cruzar(cruce, params):
         contenido = escribir_excel(foto, resultados, cmp_filas, {
             'pasada': PASADA, 'cruce': cruce, 'params': params, 'usados': usados, 'ficheros': ficheros,
             'n_entradas': n_entradas, 'n_bd': n_bd, 'cuadra': cuadra and not motivo_fallo,
+            'n_crudo': n_crudo, 'previas': previas,
+            'apartados': _todas('escaner2_apartado', 'ean_original,nombre,marca,precio_catalogo,motivo,detalle',
+                                'id', pasada_id=PASADA),
             'resumen': cmp_resumen, 'viejos': viejos_meta, 'avisos': avisos})
         sb.storage.from_(BUCKET).upload(ruta_excel, contenido, {
             'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -290,6 +321,7 @@ def cruzar(cruce, params):
         'estado': 'lista' if (cuadra and not motivo_fallo) else 'fallida',
         'motivo_fallo': motivo_fallo, 'terminado_en': _ahora().isoformat(),
         'ficheros': ficheros, 'paises_usados': usados, 'fecha_datos': fecha_datos,
+        'n_crudo': n_crudo, 'n_previas': n_previas,
         'n_entradas': n_entradas, 'n_c_pocas': n_c_pocas, 'n_c_sin_dato': n_c_sin,
         'cuadra': cuadra, 'viejo_excels': viejos_meta, 'rank_max_viejo': rank_max,
         'ruta_excel': ruta_excel, 'aviso': ' · '.join(avisos) or None,
@@ -326,7 +358,12 @@ def comparar_con_el_viejo(M, foto, resultados, params, fecha_datos):
         excels.append((m, datos))
         meta.append(dict(m, fecha=fecha.isoformat()))
     base = [f for f in elegidas if (f.get('modo') or '').lower() == 'todo']
-    rank_max = int((base[0] if base else elegidas[-1]).get('rank_maximo') or 30000)
+    # El puesto maximo con el que filtro el viejo, el SUYO (escaner_resultados.rank_maximo). Sin
+    # el no se puede explicar la diferencia de criterio: la comparacion falla y se avisa.
+    rank_max = (base[0] if base else elegidas[-1]).get('rank_maximo')
+    if rank_max is None:
+        raise RuntimeError('el Excel viejo no trae su rank_maximo en escaner_resultados')
+    rank_max = int(rank_max)
     viejo = e2.fusionar_viejos(excels)
     apartados = {}
     for a in _todas('escaner2_apartado', 'ean_original,motivo,detalle', 'id', pasada_id=PASADA):
@@ -373,17 +410,23 @@ def escribir_excel(foto, resultados, cmp_filas, info):
                  ['Umbral de caídas (30 días)', '> %d' % info['params']['umbral']],
                  ['Países configurados', ', '.join(info['params']['paises'])],
                  ['Países con CSV', ', '.join(info['usados'])],
-                 ['Entradas (filas de la foto)', info['n_entradas']]]
+                 ['Catálogo crudo de HEO', info['n_crudo']]]
+    filas_res += [['Puerta previa · %s' % e2.NOMBRE_PUERTA_PREVIA[p], info['previas'][p]] for p in e2.PUERTAS_PREVIAS]
+    filas_res += [['Entradas (filas de la foto)', info['n_entradas']]]
     filas_res += [['Puerta %s · %s' % (p, e2.NOMBRE_PUERTA[p]), info['n_bd'][p]] for p in e2.PUERTAS]
-    filas_res += [['Suma de puertas', sum(info['n_bd'].values())], ['Cuadra', 'SÍ' if info['cuadra'] else 'NO']]
+    filas_res += [['Puertas previas + suma de puertas',
+                   sum(info['previas'].values()) + sum(info['n_bd'].values())],
+                  ['Cuadra', 'SÍ' if info['cuadra'] else 'NO']]
     filas_res += [['Comparación · COMPRAR/VALORAR en los dos', r.get('n_cmp_ambos')],
                   ['Comparación · solo en el viejo', r.get('n_cmp_solo_viejo')],
                   ['Comparación · solo en el nuevo', r.get('n_cmp_solo_nuevo')],
                   ['Comparación · diferencia de criterio', r.get('n_cmp_criterio')],
                   ['Comparación · sin explicar', r.get('n_cmp_sin_explicar')]]
     filas_res += [['Excel viejo', '%s (%s, %s)' % (m['fichero'], m.get('modo'), m['fecha'])] for m in info['viejos']]
-    filas_res += [['CSV', '%s · %s · %s filas%s' % (f['nombre'], f.get('pais') or '¿?', f.get('filas') or 0,
-                                                     '' if f.get('usado') else ' · NO USADO')] for f in info['ficheros']]
+    filas_res += [['CSV', '%s · %s · %s filas%s%s' % (f['nombre'], f.get('pais') or '¿?', f.get('filas') or 0,
+                                                       '' if f.get('usado') else ' · NO USADO',
+                                                       (' · ' + f['error']) if f.get('error') else '')]
+                  for f in info['ficheros']]
     filas_res += [['Aviso', a] for a in info['avisos']]
     hoja('Resumen', ['Qué', 'Valor'], filas_res, {'A': 44, 'B': 90})
 
@@ -435,6 +478,12 @@ def escribir_excel(foto, resultados, cmp_filas, info):
            '%s · %s' % (res['puerta'], e2.NOMBRE_PUERTA[res['puerta']]), res['motivo'], res['detalle']]
           for res in resultados],
          {'A': 15, 'B': 55, 'C': 16, 'F': 24, 'G': 16, 'H': 70})
+
+    # Las LISTAS de las puertas previas (las que la llevan), EAN a EAN con su motivo.
+    hoja('Puertas previas', ['EAN tal como vino', 'Nombre', 'Marca', 'Precio catálogo (€)', 'Puerta previa', 'Detalle'],
+         [[a['ean_original'], a['nombre'], a['marca'], a['precio_catalogo'],
+           e2.NOMBRE_PUERTA_PREVIA.get(a['motivo'], a['motivo']), a['detalle']] for a in info['apartados']],
+         {'A': 18, 'B': 55, 'C': 16, 'E': 32, 'F': 80})
     salida = io.BytesIO()
     wb.save(salida)
     return salida.getvalue()

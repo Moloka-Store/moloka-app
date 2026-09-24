@@ -44,9 +44,21 @@ jobs:
         run: pip install supabase==2.31.0 requests==2.34.2
 
       - name: Barrer HEO y dejar la foto
+        # El tope va en el PASO (25 min), no solo en el job (30): asi, si se agota, el paso
+        # falla y el rescate de abajo tiene tiempo de correr.
+        timeout-minutes: 25
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           HEO_USER:             ${{ secrets.HEO_USER }}
           HEO_PASS:             ${{ secrets.HEO_PASS }}
         run: python -u escaner2_heo_barrido.py
+
+      # 🔴 SI EL RUN MUERE A MEDIAS, LA FILA NO SE QUEDA COLGADA: sin esto, una pasada que se
+      #    queda en su estado de trabajo bloquea la pantalla de la v2 para siempre.
+      - name: Rescate · si el run ha fallado, la fila de este run queda 'fallida'
+        if: failure() || cancelled()
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python -u escaner2_rescate.py pasada

@@ -39,11 +39,25 @@ jobs:
       - name: Instalar dependencias
         # Versiones FIJADAS (las de requirements.txt). pandas y openpyxl los pide el lector del
         # Escaner Pro al importarse; psycopg2, foto_comun (listar/descargar con reintento).
-        run: pip install supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 psycopg2-binary
+        # numpy y psycopg2-binary, FIJADOS tambien (numpy 2.4.6 es con la que corrio en verde
+        # pandas 3.0.0, ver requirements.txt; psycopg2-binary 2.9.13, la de los tests).
+        run: pip install supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13
 
       - name: Cruzar los CSV con la foto
+        # El tope va en el PASO (25 min), no solo en el job (30): asi, si se agota, el paso
+        # falla y el rescate de abajo tiene tiempo de correr.
+        timeout-minutes: 25
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           PASADA:               ${{ inputs.pasada }}
         run: python -u escaner2_heo_cruce.py
+
+      # 🔴 SI EL RUN MUERE A MEDIAS, LA FILA NO SE QUEDA COLGADA: sin esto, un cruce que se
+      #    queda en su estado de trabajo bloquea la pantalla de la v2 para siempre.
+      - name: Rescate · si el run ha fallado, la fila de este run queda 'fallida'
+        if: failure() || cancelled()
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python -u escaner2_rescate.py cruce

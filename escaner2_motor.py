@@ -65,9 +65,28 @@ MOTIVOS = {
     'e_valorar': 'e',
     'f_comprar': 'f',
 }
-# Lo que se aparta ANTES de la foto (no entra al cuadre de puertas, pero se guarda y se cuenta).
+# Lo que se aparta ANTES de la foto y se guarda EAN a EAN, con su motivo (escaner2_apartado).
 MOTIVOS_APARTADO = ('chase_funko', 'estado_no_servible', 'chase_suelto', 'ean_forma_rara',
                     'duplicado_proveedor')
+# 🔴 LAS PUERTAS PREVIAS (Fernando, 24-sep-2026): el cuadre empieza en el catalogo CRUDO de HEO,
+#    no en la foto. Todo producto que devuelve HEO sale por UNA de estas o entra en la foto:
+#        crudo = puertas previas + foto        y, al cruzar,        crudo = previas + a..f
+#    En el orden en que se aplican. Ninguna regla de descarte cambia: solo se cuentan y se ven.
+#    Las tres primeras de la lista solo se CUENTAN (sin GTIN no hay EAN que listar; no disponible
+#    y marca fuera son el catalogo entero de HEO menos lo que se mira); las demas, ademas, se
+#    LISTAN en escaner2_apartado.
+PUERTAS_PREVIAS = ('chase_funko', 'sin_gtin', 'no_disponible', 'marca_fuera', 'estado_no_servible',
+                   'chase_suelto', 'ean_forma_rara', 'duplicado_proveedor')
+NOMBRE_PUERTA_PREVIA = {
+    'chase_funko': 'Funko chase (código de caja)',
+    'sin_gtin': 'Sin GTIN',
+    'no_disponible': 'No disponible',
+    'marca_fuera': 'Marca fuera de la lista',
+    'estado_no_servible': 'Estado no servible',
+    'chase_suelto': 'Chase suelto',
+    'ean_forma_rara': 'Código de barras con forma rara',
+    'duplicado_proveedor': 'Duplicado del proveedor',
+}
 
 
 class PiezaNoEncontrada(Exception):
@@ -220,24 +239,38 @@ def _apartado(fila, motivo, detalle, ean=None, precio=None):
             'precio_catalogo': precio, 'motivo': motivo, 'detalle': detalle}
 
 
-def construir_foto(filas_heo, chase_heo, quiere, M):
-    """De lo que devuelve `descargar_catalogo_heo(con_chase=True)` a la foto de la pasada.
+def construir_foto(filas_heo, chase_heo, quiere, M, n_crudo=None, n_sin_gtin=None):
+    """Del catalogo CRUDO de HEO a la foto de la pasada, sin perder a nadie por el camino.
 
-    Devuelve (foto, apartados, cuentas). La foto es lo que sale por las puertas; lo apartado,
-    lo que el escaner viejo tampoco escanea por EAN, cada cosa con su motivo.
+    `filas_heo, chase_heo` es lo que devuelve `descargar_catalogo_heo(con_chase=True)`;
+    `n_crudo` (productos que devolvio HEO) y `n_sin_gtin` (los que descargar_heo tira por no
+    tener GTIN) salen de su log, porque esa funcion no los devuelve y NO se toca.
 
-    Orden, el mismo que el viejo para el perfil HEO:
-      1. el filtro del director (`_quiere`: disponible + marca de la regla u oferta);
-      2. los Funko chase que descargar_heo desvia (van en caja con codigo de caja: el viejo los
-         manda a la puente de ASIN manual, que aqui NO se toca) → apartados;
-      3. Celda 4: estado servible, chase SUELTO fuera, EAN de forma rara fuera;
-      4. dedup del proveedor: una fila por (EAN, caja), la mas barata;
-      5. guardarrail caja-vs-suelta (marca, no borra) y el precio POR UNIDAD (Celda 8)."""
+    Devuelve (foto, apartados, cuentas). Cada producto crudo sale por UNA puerta previa
+    (PUERTAS_PREVIAS) o entra en la foto, en el MISMO orden que el viejo para el perfil HEO:
+      0. descargar_heo desvia los Funko chase (codigo de caja; el viejo los manda a la puente de
+         ASIN manual, que aqui NO se toca) y tira los que no traen GTIN;
+      1. el filtro del director (`_quiere`): lo que no esta disponible, y lo disponible cuya marca
+         no esta en la regla (ni es oferta, si la regla pide ofertas);
+      2. Celda 4: estado servible, chase SUELTO fuera, EAN de forma rara fuera (los GTIN-14 caen
+         aqui: el viejo los rechaza ANTES del rescate);
+      3. dedup del proveedor: una fila por (EAN, caja), la mas barata;
+      4. guardarrail caja-vs-suelta (marca, no borra) y el precio POR UNIDAD (Celda 8)."""
     perfil = M.PERFILES[PROVEEDOR]
-    sel = [f for f in filas_heo if quiere(f)]
-    chase_sel = [c for c in (chase_heo or []) if quiere(c)]
+    previas = {p: 0 for p in PUERTAS_PREVIAS}
+    sel = []
+    for f in filas_heo:
+        if quiere(f):
+            sel.append(f)
+        # 🔑 `_quiere` es quien DECIDE; esto solo pone nombre al porque, con su misma primera
+        #    condicion: lo que no esta disponible no pasa; lo disponible que no pasa es por marca.
+        elif f.get('estado') != 'disponible':
+            previas['no_disponible'] += 1
+        else:
+            previas['marca_fuera'] += 1
+    chase_todo = list(chase_heo or [])
     apartados = []
-    for c in chase_sel:
+    for c in chase_todo:
         apartados.append(_apartado(
             c, 'chase_funko',
             'Funko chase: HEO lo vende en caja con código de caja y no cruza por EAN '
@@ -262,7 +295,9 @@ def construir_foto(filas_heo, chase_heo, quiere, M):
             continue
         core = M.core_ean(ean_in)
         if (not core.isdigit()) or len(core) not in (12, 13):
-            apartados.append(_apartado(f, 'ean_forma_rara', 'EAN forma rara (len=%d)' % len(core)))
+            apartados.append(_apartado(f, 'ean_forma_rara', 'EAN forma rara (len=%d)' % len(core)
+                                       + (': GTIN-14, el escáner viejo lo rechaza antes del rescate'
+                                          if core.isdigit() and len(core) == 14 else '')))
             continue
         filas.append({
             'producto_heo': f.get('productNumber'), 'ean_in': ean_in, 'core': core,
@@ -330,14 +365,37 @@ def construir_foto(filas_heo, chase_heo, quiere, M):
             'preorder': f['preorder'], 'imagen': f['imagen'], 'aviso_caja': f['aviso_caja'],
         })
 
-    cuentas = {'n_catalogo': len(filas_heo), 'n_chase_funko': len(chase_heo or []),
-               'n_filtrado': len(sel) + len(chase_sel), 'n_foto': len(foto),
-               'n_apartados': len(apartados)}
     for m in MOTIVOS_APARTADO:
-        cuentas['n_apartado_' + m] = sum(1 for a in apartados if a['motivo'] == m)
-    # 🔒 El cuadre de ANTES de las puertas: lo filtrado es foto + apartado, ni uno mas ni uno menos.
-    cuentas['cuadra_foto'] = (cuentas['n_filtrado'] == cuentas['n_foto'] + cuentas['n_apartados'])
+        previas[m] = sum(1 for a in apartados if a['motivo'] == m)
+    previas['sin_gtin'] = n_sin_gtin
+    cuentas = {'n_crudo': n_crudo, 'n_foto': len(foto), 'previas': previas,
+               'n_devueltos': len(filas_heo) + len(chase_todo)}
+    cuentas.update(cuadre_previo(cuentas))
     return foto, apartados, cuentas
+
+
+def cuadre_previo(cuentas):
+    """🔴 El cuadre de ANTES de las puertas, desde el catalogo CRUDO: crudo = previas + foto.
+    Un recuento que falta (None) NO es un cero: sin el no se puede afirmar que cuadra.
+    Tambien se exige que lo que descargar_heo DEVOLVIO mas lo que tiro sin GTIN sea el crudo:
+    es la prueba de que los dos numeros sacados de su log son los buenos."""
+    previas = cuentas['previas']
+    faltan = [p for p in PUERTAS_PREVIAS if previas.get(p) is None]
+    if cuentas.get('n_crudo') is None:
+        faltan.insert(0, 'crudo')
+    if faltan:
+        return {'n_previas': None, 'cuadra_previo': False,
+                'motivo_previo': 'sin recuento de: ' + ', '.join(faltan)}
+    n_previas = sum(previas[p] for p in PUERTAS_PREVIAS)
+    if cuentas['n_devueltos'] + previas['sin_gtin'] != cuentas['n_crudo']:
+        return {'n_previas': n_previas, 'cuadra_previo': False,
+                'motivo_previo': 'HEO dio %d productos y descargar_heo devolvió %d + %d sin GTIN'
+                                 % (cuentas['n_crudo'], cuentas['n_devueltos'], previas['sin_gtin'])}
+    if cuentas['n_crudo'] != n_previas + cuentas['n_foto']:
+        return {'n_previas': n_previas, 'cuadra_previo': False,
+                'motivo_previo': 'catálogo crudo %d ≠ puertas previas %d + foto %d'
+                                 % (cuentas['n_crudo'], n_previas, cuentas['n_foto'])}
+    return {'n_previas': n_previas, 'cuadra_previo': True, 'motivo_previo': None}
 
 
 def codigos_para_keepa(core, M):
@@ -732,7 +790,9 @@ def comparar(viejo, nuevo, contexto, M):
                 if paises_v and not [p for p in paises_v if p in paises]:
                     criterio.append('el viejo solo lo da en %s y el nuevo calcula %s'
                                     % (', '.join(paises_v), ' y '.join(paises)))
-                if n['puerta'] == 'c':
+                # 🔑 Solo «pocas caidas» es criterio: «sin dato de caidas» es un HUECO de dato
+                #    (el CSV no las trae), y un hueco se mira, no se explica.
+                if n['motivo'] == 'c_pocas_caidas':
                     criterio.append('el nuevo pide más de %d caídas en 30 días en %s (%s); el viejo '
                                     'filtra por puesto ≤ %s en ES' % (umbral, ' o '.join(paises), n['detalle'],
                                                                      '{:,}'.format(rank_max).replace(',', '.')))

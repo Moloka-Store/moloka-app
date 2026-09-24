@@ -12,8 +12,11 @@ QUE HACE, EN ORDEN:
   3. baja el catalogo con `descargar_heo.descargar_catalogo_heo(con_chase=True)`, la MISMA
      funcion que usa el director;
   4. construye la foto con `escaner2_motor.construir_foto` (reglas de EAN/chase/caja del
-     escaner viejo, sacadas de su fichero) y la guarda en `escaner2_foto`; lo apartado antes
-     de la foto, en `escaner2_apartado`, cada cosa con su motivo;
+     escaner viejo, sacadas de su fichero) y la guarda en `escaner2_foto`. 🔴 EL CUADRE EMPIEZA
+     EN EL CATALOGO CRUDO (Fernando, 24-sep-2026): cada producto que devuelve HEO sale por una
+     PUERTA PREVIA (Funko chase, sin GTIN, no disponible, marca fuera, estado no servible, chase
+     suelto, EAN raro, duplicado) o entra en la foto, y crudo = previas + foto o la pasada
+     queda fallida. Los recuentos van a `escaner2_pasada.p_*`; las listas, a `escaner2_apartado`;
   5. deja en Storage (bucket `escaner2`, cerrado) la lista de EAN para el Visualizador, uno por
      linea: `heo/<pasada>/eans.txt` y, si pasa de una tanda, `eans_1.txt`, `eans_2.txt`…;
   6. cierra la pasada en 'esperando_csv' con sus cuentas, o en 'fallida' con el motivo.
@@ -59,8 +62,9 @@ sb = create_client(os.environ['SUPABASE_URL'], _llave_svc)
 
 
 class _Eco(io.TextIOBase):
-    """Deja pasar lo que se imprime Y se lo guarda: `descargar_catalogo_heo` cuenta los productos
-    sin GTIN solo en el log, y aqui se rescata el numero sin tocar aquella funcion."""
+    """Deja pasar lo que se imprime Y se lo guarda: `descargar_catalogo_heo` dice cuantos
+    productos le dio HEO y cuantos tiro sin GTIN SOLO en el log, y aqui se rescatan los dos
+    numeros sin tocar aquella funcion."""
 
     def __init__(self, destino):
         self.destino, self.trozos = destino, []
@@ -99,12 +103,15 @@ def main():
     print(f">>> Pasada {pasada} abierta (descargando).", flush=True)
     try:
         cierre = barrer(pasada)
+        # 🔒 El cierre va DENTRO del try: si la base lo rechaza (p. ej. el cuadre previo no
+        #    cumple su check), la pasada queda 'fallida' con el motivo, no colgada en
+        #    'descargando' para siempre.
+        sb.table('escaner2_pasada').update(cierre).eq('id', pasada).execute()
     except Exception as ex:
         motivo = f'{type(ex).__name__}: {ex}'[:1000]
         sb.table('escaner2_pasada').update({'estado': 'fallida', 'motivo_fallo': motivo,
                                             'terminada_en': _ahora()}).eq('id', pasada).execute()
         abortar(f'pasada {pasada} fallida: {motivo}')
-    sb.table('escaner2_pasada').update(cierre).eq('id', pasada).execute()
     print(f">>> PASADA LISTA: {cierre['n_foto']} en la foto, {cierre['n_eans_lista']} códigos para el "
           f"Visualizador en {cierre['n_tandas']} tanda(s). Esperando los CSV de Keepa.", flush=True)
 
@@ -126,19 +133,21 @@ def barrer(pasada):
     eco = _Eco(sys.stdout)
     with redirect_stdout(eco):
         filas, chase = descargar_catalogo_heo(con_chase=True)
-    m = re.search(r'descartadas (\d+) sin GTIN', ''.join(eco.trozos))
+    log = ''.join(eco.trozos)
+    m = re.search(r'Cruzando: (\d+) productos', log)
+    n_crudo = int(m.group(1)) if m else None
+    m = re.search(r'descartadas (\d+) sin GTIN', log)
     n_sin_gtin = int(m.group(1)) if m else None
-    if n_sin_gtin is None:
-        print("AVISO: no encuentro en el log de descargar_heo cuántos se descartaron sin GTIN; "
-              "se guarda como desconocido (NULL), no como cero.", flush=True)
 
-    # 3 · La foto.
-    foto, apartados, cuentas = e2.construir_foto(filas, chase, quiere, M)
-    print(f">>> FOTO: catálogo {cuentas['n_catalogo']} (+{cuentas['n_chase_funko']} Funko chase) · "
-          f"filtrado {cuentas['n_filtrado']} = foto {cuentas['n_foto']} + apartados "
-          f"{cuentas['n_apartados']} → {'CUADRA' if cuentas['cuadra_foto'] else 'NO CUADRA'}", flush=True)
-    if not cuentas['cuadra_foto']:
-        raise RuntimeError('lo filtrado no es foto + apartados: %s' % cuentas)
+    # 3 · La foto, y el cuadre desde el catalogo crudo. Sin uno de los dos numeros del log no se
+    #     puede afirmar que cuadra: la pasada falla diciendo cual falta (NULL no es cero).
+    foto, apartados, cuentas = e2.construir_foto(filas, chase, quiere, M, n_crudo=n_crudo, n_sin_gtin=n_sin_gtin)
+    previas = cuentas['previas']
+    print(f">>> CUADRE PREVIO [HEO]: catálogo crudo {n_crudo} = "
+          + ' + '.join(f'{p} {previas[p]}' for p in e2.PUERTAS_PREVIAS)
+          + f" + foto {cuentas['n_foto']} → {'CUADRA' if cuentas['cuadra_previo'] else 'NO CUADRA'}", flush=True)
+    if not cuentas['cuadra_previo']:
+        raise RuntimeError('NO CUADRA antes de la foto: ' + cuentas['motivo_previo'])
     if not foto:
         raise RuntimeError('la foto sale vacía: nada de HEO pasa el filtro del director')
 
@@ -161,12 +170,15 @@ def barrer(pasada):
 
     # 🔴 LO QUE HAY EN LA BASE, NO LO QUE DICE EL CLIENTE: se cuenta despues de escribir.
     n_foto_bd = _contar('escaner2_foto', pasada_id=pasada)
-    n_apart_bd = _contar('escaner2_apartado', pasada_id=pasada)
-    print(f"CUADRE foto [HEO]: escritas {len(filas_foto)} | en la tabla {n_foto_bd} · apartados "
-          f"{len(apartados)} | en la tabla {n_apart_bd}", flush=True)
-    if n_foto_bd != len(filas_foto) or n_apart_bd != len(apartados):
-        raise RuntimeError('la foto no quedó entera en la base (foto %s/%s, apartados %s/%s)'
-                           % (n_foto_bd, len(filas_foto), n_apart_bd, len(apartados)))
+    listas_bd = {mo: _contar('escaner2_apartado', pasada_id=pasada, motivo=mo) for mo in e2.MOTIVOS_APARTADO}
+    print(f"CUADRE foto [HEO]: escritas {len(filas_foto)} | en la tabla {n_foto_bd} · listas de las "
+          f"puertas previas en la tabla {listas_bd}", flush=True)
+    if n_foto_bd != len(filas_foto):
+        raise RuntimeError('la foto no quedó entera en la base (%s de %s)' % (n_foto_bd, len(filas_foto)))
+    distintas = {mo: (listas_bd[mo], previas[mo]) for mo in e2.MOTIVOS_APARTADO if listas_bd[mo] != previas[mo]}
+    if distintas:
+        raise RuntimeError('las listas de las puertas previas no son su recuento (en la base, contadas): %s'
+                           % distintas)
 
     # 4 · La lista para el Visualizador, uno por linea.
     codigos = e2.lista_para_keepa(foto)
@@ -180,11 +192,11 @@ def barrer(pasada):
 
     cierre = {'estado': 'esperando_csv', 'terminada_en': _ahora(),
               'regla_activa': bool(regla.get('activo')), 'marcas': info['marcas_reales'],
-              'ofertas': info['quiere_ofertas'], 'n_sin_gtin': n_sin_gtin,
+              'ofertas': info['quiere_ofertas'], 'n_crudo': n_crudo, 'n_foto': cuentas['n_foto'],
               'ruta_lista': f'{base}/eans.txt', 'n_eans_lista': len(codigos), 'n_tandas': len(tandas),
               'tanda': tanda}
-    for k in ('n_catalogo', 'n_chase_funko', 'n_filtrado', 'n_foto', 'n_apartados'):
-        cierre[k] = cuentas[k]
+    for p in e2.PUERTAS_PREVIAS:
+        cierre['p_' + p] = previas[p]
     return cierre
 
 

@@ -287,16 +287,41 @@ print('\n(E) la foto: filtro del director, chase, caja, EAN raro, duplicado y GT
 QUIERE, _info = e2.cargar_filtro_director(REGLA)
 eq('(E) el filtro sale de director_heo_prep.py con las marcas de la regla',
    (_info['marcas_reales'], _info['quiere_ofertas']), (['Funko', 'Ultimate Guard'], True))
-FOTO, APARTADOS, CUENTAS = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M)
+# El catalogo CRUDO de la escena: las 20 filas con GTIN + el Funko chase + 3 sin GTIN = 24.
+FOTO, APARTADOS, CUENTAS = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=24, n_sin_gtin=3)
 _por_ean = {f['ean_original']: f for f in FOTO}
 eq('(E) en la foto: los 13 de la escena + la oferta de Hasbro, sin el agotado ni el de otra marca',
    sorted(f['producto_heo'] for f in FOTO),
    sorted(['HEO%04d' % n for n in range(1, 15)]))
-eq('(E) apartados, cada uno con su motivo', sorted(a['motivo'] for a in APARTADOS),
+eq('(E) apartados (las listas de las puertas previas), cada uno con su motivo', sorted(a['motivo'] for a in APARTADOS),
    sorted(['chase_funko', 'chase_suelto', 'ean_forma_rara', 'ean_forma_rara', 'duplicado_proveedor']))
-eq('(E) el GTIN-14 de 14 cifras se aparta como EAN de forma rara (len=14), igual que en el viejo',
-   [a['detalle'] for a in APARTADOS if a['ean_original'] == GTIN14], ['EAN forma rara (len=14)'])
-eq('(E) 🔒 lo filtrado = foto + apartados', CUENTAS['cuadra_foto'], True)
+eq('(E) el GTIN-14 de 14 cifras se aparta como EAN de forma rara (len=14), igual que en el viejo, y lo dice',
+   [a['detalle'] for a in APARTADOS if a['ean_original'] == GTIN14],
+   ['EAN forma rara (len=14): GTIN-14, el escáner viejo lo rechaza antes del rescate'])
+eq('(E) 🔴 PUERTAS PREVIAS: cada producto crudo, en UNA', CUENTAS['previas'],
+   {'chase_funko': 1, 'sin_gtin': 3, 'no_disponible': 1, 'marca_fuera': 1, 'estado_no_servible': 0,
+    'chase_suelto': 1, 'ean_forma_rara': 2, 'duplicado_proveedor': 1})
+eq('(E) 🔴 crudo 24 = previas 10 + foto 14 → cuadra', (CUENTAS['n_previas'], CUENTAS['n_foto'], CUENTAS['cuadra_previo']),
+   (10, 14, True))
+eq('(E) las puertas previas son las de la migración, en su orden',
+   list(e2.PUERTAS_PREVIAS), ['chase_funko', 'sin_gtin', 'no_disponible', 'marca_fuera', 'estado_no_servible',
+                              'chase_suelto', 'ean_forma_rara', 'duplicado_proveedor'])
+# Un Funko chase AGOTADO tambien sale por su puerta previa: descargar_heo lo desvia antes que nada.
+_chase2 = CHASE_HEO + [dict(CHASE_HEO[0], producto_heo='HEO9002', estado='agotado')]
+_, _, _c2 = e2.construir_foto(FILAS_HEO, _chase2, QUIERE, M, n_crudo=25, n_sin_gtin=3)
+eq('(E) 🔴 el Funko chase que no pasa el filtro también se cuenta (antes se perdía)',
+   (_c2['previas']['chase_funko'], _c2['cuadra_previo']), (2, True))
+# Los rojos: el cuadre previo no puede salir verde por las malas.
+_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=24, n_sin_gtin=None)
+eq('(E) 🔴 sin el recuento de sin GTIN (log ilegible) → NO cuadra, y dice cuál falta',
+   (_r['cuadra_previo'], _r['motivo_previo']), (False, 'sin recuento de: sin_gtin'))
+_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=None, n_sin_gtin=3)
+eq('(E) 🔴 sin el crudo → NO cuadra', (_r['cuadra_previo'], _r['motivo_previo']), (False, 'sin recuento de: crudo'))
+_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=25, n_sin_gtin=3)
+eq('(E) 🔴 HEO dio uno más de los que salen de descargar_heo → NO cuadra', _r['cuadra_previo'], False)
+_r = e2.cuadre_previo(dict(CUENTAS, n_foto=13))
+eq('(E) 🔴 un producto que se pierde entre las previas y la foto → NO cuadra',
+   (_r['cuadra_previo'], _r['motivo_previo']), (False, 'catálogo crudo 24 ≠ puertas previas 10 + foto 13'))
 eq('(E) duplicado: se queda la MAS BARATA (8,00, no 9,50)', _por_ean[ean(1)]['precio_unidad'], 8.0)
 _k = _por_ean[ean(11)]
 eq('(E) la caja 5+1: es caja, de 6, precio por unidad 60/6 = 10', (_k['es_caja'], _k['uds_caja'], _k['precio_unidad']),
@@ -405,6 +430,7 @@ _completo = excel_viejo([(ean(1), p, 'COMPRAR') for p in ('ES', 'IT', 'FR', 'DE'
                         + [(ean(3), 'ES', 'NO COMPRAR'), (ean(3), 'IT', 'VALORAR')]
                         + [(ean(2), 'ES', 'NO COMPRAR')]
                         + [(ean(7), 'ES', 'COMPRAR')]
+                        + [(ean(6), 'ES', 'COMPRAR')]
                         + [(ean(14), 'ES', 'COMPRAR')]
                         + [('9990000000011', 'ES', 'COMPRAR')])
 _novedad = excel_viejo([(ean(14), 'ES', 'NO COMPRAR')])
@@ -443,6 +469,8 @@ eq('(H) solo en el viejo porque el nuevo no ve caidas → DIFERENCIA DE CRITERIO
 eq('(H) …y la explicacion lo dice', 'caídas' in CMP[M.norm(ean(5))]['explicacion'], True)
 eq('(H) solo en el viejo porque solo lo da en IT → DIFERENCIA DE CRITERIO (paises)', cmp(3), ('solo_viejo', True))
 eq('(H) …y nombra el pais', 'IT' in CMP[M.norm(ean(3))]['explicacion'], True)
+eq('(H) 🔴 solo en el viejo y el nuevo no tiene DATO de caídas → SIN EXPLICAR (es un hueco, no criterio)',
+   cmp(6), ('solo_viejo', False))
 eq('(H) solo en el viejo y el nuevo no lo encuentra en Amazon → SIN EXPLICAR (se mira)', cmp(7), ('solo_viejo', False))
 eq('(H) el viejo lo evaluo NO COMPRAR y el nuevo VALORAR → SIN EXPLICAR', cmp(2), ('solo_nuevo', False))
 eq('(H) el viejo no lo tiene y su puesto en ES pasa de 30.000 → DIFERENCIA DE CRITERIO', cmp(13), ('solo_nuevo', True))

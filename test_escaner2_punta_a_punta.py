@@ -213,6 +213,9 @@ def hijo(ruta_estado, programa):
     e2, _pro, M = _escena()
 
     def descargar_catalogo_heo(max_paginas=None, con_chase=False):
+        # Las dos lineas del log de la funcion de verdad (descargar_heo.py) de las que el barrido
+        # saca el catalogo CRUDO y los tirados sin GTIN: 7 con EAN + 1 Funko chase + 3 sin GTIN.
+        print('>>> Cruzando: %d productos | 0 precios | 0 disponibilidades' % int(os.environ.get('E2_CRUDO', '11')))
         print('>>> Catalogo cruzado: 7 filas con EAN (descartadas 3 sin GTIN)')
         chase = [{'producto_heo': 'HEO9001', 'nombre': 'Funko Pop Omega w/CH', 'ean_caja': '9990000000011',
                   'marca': 'FUNKO', 'precio_caja': 70.0, 'estado': 'disponible', 'imagen': '', 'link_amazon': ''}]
@@ -221,6 +224,7 @@ def hijo(ruta_estado, programa):
     sys.modules['descargar_heo'] = types.ModuleType('descargar_heo')
     sys.modules['descargar_heo'].descargar_catalogo_heo = descargar_catalogo_heo
     import runpy
+    sys.argv = [programa] + os.environ.get('E2_ARGS', '').split()
     codigo = 0
     try:
         runpy.run_path(os.path.join(AQUI, programa), run_name='__main__')
@@ -258,13 +262,15 @@ def estado_inicial(e2, M, frenar=None):
     }
 
 
-def caso(nombre, frenar=None):
+def caso(nombre, frenar=None, crudo=None):
     e2, pro, M = _escena()
     tmp = tempfile.mkdtemp(prefix='e2pp_')
     ruta = os.path.join(tmp, 'estado.json')
     with open(ruta, 'w', encoding='utf-8') as fh:
         json.dump(estado_inicial(e2, M, frenar), fh)
     llave = {'SUPABASE_SERVICE_KEY': 'svc-de-mentira', 'HEO_USER': 'u', 'HEO_PASS': 'p', 'GITHUB_RUN_ID': '424242'}
+    if crudo is not None:
+        llave['E2_CRUDO'] = str(crudo)
     cod, log = correr(ruta, 'escaner2_heo_barrido.py', llave)
     bd = json.load(open(ruta, encoding='utf-8'))
     pasada = bd['tablas']['escaner2_pasada'][0]
@@ -279,6 +285,13 @@ def caso(nombre, frenar=None):
              [('B0ALFA0001', 1, '12', '21.00'), ('B0GAMA0001', 3, '2', '21.00')])):
         bd['storage']['escaner2'][carpeta + '20260924-1200-' + nombre_fichero] = base64.b64encode(
             csv_visualizador(e2, pro, M, pais, filas)).decode()
+    if nombre == 'bueno':
+        # 🔑 Un ES MAS VIEJO con otro precio y 0 caidas para el ALFA: el mas reciente tiene que
+        #    mandar (antes mandaba el primero por nombre, o sea el viejo).
+        bd['storage']['escaner2'][carpeta + '20260924-1100-KeepaExport-antiguo.csv'] = base64.b64encode(
+            csv_visualizador(e2, pro, M, 'es', [('B0ALFA0001', 1, '0', '99.00')])).decode()
+        # 🔑 Y un fichero que no se puede leer: se dice y se sigue (no bloquea la pasada para siempre).
+        bd['storage']['escaner2'][carpeta + '20260924-1300-roto.csv'] = base64.b64encode(b'esto no es un csv').decode()
     json.dump(bd, open(ruta, 'w', encoding='utf-8'), default=str)
     cod2, log2 = correr(ruta, 'escaner2_heo_cruce.py', {'SUPABASE_SERVICE_KEY': 'svc-de-mentira', 'PASADA': pasada['id'],
                                                         'GITHUB_RUN_ID': '434343'})
@@ -309,7 +322,9 @@ eq('2 · la pasada queda esperando los CSV, con el run apuntado', (p['estado'], 
 eq('2 · foto: los 5 Funko (el chase suelto y Hasbro, fuera)', (p['n_foto'], len(T['escaner2_foto'])), (5, 5))
 eq('2 · apartados: el Funko chase de la API y el chase suelto', sorted(a['motivo'] for a in T['escaner2_apartado']),
    ['chase_funko', 'chase_suelto'])
-eq('2 · los descartados sin GTIN se rescatan del log de descargar_heo', p['n_sin_gtin'], 3)
+eq('2 · los descartados sin GTIN se rescatan del log de descargar_heo', p['p_sin_gtin'], 3)
+eq('2 · 🔴 el catálogo CRUDO sale del log, y cuadra: crudo = previas + foto',
+   (p['n_crudo'], sum(p['p_' + x] for x in e2.PUERTAS_PREVIAS) + p['n_foto']), (11, 11))
 _lista = base64.b64decode(bd['storage']['escaner2']['heo/%s/eans.txt' % pasada]).decode().split('\n')
 eq('2 · la lista para el Visualizador: un EAN por linea, en el bucket escaner2', (len(_lista), p['n_eans_lista'], p['n_tandas']),
    (5, 5, 1))
@@ -320,7 +335,10 @@ eq('2 · …y las tablas viejas siguen como estaban', (len(T['escaner_resultados
 c = T['escaner2_cruce'][0]
 eq('2 · el cruce sale en VERDE', cod2, 0)
 eq('2 · …y queda LISTA, cuadrado', (c['estado'], c['cuadra'], c['motivo_fallo']), ('lista', True, None))
-eq('2 · el pais de cada CSV sale del dato', sorted((f['pais'], f['usado']) for f in c['ficheros']), [('DE', True), ('ES', True)])
+eq('2 · el pais de cada CSV sale del dato', sorted((f['pais'] or '', f['usado']) for f in c['ficheros']),
+   [('', False), ('DE', True), ('ES', True), ('ES', True)])
+eq('2 · 🔴 el CSV roto se dice (en ficheros) y NO tumba el cruce',
+   [(f['nombre'].endswith('roto.csv'), bool(f['error'])) for f in c['ficheros'] if f['error']], [(True, True)])
 eq('2 · puertas: entradas 5 = a1 b1 c1 d0 e1 f1', (c['n_entradas'], c['n_a'], c['n_b'], c['n_c'], c['n_d'], c['n_e'], c['n_f']),
    (5, 1, 1, 1, 0, 1, 1))
 eq('2 · …una fila por EAN, ni mas ni menos', len(T['escaner2_resultado_ean']), 5)
@@ -328,6 +346,8 @@ _f1 = [r for r in T['escaner2_resultado_ean'] if r['puerta'] == 'f']
 eq('2 · COMPRAR con su mejor pais (ES: IVA de ficha 10 %)', sorted((r['asin'], r['mejor_pais']) for r in _f1),
    [('B0ALFA0001', 'ES')])
 _es1 = [r for r in T['escaner2_resultado_pais'] if r['asin'] == 'B0ALFA0001' and r['pais'] == 'ES'][0]
+eq('2 · 🔴 manda el CSV MAS RECIENTE de ES: precio 22 y 30 caídas, no 99 y 0 del antiguo',
+   (_es1['precio_venta'], _es1['caidas_30d']), (22.0, 30))
 eq('2 · el IVA de ES sale de la ficha y la fila lo dice', (_es1['iva'], _es1['iva_origen']), (0.1, 'ficha'))
 eq('2 · la cuenta es la del viejo (margen guardado, decision COMPRAR)', (_es1['decision'], round(_es1['margen'], 4)),
    ('COMPRAR', round(M.calc_rentabilidad(22.0, 8.0, 15.01, 3.5, 0.10, almacen=M.ALMACEN, com_digitales=M.COM_DIGITALES,
@@ -342,8 +362,11 @@ eq('2 · el Excel del cruce queda en el bucket escaner2 y apuntado en el cruce',
    (1, True))
 from openpyxl import load_workbook  # noqa: E402
 _wb = load_workbook(io.BytesIO(base64.b64decode(bd['storage']['escaner2'][_xl[0]])), read_only=True)
-eq('2 · …con sus cinco hojas', _wb.sheetnames, ['Resumen', 'COMPRAR y VALORAR', 'Comparación', 'Varias fichas', 'Puertas'])
-eq('2 · el log deja el CUADRE, cuadre o no', 'CUADRE puertas [HEO]: entradas=5 | suma de puertas=5' in log2, True)
+eq('2 · …con sus seis hojas (la última, las listas de las puertas previas)', _wb.sheetnames, ['Resumen', 'COMPRAR y VALORAR', 'Comparación', 'Varias fichas', 'Puertas', 'Puertas previas'])
+eq('2 · el log deja el CUADRE, cuadre o no', 'CUADRE [HEO]: crudo=11 | previas=6' in log2
+   and '| entradas=5 | suma de puertas=5' in log2, True)
+eq('2 · 🔴 el cruce guarda el crudo y las previas: crudo 11 = previas 6 + puertas 5',
+   (c['n_crudo'], c['n_previas'], sum(c['n_' + x] for x in 'abcdef')), (11, 6, 5))
 
 print('\n3 · [frenado] la base se come las filas de una puerta → el cuadre lo caza')
 cod, log, cod2, log2, bd, pasada, M, e2 = caso('frenado', frenar=('escaner2_resultado_ean', 'b'))
@@ -353,6 +376,36 @@ eq('3 · 🔴 …y queda FALLIDA, sin cuadrar, con el motivo', (c['estado'], c['
    ('fallida', False, True))
 eq('3 · 🔴 …contando en la BASE: 5 entradas y 4 en las puertas', (c['n_entradas'], sum(c['n_' + x] for x in 'abcdef')), (5, 4))
 eq('3 · el log lo dice', 'NO CUADRA' in log2, True)
+
+print('\n4 · [crudo_de_mas] HEO dice un producto más de los que salen → la pasada FALLA')
+cod, log, cod2, log2, bd, pasada, M, e2 = caso('crudo_de_mas', crudo=12)
+p = bd['tablas']['escaner2_pasada'][0]
+eq('4 · 🔴 el barrido sale en ROJO', cod, 1)
+eq('4 · 🔴 …y la pasada queda FALLIDA con el motivo', (p['estado'], 'NO CUADRA antes de la foto' in (p['motivo_fallo'] or '')),
+   ('fallida', True))
+eq('4 · 🔴 …sin lista para Keepa: no se puede cruzar', (p.get('ruta_lista'), cod2), (None, 1))
+
+print('\n5 · [rescate] el run muere a medias → SU fila queda fallida, las demás no se tocan')
+_ruta = os.path.join(_tmp, 'rescate.json')
+json.dump({'tablas': {
+    'escaner2_pasada': [{'id': 'p-colgada', 'run_id': 777, 'estado': 'descargando'},
+                        {'id': 'p-otro-run', 'run_id': 888, 'estado': 'descargando'},
+                        {'id': 'p-cerrada', 'run_id': 777, 'estado': 'esperando_csv'}],
+    'escaner2_cruce': [{'id': 'c-colgado', 'run_id': 777, 'estado': 'cruzando'},
+                       {'id': 'c-lista', 'run_id': 777, 'estado': 'lista'}]}, 'storage': {}},
+          open(_ruta, 'w', encoding='utf-8'))
+for _que in ('pasada', 'cruce'):
+    _cod, _log = correr(_ruta, 'escaner2_rescate.py', {'SUPABASE_SERVICE_KEY': 'svc-de-mentira', 'GITHUB_RUN_ID': '777',
+                                                       'E2_ARGS': _que})
+    eq('5 · el rescate de %s sale en verde' % _que, _cod, 0)
+_bd = json.load(open(_ruta, encoding='utf-8'))['tablas']
+eq('5 · 🔴 la pasada colgada de ESTE run queda fallida, con el motivo',
+   [(f['id'], f['estado'], 'run 777' in (f.get('motivo_fallo') or '')) for f in _bd['escaner2_pasada']],
+   [('p-colgada', 'fallida', True), ('p-otro-run', 'descargando', False), ('p-cerrada', 'esperando_csv', False)])
+eq('5 · 🔴 el cruce colgado también; el que ya estaba lista, no',
+   [(f['id'], f['estado']) for f in _bd['escaner2_cruce']], [('c-colgado', 'fallida'), ('c-lista', 'lista')])
+_cod, _log = correr(_ruta, 'escaner2_rescate.py', {'GITHUB_RUN_ID': '777', 'E2_ARGS': 'pasada'})
+eq('5 · sin llave, el rescate tampoco corre', (_cod, 'CLIENTES_CREADOS=0' in _log), (1, True))
 
 print()
 if fallos:
