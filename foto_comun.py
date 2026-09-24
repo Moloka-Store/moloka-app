@@ -255,10 +255,12 @@ def descargar_buzon(sb, bucket, ruta):
 #
 # 🔴 connect_timeout SOLO VIGILA EL CONNECT. Una vez dentro, si la conexión se muere por
 #    el camino, el cliente espera la respuesta PARA SIEMPRE. Pasó el 24-sep-2026 (run
-#    35956134193 de procesar-ledger): con su refresco del Trackeador en marcha, Postgres de
-#    producción se reinició a las 06:35:16 (`pg_postmaster_start_time()`), y el procesador
-#    se quedó 71 min esperando por una conexión que ya no existía, hasta que lo cancelaron.
-#    De ahí los keepalives y el `tcp_user_timeout` (encargo AA). Qué hacen, medido contra un Postgres local cortando la red con iptables:
+#    35956134193 de procesar-ledger): con su refresco del Trackeador en marcha, la base de
+#    producción se reinició a las 06:35:16 Madrid (04:35:16 UTC, `pg_postmaster_start_time()`;
+#    su registro dice «database system was not properly shut down; automatic recovery in
+#    progress»), y el procesador se quedó 71 min esperando hasta que lo cancelaron. La causa
+#    del reinicio NO está probada. De ahí los keepalives y el `tcp_user_timeout` (encargo AJ).
+#    Qué hacen, medido contra un Postgres local cortando la red con iptables:
 #    · keepalives: con la conexión callada `idle` s, el sistema manda una sonda cada
 #      `interval` s. Si el otro extremo está VIVO, su núcleo la contesta aunque la
 #      consulta siga trabajando: una llamada larga LEGÍTIMA no se corta (probado con
@@ -267,6 +269,10 @@ def descargar_buzon(sb, bucket, ruta):
 #      el caso que los keepalives no ven (el cable muere mientras ENVIAMOS) y en Linux
 #      manda también sobre el recuento de sondas.
 #    Con estos valores, una conexión muerta da error hacia los 90-100 s en vez de nunca.
+# ⚠️ SU LÍMITE: vigilan el tramo TCP hasta el PRIMER extremo, y nada más allá. Si
+#    `SUPABASE_DB_URL` pasa por el pooler (no se sabe: es un secreto), quien contesta las
+#    sondas es el pooler, y una base caída DETRÁS de él no la ven. Ahí manda el
+#    `timeout-minutes` del job.
 # 🔒 NO cortan una consulta lenta con la base viva, ni un servidor colgado en un
 #    bloqueo: eso lo corta el `timeout-minutes` del job, no esto.
 # ---------------------------------------------------------------------------

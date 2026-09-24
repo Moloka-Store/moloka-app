@@ -296,7 +296,7 @@ jobs:
         run: python -u test_registro_ejecuciones.py
 
       - name: 25 quater) test_topes_cuelgue.py
-        # 🔑 Encargo AA (24-sep-2026): que todo procesar-*.yml tenga `timeout-minutes` en
+        # 🔑 Encargo AJ (24-sep-2026): que todo procesar-*.yml tenga `timeout-minutes` en
         #    el JOB (por encima del exito mas largo medido) y que `conectar_bd` abra con
         #    keepalives y `tcp_user_timeout` que la libpq instalada conoce. El ledger se
         #    quedo 71 min colgado sin nada de esto. Por estructura, sin red y sin secretos.

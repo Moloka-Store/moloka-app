@@ -27,9 +27,9 @@ concurrency:
 jobs:
   procesar:
     runs-on: ubuntu-24.04
-    # 🔴 TOPE CONTRA CUELGUES (encargo AA, 24-sep-2026). Sin él, GitHub espera 6 h. El
+    # 🔴 TOPE CONTRA CUELGUES (encargo AJ, 24-sep-2026). Sin él, GitHub espera 6 h. El
     #    24-sep el ledger se quedó 71 min colgado esperando la respuesta del refresco
-    #    del Trackeador: Postgres se reinició a mitad y nadie se lo dijo (run 35956134193).
+    #    del Trackeador: la base se reinició a mitad (06:35:16) y nadie se lo dijo (run 35956134193).
     #    15 min, medido con los runs de los nueve procesar-*.yml (622 runs): el éxito más
     #    largo de todos fue paneu-aptos, 587 s, el 29-jul; desde el 29-jul ninguno pasa
     #    de 137 s. Un corte por tope sale `cancelled` y el paso del registro lo apunta

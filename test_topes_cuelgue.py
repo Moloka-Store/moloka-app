@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Los topes contra cuelgues de los procesadores (encargo AA, 24-sep-2026).
+"""Los topes contra cuelgues de los procesadores (encargo AJ, 24-sep-2026).
 
 🔴 POR QUE. El 24-sep el ledger (run 35956134193) cargo 1592 movimientos y se quedo
-   71 min colgado esperando la respuesta del refresco del Trackeador: Postgres se
-   reinicio a las 06:35:16 con esa llamada en marcha. Dos agujeros, y esta mesa vigila
-   los dos:
+   71 min colgado esperando la respuesta del refresco del Trackeador: la base de
+   produccion se reinicio a las 06:35:16 Madrid (04:35:16 UTC) con esa llamada en marcha
+   («database system was not properly shut down»; la causa NO esta probada). Dos
+   agujeros, y esta mesa vigila los dos:
      1. `conectar_bd` abria la conexion sin keepalives ni `tcp_user_timeout`: una
         conexion muerta a mitad de consulta se esperaba PARA SIEMPRE.
      2. Los `procesar-*.yml` no tenian `timeout-minutes` en el job: GitHub espera 6 h.
@@ -15,8 +16,10 @@
    dia que nazca un `procesar-*.yml` nuevo sin tope, esto se pone ROJO solo.
 
 🔒 Lo que NO ve: que la conexion muerta de error de verdad. Eso se midio contra un
-   Postgres local cortando la red con iptables (INFORME del encargo AA): error a los
-   92 s con keepalives; sin ellos, sigue colgado.
+   Postgres local cortando la red con iptables (INFORME del encargo AJ): error a los
+   92 s con keepalives; sin ellos, sigue colgado. Y tampoco ve lo que los keepalives no
+   pueden ver: si la cadena pasa por el pooler, una base caida detras de el. Ahi manda
+   el tope del job.
 """
 import os
 import subprocess
