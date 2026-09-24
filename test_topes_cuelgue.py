@@ -16,7 +16,7 @@
    dia que nazca un `procesar-*.yml` nuevo sin tope, esto se pone ROJO solo.
 
 🔒 Lo que NO ve: que la conexion muerta de error de verdad. Eso se midio contra un
-   Postgres local cortando la red con iptables (INFORME del encargo AJ): error a los
+   Postgres local cortando la red con iptables (PR #308, encargo AJ): error a los
    92 s con keepalives; sin ellos, sigue colgado. Y tampoco ve lo que los keepalives no
    pueden ver: si la cadena pasa por el pooler, una base caida detras de el. Ahi manda
    el tope del job.
