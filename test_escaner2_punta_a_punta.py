@@ -215,6 +215,8 @@ def hijo(ruta_estado, programa):
     def descargar_catalogo_heo(max_paginas=None, con_chase=False):
         # Las dos lineas del log de la funcion de verdad (descargar_heo.py) de las que el barrido
         # saca el catalogo CRUDO y los tirados sin GTIN: 7 con EAN + 1 Funko chase + 3 sin GTIN.
+        # …y la de `_paginar`: lo que HEO DICE que tiene (totalElements). En la de verdad sale antes.
+        print('  catalog/products: %d items | 1 paginas | pageSize 500' % int(os.environ.get('E2_DECLARADO', '11')))
         print('>>> Cruzando: %d productos | 0 precios | 0 disponibilidades' % int(os.environ.get('E2_CRUDO', '11')))
         print('>>> Catalogo cruzado: 7 filas con EAN (descartadas 3 sin GTIN)')
         chase = [{'producto_heo': 'HEO9001', 'nombre': 'Funko Pop Omega w/CH', 'ean_caja': '9990000000011',
@@ -251,7 +253,8 @@ def estado_inicial(e2, M, frenar=None):
         'frenar': frenar,
         'tablas': {
             'reglas_director': [{'proveedor': 'HEO', 'activo': True, 'marcas': ['Funko', 'OFERTAS'], 'rank_maximo': 30000}],
-            'escaner2_parametros': [{'proveedor': 'HEO', 'umbral_caidas_30d': 8, 'paises': ['ES', 'DE']}],
+            'escaner2_parametros': [{'proveedor': 'HEO', 'umbral_caidas_30d': 8, 'paises_filtro': ['ES', 'DE'],
+                                     'paises_calculo': ['ES', 'IT', 'FR', 'DE']}],
             'productos': [{'id': 'p1', 'ean': _ean(M, 1), 'asin': 'B0ALFA0001', 'iva_pct': 0.10, 'activo': True,
                            'stock_moloka': 0, 'stock_fba': 3}],
             'escaner_resultados': [{'id': 1, 'proveedor': 'HEO', 'modo': 'todo', 'rank_maximo': 30000,
@@ -292,6 +295,9 @@ def caso(nombre, frenar=None, crudo=None):
             csv_visualizador(e2, pro, M, 'es', [('B0ALFA0001', 1, '0', '99.00')])).decode()
         # 🔑 Y un fichero que no se puede leer: se dice y se sigue (no bloquea la pasada para siempre).
         bd['storage']['escaner2'][carpeta + '20260924-1300-roto.csv'] = base64.b64encode(b'esto no es un csv').decode()
+        # 🔑 Un tercer pais (IT): se CALCULA y se ve, pero no cuenta para «se vende» (filtro ES y DE).
+        bd['storage']['escaner2'][carpeta + '20260924-1205-KeepaExport-italia.csv'] = base64.b64encode(
+            csv_visualizador(e2, pro, M, 'it', [('B0ALFA0001', 1, '3', '25.00')])).decode()
     json.dump(bd, open(ruta, 'w', encoding='utf-8'), default=str)
     cod2, log2 = correr(ruta, 'escaner2_heo_cruce.py', {'SUPABASE_SERVICE_KEY': 'svc-de-mentira', 'PASADA': pasada['id'],
                                                         'GITHUB_RUN_ID': '434343'})
@@ -336,7 +342,7 @@ c = T['escaner2_cruce'][0]
 eq('2 · el cruce sale en VERDE', cod2, 0)
 eq('2 · …y queda LISTA, cuadrado', (c['estado'], c['cuadra'], c['motivo_fallo']), ('lista', True, None))
 eq('2 · el pais de cada CSV sale del dato', sorted((f['pais'] or '', f['usado']) for f in c['ficheros']),
-   [('', False), ('DE', True), ('ES', True), ('ES', True)])
+   [('', False), ('DE', True), ('ES', True), ('ES', True), ('IT', True)])
 eq('2 · 🔴 el CSV roto se dice (en ficheros) y NO tumba el cruce',
    [(f['nombre'].endswith('roto.csv'), bool(f['error'])) for f in c['ficheros'] if f['error']], [(True, True)])
 eq('2 · puertas: entradas 5 = a1 b1 c1 d0 e1 f1', (c['n_entradas'], c['n_a'], c['n_b'], c['n_c'], c['n_d'], c['n_e'], c['n_f']),
@@ -346,6 +352,11 @@ _f1 = [r for r in T['escaner2_resultado_ean'] if r['puerta'] == 'f']
 eq('2 · COMPRAR con su mejor pais (ES: IVA de ficha 10 %)', sorted((r['asin'], r['mejor_pais']) for r in _f1),
    [('B0ALFA0001', 'ES')])
 _es1 = [r for r in T['escaner2_resultado_pais'] if r['asin'] == 'B0ALFA0001' and r['pais'] == 'ES'][0]
+_alfa_p = {r['pais']: r for r in T['escaner2_resultado_pais'] if r['asin'] == 'B0ALFA0001'}
+eq('2 · 🔴 el ALFA se calcula en ES, IT y DE (el IT también), cada uno con su marca «vende aquí»',
+   {p: r['vende_aqui'] for p, r in _alfa_p.items()}, {'ES': True, 'IT': False, 'DE': True})
+eq('2 · …y el cruce guarda las DOS listas de países', (c['paises_filtro'], c['paises_calculo']),
+   (['ES', 'DE'], ['ES', 'IT', 'FR', 'DE']))
 eq('2 · 🔴 manda el CSV MAS RECIENTE de ES: precio 22 y 30 caídas, no 99 y 0 del antiguo',
    (_es1['precio_venta'], _es1['caidas_30d']), (22.0, 30))
 eq('2 · el IVA de ES sale de la ficha y la fila lo dice', (_es1['iva'], _es1['iva_origen']), (0.1, 'ficha'))
@@ -384,6 +395,8 @@ eq('4 · 🔴 el barrido sale en ROJO', cod, 1)
 eq('4 · 🔴 …y la pasada queda FALLIDA con el motivo', (p['estado'], 'NO CUADRA antes de la foto' in (p['motivo_fallo'] or '')),
    ('fallida', True))
 eq('4 · 🔴 …sin lista para Keepa: no se puede cruzar', (p.get('ruta_lista'), cod2), (None, 1))
+eq('4 · 🔴 …y con los recuentos GUARDADOS aunque no cuadre (sin ellos no se sabe dónde se descuadró)',
+   (p.get('n_crudo'), p.get('p_sin_gtin'), p.get('p_chase_funko')), (12, 3, 1))
 
 print('\n5 · [rescate] el run muere a medias → SU fila queda fallida, las demás no se tocan')
 _ruta = os.path.join(_tmp, 'rescate.json')

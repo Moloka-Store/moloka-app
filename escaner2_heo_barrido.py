@@ -78,6 +78,15 @@ class _Eco(io.TextIOBase):
         self.destino.flush()
 
 
+class FalloPasada(RuntimeError):
+    """Un fallo que trae los recuentos que se llegaron a hacer, para guardarlos en la pasada
+    fallida (el check de cuadre de la base solo se aplica a 'esperando_csv')."""
+
+    def __init__(self, motivo, recuentos):
+        super().__init__(motivo)
+        self.recuentos = recuentos
+
+
 def _ahora():
     return datetime.now(timezone.utc).isoformat()
 
@@ -109,8 +118,9 @@ def main():
         sb.table('escaner2_pasada').update(cierre).eq('id', pasada).execute()
     except Exception as ex:
         motivo = f'{type(ex).__name__}: {ex}'[:1000]
-        sb.table('escaner2_pasada').update({'estado': 'fallida', 'motivo_fallo': motivo,
-                                            'terminada_en': _ahora()}).eq('id', pasada).execute()
+        sb.table('escaner2_pasada').update(dict({'estado': 'fallida', 'motivo_fallo': motivo,
+                                                 'terminada_en': _ahora()},
+                                                **getattr(ex, 'recuentos', {}))).eq('id', pasada).execute()
         abortar(f'pasada {pasada} fallida: {motivo}')
     print(f">>> PASADA LISTA: {cierre['n_foto']} en la foto, {cierre['n_eans_lista']} códigos para el "
           f"Visualizador en {cierre['n_tandas']} tanda(s). Esperando los CSV de Keepa.", flush=True)
@@ -138,16 +148,21 @@ def barrer(pasada):
     n_crudo = int(m.group(1)) if m else None
     m = re.search(r'descartadas (\d+) sin GTIN', log)
     n_sin_gtin = int(m.group(1)) if m else None
+    m = re.search(r'catalog/products: (\d+) items', log)
+    n_declarado = int(m.group(1)) if m else None
 
     # 3 · La foto, y el cuadre desde el catalogo crudo. Sin uno de los dos numeros del log no se
     #     puede afirmar que cuadra: la pasada falla diciendo cual falta (NULL no es cero).
-    foto, apartados, cuentas = e2.construir_foto(filas, chase, quiere, M, n_crudo=n_crudo, n_sin_gtin=n_sin_gtin)
+    foto, apartados, cuentas = e2.construir_foto(filas, chase, quiere, M, n_crudo=n_crudo, n_sin_gtin=n_sin_gtin,
+                                                 n_declarado=n_declarado)
     previas = cuentas['previas']
     print(f">>> CUADRE PREVIO [HEO]: catálogo crudo {n_crudo} = "
           + ' + '.join(f'{p} {previas[p]}' for p in e2.PUERTAS_PREVIAS)
           + f" + foto {cuentas['n_foto']} → {'CUADRA' if cuentas['cuadra_previo'] else 'NO CUADRA'}", flush=True)
     if not cuentas['cuadra_previo']:
-        raise RuntimeError('NO CUADRA antes de la foto: ' + cuentas['motivo_previo'])
+        # Los recuentos viajan con el fallo: justo cuando no cuadra es cuando hacen falta.
+        raise FalloPasada('NO CUADRA antes de la foto: ' + cuentas['motivo_previo'],
+                          dict({'n_crudo': n_crudo}, **{'p_' + p: v for p, v in previas.items()}))
     if not foto:
         raise RuntimeError('la foto sale vacía: nada de HEO pasa el filtro del director')
 

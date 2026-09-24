@@ -109,16 +109,21 @@ def main():
     par = (res.data or [None])[0]
     if not par:
         abortar('no hay fila HEO en escaner2_parametros (umbral y países)')
-    params = {'umbral': int(par['umbral_caidas_30d']), 'paises': list(par['paises'])}
+    # 🔑 DOS listas distintas (Fernando, 24-sep-2026): donde se mira si SE VENDE (filtro) y donde
+    #    se CALCULA (todos los que traigan CSV, hasta los cuatro).
+    params = {'umbral': int(par['umbral_caidas_30d']), 'paises_filtro': list(par['paises_filtro']),
+              'paises_calculo': list(par['paises_calculo'])}
 
     cruce = str(uuid.uuid4())
     sb.table('escaner2_cruce').insert({
         'id': cruce, 'pasada_id': PASADA, 'estado': 'cruzando',
-        'umbral_caidas_30d': params['umbral'], 'paises': params['paises'],
+        'umbral_caidas_30d': params['umbral'], 'paises_filtro': params['paises_filtro'],
+        'paises_calculo': params['paises_calculo'],
         'run_id': int(RUN_ID) if (RUN_ID or '').isdigit() else None,
     }).execute()
     print(f">>> Cruce {cruce} de la pasada {PASADA} abierto · umbral > {params['umbral']} caídas "
-          f"en {' o '.join(params['paises'])}.", flush=True)
+          f"en {' o '.join(params['paises_filtro'])} · se calcula en los de "
+          f"{', '.join(params['paises_calculo'])} que traigan CSV.", flush=True)
     try:
         cierre, rojo = cruzar(cruce, params, pasada)
         # 🔒 El cierre va DENTRO del try: si la base lo rechaza, el cruce queda 'fallida' con el
@@ -178,12 +183,12 @@ def cruzar(cruce, params, pasada):
             ficheros.append({'nombre': o['name'], 'pais': None, 'filas': None, 'usado': False,
                              'error': str(err), 'subido': subido})
             continue
-        usado = ex['pais'] in params['paises']
+        usado = ex['pais'] in params['paises_calculo']
         ficheros.append({'nombre': o['name'], 'pais': ex['pais'], 'filas': ex['filas'], 'usado': usado,
                          'fuente_pais': ex['fuente_pais'], 'choques_caidas': ex['choques_caidas'],
                          'error': None, 'subido': subido})
         print(f"    CSV {o['name']}: {ex['pais']} ({ex['fuente_pais']}), {ex['filas']} filas"
-              + ('' if usado else ' → IGNORADO: el barrido solo mira ' + ', '.join(params['paises'])),
+              + ('' if usado else ' → IGNORADO: se calcula solo en ' + ', '.join(params['paises_calculo'])),
               flush=True)
         if not usado:
             avisos.append(f"CSV de {ex['pais']} ignorado ({o['name']})")
@@ -195,16 +200,19 @@ def cruzar(cruce, params, pasada):
         # un dato mas fresco que el que la sostiene.
         if subido and (fecha_datos is None or subido < fecha_datos):
             fecha_datos = subido
-    usados = [p for p in params['paises'] if p in rutas_por_pais]
+    usados = [p for p in params['paises_calculo'] if p in rutas_por_pais]
     if not usados:
-        raise Fallo('ningún CSV es de %s' % ' ni de '.join(params['paises'])
+        raise Fallo('ningún CSV es de %s' % ' ni de '.join(params['paises_calculo'])
                     + ((' · CSV que no se pueden usar → ' + ' | '.join(errores)) if errores else ''))
     # Un CSV ilegible NO tumba el cruce si hay otros buenos (sin poder borrar lo subido, un solo
     # fichero malo bloquearia la pasada para siempre): se sigue, y el porque va en `ficheros`
     # (la pantalla lo pinta como aviso, fichero a fichero) y en el Excel.
-    for p in params['paises']:
+    # Solo se avisa de los que faltan del FILTRO: sin ellos no se sabe si se vende. Los demas
+    # paises de calculo son opcionales (hasta cuatro CSV).
+    for p in params['paises_filtro']:
         if p not in usados:
-            avisos.append(f'Falta el CSV de {p}: se decide solo con {", ".join(usados)}')
+            avisos.append(f'Falta el CSV de {p}: «se vende» se mira solo en '
+                          f'{", ".join(x for x in params["paises_filtro"] if x in usados) or "ningún país"}')
     datos_por_pais = {p: pro.leer_csv_visualizador(rutas_por_pais[p]) for p in usados}
 
     # ── 2 · La foto y el catalogo propio (el IVA de la ficha) ──────────────────────────
@@ -251,7 +259,7 @@ def cruzar(cruce, params, pasada):
                 'almacen': c['almacen'], 'com_digitales': c['com_digitales'], 'isd_pct': c['isd_pct'],
                 'isd_incluye_fba': c['isd_incluye_fba'], 'pa': c['pa'], 'com_amazon': c['com_amazon'],
                 'beneficio': c['beneficio'], 'roi': c['roi'], 'margen': c['margen'],
-                'decision': c['decision'],
+                'decision': c['decision'], 'vende_aqui': c['vende_aqui'],
             })
     _en_lotes('escaner2_resultado_ean', filas_ean)
     _en_lotes('escaner2_resultado_pais', filas_pais)
@@ -289,7 +297,7 @@ def cruzar(cruce, params, pasada):
     cmp_filas, cmp_resumen, viejos_meta, rank_max = [], {}, [], None
     try:
         cmp_filas, cmp_resumen, viejos_meta, rank_max = comparar_con_el_viejo(
-            M, foto, resultados, params, fecha_datos)
+            M, foto, resultados, dict(params, usados=usados), fecha_datos)
         _en_lotes('escaner2_comparacion', [dict(c, cruce_id=cruce, fecha_viejo=_iso(c['fecha_viejo']),
                                                 fecha_nuevo=_iso(c['fecha_nuevo'])) for c in cmp_filas])
     except Exception as ex:
@@ -372,7 +380,8 @@ def comparar_con_el_viejo(M, foto, resultados, params, fecha_datos):
             apartados.setdefault(k, 'apartado antes de la foto: ' + (a['detalle'] or a['motivo']))
     nuevo = e2.nuevo_por_ean(foto, {r['foto_id']: r for r in resultados}, M)
     fecha_nuevo = datetime.fromisoformat(str(fecha_datos).replace('Z', '+00:00')) if fecha_datos else _ahora()
-    cmp = e2.comparar(viejo, nuevo, {'umbral': params['umbral'], 'paises': params['paises'],
+    cmp = e2.comparar(viejo, nuevo, {'umbral': params['umbral'], 'paises': params['usados'],
+                                      'paises_filtro': params['paises_filtro'],
                                       'rank_max': rank_max, 'apartados': apartados,
                                       'fecha_nuevo': fecha_nuevo}, M)
     if not hay_completo:
@@ -408,7 +417,8 @@ def escribir_excel(foto, resultados, cmp_filas, info):
     r = info['resumen'] or {}
     filas_res = [['Pasada', info['pasada']], ['Cruce', info['cruce']],
                  ['Umbral de caídas (30 días)', '> %d' % info['params']['umbral']],
-                 ['Países configurados', ', '.join(info['params']['paises'])],
+                 ['Países del filtro de ventas', ', '.join(info['params']['paises_filtro'])],
+                 ['Países que se calculan (si traen CSV)', ', '.join(info['params']['paises_calculo'])],
                  ['Países con CSV', ', '.join(info['usados'])],
                  ['Catálogo crudo de HEO', info['n_crudo']]]
     filas_res += [['Puerta previa · %s' % e2.NOMBRE_PUERTA_PREVIA[p], info['previas'][p]] for p in e2.PUERTAS_PREVIAS]
@@ -430,25 +440,32 @@ def escribir_excel(foto, resultados, cmp_filas, info):
     filas_res += [['Aviso', a] for a in info['avisos']]
     hoja('Resumen', ['Qué', 'Valor'], filas_res, {'A': 44, 'B': 90})
 
+    # Los paises CALCULADOS, uno al lado del otro: caidas, margen, decision y si vende alli.
+    calc = info['usados']
     compras = []
     for res in resultados:
         if res['puerta'] not in ('e', 'f'):
             continue
         f, m = por_foto[res['foto_id']], res['mejor']
-        caidas = res.get('caidas') or {}
-        compras.append([f['ean_original'], f['nombre'], f['marca'], e2.NOMBRE_PUERTA[res['puerta']],
-                        m['pais'], round(m['margen'], 4), round(m['beneficio'], 2), m['precio_venta'],
-                        round(f['precio_unidad'], 2) if f['precio_unidad'] is not None else None,
-                        caidas.get('ES'), caidas.get('DE'), res['asin'],
-                        (res['paises'].get(m['pais']) or {}).get('iva_origen')])
+        fila = [f['ean_original'], f['nombre'], f['marca'], e2.NOMBRE_PUERTA[res['puerta']],
+                m['pais'], round(m['margen'], 4), round(m['beneficio'], 2), m['precio_venta'],
+                round(f['precio_unidad'], 2) if f['precio_unidad'] is not None else None, res['asin'],
+                (res['paises'].get(m['pais']) or {}).get('iva_origen')]
+        for p in calc:
+            c = res['paises'].get(p)
+            fila += ([c.get('caidas_30d'), round(c['margen'], 4) if c.get('margen') is not None else None,
+                      c.get('decision'), 'sí' if c.get('vende_aqui') else 'NO VENDE AQUÍ'] if c else [None, None, None, None])
+        compras.append(fila)
     compras.sort(key=lambda x: (x[3] != 'COMPRAR', -(x[5] or 0)))
-    ws = hoja('COMPRAR y VALORAR', ['EAN', 'Nombre', 'Marca', 'Decisión', 'Mejor país', 'Margen',
-                                    'Beneficio (€)', 'Precio venta (€)', 'Precio compra (€)',
-                                    'Caídas 30 d ES', 'Caídas 30 d DE', 'ASIN', 'Origen IVA'],
-              compras, {'A': 15, 'B': 55, 'C': 16, 'L': 12, 'M': 14})
-    for fila in ws.iter_rows(min_row=2, min_col=6, max_col=6):
-        for c in fila:
-            c.number_format = '0.0%'
+    cab = ['EAN', 'Nombre', 'Marca', 'Decisión', 'Mejor país', 'Margen', 'Beneficio (€)', 'Precio venta (€)',
+           'Precio compra (€)', 'ASIN', 'Origen IVA']
+    for p in calc:
+        cab += ['%s caídas 30 d' % p, '%s margen' % p, '%s decisión' % p, '%s vende' % p]
+    ws = hoja('COMPRAR y VALORAR', cab, compras, {'A': 15, 'B': 55, 'C': 16, 'J': 12, 'K': 14})
+    for fila in ws.iter_rows(min_row=2):
+        fila[5].number_format = '0.0%'
+        for k in range(len(calc)):
+            fila[11 + 4 * k + 1].number_format = '0.0%'
 
     hoja('Comparación', ['EAN', 'Nombre', 'Categoría', 'Viejo', 'País viejo', 'Fecha viejo (UTC)',
                          'Excel viejo', 'Puerta nuevo', 'Nuevo', 'País nuevo', 'Fecha nuevo (UTC)',

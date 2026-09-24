@@ -288,7 +288,7 @@ QUIERE, _info = e2.cargar_filtro_director(REGLA)
 eq('(E) el filtro sale de director_heo_prep.py con las marcas de la regla',
    (_info['marcas_reales'], _info['quiere_ofertas']), (['Funko', 'Ultimate Guard'], True))
 # El catalogo CRUDO de la escena: las 20 filas con GTIN + el Funko chase + 3 sin GTIN = 24.
-FOTO, APARTADOS, CUENTAS = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=24, n_sin_gtin=3)
+FOTO, APARTADOS, CUENTAS = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=24, n_sin_gtin=3, n_declarado=24)
 _por_ean = {f['ean_original']: f for f in FOTO}
 eq('(E) en la foto: los 13 de la escena + la oferta de Hasbro, sin el agotado ni el de otra marca',
    sorted(f['producto_heo'] for f in FOTO),
@@ -308,17 +308,23 @@ eq('(E) las puertas previas son las de la migración, en su orden',
                               'chase_suelto', 'ean_forma_rara', 'duplicado_proveedor'])
 # Un Funko chase AGOTADO tambien sale por su puerta previa: descargar_heo lo desvia antes que nada.
 _chase2 = CHASE_HEO + [dict(CHASE_HEO[0], producto_heo='HEO9002', estado='agotado')]
-_, _, _c2 = e2.construir_foto(FILAS_HEO, _chase2, QUIERE, M, n_crudo=25, n_sin_gtin=3)
+_, _, _c2 = e2.construir_foto(FILAS_HEO, _chase2, QUIERE, M, n_crudo=25, n_sin_gtin=3, n_declarado=25)
 eq('(E) 🔴 el Funko chase que no pasa el filtro también se cuenta (antes se perdía)',
    (_c2['previas']['chase_funko'], _c2['cuadra_previo']), (2, True))
 # Los rojos: el cuadre previo no puede salir verde por las malas.
-_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=24, n_sin_gtin=None)
+_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=24, n_sin_gtin=None, n_declarado=24)
 eq('(E) 🔴 sin el recuento de sin GTIN (log ilegible) → NO cuadra, y dice cuál falta',
    (_r['cuadra_previo'], _r['motivo_previo']), (False, 'sin recuento de: sin_gtin'))
-_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=None, n_sin_gtin=3)
+_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=None, n_sin_gtin=3, n_declarado=24)
 eq('(E) 🔴 sin el crudo → NO cuadra', (_r['cuadra_previo'], _r['motivo_previo']), (False, 'sin recuento de: crudo'))
-_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=25, n_sin_gtin=3)
+_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=25, n_sin_gtin=3, n_declarado=25)
 eq('(E) 🔴 HEO dio uno más de los que salen de descargar_heo → NO cuadra', _r['cuadra_previo'], False)
+_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=24, n_sin_gtin=3, n_declarado=None)
+eq('(E) 🔴 sin el total que DECLARA HEO → NO cuadra (no se puede saber si la descarga vino entera)',
+   (_r['cuadra_previo'], _r['motivo_previo']), (False, 'sin recuento de: total que declara HEO'))
+_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=24, n_sin_gtin=3, n_declarado=30)
+eq('(E) 🔴 HEO dice 30 y se bajaron 24 (una página falló en silencio) → NO cuadra',
+   (_r['cuadra_previo'], _r['motivo_previo']), (False, 'HEO dice que tiene 30 productos y se bajaron 24: la descarga se cortó'))
 _r = e2.cuadre_previo(dict(CUENTAS, n_foto=13))
 eq('(E) 🔴 un producto que se pierde entre las previas y la foto → NO cuadra',
    (_r['cuadra_previo'], _r['motivo_previo']), (False, 'catálogo crudo 24 ≠ puertas previas 10 + foto 13'))
@@ -339,7 +345,8 @@ print('\n(F) las seis puertas')
 M.poner_catalogo_propio([{'ean': ean(1), 'iva_pct': 0.10, 'stock_moloka': 0, 'stock_fba': 0}])
 _datos = {'ES': pro.leer_csv_visualizador(RUTA_ES), 'DE': pro.leer_csv_visualizador(RUTA_DE)}
 _caidas = {'ES': _ex_es['caidas'], 'DE': _ex_de['caidas']}
-PARAMS = {'umbral': 8, 'paises': ['ES', 'DE']}
+# Las DOS listas (Fernando, 24-sep-2026): el filtro de ventas mira ES y DE; se calcula en los cuatro.
+PARAMS = {'umbral': 8, 'paises_filtro': ['ES', 'DE'], 'paises_calculo': ['ES', 'IT', 'FR', 'DE']}
 RES = {}
 for _f in FOTO:
     _f['id'] = _f['producto_heo']
@@ -379,8 +386,30 @@ _solo_es = e2.decidir(FOTO[4], {'ES': e2.candidatos(FOTO[4], _datos['ES'])}, _ca
 eq('(F) c · con solo el CSV de ES, el motivo dice que DE no tiene dato', _solo_es['detalle'],
    '≤ 8 caídas en ES (DE: sin dato)')
 _umbral_bajo = e2.decidir(FOTO[4], {p: e2.candidatos(FOTO[4], _datos[p]) for p in ('ES', 'DE')}, _caidas,
-                          {'umbral': 4, 'paises': ['ES', 'DE']}, M)
+                          dict(PARAMS, umbral=4), M)
 eq('(F) el umbral es un PARAMETRO: con 4, 5 caidas en ES ya se vende', _umbral_bajo['puerta'] in ('d', 'e', 'f'), True)
+
+# 🔴 EL CASO DE FERNANDO: 20 caidas en ES, 0 en DE y MAS margen en DE → COMPRAR con mejor pais DE,
+#    y DE marcado «no vende aqui». Mas IT (5 caidas) y FR (sin dato): se calculan y se marcan.
+_tres = {
+    'ES': escribir_csv(os.path.join(_tmp, 'es4.csv'), [fila_csv('es', 'B0ALFA0001', ean(1), 'Alfa', bb='22.00', caidas='20')]),
+    'DE': escribir_csv(os.path.join(_tmp, 'de4.csv'), [fila_csv('de', 'B0ALFA0001', ean(1), 'Alfa', bb='40.00', caidas='0')]),
+    'IT': escribir_csv(os.path.join(_tmp, 'it4.csv'), [fila_csv('it', 'B0ALFA0001', ean(1), 'Alfa', bb='30.00', caidas='5')]),
+    'FR': escribir_csv(os.path.join(_tmp, 'fr4.csv'), [fila_csv('fr', 'B0ALFA0001', ean(1), 'Alfa', bb='30.00', caidas='')]),
+}
+_d4 = {p: pro.leer_csv_visualizador(r) for p, r in _tres.items()}
+_c4 = {p: e2.examinar_csv(r, pro, COL_PAIS, COL_CAIDAS)['caidas'] for p, r in _tres.items()}
+_alfa = FOTO[[f['producto_heo'] for f in FOTO].index('HEO0001')]
+_r4 = e2.decidir(_alfa, {p: e2.candidatos(_alfa, _d4[p]) for p in _d4}, _c4, PARAMS, M)
+eq('(F) 🔴 20 caídas en ES, 0 en DE y más margen en DE → COMPRAR con mejor país DE',
+   (_r4['puerta'], _r4['mejor']['pais']), ('f', 'DE'))
+eq('(F) 🔴 …y DE lleva «no vende aquí»; ES vende; IT (5) y FR (sin dato) tampoco venden, pero se calculan',
+   {p: (c['vende_aqui'], c['decision'] is not None) for p, c in _r4['paises'].items()},
+   {'ES': (True, True), 'IT': (False, True), 'FR': (False, True), 'DE': (False, True)})
+eq('(F) 🔴 los cuatro países, en el orden de los parámetros', list(_r4['paises']), ['ES', 'IT', 'FR', 'DE'])
+eq('(F) 🔴 IT con 50 caídas NO hace que se venda: el filtro es solo ES y DE',
+   e2.decidir(_alfa, {p: e2.candidatos(_alfa, _d4[p]) for p in ('IT', 'DE')},
+              dict(_c4, IT={'B0ALFA0001': 50.0}), PARAMS, M)['puerta'], 'c')
 
 # ═══════════════════════════════════════════════════════════════════════════════
 print('\n(G) el cuadre: entradas = suma de puertas, y cada EAN por UNA sola')
@@ -455,7 +484,7 @@ _viejo = e2.fusionar_viejos([
 eq('(H) la novedad POSTERIOR manda sobre el completo', _viejo[M.norm(ean(14))]['decisiones'], {'ES': 'NO COMPRAR'})
 _nuevo = e2.nuevo_por_ean(FOTO, RES, M)
 _apart = {M.norm(M.core_ean(a['ean_original'])): 'apartado antes de la foto: ' + a['detalle'] for a in APARTADOS}
-CMP = {c['ean_norm']: c for c in e2.comparar(_viejo, _nuevo, {'umbral': 8, 'paises': ['ES', 'DE'], 'rank_max': 30000,
+CMP = {c['ean_norm']: c for c in e2.comparar(_viejo, _nuevo, {'umbral': 8, 'paises': ['ES', 'DE'], 'paises_filtro': ['ES', 'DE'], 'rank_max': 30000,
                                                               'apartados': _apart, 'fecha_nuevo': None}, M)}
 
 

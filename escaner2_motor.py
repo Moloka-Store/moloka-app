@@ -72,9 +72,10 @@ MOTIVOS_APARTADO = ('chase_funko', 'estado_no_servible', 'chase_suelto', 'ean_fo
 #    no en la foto. Todo producto que devuelve HEO sale por UNA de estas o entra en la foto:
 #        crudo = puertas previas + foto        y, al cruzar,        crudo = previas + a..f
 #    En el orden en que se aplican. Ninguna regla de descarte cambia: solo se cuentan y se ven.
-#    Las tres primeras de la lista solo se CUENTAN (sin GTIN no hay EAN que listar; no disponible
-#    y marca fuera son el catalogo entero de HEO menos lo que se mira); las demas, ademas, se
-#    LISTAN en escaner2_apartado.
+#    `sin_gtin`, `no_disponible` y `marca_fuera` solo se CUENTAN (sin GTIN no hay EAN que listar;
+#    no disponible y marca fuera son el catalogo entero de HEO menos lo que se mira); las otras
+#    cinco (MOTIVOS_APARTADO: el Funko chase y las cuatro ultimas) ademas se LISTAN en
+#    escaner2_apartado.
 PUERTAS_PREVIAS = ('chase_funko', 'sin_gtin', 'no_disponible', 'marca_fuera', 'estado_no_servible',
                    'chase_suelto', 'ean_forma_rara', 'duplicado_proveedor')
 NOMBRE_PUERTA_PREVIA = {
@@ -239,12 +240,13 @@ def _apartado(fila, motivo, detalle, ean=None, precio=None):
             'precio_catalogo': precio, 'motivo': motivo, 'detalle': detalle}
 
 
-def construir_foto(filas_heo, chase_heo, quiere, M, n_crudo=None, n_sin_gtin=None):
+def construir_foto(filas_heo, chase_heo, quiere, M, n_crudo=None, n_sin_gtin=None, n_declarado=None):
     """Del catalogo CRUDO de HEO a la foto de la pasada, sin perder a nadie por el camino.
 
     `filas_heo, chase_heo` es lo que devuelve `descargar_catalogo_heo(con_chase=True)`;
-    `n_crudo` (productos que devolvio HEO) y `n_sin_gtin` (los que descargar_heo tira por no
-    tener GTIN) salen de su log, porque esa funcion no los devuelve y NO se toca.
+    `n_crudo` (productos que se bajaron de HEO), `n_sin_gtin` (los que descargar_heo tira por no
+    tener GTIN) y `n_declarado` (los que HEO DICE que tiene, `totalElements` de la API) salen de
+    su log, porque esa funcion no los devuelve y NO se toca.
 
     Devuelve (foto, apartados, cuentas). Cada producto crudo sale por UNA puerta previa
     (PUERTAS_PREVIAS) o entra en la foto, en el MISMO orden que el viejo para el perfil HEO:
@@ -368,7 +370,7 @@ def construir_foto(filas_heo, chase_heo, quiere, M, n_crudo=None, n_sin_gtin=Non
     for m in MOTIVOS_APARTADO:
         previas[m] = sum(1 for a in apartados if a['motivo'] == m)
     previas['sin_gtin'] = n_sin_gtin
-    cuentas = {'n_crudo': n_crudo, 'n_foto': len(foto), 'previas': previas,
+    cuentas = {'n_crudo': n_crudo, 'n_declarado': n_declarado, 'n_foto': len(foto), 'previas': previas,
                'n_devueltos': len(filas_heo) + len(chase_todo)}
     cuentas.update(cuadre_previo(cuentas))
     return foto, apartados, cuentas
@@ -383,10 +385,19 @@ def cuadre_previo(cuentas):
     faltan = [p for p in PUERTAS_PREVIAS if previas.get(p) is None]
     if cuentas.get('n_crudo') is None:
         faltan.insert(0, 'crudo')
+    if cuentas.get('n_declarado') is None:
+        faltan.insert(0, 'total que declara HEO')
     if faltan:
         return {'n_previas': None, 'cuadra_previo': False,
                 'motivo_previo': 'sin recuento de: ' + ', '.join(faltan)}
     n_previas = sum(previas[p] for p in PUERTAS_PREVIAS)
+    # 🔴 El catalogo «tal como llega de HEO» es el que HEO DICE que tiene, no lo que se bajo:
+    #    `_paginar` de descargar_heo se para EN SILENCIO si una pagina falla cinco veces, y sin
+    #    esto el cuadre diria CUADRA sobre un catalogo recortado.
+    if cuentas['n_crudo'] != cuentas['n_declarado']:
+        return {'n_previas': n_previas, 'cuadra_previo': False,
+                'motivo_previo': 'HEO dice que tiene %d productos y se bajaron %d: la descarga se cortó'
+                                 % (cuentas['n_declarado'], cuentas['n_crudo'])}
     if cuentas['n_devueltos'] + previas['sin_gtin'] != cuentas['n_crudo']:
         return {'n_previas': n_previas, 'cuadra_previo': False,
                 'motivo_previo': 'HEO dio %d productos y descargar_heo devolvió %d + %d sin GTIN'
@@ -557,16 +568,24 @@ def decidir(fila_foto, cands_por_pais, caidas_por_pais, params, M):
     """La PUERTA de una fila de la foto. Devuelve {'puerta', 'motivo', 'detalle', 'asin',
     'fichas', 'paises': {pais: calculo}, 'caidas': {pais: n o None}, 'mejor': {...} o None}.
 
-    `cands_por_pais`: {pais: [fichas del CSV]}, SOLO los paises configurados de los que se ha
-    subido CSV. `params`: {'umbral': 8, 'paises': ['ES', 'DE']} de escaner2_parametros.
+    `cands_por_pais`: {pais: [fichas del CSV]}, los paises que se CALCULAN de los que se ha
+    subido CSV. `params` (escaner2_parametros, Fernando 24-sep-2026), DOS listas distintas:
+      · 'paises_filtro'  (ES, DE): donde se mira si SE VENDE (> `umbral` caidas en 30 dias en
+        alguno de ellos);
+      · 'paises_calculo' (ES, IT, FR, DE): donde se CALCULA la rentabilidad, si traen CSV. El
+        mejor pais sale de TODOS los calculados, venda o no alli: cada pais lleva `vende_aqui`
+        y la pantalla marca «no vende aquí», pero se ve (decide Fernando).
 
     Orden de las puertas (una y solo una):
       a · ninguna ficha con ASIN en ningun CSV;
       b · dos o mas ASIN distintos para el mismo EAN (no se calcula: se listan);
-      c · no se vende: ningun pais configurado con MAS de `umbral` caidas en 30 dias;
+      c · no se vende: ningun pais del FILTRO con MAS de `umbral` caidas en 30 dias;
       d/e/f · se vende: COMPRAR si algun pais da COMPRAR, VALORAR si alguno da VALORAR, y si
               ninguno, sin margen. El mejor pais es el de mas margen dentro de esa decision."""
-    umbral, paises = params['umbral'], list(params['paises'])
+    umbral = params['umbral']
+    filtro = list(params['paises_filtro'])
+    # Los que se calculan, en el orden de los parametros; solo los que traen CSV.
+    paises = [p for p in params['paises_calculo'] if p in cands_por_pais]
     todas = [(p, r) for p in cands_por_pais for r in cands_por_pais[p]]
     asins = list(dict.fromkeys(r['asin'] for _p, r in todas if r.get('asin')))
     base = {'asin': None, 'fichas': None, 'paises': {}, 'caidas': {}, 'mejor': None}
@@ -598,15 +617,17 @@ def decidir(fila_foto, cands_por_pais, caidas_por_pais, params, M):
         if rec is not None:
             calculos[p] = calcular_pais(p, rec, fila_foto['precio_unidad'], fila_foto['ean_core'], M)
             calculos[p]['caidas_30d'] = caidas[p]
+            # 🔑 La marca «no vende aquí»: se decide AQUI y se guarda; la pantalla no la recalcula.
+            calculos[p]['vende_aqui'] = caidas[p] is not None and caidas[p] > umbral
     salida = dict(base, asin=asin, paises=calculos, caidas=caidas)
 
-    se_vende = any(c is not None and c > umbral for c in caidas.values())
+    se_vende = any(caidas.get(p) is not None and caidas[p] > umbral for p in filtro)
     if not se_vende:
-        con_dato = [p for p in paises if caidas.get(p) is not None]
-        sin_dato = [p for p in paises if caidas.get(p) is None]
+        con_dato = [p for p in filtro if caidas.get(p) is not None]
+        sin_dato = [p for p in filtro if caidas.get(p) is None]
         if not con_dato:
             return dict(salida, puerta='c', motivo='c_sin_dato',
-                        detalle='Sin dato de caídas en ' + ' ni en '.join(paises))
+                        detalle='Sin dato de caídas en ' + ' ni en '.join(filtro))
         det = '≤ %d caídas en %s' % (umbral, ' y en '.join(con_dato))
         if sin_dato:
             det += ' (%s: sin dato)' % ', '.join(sin_dato)
@@ -754,7 +775,8 @@ def comparar(viejo, nuevo, contexto, M):
     `viejo`: salida de fusionar_viejos. `nuevo`: {ean_norm: {'puerta', 'motivo', 'detalle',
     'mejor_pais', 'decision', 'ean', 'nombre', 'core', 'rank_es', 'rank90_es'}} (si un EAN tiene
     dos filas en la foto --unidad y caja-- manda la de puerta mas alta). `contexto`: {'umbral',
-    'paises', 'rank_max', 'apartados': {ean_norm: detalle}, 'fecha_nuevo'}.
+    'paises' (los calculados), 'paises_filtro', 'rank_max', 'apartados': {ean_norm: detalle},
+    'fecha_nuevo'}.
 
     Solo entran los EAN que son COMPRAR o VALORAR en ALGUNO de los dos lados. Se rotula como
     DIFERENCIA DE CRITERIO lo que se explica por lo que el encargo nombra:
@@ -762,7 +784,9 @@ def comparar(viejo, nuevo, contexto, M):
         por caidas de 30 dias en ES o DE;
       · el viejo calcula ES/IT/FR/DE y el nuevo solo los paises configurados.
     Todo lo demas queda como SIN EXPLICAR, con una nota de lo que dice cada lado."""
+    # `paises_filtro`: donde el nuevo mira si se vende; `paises`: los que el nuevo CALCULO (con CSV).
     umbral, paises, rank_max = contexto['umbral'], list(contexto['paises']), contexto['rank_max']
+    filtro = list(contexto.get('paises_filtro') or paises)
     filas = []
     for k in sorted(set(viejo) | set(nuevo)):
         v, n = viejo.get(k), nuevo.get(k)
@@ -794,7 +818,7 @@ def comparar(viejo, nuevo, contexto, M):
                 #    (el CSV no las trae), y un hueco se mira, no se explica.
                 if n['motivo'] == 'c_pocas_caidas':
                     criterio.append('el nuevo pide más de %d caídas en 30 días en %s (%s); el viejo '
-                                    'filtra por puesto ≤ %s en ES' % (umbral, ' o '.join(paises), n['detalle'],
+                                    'filtra por puesto ≤ %s en ES' % (umbral, ' o '.join(filtro), n['detalle'],
                                                                      '{:,}'.format(rank_max).replace(',', '.')))
                 if not criterio:
                     notas.append('nuevo: puerta %s · %s' % (n['puerta'], n['detalle']))
