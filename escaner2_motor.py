@@ -8,21 +8,22 @@ Supabase, Storage) vive en los dos programas que lo usan:
   · escaner2_heo_barrido.py  (workflow escaner2-heo-barrido.yml): baja HEO y deja la foto.
   · escaner2_heo_cruce.py    (workflow escaner2-heo-cruce.yml):   cruza los CSV y decide.
 
-🔴 NO SE COPIA NI UNA LINEA DEL ESCANER VIEJO: SE LEE DE SU FICHERO, POR ESTRUCTURA.
-   `moloka_escaner_nube.py` no se puede importar (crea el cliente de Keepa y sale a la red
-   al cargar) y el encargo prohibe modificarlo. Asi que `calc_rentabilidad`, `decision_de`,
-   las reglas de EAN/chase/caja (`partir_ean`, `clasificar_chase`, `variantes_ean` con el
-   rescate de GTIN), el IVA con su origen, `ISD_PAIS`, `UNIDADES_CASE_TCG` y el perfil HEO
-   se SACAN del fichero real con `ast` -- buscando cada `def` y cada asignacion de NIVEL
-   SUPERIOR por su nombre, no con un grep -- y se EJECUTAN. Es el mismo metodo con el que
-   `test_escaner_memoria.py` prueba las guardas del escaner. Consecuencias:
-     · la formula que usa el escaner nuevo ES la del viejo, letra por letra, hoy y manana:
-       si alguien la cambia alli, el nuevo la hereda sin tocar este fichero;
-     · si alguien la BORRA o la RENOMBRA, esto no adivina: revienta con el nombre que falta.
-   Lo mismo con el filtro del director (`_quiere` y sus marcas, de director_heo_prep.py) y
-   con la tanda del Visualizador (descargar_heo.py). Las columnas del CSV salen del Escaner
-   Pro (`CSV_COLS`, `leer_csv_visualizador`) y de `procesador_keepa_escaparate.py`
-   (`TIPADAS`, medidas contra los exports reales del 17 y 18-ago-2026).
+🔴 LAS PIEZAS DEL VIEJO, COPIADAS LITERALMENTE EN LOS FICHEROS HEREDADOS (encargo B7, 25-sep-2026).
+   Hasta el B6 se leian del fichero del viejo; desde el B7, de escaner2_heredado_*.py, que llevan su
+   texto EXACTO (generado por script desde el commit 2f9c06a, con fichero, lineas y blob de origen
+   encima de cada pieza). `calc_rentabilidad`, `decision_de`, las reglas de EAN/chase/caja
+   (`partir_ean`, `clasificar_chase`, `variantes_ean` con el rescate de GTIN), el IVA con su origen,
+   `ISD_PAIS`, `UNIDADES_CASE_TCG`, el perfil HEO, la eleccion de ficha y la Celda 9 del Excel (hecha
+   funcion, `excel_del_viejo`) se SACAN de escaner2_heredado_nube.py con `ast` -- buscando cada `def` y
+   cada asignacion de NIVEL SUPERIOR por su nombre, no con un grep -- y se EJECUTAN. Consecuencias:
+     · la formula que usa el escaner nuevo ES la del viejo, letra por letra; y si el viejo cambia, el
+       nuevo NO lo arrastra: test_escaner2_heredado.py lo avisa y decide Fernando si se hereda;
+     · el dia que se borre el viejo, el escaner 2 sigue igual (ninguna ruta de aqui apunta al viejo);
+     · si alguien BORRA o RENOMBRA una pieza heredada, esto no adivina: revienta con su nombre.
+   Lo mismo con el filtro del director (`_quiere` y sus marcas: escaner2_heredado_director.py), con la
+   tanda del Visualizador (escaner2_heredado_descarga.py), con las columnas del CSV (el lector del
+   Escaner Pro: escaner2_heredado_pro.py) y con `TIPADAS` (escaner2_heredado_escaparate.py, medidas
+   contra los exports reales del 17 y 18-ago-2026).
 
 🔒 LO QUE NO SE PUEDE SACAR POR NOMBRE, porque en el viejo va escrito EN LINEA dentro de
    un bucle y no en una funcion, se replica aqui con el sitio de donde sale al lado:
@@ -39,10 +40,16 @@ import os
 import re
 from datetime import datetime, timezone
 
-RUTA_MOTOR = 'moloka_escaner_nube.py'
-RUTA_DIRECTOR_HEO = 'director_heo_prep.py'
-RUTA_DESCARGAR_HEO = 'descargar_heo.py'
-RUTA_ESCAPARATE = 'procesador_keepa_escaparate.py'
+# 🔑 (B7, 25-sep-2026) LAS PIEZAS SALEN DE LOS FICHEROS HEREDADOS DEL ESCANER 2, NO DEL VIEJO.
+#    escaner2_heredado_*.py llevan el texto EXACTO de cada pieza del viejo (copiado por script del commit
+#    2f9c06a, con su origen encima) y se leen igual que antes se leia el viejo: por nombre, con `ast`.
+#    El dia que se borre el viejo, el escaner 2 sigue igual. Si el viejo cambia, lo avisa
+#    test_escaner2_heredado.py y decide Fernando si se hereda. Ninguna ruta de aqui apunta al viejo
+#    (lo vigila el mismo banco).
+RUTA_MOTOR = 'escaner2_heredado_nube.py'              # ← moloka_escaner_nube.py
+RUTA_DIRECTOR_HEO = 'escaner2_heredado_director.py'   # ← director_heo_prep.py
+RUTA_DESCARGAR_HEO = 'escaner2_heredado_descarga.py'  # ← descargar_heo.py
+RUTA_ESCAPARATE = 'escaner2_heredado_escaparate.py'   # ← procesador_keepa_escaparate.py
 
 PROVEEDOR = 'HEO'
 
@@ -1214,55 +1221,32 @@ def nuevo_por_ean(foto, resultados_por_foto, M):
 # 6 · (B4) EL EXCEL CON EL FORMATO DEL VIEJO
 # ═══════════════════════════════════════════════════════════════════════════════
 # Fernando (25-sep-2026): «yo necesito exactamente el mismo formato de excel del escaner antiguo».
-# 🔴 NO SE COPIA: SE EJECUTA EL SUYO. La «Celda 9» de moloka_escaner_nube.py (la que escribe
-#    Análisis, Descartados, Ambiguos, Sin_rank, Precio por lote y Chase_manual) va EN LINEA, no en una
-#    funcion, asi que se saca del fichero por ESTRUCTURA: las sentencias de nivel superior desde los
-#    `import` de openpyxl que preceden a `COLS = …` hasta la anterior a `_sin_excel = …`, dos anclas
-#    unicas o no arranca. Se ejecutan con los datos del escaner 2 vestidos como los suyos
-#    (`registros`, `problematicos`, …): mismas hojas, columnas, formulas vivas, anchos y semaforo, y
-#    si alguien cambia el viejo, el nuevo lo hereda sin tocar este fichero. El viejo NO se modifica.
-# 🔑 Si el bloque empieza a usar un nombre que aqui no se le da, NO se adivina: revienta con el nombre.
+# 🔴 SE EJECUTA LA CELDA 9 DEL VIEJO, COPIADA. Hasta el B6 se sacaba del fichero del viejo por
+#    estructura (las sentencias entre los `import` de openpyxl que preceden a `COLS = …` y la anterior a
+#    `_sin_excel = …`). Desde el B7 (25-sep-2026) ese mismo bloque vive en escaner2_heredado_nube.py como
+#    la funcion `excel_del_viejo`: su texto exacto, con 4 espacios mas de sangria, una linea `def` con los
+#    datos que antes leia como globales (`registros`, `problematicos`, …) y `return wb`. Mismas hojas,
+#    columnas, formulas vivas, anchos, formatos y semaforo; lo prueba test_escaner2_heredado.py celda a
+#    celda contra el bloque del viejo (mientras exista) y contra un libro de referencia guardado en el repo.
+# 🔑 Si la funcion empieza a pedir un dato que aqui no se le da, NO se adivina: Python revienta con su nombre.
 PUERTAS_ANALISIS = ('d', 'e', 'f')
-_ANCLA_INICIO_EXCEL, _ANCLA_FIN_EXCEL = 'COLS', '_sin_excel'
+# Los datos que la Celda 9 leia como globales, en el orden de los parametros de `excel_del_viejo`.
+DATOS_CELDA9 = ('registros', 'problematicos', 'no_encontrados', 'chase_sueltos', '_dups', 'ambiguos', 'sin_rank',
+                'chase_pendientes', 'cotejo_info', 'PROVEEDOR')
 
 
-def _nombres_libres(nodos):
-    """Los nombres que el bloque LEE y no define el mismo (ni son del lenguaje)."""
-    import builtins
-    leidos, definidos = set(), set()
-    for n in nodos:
-        for x in ast.walk(n):
-            if isinstance(x, ast.Name):
-                (leidos if isinstance(x.ctx, ast.Load) else definidos).add(x.id)
-            elif isinstance(x, (ast.FunctionDef, ast.ClassDef)):
-                definidos.add(x.name)
-            elif isinstance(x, ast.arg):
-                definidos.add(x.arg)
-            elif isinstance(x, (ast.Import, ast.ImportFrom)):
-                definidos.update((a.asname or a.name).split('.')[0] for a in x.names)
-    return leidos - definidos - set(dir(builtins))
-
-
-def sacar_bloque_excel(ruta=RUTA_MOTOR):
-    """(codigo, nombres_que_necesita) de la Celda 9 del viejo. Falla CERRADO si una ancla falta,
-    esta dos veces o estan al reves."""
+def columnas_analisis(ruta=RUTA_MOTOR):
+    """Las columnas de la hoja «Análisis» (`COLS` de la Celda 9), leidas de `excel_del_viejo` por
+    estructura: la UNICA asignacion a `COLS` dentro de esa funcion, evaluada como literal."""
     with io.open(ruta, encoding='utf-8') as fh:
         arbol = ast.parse(fh.read(), ruta)
-    cuerpo = arbol.body
-
-    def ancla(nombre):
-        idx = [i for i, n in enumerate(cuerpo) if isinstance(n, ast.Assign) and nombre in _nombres_asignados(n)]
-        if len(idx) != 1:
-            raise PiezaNoEncontrada('%s: se esperaba UNA asignacion de nivel superior a %s y hay %d'
-                                    % (ruta, nombre, len(idx)))
-        return idx[0]
-    ini, fin = ancla(_ANCLA_INICIO_EXCEL), ancla(_ANCLA_FIN_EXCEL)
-    while ini > 0 and isinstance(cuerpo[ini - 1], (ast.Import, ast.ImportFrom)):
-        ini -= 1
-    if not ini < fin:
-        raise PiezaNoEncontrada('%s: %s no va antes de %s' % (ruta, _ANCLA_INICIO_EXCEL, _ANCLA_FIN_EXCEL))
-    nodos = cuerpo[ini:fin]
-    return compile(ast.Module(body=nodos, type_ignores=[]), ruta, 'exec'), _nombres_libres(nodos)
+    defs = [n for n in arbol.body if isinstance(n, ast.FunctionDef) and n.name == 'excel_del_viejo']
+    if len(defs) != 1:
+        raise PiezaNoEncontrada('%s: se esperaba UN def excel_del_viejo y hay %d' % (ruta, len(defs)))
+    cols = [n for n in ast.walk(defs[0]) if isinstance(n, ast.Assign) and 'COLS' in _nombres_asignados(n)]
+    if len(cols) != 1:
+        raise PiezaNoEncontrada('%s: se esperaba UNA asignacion a COLS en excel_del_viejo y hay %d' % (ruta, len(cols)))
+    return list(ast.literal_eval(cols[0].value))
 
 
 def _pais_viejo(c):
@@ -1341,18 +1325,19 @@ def datos_como_el_viejo(foto, resultados, apartados, M, eleccion=None):
 
 
 def excel_como_el_viejo(foto, resultados, apartados, M, ruta=RUTA_MOTOR, eleccion=None):
-    """El libro de openpyxl con las SEIS hojas del viejo, escritas por SU codigo. El catalogo propio
-    (`M.poner_catalogo_propio`) tiene que estar puesto: «En mi BD» sale de el, con `en_bd_txt` del viejo."""
+    """El libro de openpyxl con las SEIS hojas del viejo, escritas por SU codigo (la Celda 9, copiada en
+    escaner2_heredado_nube.py como `excel_del_viejo`). El catalogo propio (`M.poner_catalogo_propio`) tiene
+    que estar puesto: «En mi BD» sale de el, con `en_bd_txt` del viejo."""
+    return escribir_celda9(datos_como_el_viejo(foto, resultados, apartados, M, eleccion), M, ruta)
+
+
+def escribir_celda9(datos, M, ruta=RUTA_MOTOR):
+    """`excel_del_viejo` con estos datos (un dict con las llaves de DATOS_CELDA9), en el espacio de nombres
+    del motor (sus constantes, `sup`, `pct_comision_celda` y `en_bd_txt`). Devuelve el libro."""
     from contextlib import redirect_stdout
-    codigo, necesita = sacar_bloque_excel(ruta)
-    ns = sacar_piezas(ruta, ('pct_comision_celda', 'en_bd_txt'), (), base=M._ns)
-    ns.update(datos_como_el_viejo(foto, resultados, apartados, M, eleccion))
-    faltan = sorted(n for n in necesita if n not in ns)
-    if faltan:
-        raise PiezaNoEncontrada('%s: la Celda 9 del viejo usa %s y el escaner 2 no se lo da' % (ruta, ', '.join(faltan)))
+    ns = sacar_piezas(ruta, ('pct_comision_celda', 'en_bd_txt', 'excel_del_viejo'), (), base=M._ns)
     with redirect_stdout(io.StringIO()):     # sus `print` de la hoja no ensucian el log del cruce
-        exec(codigo, ns)
-    return ns['wb']
+        return ns['excel_del_viejo'](**{k: datos[k] for k in DATOS_CELDA9})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1367,9 +1352,10 @@ def excel_como_el_viejo(foto, resultados, apartados, M, ruta=RUTA_MOTOR, eleccio
 #   3. si ninguna casa, la MAS PARECIDA (y a igualdad, la de mejor puesto), marcada «⚠ DUDOSO»; si
 #      ninguna se parece en nada, la de mejor puesto, tambien «⚠ DUDOSO»;
 #   4. si no hay texto con que cotejar, la de mejor puesto («n/d»). NUNCA se rinde: siempre elige.
-# 🔴 NO SE COPIA: se sacan del fichero del viejo, por estructura, `_tok_cot`, `construir_idf`, `_idf`,
-#    `_distintivo`, `cotejar`, `elegir_candidato`, `UMBRAL_COTEJO` y `keyrank` (que va anidada dentro
-#    del `if filas:`, por eso se busca por nombre en todo el arbol y tiene que ser UNA). El cotejo
+# 🔴 NO SE REESCRIBE: se sacan, por estructura, `_tok_cot`, `construir_idf`, `_idf`, `_distintivo`,
+#    `cotejar`, `elegir_candidato`, `UMBRAL_COTEJO` y `keyrank` de escaner2_heredado_nube.py, que los lleva
+#    copiados literalmente del viejo (B7; hasta el B6, del fichero del viejo). `keyrank` va anidada dentro
+#    del `if filas:` en el viejo; se busca por nombre en todo el arbol y tiene que ser UNA. El cotejo
 #    corre como en el viejo con HEO: activo (ningun workflow le pasa COTEJO_MODO=off y HEO trae nombre).
 # 🔒 El ASIN elegido vive SOLO en el resultado del cruce: ni `productos` ni ninguna tabla de identidad.
 DEFS_ELECCION = ('_tok_cot', 'construir_idf', '_idf', '_distintivo', 'cotejar', 'elegir_candidato')
@@ -1430,7 +1416,7 @@ class EleccionViejo:
                     'asin_viejo': cands[0]['asin'], 'detalle': 'solo hay una ficha en ES, que es donde mira el viejo'}
         kr = self._ns['keyrank']
         viejo, _veredicto_v, _detalle_v = self._ns['elegir_candidato'](nombre, cands, kr)
-        # 🔑 La eleccion la hace el MISMO `elegir_candidato` del viejo (sacado de su fichero otra vez, en
+        # 🔑 La eleccion la hace el MISMO `elegir_candidato` del viejo (sacado otra vez de su copia heredada, en
         #    `self._ns6`), y lo unico que cambia es a que `cotejar` llama: `_cotejar_paises`, que pasa el
         #    `cotejar` del viejo por el titulo de cada pais. Ni una linea de su regla se copia aqui.
         titulos = titulos_por_pais(registros_es, otros)

@@ -3,9 +3,10 @@
 
 `escaner2_heo_barrido.py` y `escaner2_heo_cruce.py` son scripts (se corren con `runpy` y
 hacen `sys.exit`), asi que cada caso va en su PROCESO. `supabase` (base y Storage) y la API de
-HEO (`descargar_heo`) se sustituyen por dobles EN MEMORIA que guardan su estado en un fichero
-entre proceso y proceso: el barrido deja la foto y el cruce la lee. Sin red, sin secretos y
-sin tocar produccion. El escaner viejo NO se toca: sus piezas se leen de su fichero real.
+HEO (`descargar_catalogo_heo`, desde el B7 en escaner2_heredado_descarga.py) se sustituyen por dobles
+EN MEMORIA que guardan su estado en un fichero entre proceso y proceso: el barrido deja la foto y el
+cruce la lee. Sin red, sin secretos y sin tocar produccion. El escaner viejo NO se toca: sus piezas
+van copiadas en escaner2_heredado_*.py (B7).
 
 CASOS:
   1. [sin_llave]  sin SUPABASE_SERVICE_KEY → ROJO, la linea exacta y NINGUN cliente creado.
@@ -173,7 +174,7 @@ class _Cliente:
 def _escena():
     sys.path.insert(0, AQUI)
     import escaner2_motor as e2
-    import moloka_escaner_pro as pro
+    import escaner2_heredado_pro as pro
     M = e2.cargar_motor(os.path.join(AQUI, e2.RUTA_MOTOR))
     return e2, pro, M
 
@@ -211,7 +212,7 @@ def csv_visualizador(e2, pro, M, pais, filas):
 
 def excel_viejo(e2, M, filas):
     from openpyxl import Workbook
-    cols = e2.sacar_piezas(os.path.join(AQUI, e2.RUTA_MOTOR), (), ('COLS',))['COLS']
+    cols = e2.columnas_analisis(os.path.join(AQUI, e2.RUTA_MOTOR))
     wb = Workbook()
     ws = wb.active
     ws.title = 'Análisis'
@@ -267,7 +268,7 @@ def hijo(ruta_estado, programa):
     e2, _pro, M = _escena()
 
     def descargar_catalogo_heo(max_paginas=None, con_chase=False):
-        # Las dos lineas del log de la funcion de verdad (descargar_heo.py) de las que el barrido
+        # Las dos lineas del log de la funcion de verdad (descargar_heo.py, copiada) de las que el barrido
         # saca el catalogo CRUDO y los tirados sin GTIN: 7 con EAN + la lista chase + 3 sin GTIN.
         # …y la de `_paginar`: lo que HEO DICE que tiene (totalElements). En la de verdad sale antes.
         chase = chase_de(os.environ.get('E2_ESCENA', 'base'))
@@ -277,8 +278,8 @@ def hijo(ruta_estado, programa):
         print('>>> Catalogo cruzado: 7 filas con EAN (descartadas 3 sin GTIN)')
         return (filas_heo(M), chase) if con_chase else filas_heo(M)
 
-    sys.modules['descargar_heo'] = types.ModuleType('descargar_heo')
-    sys.modules['descargar_heo'].descargar_catalogo_heo = descargar_catalogo_heo
+    sys.modules['escaner2_heredado_descarga'] = types.ModuleType('escaner2_heredado_descarga')
+    sys.modules['escaner2_heredado_descarga'].descargar_catalogo_heo = descargar_catalogo_heo
     import runpy
     sys.argv = [programa] + os.environ.get('E2_ARGS', '').split()
     codigo = 0
@@ -472,7 +473,7 @@ HOJAS_VIEJO = ['Análisis', 'Descartados', 'Ambiguos', 'Sin_rank', 'Precio por l
 HOJAS_E2 = ['Resumen', 'Comparación', 'Varias fichas', 'Puertas', 'Puertas previas']
 eq('2 · 🔴 (B4) las seis hojas del viejo delante, en su orden, y las del escáner 2 detrás',
    _wb.sheetnames, HOJAS_VIEJO + HOJAS_E2)
-_COLS = e2.sacar_piezas(os.path.join(AQUI, e2.RUTA_MOTOR), (), ('COLS',))['COLS']
+_COLS = e2.columnas_analisis(os.path.join(AQUI, e2.RUTA_MOTOR))
 _an = list(_wb['Análisis'].iter_rows(values_only=True))
 eq('2 · 🔴 (B4) «Análisis» lleva las cabeceras de COLS del viejo, en su orden', list(_an[0]), list(_COLS))
 _ia = {h: k for k, h in enumerate(_an[0])}

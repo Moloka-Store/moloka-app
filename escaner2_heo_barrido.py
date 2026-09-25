@@ -9,14 +9,14 @@ escaner2-heo-barrido.yml, con el input `modo` (marcas | todas | elegidas) y, en 
 
 QUE HACE, EN ORDEN:
   1. abre una pasada en `escaner2_pasada` (estado 'descargando') con el id del run;
-  2. modo 'marcas': lee la regla HEO de `reglas_director` (SOLO LECTURA) y saca de
-     director_heo_prep.py SU filtro (`_quiere`), sin ejecutar aquel fichero. Modo 'todas': ni
+  2. modo 'marcas': lee la regla HEO de `reglas_director` (SOLO LECTURA) y aplica el filtro del
+     director (`_quiere`), copiado literalmente en escaner2_heredado_director.py (B7). Modo 'todas': ni
      la lee; el filtro es solo «disponible». Modo 'elegidas' (B4): ni la lee; el filtro es
      «disponible» y de una marca elegida (coincidencia EXACTA) o, con la casilla, en oferta;
-  3. baja el catalogo con `descargar_heo.descargar_catalogo_heo(con_chase=True)`, la MISMA
-     funcion que usa el director;
+  3. baja el catalogo con `descargar_catalogo_heo(con_chase=True)`, la MISMA funcion que usa el
+     director, copiada literalmente de descargar_heo.py en escaner2_heredado_descarga.py (B7);
   4. construye la foto con `escaner2_motor.construir_foto` (reglas de EAN/chase/caja del
-     escaner viejo, sacadas de su fichero) y la guarda en `escaner2_foto`. 🔴 EL CUADRE EMPIEZA
+     escaner viejo, copiadas en escaner2_heredado_nube.py) y la guarda en `escaner2_foto`. 🔴 EL CUADRE EMPIEZA
      EN EL CATALOGO CRUDO (Fernando, 24-sep-2026): cada producto que devuelve HEO sale por una
      PUERTA PREVIA (caja con chase sin EAN de la figura, sin GTIN, no disponible, marca fuera,
      estado no servible, chase suelto, EAN raro, duplicado) o entra en la foto, y crudo = previas
@@ -183,7 +183,8 @@ def barrer(pasada):
               f"tanda del Visualizador {tanda}", flush=True)
 
     # 2 · El catalogo, con la MISMA funcion que el director (import tardio: lee HEO_USER al cargar).
-    from descargar_heo import descargar_catalogo_heo
+    #     (B7) Su copia literal, escaner2_heredado_descarga.py: el escaner 2 ya no importa descargar_heo.py.
+    from escaner2_heredado_descarga import descargar_catalogo_heo
     eco = _Eco(sys.stdout)
     with redirect_stdout(eco):
         filas, chase = descargar_catalogo_heo(con_chase=True)

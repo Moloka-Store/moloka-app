@@ -141,3 +141,90 @@ def diferencias(ref, otro, solo_hojas=None, ignorar_columnas=(), vacias=()):
             if not set(pb['formula']) <= set(pa['formula']):
                 difs.append('%s · %s · formula: %r no es de las del viejo %r' % (n, col, pb['formula'], pa['formula']))
     return difs
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# (B7, 25-sep-2026) CELDA A CELDA: dos libros IDENTICOS, no solo con la misma huella
+# ═══════════════════════════════════════════════════════════════════════════════
+# La huella de arriba mira el FORMATO por columna para poder compararse con un Excel real sin publicarlo.
+# Esto es mas estricto y sirve cuando los dos libros salen de los MISMOS datos (la Celda 9 del viejo frente
+# a su copia, o el libro de referencia del repo frente al que se regenera): cada celda con su valor o su
+# formula, formato de numero, fuente, relleno, bordes, alineacion y enlace; y de cada hoja, su orden, su
+# tamano, los anchos y altos, la fila congelada, las celdas combinadas, las tablas y el formato condicional.
+def _fuente(f):
+    return None if f is None else (f.name, f.sz, f.b, f.i, f.u, f.strike, f.vertAlign,
+                                   _color(f.color), getattr(f.color, 'theme', None) if f.color is not None else None)
+
+
+def _relleno(f):
+    if f is None:
+        return None
+    return (getattr(f, 'fill_type', None), _color(getattr(f, 'fgColor', None)), _color(getattr(f, 'bgColor', None)))
+
+
+def _borde(b):
+    if b is None:
+        return None
+    return tuple((getattr(b, lado).style, _color(getattr(b, lado).color)) if getattr(b, lado) is not None else None
+                 for lado in ('left', 'right', 'top', 'bottom'))
+
+
+def _alineacion(a):
+    return None if a is None else (a.horizontal, a.vertical, a.wrap_text, a.indent, a.text_rotation)
+
+
+def _dxf(d):
+    if d is None:
+        return None
+    return (_fuente(d.font), _relleno(d.fill), _borde(d.border), d.numFmt.formatCode if d.numFmt is not None else None)
+
+
+def _hoja_general(ws):
+    from openpyxl.utils import get_column_letter
+    anchos = {k: (d.width, bool(d.customWidth), bool(d.hidden)) for k, d in ws.column_dimensions.items()
+              if d.width is not None or d.hidden}
+    altos = {k: (d.height, bool(d.hidden)) for k, d in ws.row_dimensions.items() if d.height is not None or d.hidden}
+    cf = []
+    for rango, reglas in ws.conditional_formatting._cf_rules.items():
+        for r in reglas:
+            cf.append((str(rango.sqref), r.type, r.operator, tuple(r.formula or ()), bool(r.stopIfTrue), r.priority,
+                       _dxf(r.dxf)))
+    tablas = sorted((t.displayName, t.ref, t.tableStyleInfo.name if t.tableStyleInfo else None,
+                     bool(t.tableStyleInfo.showRowStripes) if t.tableStyleInfo else None,
+                     bool(t.tableStyleInfo.showColumnStripes) if t.tableStyleInfo else None)
+                    for t in ws.tables.values())
+    return {'tamano': (ws.max_row, ws.max_column), 'congelada': ws.freeze_panes,
+            'combinadas': sorted(str(m) for m in ws.merged_cells.ranges), 'anchos': anchos, 'altos': altos,
+            'formato_condicional': sorted(cf, key=str), 'tablas': tablas,
+            'filtro': ws.auto_filter.ref, 'ultima_columna': get_column_letter(max(ws.max_column, 1))}
+
+
+def _celda(c):
+    return {'valor': c.value, 'tipo': c.data_type, 'formato': c.number_format, 'fuente': _fuente(c.font),
+            'relleno': _relleno(c.fill), 'borde': _borde(c.border), 'alineacion': _alineacion(c.alignment),
+            'enlace': c.hyperlink.target if c.hyperlink is not None else None}
+
+
+def celda_a_celda(contenido_a, contenido_b, max_difs=50):
+    """(n_celdas_comparadas, [diferencias legibles]) entre dos .xlsx (bytes), leidos del fichero guardado.
+    Se comparan TODAS las celdas del rectangulo mayor de cada hoja; una celda que falta en uno es una
+    diferencia. Las diferencias se cortan en `max_difs` (el recuento de celdas no)."""
+    from openpyxl import load_workbook
+    wa, wb_ = load_workbook(io.BytesIO(contenido_a)), load_workbook(io.BytesIO(contenido_b))
+    difs, n = [], 0
+    if wa.sheetnames != wb_.sheetnames:
+        difs.append('hojas: %s ≠ %s' % (wa.sheetnames, wb_.sheetnames))
+    for nombre in [h for h in wa.sheetnames if h in wb_.sheetnames]:
+        a, b = wa[nombre], wb_[nombre]
+        ga, gb = _hoja_general(a), _hoja_general(b)
+        for k in ga:
+            if ga[k] != gb[k]:
+                difs.append('%s · %s: %r ≠ %r' % (nombre, k, ga[k], gb[k]))
+        for fila in range(1, max(a.max_row, b.max_row) + 1):
+            for col in range(1, max(a.max_column, b.max_column) + 1):
+                n += 1
+                ca, cb = _celda(a.cell(row=fila, column=col)), _celda(b.cell(row=fila, column=col))
+                if ca != cb:
+                    distintos = {k: (ca[k], cb[k]) for k in ca if ca[k] != cb[k]}
+                    difs.append('%s · %s: %r' % (nombre, a.cell(row=fila, column=col).coordinate, distintos))
+    return n, difs[:max_difs] + (['… y %d más' % (len(difs) - max_difs)] if len(difs) > max_difs else [])

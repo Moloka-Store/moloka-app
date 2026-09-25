@@ -341,6 +341,12 @@ jobs:
       - name: 25 undecies) test_escaner2_codigos14.py
         run: python -u test_escaner2_codigos14.py
 
+      # (B7, 25-sep-2026) El escaner 2, independiente del viejo: ningun escaner2_*.py lee sus ficheros;
+      # las piezas copiadas son las del viejo (mientras exista; si no esta, se salta y lo dice) y no se
+      # han tocado a mano; y el Excel es el del viejo celda a celda, y el del libro de referencia del repo.
+      - name: 25 duodecies) test_escaner2_heredado.py
+        run: python -u test_escaner2_heredado.py
+
       - name: 26) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
@@ -389,6 +395,7 @@ jobs:
             test_escaner2_elegidas.py
             test_escaner2_elegir_ficha.py
             test_escaner2_codigos14.py
+            test_escaner2_heredado.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).

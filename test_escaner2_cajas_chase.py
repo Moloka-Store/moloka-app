@@ -235,7 +235,7 @@ eq('(E) 🔴 en el modo de siempre (sin lista) la marca no explica nada', _marca
 print('\n(F) el tope del Visualizador')
 eq('(F) la tanda del motor no pasa de 10.000', e2.tanda_visualizador() <= e2.TOPE_VISUALIZADOR == 10000, True)
 _tmp = tempfile.mkdtemp(prefix='e2b2_')
-_ruta = os.path.join(_tmp, 'descargar_heo.py')
+_ruta = os.path.join(_tmp, 'escaner2_heredado_descarga.py')
 io.open(_ruta, 'w', encoding='utf-8').write("TANDA = int(os.environ.get('HEO_TANDA', '20000'))\n")
 try:
     e2.tanda_visualizador(_ruta)
