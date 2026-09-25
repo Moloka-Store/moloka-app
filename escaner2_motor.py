@@ -445,6 +445,23 @@ def ean_de_la_figura(ean_caja, producto_heo, M):
     return visto, origen, aviso
 
 
+# ── (B6) EL CODIGO DE 14 CIFRAS CON UN 0 DELANTE ──────────────────────────────────────────
+# 🔑 DESVIO DELIBERADO DEL VIEJO (Fernando, 25-sep-2026). El viejo tira como «EAN forma rara» todo
+#    codigo de 14 cifras (Celda 4, antes del rescate). Si el primero es un 0, es el MISMO EAN-13 con un
+#    cero de relleno delante (GTIN-14 con indicador 0): el digito de control del GTIN no cambia con
+#    ceros a la izquierda, asi que el EAN-13 que queda al quitarlo es el del producto. En ed95d086 eran
+#    51 (Hasbro, Mattel, Phat Mojo, ThreeZero, Wizards) y ninguno estaba en la foto con sus 13 cifras.
+#    Se busca en Keepa y se cruza con las 13; `ean_original` se guarda tal cual, con sus 14.
+#    Los de 14 cifras que empiezan por 1-9 (codigo de CAJA: otra unidad) y los de 8 NO se tocan.
+def core_de_heo(ean_in, M):
+    """El EAN con el que se busca y se cruza una fila de HEO: `core_ean` del viejo y, si son 14 cifras
+    que empiezan por 0, esas 14 sin el 0 (13 cifras). Todo lo demas, tal cual lo deja el viejo."""
+    core = M.core_ean(ean_in)
+    if core.isdigit() and len(core) == 14 and core.startswith('0'):
+        return core[1:]
+    return core
+
+
 def rotulo_caja(f):
     """Lo que dice la fila de su caja, en pantalla y en el Excel: «caja con chase · N uds» (la
     caja con chase de HEO y la 5+1 del viejo, que es lo mismo), «caja x N» si es caja sin chase, o
@@ -488,7 +505,8 @@ def construir_foto(filas_heo, chase_heo, quiere, M, n_crudo=None, n_sin_gtin=Non
       1 bis. la caja con chase que pasa el filtro: el EAN de su figura comun
          (`ean_de_la_figura`) o, si no hay forma de sacarlo, puerta previa `chase_funko`;
       2. Celda 4: estado servible, chase SUELTO fuera, EAN de forma rara fuera (los GTIN-14 caen
-         aqui: el viejo los rechaza ANTES del rescate);
+         aqui: el viejo los rechaza ANTES del rescate). (B6) Salvo los de 14 cifras con un 0 delante,
+         que entran con sus 13 (`core_de_heo`); si esas 13 ya estan, el dedup del paso 3 los junta;
       3. dedup del proveedor: una fila por (EAN, caja), la mas barata;
       4. guardarrail caja-vs-suelta (marca, no borra) y el precio POR UNIDAD (Celda 8)."""
     perfil = M.PERFILES[PROVEEDOR]
@@ -550,7 +568,7 @@ def construir_foto(filas_heo, chase_heo, quiere, M, n_crudo=None, n_sin_gtin=Non
             apartados.append(_apartado(f, 'chase_suelto',
                                        'Chase SUELTO descartado (solo se compra en caja de 6)'))
             continue
-        core = M.core_ean(ean_in)
+        core = core_de_heo(ean_in, M)
         if (not core.isdigit()) or len(core) not in (12, 13):
             apartados.append(_apartado(f, 'ean_forma_rara', 'EAN forma rara (len=%d)' % len(core)
                                        + (': GTIN-14, el escáner viejo lo rechaza antes del rescate'
@@ -835,7 +853,7 @@ def decidir(fila_foto, cands_por_pais, caidas_por_pais, params, M, eleccion=None
 
     (B4 → B5) `eleccion` (`cargar_eleccion_viejo`): con dos o mas fichas, la del viejo elige UNA
     entre las de ES y el EAN sigue como si solo tuviera esa; su porque va en `detalle` y cada ficha
-    lleva `elegida`.
+    lleva `elegida`. (B6) El titulo se coteja en todos los paises con CSV, no solo en ES.
 
     Orden de las puertas (una y solo una):
       a · ninguna ficha con ASIN en ningun CSV;
@@ -864,7 +882,10 @@ def decidir(fila_foto, cands_por_pais, caidas_por_pais, params, M, eleccion=None
                            'caidas_30d': caidas_por_pais.get(p, {}).get(r['asin']),
                            'precio_venta': precio, 'canal': canal})
         detalle = '%d fichas para el mismo EAN: %s' % (len(asins), ', '.join(asins))
-        elegida = eleccion.elegir(fila_foto.get('nombre') or '', cands_por_pais.get('ES') or []) if eleccion else None
+        # (B6) Las candidatas, las de ES; el titulo se coteja tambien en los demas paises con CSV.
+        otros = {p: v for p, v in cands_por_pais.items() if p != 'ES'}
+        elegida = (eleccion.elegir(fila_foto.get('nombre') or '', cands_por_pais.get('ES') or [], otros)
+                   if eleccion else None)
         if elegida is None:
             if eleccion is not None:
                 detalle += ' · ninguna en ES: el viejo elige entre las de ES, y aquí no hay ninguna'
@@ -875,7 +896,7 @@ def decidir(fila_foto, cands_por_pais, caidas_por_pais, params, M, eleccion=None
         salida = _decidir_con_asin(fila_foto, cands_por_pais, caidas_por_pais, params, M, elegida['asin'], base)
         descartadas = [a for a in asins if a != elegida['asin']]
         return dict(salida, fichas=fichas, eleccion=elegida,
-                    detalle='Ficha %s elegida como el viejo (%s: %s; descartadas %s) · %s'
+                    detalle='Ficha %s elegida con la regla del viejo y el título en los cuatro países (%s: %s; descartadas %s) · %s'
                             % (elegida['asin'], elegida['veredicto'], elegida['detalle'],
                                ', '.join(descartadas), salida['detalle']))
     return _decidir_con_asin(fila_foto, cands_por_pais, caidas_por_pais, params, M, asins[0], base)
@@ -1376,14 +1397,26 @@ class EleccionViejo:
                                       'Counter': Counter, '_DF': Counter(), '_NDOC': 1, 'COTEJO_ACTIVO': True})
         exec(compile(ast.Module(body=[_def_anidada(ruta, 'keyrank')], type_ignores=[]), ruta, 'exec'), self._ns)
         self._ns['construir_idf'](list(nombres))
+        # (B6) Otra copia de `elegir_candidato` del viejo, cuyo `cotejar` es `_cotejar_paises`.
+        self._ns6 = sacar_piezas(ruta, ('elegir_candidato',), (), base={'cotejar': self._cotejar_paises})
 
     @property
     def n_nombres(self):
         return self._ns['_NDOC']
 
-    def elegir(self, nombre, registros_es):
-        """`registros_es`: las filas del CSV de ES de este EAN. → {'asin', 'veredicto', 'detalle', 'n'}
-        o None si en ES no hay ninguna ficha con ASIN (el viejo solo mira ES)."""
+    def elegir(self, nombre, registros_es, otros=None):
+        """`registros_es`: las filas del CSV de ES de este EAN; `otros`: {pais: filas del CSV} de los demas
+        paises (B6). → {'asin', 'veredicto', 'detalle', 'n', 'paises_cotejo', 'asin_viejo'} o None si en
+        ES no hay ninguna ficha con ASIN (el viejo solo mira ES).
+
+        🔑 (B6) DESVIO DELIBERADO DEL VIEJO (Fernando, 25-sep-2026), SOLO EN EL COTEJO. Las candidatas
+           siguen siendo las de ES y el orden, `keyrank` (puesto medio de 90 dias en ES). Pero una
+           candidata CASA si `cotejar` del viejo casa con su titulo en CUALQUIERA de los paises donde
+           aparece (PAISES_COTEJO). El viejo solo miraba el titulo de ES, y un titulo de ES mal traducido
+           le hacia elegir otro producto (Deck Case 100+ Black, 4260250075074: ES «Êltimo Guardia…», sin
+           «deck» ni «case»; FR «Ultimate Guard Deck Case 100+ - Black»). Si ninguna casa en ningun pais,
+           se sigue EXACTAMENTE como el viejo (su `elegir_candidato`: el mas parecido en ES, «⚠ DUDOSO»).
+           `asin_viejo` es la que elegiria el viejo, y si es otra, el detalle lo dice."""
         cands, vistos = [], set()
         for r in registros_es:
             a = r.get('asin')
@@ -1393,10 +1426,43 @@ class EleccionViejo:
         if not cands:
             return None
         if len(cands) == 1:
-            return {'asin': cands[0]['asin'], 'veredicto': 'única en ES', 'n': 1,
-                    'detalle': 'solo hay una ficha en ES, que es donde mira el viejo'}
-        elegido, veredicto, detalle = self._ns['elegir_candidato'](nombre, cands, self._ns['keyrank'])
-        return {'asin': elegido['asin'], 'veredicto': veredicto, 'detalle': detalle, 'n': len(cands)}
+            return {'asin': cands[0]['asin'], 'veredicto': 'única en ES', 'n': 1, 'paises_cotejo': [],
+                    'asin_viejo': cands[0]['asin'], 'detalle': 'solo hay una ficha en ES, que es donde mira el viejo'}
+        kr = self._ns['keyrank']
+        viejo, _veredicto_v, _detalle_v = self._ns['elegir_candidato'](nombre, cands, kr)
+        # 🔑 La eleccion la hace el MISMO `elegir_candidato` del viejo (sacado de su fichero otra vez, en
+        #    `self._ns6`), y lo unico que cambia es a que `cotejar` llama: `_cotejar_paises`, que pasa el
+        #    `cotejar` del viejo por el titulo de cada pais. Ni una linea de su regla se copia aqui.
+        titulos = titulos_por_pais(registros_es, otros)
+        cands6 = [dict(c, title=_Titulos(titulos.get(c['asin']) or [('ES', c['title'])])) for c in cands]
+        elegido, veredicto, detalle = self._ns6['elegir_candidato'](nombre, cands6, kr)
+        paises = self._paises_que_casan(nombre, elegido['title'])
+        if not paises:
+            detalle += ' · ninguna casa en ningún país (%s): como el viejo' % '/'.join(PAISES_COTEJO)
+        if elegido['asin'] != viejo['asin']:
+            detalle += ' · distinta del viejo: el viejo elegiría %s' % viejo['asin']
+        return {'asin': elegido['asin'], 'veredicto': veredicto, 'detalle': detalle, 'n': len(cands),
+                'paises_cotejo': paises, 'asin_viejo': viejo['asin']}
+
+    def _paises_que_casan(self, nombre, titulos):
+        """Los paises (en el orden de PAISES_COTEJO) en los que `cotejar` del viejo casa con el titulo."""
+        salida = []
+        for pais, titulo in titulos:
+            if pais not in salida and self._ns['cotejar'](nombre, titulo)[0] is True:
+                salida.append(pais)
+        return salida
+
+    def _cotejar_paises(self, nombre_prov, titulos):
+        """(B6) El `cotejar` que ve `elegir_candidato` en `self._ns6`: casa si el del viejo casa con el
+        titulo de ALGUN pais, y lo dice («casó en IT, FR, DE · casa: case, deck»). Si no casa en ninguno,
+        devuelve TAL CUAL lo que dice el del viejo con el titulo de ES (su «n/d», su «no casa» y su
+        parecido), para que desde ahi la eleccion sea exactamente la del viejo."""
+        paises = self._paises_que_casan(nombre_prov, titulos)
+        if paises:
+            _casa, score, motivo = self._ns['cotejar'](nombre_prov, dict(titulos)[paises[0]])
+            return True, score, 'casó en %s · %s' % (', '.join(paises), motivo)
+        titulo_es = dict(titulos).get('ES', '')
+        return self._ns['cotejar'](nombre_prov, titulo_es)
 
     def ganador_por_puesto(self, registros_es):
         """Las filas de la hoja «Ambiguos» del viejo para este EAN: al registrar cada ficha nueva, la
@@ -1420,6 +1486,29 @@ class EleccionViejo:
         return filas
 
 
+# (B6) Los paises cuyo titulo se coteja, en este orden (ES primero: es el del viejo).
+PAISES_COTEJO = ('ES', 'IT', 'FR', 'DE')
+
+
+class _Titulos(tuple):
+    """Los titulos de una ficha por pais, ((pais, titulo), …): lo que `elegir_candidato` del viejo lleva en
+    `title` y le pasa a `cotejar` (en `EleccionViejo._ns6`, `_cotejar_paises`)."""
+
+
+def titulos_por_pais(registros_es, otros=None):
+    """{asin: [(pais, titulo)]}: los titulos de cada ficha en cada pais de PAISES_COTEJO donde aparece,
+    en ese orden y sin repetir. `otros`: {pais: filas del CSV}; los paises de fuera de la lista no cuentan."""
+    por_pais = dict(otros or {})
+    por_pais['ES'] = registros_es
+    salida = {}
+    for pais in PAISES_COTEJO:
+        for r in por_pais.get(pais) or []:
+            a, t = r.get('asin'), (r.get('titulo') or '')
+            if a and t and (pais, t) not in salida.setdefault(a, []):
+                salida[a].append((pais, t))
+    return salida
+
+
 def cargar_eleccion_viejo(nombres, ruta=RUTA_MOTOR):
     return EleccionViejo(nombres, ruta)
 
@@ -1431,7 +1520,8 @@ def cargar_eleccion_viejo(nombres, ruta=RUTA_MOTOR):
 # la foto + lo apartado por MARCA (marca fuera / no elegida) que habria pasado las demas puertas previas.
 #   · estado no servible: la marca fuera se lista SOLO si esta «disponible», que es lo unico que HEO
 #     admite (PERFILES['HEO']['estados_ok']): la pasa siempre;
-#   · chase suelto y EAN de forma rara: las mismas funciones del viejo (`clasificar_chase`, `core_ean`);
+#   · chase suelto y EAN de forma rara: las mismas funciones del viejo (`clasificar_chase`, `core_ean`) y,
+#     desde el B6, el mismo `core_de_heo` que la foto (14 cifras con un 0 delante → sus 13);
 #   · caja con chase (lista `chase` de descargar_heo, con unidades en el nombre): el mismo camino que en
 #     `construir_foto` (`ean_de_la_figura`); si no sale EAN de la figura, iria a su puerta previa;
 #   · duplicado del proveedor: una por (EAN, chase), la MAS BARATA, contando tambien con la foto.
@@ -1453,7 +1543,7 @@ def corpus_cotejo(foto, apartados, M):
             continue
         nombre, ean = a.get('nombre') or '', str(a.get('ean_original') or '').strip()
         es_case, _es_caja6, descartar = M.clasificar_chase(nombre, ean)
-        core = M.core_ean(ean)
+        core = core_de_heo(ean, M)
         if (not core.isdigit()) or len(core) not in (12, 13):
             # ¿Una caja con chase de la lista `chase`? Entonces el EAN es el de su figura.
             if unidades_caja_chase(nombre) is None:

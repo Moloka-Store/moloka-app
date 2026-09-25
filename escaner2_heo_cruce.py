@@ -243,11 +243,14 @@ def cruzar(cruce, params, pasada):
     # (B5-bis) Las palabras que distinguen se miden sobre el catalogo que tendria la pasada en modo
     #      «todas» (la foto + la marca fuera que habria pasado las demas puertas previas), para que la
     #      eleccion NO dependa de las marcas elegidas.
+    # (B6) Desvio deliberado del viejo: una candidata de ES casa si el titulo casa en CUALQUIER pais con
+    #      CSV (ES, IT, FR, DE); si ninguna casa en ninguno, como el viejo. El detalle dice donde caso.
     apartados = _todas('escaner2_apartado', 'ean_original,nombre,marca,precio_catalogo,motivo,detalle,producto_heo',
                        'id', pasada_id=PASADA)
     corpus, de_fuera = e2.corpus_cotejo(foto, apartados, M)
     eleccion = e2.cargar_eleccion_viejo(corpus)
-    print(f"ELECCION DE FICHA (regla del viejo): corpus del cotejo {len(corpus)} nombres ({eleccion.n_nombres} "
+    print(f"ELECCION DE FICHA (regla del viejo, título cotejado en {'/'.join(e2.PAISES_COTEJO)}): corpus del "
+          f"cotejo {len(corpus)} nombres ({eleccion.n_nombres} "
           f"distintos), {de_fuera} de fuera de la foto (marca fuera/no elegida que habría pasado las demás "
           f"puertas previas).", flush=True)
     resultados = []

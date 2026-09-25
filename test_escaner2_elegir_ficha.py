@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Banco del escaner 2 de HEO · ELEGIR LA FICHA CUANDO UN EAN TIENE VARIAS (encargo B5, 25-sep-2026).
+"""Banco del escaner 2 de HEO · ELEGIR LA FICHA CUANDO UN EAN TIENE VARIAS (encargo B5, 25-sep-2026;
+B6 el mismo dia: el titulo se coteja en ES, IT, FR y DE).
 
 SIN RED, SIN SECRETOS Y SIN BASE. La regla es la del viejo, SACADA de su fichero
 (moloka_escaner_nube.py: `elegir_candidato`, su cotejo de titulo y `keyrank`) y ejecutada.
@@ -10,12 +11,18 @@ SIN RED, SIN SECRETOS Y SIN BASE. La regla es la del viejo, SACADA de su fichero
    el «Análisis» de su Excel. Para el cotejo, las palabras de esos 13 nombres con en cuantos nombres del
    catalogo de la pasada (7.815) salen: es lo UNICO que el cotejo mira. Sin precios.
 
+   (B6) `fichas_otros` lleva el titulo de cada ficha en IT/FR/DE, del mismo cruce y volcado igual.
+
 QUE PRUEBA:
-  (A) en los 13 el nuevo elige la MISMA ficha que el viejo (y escaner_detalle, donde lo hay, dice lo mismo);
-  (B) el Deck Case 100+ Black: gana por puesto B00M6XJWVM y el viejo eligio B00RLSIUBK, por el cotejo;
+  (A) (B6) en 12 de los 13 el nuevo elige la MISMA ficha que el viejo; en el Deck Case 100+ Black,
+      B00M6XJWVM, y dice que es distinta del viejo. `asin_viejo` es, en los 13, la ficha del viejo;
+  (B) el Deck Case 100+ Black: gana por puesto B00M6XJWVM; el viejo eligio B00RLSIUBK porque en ES solo
+      el titulo de esa trae «deck»; en IT/FR/DE las dos lo traen, y entre las dos gana el puesto;
   (C) la hoja «Ambiguos»: lo que escribe el viejo es el ganador POR PUESTO, no el del cotejo;
   (D) 🔴 LA GUARDA MUERDE: con la regla cambiada en una copia del fichero del viejo («menor puesto» por
-      «mayor», o sin el cotejo de titulo) el banco se pone rojo; y sin ficha en ES no se elige nada.
+      «mayor», o sin el cotejo de titulo) el banco se pone rojo; (B6) con el cotejo solo en ES (una copia
+      del motor con PAISES_COTEJO = ('ES',)) vuelve a salir B00RLSIUBK → rojo; y sin ficha en ES no se
+      elige nada.
 """
 import copy
 import io
@@ -50,22 +57,48 @@ def con_idf(ruta=e2.RUTA_MOTOR):
     return el
 
 
+def otros(caso):
+    """(B6) {pais: filas} de las fichas del caso fuera de ES, con su titulo, como `cands_por_pais`."""
+    salida = {}
+    for x in caso['fichas_otros']:
+        salida.setdefault(x['pais'], []).append({'asin': x['asin'], 'titulo': x['titulo']})
+    return salida
+
+
+def eleccion(el, caso):
+    return el.elegir(caso['nombre'], caso['fichas_es'], otros(caso))
+
+
 def elige(el, caso):
-    r = el.elegir(caso['nombre'], caso['fichas_es'])
+    r = eleccion(el, caso)
     return r['asin'] if r else None
 
 
+# (B6) Lo que se espera: la ficha del viejo en 12, y la 100+ negra en el Deck Case 100+ Black.
+DECK_EAN, DECK_BUENA, DECK_VIEJO = '4260250075074', 'B00M6XJWVM', 'B00RLSIUBK'
+ESPERADO = {c['ean']: (DECK_BUENA if c['ean'] == DECK_EAN else c['esperado']) for c in CASOS}
+
 EL = con_idf()
-print('(A) los 13 casos reales: la misma ficha que el viejo')
+print('(A) los 13 casos reales: la ficha del viejo en 12, y la buena en el Deck Case 100+ Black')
 eq('(A) son 13, del cruce 37eaa138, todos de la puerta b', (len(CASOS), {c['puerta_37eaa138'] for c in CASOS}), (13, {'b'}))
+eq('(A) (B6) el volcado trae el título de IT/FR/DE de cada ficha: 94, ninguno vacío',
+   (sum(len(c['fichas_otros']) for c in CASOS), all(x['titulo'] for c in CASOS for x in c['fichas_otros'])), (94, True))
+eq('(A) el Deck Case es el único en que lo esperado no es la ficha del viejo',
+   [c['ean'] for c in CASOS if ESPERADO[c['ean']] != c['esperado']], [DECK_EAN])
 for c in CASOS:
-    r = EL.elegir(c['nombre'], c['fichas_es'])
-    eq('(A) %s %s → %s (%s)' % (c['ean'], c['nombre'][:40], c['esperado'], c['excel_viejo'][-18:-5]), r['asin'], c['esperado'])
+    r = eleccion(EL, c)
+    eq('(A) %s %s → %s (%s)' % (c['ean'], c['nombre'][:40], ESPERADO[c['ean']], c['excel_viejo'][-18:-5]),
+       r['asin'], ESPERADO[c['ean']])
+eq('(A) (B6) en los 13, `asin_viejo` es la ficha que puso el viejo en su Excel',
+   {c['ean']: eleccion(EL, c)['asin_viejo'] for c in CASOS}, {c['ean']: c['esperado'] for c in CASOS})
+eq('(A) (B6) «distinta del viejo» solo lo dice el Deck Case, y con el ASIN del viejo',
+   [(c['ean'], eleccion(EL, c)['detalle'].split('distinta del viejo: ')[-1]) for c in CASOS
+    if 'distinta del viejo' in eleccion(EL, c)['detalle']], [(DECK_EAN, 'el viejo elegiría ' + DECK_VIEJO)])
 eq('(A) donde el viejo cotejó entre varias, el veredicto es el suyo («OK» en su Excel)',
-   {c['ean']: EL.elegir(c['nombre'], c['fichas_es'])['veredicto'] for c in CASOS if len(c['fichas_es']) >= 2},
+   {c['ean']: eleccion(EL, c)['veredicto'] for c in CASOS if len(c['fichas_es']) >= 2},
    {c['ean']: c['cotejo_viejo'] for c in CASOS if len(c['fichas_es']) >= 2})
 eq('(A) los dos con UNA sola ficha en ES (Supernenas y Hermione): esa, como el viejo, que solo mira ES',
-   [(c['ean'], EL.elegir(c['nombre'], c['fichas_es'])['veredicto']) for c in CASOS if len(c['fichas_es']) == 1],
+   [(c['ean'], eleccion(EL, c)['veredicto']) for c in CASOS if len(c['fichas_es']) == 1],
    [('889698577755', 'única en ES'), ('889698760102', 'única en ES')])
 eq('(A) contraste: escaner_detalle (2-sep o antes) dice lo mismo que el Excel en los 10 que tiene; 3 sin registro',
    ([c['ean'] for c in CASOS if c['escaner_detalle'] and c['escaner_detalle'] != c['esperado']],
@@ -84,6 +117,29 @@ eq('(B) 🔑 pero el cotejo de título manda: solo B00RLSIUBK comparte una palab
 eq('(B) …y «deck» es distintiva (37 de 7.815 nombres); «black», «100», «ultimate» y «guard» no',
    {w: EL._ns['_distintivo'](w) for w in ('deck', 'case', 'black', '100', 'ultimate', 'guard')},
    {'deck': True, 'case': True, 'black': False, '100': False, 'ultimate': False, 'guard': False})
+_tit = {(x['pais'], x['asin']): x['titulo'] for x in DECK['fichas_otros']}
+eq('(B) (B6) en IT, FR y DE el título de las DOS trae «deck» y «case»: casan las dos, en los tres',
+   {(p, a): EL._ns['cotejar'](DECK['nombre'], _tit[(p, a)])[0] for p in ('IT', 'FR', 'DE') for a in (DECK_BUENA, DECK_VIEJO)},
+   {(p, a): True for p in ('IT', 'FR', 'DE') for a in (DECK_BUENA, DECK_VIEJO)})
+_r = eleccion(EL, DECK)
+eq('(B) (B6) …así que entre las dos manda el puesto: B00M6XJWVM, que casó en IT, FR y DE (no en ES)',
+   (_r['asin'], _r['veredicto'], _r['paises_cotejo'], _r['asin_viejo']), (DECK_BUENA, 'OK', ['IT', 'FR', 'DE'], DECK_VIEJO))
+eq('(B) (B6) el detalle dice en qué país casó y que es distinta de la del viejo', _r['detalle'],
+   '2/2 casan; entre esos, mejor rank (casó en IT, FR, DE · casa: case, deck)'
+   ' · distinta del viejo: el viejo elegiría B00RLSIUBK')
+_v = EL.elegir(DECK['nombre'], DECK['fichas_es'])
+eq('(B) (B6) sin los títulos de fuera de ES sale lo del viejo, y dice que casó en ES', (_v['asin'], _v['detalle']),
+   (DECK_VIEJO, '1/2 casan; entre esos, mejor rank (casó en ES · casa: deck)'))
+# Si en ningún país casa ninguna, se sigue EXACTAMENTE como el viejo: su «⚠ DUDOSO» y su elegida.
+_nada = [{'asin': 'B0NADA0001', 'titulo': 'Zapatilla de deporte roja', 'rank90': 500},
+         {'asin': 'B0NADA0002', 'titulo': 'Taza de cafe Ultimate', 'rank90': 90000}]
+_otros_nada = {'FR': [{'asin': 'B0NADA0001', 'titulo': 'Chaussure rouge'}, {'asin': 'B0NADA0002', 'titulo': 'Tasse Guard'}]}
+_rn = EL.elegir(DECK['nombre'], _nada, _otros_nada)
+_vn = EL._ns['elegir_candidato'](DECK['nombre'], [{'asin': x['asin'], 'title': x['titulo'], 'r_90': x['rank90']} for x in _nada],
+                                 EL._ns['keyrank'])
+eq('(B) (B6) ninguna casa en ningún país → la del viejo, con su veredicto y su detalle, y lo dice',
+   (_rn['asin'], _rn['veredicto'], _rn['detalle'], _rn['paises_cotejo']),
+   (_vn[0]['asin'], '⚠ DUDOSO', _vn[2] + ' · ninguna casa en ningún país (ES/IT/FR/DE): como el viejo', []))
 
 print('\n(C) la hoja «Ambiguos»: el ganador POR PUESTO, como la escribe el viejo')
 for c in CASOS:
@@ -106,7 +162,8 @@ def fallan_con(sustituir, por):
         t.write(VIEJO.replace(sustituir, por))
     try:
         el = con_idf(t.name)
-        return sorted(c['ean'] for c in CASOS if elige(el, c) != c['esperado'])
+        return sorted(c['ean'] for c in CASOS if (eleccion(el, c)['asin'], eleccion(el, c)['veredicto'])
+                      != (ESPERADO[c['ean']], c['cotejo_viejo'] if len(c['fichas_es']) >= 2 else 'única en ES'))
     finally:
         os.unlink(t.name)
 
@@ -114,14 +171,43 @@ def fallan_con(sustituir, por):
 _MAYOR = fallan_con('elegido = min((c for c, _ in casan), key=keyrank)', 'elegido = max((c for c, _ in casan), key=keyrank)')
 print('    (con «mayor puesto» fallan: %s)' % ', '.join(_MAYOR))
 eq('(D) 🔴 «menor puesto» cambiado por «mayor» (entre las que casan): falla en alguno de los 13', bool(_MAYOR), True)
-eq('(D) 🔴 sin el cotejo de título (todo «n/d» → por puesto): falla justo el Deck Case 100+ Black, y solo él',
+# (B6) Sin cotejo, el puesto solo da la ficha esperada en los 13 (B00M6XJWVM es la de mejor puesto): lo
+#      que se pone rojo es el veredicto, «n/d» en vez del «OK» del viejo, en los 11 con varias fichas en ES.
+eq('(D) 🔴 sin el cotejo de título (todo «n/d» → por puesto): fallan los 11 con varias fichas en ES',
    fallan_con("    if not COTEJO_ACTIVO:\n        return None, 0.0, 'n/d: proveedor sin columna de nombre'",
-              "    if True:\n        return None, 0.0, 'n/d: proveedor sin columna de nombre'"), ['4260250075074'])
+              "    if True:\n        return None, 0.0, 'n/d: proveedor sin columna de nombre'"),
+   sorted(c['ean'] for c in CASOS if len(c['fichas_es']) >= 2))
 eq('(D) 🔴 keyrank al revés (el MAYOR puesto primero): falla',
    bool(fallan_con("def keyrank(c): return c['r_90'] if c['r_90'] and c['r_90']>0 else 10**12",
                    "def keyrank(c): return -c['r_90'] if c['r_90'] and c['r_90']>0 else 10**12")), True)
 eq('(D) sin ninguna ficha en ES no se elige nada (el viejo solo mira ES): sigue en la puerta b',
    EL.elegir('Algo', [{'asin': None, 'titulo': 'x'}]), None)
+eq('(D) (B6) …aunque la haya en otros países: las candidatas son las de ES',
+   EL.elegir('Ultimate Guard Deck Case', [], {'FR': [{'asin': 'B0FR000001', 'titulo': 'Ultimate Guard Deck Case'}]}), None)
+
+
+def motor_con(sustituir, por):
+    """Una copia del motor del escaner 2 con un cambio, cargada como modulo aparte (el original, intacto)."""
+    import importlib.util
+    with io.open(os.path.join(AQUI, 'escaner2_motor.py'), encoding='utf-8') as fh:
+        texto = fh.read()
+    assert texto.count(sustituir) == 1, sustituir
+    with tempfile.NamedTemporaryFile('w', suffix='.py', delete=False, encoding='utf-8') as t:
+        t.write(texto.replace(sustituir, por))
+    try:
+        spec = importlib.util.spec_from_file_location('escaner2_motor_roto', t.name)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    finally:
+        os.unlink(t.name)
+
+
+_solo_es = motor_con("PAISES_COTEJO = ('ES', 'IT', 'FR', 'DE')", "PAISES_COTEJO = ('ES',)")
+_el_es = _solo_es.cargar_eleccion_viejo([])
+_el_es._ns['_DF'], _el_es._ns['_NDOC'] = EL._ns['_DF'], EL._ns['_NDOC']
+eq('(D) 🔴 (B6) con el cotejo SOLO en ES (una copia del motor) vuelve a salir B00RLSIUBK: falla el Deck Case, y solo él',
+   (sorted(c['ean'] for c in CASOS if elige(_el_es, c) != ESPERADO[c['ean']]), elige(_el_es, DECK)), ([DECK_EAN], DECK_VIEJO))
 _mal = copy.deepcopy(VIEJO) + "\ndef keyrank(c): return 0\n"
 with tempfile.NamedTemporaryFile('w', suffix='.py', delete=False, encoding='utf-8') as _t:
     _t.write(_mal)
@@ -210,8 +296,8 @@ eq('(E) en modo «elegidas» (solo Ultimate Guard) la FOTO encoge, y la marca no
    (N_UG < N_T / 2 + 20, sum(1 for a in AP_UG if a['motivo'] == 'marca_fuera') > 3000), (True, True))
 eq('(E) 🔴 pero el corpus del cotejo es el MISMO: mismos nombres y los mismos recuentos',
    (EL_UG.n_nombres, dict(EL_UG._ns['_DF'])), (EL_T.n_nombres, dict(EL_T._ns['_DF'])))
-eq('(E) 🔴 …y la MISMA elección en los 13 casos, que es la del viejo',
-   [elige(EL_UG, c) for c in CASOS], [c['esperado'] for c in CASOS])
+eq('(E) 🔴 …y la MISMA elección en los 13 casos, la esperada (B6)',
+   [elige(EL_UG, c) for c in CASOS], [ESPERADO[c['ean']] for c in CASOS])
 EL_FOTO, _n, _a = corpus_de(e2.filtro_elegidas(['Ultimate Guard'], False)[0], 'elegidas', solo_foto=True)
 eq('(E) 🔴 si el corpus fuera solo la foto (lo del #313 antes del B5-bis), con solo UG cambiaría: otro número de nombres y «deck» con otro recuento',
    (EL_FOTO.n_nombres != EL_T.n_nombres, EL_FOTO._ns['_DF'].get('deck') != EL_T._ns['_DF'].get('deck')), (True, True))
@@ -220,4 +306,5 @@ print()
 if fallos:
     print('ROJO: %d comprobaciones fallan: %s' % (len(fallos), ', '.join(fallos)))
     sys.exit(1)
-print('VERDE: en los 13 casos reales el escáner 2 elige la misma ficha que el viejo, con su regla leída de su fichero.')
+print('VERDE: en los 13 casos reales el escáner 2 elige la ficha del viejo en 12 y la buena en el Deck Case 100+ Black,'
+      ' con la regla del viejo leída de su fichero y el título cotejado en ES, IT, FR y DE.')
