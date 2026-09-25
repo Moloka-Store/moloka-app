@@ -1,0 +1,795 @@
+{
+ "origen": "Cruce 37eaa138 (pasada ed95d086), puerta b; fichas de escaner2_resultado_ean.fichas; esperado = la ficha del «Análisis» del Excel del viejo; escaner_detalle = último registro (2-sep o antes). Leído el 25-sep-2026 con el conector de lectura y volcado por script (encargo B5). Sin precios.",
+ "idf": {
+  "n_nombres": 7815,
+  "df": {
+   "10": 500,
+   "100": 220,
+   "133": 43,
+   "1989": 6,
+   "2025": 34,
+   "25": 109,
+   "35": 58,
+   "80": 57,
+   "80th": 2,
+   "9": 1157,
+   "animation": 198,
+   "batman": 141,
+   "black": 227,
+   "blossom": 6,
+   "blue": 106,
+   "buddy": 24,
+   "card": 35,
+   "case": 56,
+   "crookshank": 1,
+   "deck": 37,
+   "disney": 155,
+   "dumbledore": 5,
+   "figura": 2716,
+   "flip": 45,
+   "guard": 600,
+   "harry": 469,
+   "hermione": 7,
+   "heroe": 57,
+   "krypto": 5,
+   "las": 115,
+   "leon": 6,
+   "magnetic": 7,
+   "movie": 230,
+   "orange": 16,
+   "petrol": 21,
+   "pop": 1325,
+   "potter": 466,
+   "rafiki": 1,
+   "rey": 7,
+   "simba": 3,
+   "sized": 32,
+   "super": 201,
+   "superman": 62,
+   "supernena": 3,
+   "tray": 45,
+   "ultimate": 629,
+   "vinyl": 1265,
+   "voldemort": 11,
+   "xenoskin": 242
+  }
+ },
+ "casos": [
+  {
+   "ean": "4056133014595",
+   "nombre": "Ultimate Guard Card Case Magnetic - 35 pt",
+   "puerta_37eaa138": "b",
+   "fichas_es": [
+    {
+     "asin": "B09HS11MH4",
+     "titulo": "Ultimate Guard Cargador magnético para tarjetas, 35 puntos x 80 unidades",
+     "rank90": 254763
+    },
+    {
+     "asin": "B09B45ZVKG",
+     "titulo": "Ultimate Guard Estuche magnético para tarjetas (15 pt)",
+     "rank90": 215070
+    },
+    {
+     "asin": "B08T1DJQ4L",
+     "titulo": "Ultimate Guard Tarjetero magnético, 35pt",
+     "rank90": 162820
+    },
+    {
+     "asin": "B09BR8HHMR",
+     "titulo": "Ultimate Guard Estuche magnético para tarjetas de 20 x 35 puntos",
+     "rank90": 252205
+    },
+    {
+     "asin": "B09HS3KGM7",
+     "titulo": "Ultimate Guard Cargador magnético para tarjetas, 35 pt x 40 unidades",
+     "rank90": 247183
+    },
+    {
+     "asin": "B09B44V1KT",
+     "titulo": "Ultimate Guard Estuche magnético para tarjetas (10 x 35 pt)",
+     "rank90": 227116
+    },
+    {
+     "asin": "B08S74XPTK",
+     "titulo": "Ultimate Guard Card Case Magnetic - 35 pt",
+     "rank90": 21305
+    },
+    {
+     "asin": "B09B5S8QFY",
+     "titulo": "Ultimate Guard Estuche magnético para tarjetas (5 x 35 pt)",
+     "rank90": 222854
+    }
+   ],
+   "fichas_otros": [
+    [
+     "DE",
+     "B08S74XPTK"
+    ],
+    [
+     "DE",
+     "B08T1DJQ4L"
+    ],
+    [
+     "DE",
+     "B09B44V1KT"
+    ],
+    [
+     "DE",
+     "B09B45ZVKG"
+    ],
+    [
+     "DE",
+     "B09B5S8QFY"
+    ],
+    [
+     "DE",
+     "B09BR8HHMR"
+    ],
+    [
+     "DE",
+     "B09HS11MH4"
+    ],
+    [
+     "DE",
+     "B09HS3KGM7"
+    ],
+    [
+     "FR",
+     "B08S74XPTK"
+    ],
+    [
+     "FR",
+     "B08T1DJQ4L"
+    ],
+    [
+     "FR",
+     "B09B44V1KT"
+    ],
+    [
+     "FR",
+     "B09B45ZVKG"
+    ],
+    [
+     "FR",
+     "B09B5S8QFY"
+    ],
+    [
+     "FR",
+     "B09BR8HHMR"
+    ],
+    [
+     "FR",
+     "B09HS11MH4"
+    ],
+    [
+     "FR",
+     "B09HS3KGM7"
+    ],
+    [
+     "IT",
+     "B08S74XPTK"
+    ],
+    [
+     "IT",
+     "B08T1DJQ4L"
+    ],
+    [
+     "IT",
+     "B09B44V1KT"
+    ],
+    [
+     "IT",
+     "B09B45ZVKG"
+    ],
+    [
+     "IT",
+     "B09B5S8QFY"
+    ],
+    [
+     "IT",
+     "B09BR8HHMR"
+    ],
+    [
+     "IT",
+     "B09HS11MH4"
+    ],
+    [
+     "IT",
+     "B09HS3KGM7"
+    ]
+   ],
+   "esperado": "B08S74XPTK",
+   "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
+   "cotejo_viejo": "OK",
+   "ambiguos_viejo": [
+    "B09B44V1KT",
+    "B08S74XPTK",
+    "B08S74XPTK",
+    "B08S74XPTK",
+    "B08S74XPTK",
+    "B08S74XPTK",
+    "B08S74XPTK"
+   ],
+   "escaner_detalle": "B08S74XPTK"
+  },
+  {
+   "ean": "4056133025966",
+   "nombre": "Ultimate Guard Flip'n'Tray 133+ Xenoskin - Petrol",
+   "puerta_37eaa138": "b",
+   "fichas_es": [
+    {
+     "asin": "B0CKGQ2FCW",
+     "titulo": "Ultimate Guard FlipnTray 133 XenoSkin Petrol Caja de Mazos para 133 Cartas",
+     "rank90": 32081
+    },
+    {
+     "asin": "B0CG1YNJVH",
+     "titulo": "Ultimate Guard Flip`n`Tray 133+ XenoSkin monocolor, color: azul petróleo",
+     "rank90": 77564
+    }
+   ],
+   "fichas_otros": [
+    [
+     "DE",
+     "B0CG1YNJVH"
+    ],
+    [
+     "DE",
+     "B0CKGQ2FCW"
+    ],
+    [
+     "FR",
+     "B0CG1YNJVH"
+    ],
+    [
+     "FR",
+     "B0CKGQ2FCW"
+    ],
+    [
+     "IT",
+     "B0CG1YNJVH"
+    ],
+    [
+     "IT",
+     "B0CKGQ2FCW"
+    ]
+   ],
+   "esperado": "B0CKGQ2FCW",
+   "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
+   "cotejo_viejo": "OK",
+   "ambiguos_viejo": [
+    "B0CKGQ2FCW"
+   ],
+   "escaner_detalle": "B0CKGQ2FCW"
+  },
+  {
+   "ean": "4260250075005",
+   "nombre": "Ultimate Guard Deck Case 80+ - Blue",
+   "puerta_37eaa138": "b",
+   "fichas_es": [
+    {
+     "asin": "B00RLSISOY",
+     "titulo": "Ultimate Guard Deck 80+ Azul, Hobbies",
+     "rank90": 22556
+    },
+    {
+     "asin": "B07TGKLSXH",
+     "titulo": "Ultimate Guard Db: Deck Case 80Ct Blue Cards",
+     "rank90": null
+    }
+   ],
+   "fichas_otros": [
+    [
+     "DE",
+     "B00RLSISOY"
+    ],
+    [
+     "DE",
+     "B07TGKLSXH"
+    ],
+    [
+     "FR",
+     "B00RLSISOY"
+    ],
+    [
+     "FR",
+     "B07TGKLSXH"
+    ],
+    [
+     "IT",
+     "B00RLSISOY"
+    ],
+    [
+     "IT",
+     "B07TGKLSXH"
+    ]
+   ],
+   "esperado": "B00RLSISOY",
+   "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
+   "cotejo_viejo": "OK",
+   "ambiguos_viejo": [
+    "B00RLSISOY"
+   ],
+   "escaner_detalle": "B00RLSISOY"
+  },
+  {
+   "ean": "4260250075074",
+   "nombre": "Ultimate Guard Deck Case 100+ - Black",
+   "puerta_37eaa138": "b",
+   "fichas_es": [
+    {
+     "asin": "B00RLSIUBK",
+     "titulo": "Deck Ultimate Guard 80+ Amarillo, Hobbies",
+     "rank90": 22137
+    },
+    {
+     "asin": "B00M6XJWVM",
+     "titulo": "Êltimo Guardia - Êltimo Protector del Caso de Tarjetas de la Caja Cubierta 100 tamaño estándar Negro",
+     "rank90": 1556
+    }
+   ],
+   "fichas_otros": [
+    [
+     "DE",
+     "B00M6XJWVM"
+    ],
+    [
+     "DE",
+     "B00RLSIUBK"
+    ],
+    [
+     "FR",
+     "B00M6XJWVM"
+    ],
+    [
+     "FR",
+     "B00RLSIUBK"
+    ],
+    [
+     "IT",
+     "B00M6XJWVM"
+    ],
+    [
+     "IT",
+     "B00RLSIUBK"
+    ]
+   ],
+   "esperado": "B00RLSIUBK",
+   "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
+   "cotejo_viejo": "OK",
+   "ambiguos_viejo": [
+    "B00M6XJWVM"
+   ],
+   "escaner_detalle": "B00RLSIUBK"
+  },
+  {
+   "ean": "4260250075562",
+   "nombre": "Ultimate Guard Deck Case 100+ - Orange",
+   "puerta_37eaa138": "b",
+   "fichas_es": [
+    {
+     "asin": "B00M6XJSN4",
+     "titulo": "Êltimo Guardia - Guardia último Cuadro Cubierta Case Orange 100 Tarjetas de tamaño estándar",
+     "rank90": 1604
+    },
+    {
+     "asin": "B01844MJUM",
+     "titulo": "Caja de baraja (100 tarjetas), naranja",
+     "rank90": null
+    }
+   ],
+   "fichas_otros": [
+    [
+     "DE",
+     "B00M6XJSN4"
+    ],
+    [
+     "DE",
+     "B01844MJUM"
+    ],
+    [
+     "FR",
+     "B00M6XJSN4"
+    ],
+    [
+     "FR",
+     "B01844MJUM"
+    ],
+    [
+     "IT",
+     "B00M6XJSN4"
+    ],
+    [
+     "IT",
+     "B01844MJUM"
+    ]
+   ],
+   "esperado": "B00M6XJSN4",
+   "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
+   "cotejo_viejo": "OK",
+   "ambiguos_viejo": [
+    "B00M6XJSN4"
+   ],
+   "escaner_detalle": "B00M6XJSN4"
+  },
+  {
+   "ean": "849803058616",
+   "nombre": "Harry Potter POP! Movies Vinyl Figura Voldemort 10 cm",
+   "puerta_37eaa138": "b",
+   "fichas_es": [
+    {
+     "asin": "B07KBX9FMR",
+     "titulo": "Funko Pop Harry Potter Lord Voldemort (FK5861)",
+     "rank90": 124676
+    },
+    {
+     "asin": "B00TQ5S6D8",
+     "titulo": "Funko Pop! Movies: Harry Potter - Lord Voldemort- Figura de Vinilo Coleccionable - Idea de Regalo - Mercancia Oficial - Juguetes para Niños y Adultos - Movies Fans",
+     "rank90": 19292
+    }
+   ],
+   "fichas_otros": [
+    [
+     "DE",
+     "B00TQ5S6D8"
+    ],
+    [
+     "DE",
+     "B07KBX9FMR"
+    ],
+    [
+     "FR",
+     "B00TQ5S6D8"
+    ],
+    [
+     "FR",
+     "B07KBX9FMR"
+    ],
+    [
+     "IT",
+     "B00TQ5S6D8"
+    ],
+    [
+     "IT",
+     "B07KBX9FMR"
+    ]
+   ],
+   "esperado": "B00TQ5S6D8",
+   "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
+   "cotejo_viejo": "OK",
+   "ambiguos_viejo": [
+    "B00TQ5S6D8"
+   ],
+   "escaner_detalle": null
+  },
+  {
+   "ean": "889698200950",
+   "nombre": "El rey león POP! Disney Vinyl Figura Rafiki & Simba 9 cm",
+   "puerta_37eaa138": "b",
+   "fichas_es": [
+    {
+     "asin": "B07D6CWXC8",
+     "titulo": "DISNEY - Bobble Head POP N° 301 - Rafiki with Simba",
+     "rank90": 194664
+    },
+    {
+     "asin": "B0716YVVZ4",
+     "titulo": "El Rey León Funko Pop! Disney Lion King Rafiki with Baby Simba - The Lion King Figura de Vinilo Coleccionable - Idea de Regalo- Mercancia Oficial - Juguetes para Niños y Adultos - Movies Fans",
+     "rank90": 21785
+    }
+   ],
+   "fichas_otros": [
+    [
+     "DE",
+     "B0716YVVZ4"
+    ],
+    [
+     "DE",
+     "B07D6CWXC8"
+    ],
+    [
+     "FR",
+     "B0716YVVZ4"
+    ],
+    [
+     "FR",
+     "B07D6CWXC8"
+    ],
+    [
+     "IT",
+     "B0716YVVZ4"
+    ],
+    [
+     "IT",
+     "B07D6CWXC8"
+    ]
+   ],
+   "esperado": "B0716YVVZ4",
+   "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
+   "cotejo_viejo": "OK",
+   "ambiguos_viejo": [
+    "B0716YVVZ4"
+   ],
+   "escaner_detalle": "B0716YVVZ4"
+  },
+  {
+   "ean": "889698372480",
+   "nombre": "Batman 80th POP! Heroes Vinyl Figura Batman (1989) 9 cm",
+   "puerta_37eaa138": "b",
+   "fichas_es": [
+    {
+     "asin": "B085RKHMTV",
+     "titulo": "Funko Pop Batman 80 Aniversario 1989",
+     "rank90": 214434
+    },
+    {
+     "asin": "B07KPT4L3N",
+     "titulo": "Funko Pop! Heroes: Batman 80th - Batman - (1989) - DC Comics - Figura de Vinilo Coleccionable - Idea de Regalo- Mercancia Oficial - Juguetes para Niños y Adultos - Comic Books Fans",
+     "rank90": 19812
+    }
+   ],
+   "fichas_otros": [
+    [
+     "DE",
+     "B07KPT4L3N"
+    ],
+    [
+     "DE",
+     "B085RKHMTV"
+    ],
+    [
+     "FR",
+     "B07KPT4L3N"
+    ],
+    [
+     "FR",
+     "B085RKHMTV"
+    ],
+    [
+     "IT",
+     "B07KPT4L3N"
+    ],
+    [
+     "IT",
+     "B085RKHMTV"
+    ]
+   ],
+   "esperado": "B07KPT4L3N",
+   "excel_viejo": "Escaneo_HEO_TODAS_20260924_1135.xlsx",
+   "cotejo_viejo": "OK",
+   "ambiguos_viejo": [
+    "B07KPT4L3N"
+   ],
+   "escaner_detalle": null
+  },
+  {
+   "ean": "889698480383",
+   "nombre": "Harry Potter Super Sized POP! Movies Vinyl Figura Dumbledore 25 cm",
+   "puerta_37eaa138": "b",
+   "fichas_es": [
+    {
+     "asin": "B083Z1NQM6",
+     "titulo": "Funko Pop! Harry Potter: 10\" Albus Dumbledore with Fawkes",
+     "rank90": 33467
+    },
+    {
+     "asin": "B085PH46S5",
+     "titulo": "Funko Pop! Heroes: DC Holiday - Santa The Joker Comics - DC Comics - Figura de Vinilo Coleccionable - Idea de Regalo- Mercancia Oficial - Juguetes para Niños y Adultos - Comic Books Fans",
+     "rank90": 221411
+    }
+   ],
+   "fichas_otros": [
+    [
+     "DE",
+     "B083Z1NQM6"
+    ],
+    [
+     "DE",
+     "B085PH46S5"
+    ],
+    [
+     "FR",
+     "B083Z1NQM6"
+    ],
+    [
+     "FR",
+     "B085PH46S5"
+    ],
+    [
+     "IT",
+     "B083Z1NQM6"
+    ],
+    [
+     "IT",
+     "B085PH46S5"
+    ]
+   ],
+   "esperado": "B083Z1NQM6",
+   "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
+   "cotejo_viejo": "OK",
+   "ambiguos_viejo": [
+    "B083Z1NQM6"
+   ],
+   "escaner_detalle": "B083Z1NQM6"
+  },
+  {
+   "ean": "889698577755",
+   "nombre": "Las Supernenas POP! Animation Vinyl Figura Blossom 9 cm",
+   "puerta_37eaa138": "b",
+   "fichas_es": [
+    {
+     "asin": "B09313R9HQ",
+     "titulo": "Funko Pop! Animation: The Powerpuff Girls - Blossom",
+     "rank90": 9578
+    }
+   ],
+   "fichas_otros": [
+    [
+     "DE",
+     "B08YKC34GB"
+    ],
+    [
+     "DE",
+     "B09313R9HQ"
+    ],
+    [
+     "FR",
+     "B08YKC34GB"
+    ],
+    [
+     "FR",
+     "B09313R9HQ"
+    ],
+    [
+     "IT",
+     "B08YKC34GB"
+    ],
+    [
+     "IT",
+     "B09313R9HQ"
+    ]
+   ],
+   "esperado": "B09313R9HQ",
+   "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
+   "cotejo_viejo": "OK",
+   "ambiguos_viejo": [],
+   "escaner_detalle": "B09313R9HQ"
+  },
+  {
+   "ean": "889698760102",
+   "nombre": "Harry Potter POP & Buddy! Movies Vinyl Figura Hermione w/Crookshanks 9 cm",
+   "puerta_37eaa138": "b",
+   "fichas_es": [
+    {
+     "asin": "B0CGGZ96M9",
+     "titulo": "Funko Pop! Movies: Harry Potter - Hermione Granger with Crookshanks",
+     "rank90": 29053
+    }
+   ],
+   "fichas_otros": [
+    [
+     "DE",
+     "B09DL7ZL4M"
+    ],
+    [
+     "DE",
+     "B0CGGZ96M9"
+    ],
+    [
+     "FR",
+     "B09DL7ZL4M"
+    ],
+    [
+     "FR",
+     "B0CGGZ96M9"
+    ],
+    [
+     "IT",
+     "B09DL7ZL4M"
+    ],
+    [
+     "IT",
+     "B0CGGZ96M9"
+    ]
+   ],
+   "esperado": "B0CGGZ96M9",
+   "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
+   "cotejo_viejo": "OK",
+   "ambiguos_viejo": [],
+   "escaner_detalle": "B0CGGZ96M9"
+  },
+  {
+   "ean": "889698856423",
+   "nombre": "Superman (2025) POP! Vinyl Figura Superman 9 cm",
+   "puerta_37eaa138": "b",
+   "fichas_es": [
+    {
+     "asin": "B0DGBZBJCC",
+     "titulo": "Funko Pop! Movies: DC Superman (2025)",
+     "rank90": 13216
+    },
+    {
+     "asin": "B000AOG3UW",
+     "titulo": "Ford - Modelo a Escala (Motor MAX 73001W)",
+     "rank90": 553670
+    }
+   ],
+   "fichas_otros": [
+    [
+     "DE",
+     "B0DGBZBJCC"
+    ],
+    [
+     "FR",
+     "B000AOG3UW"
+    ],
+    [
+     "FR",
+     "B0DGBZBJCC"
+    ],
+    [
+     "IT",
+     "B0DGBZBJCC"
+    ]
+   ],
+   "esperado": "B0DGBZBJCC",
+   "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
+   "cotejo_viejo": "OK",
+   "ambiguos_viejo": [
+    "B0DGBZBJCC"
+   ],
+   "escaner_detalle": null
+  },
+  {
+   "ean": "889698856454",
+   "nombre": "Superman (2025) POP! Vinyl Figura Krypto 9 cm",
+   "puerta_37eaa138": "b",
+   "fichas_es": [
+    {
+     "asin": "B0DGB5PDMB",
+     "titulo": "Funko Pop! Movies: DC Superman - Krypto",
+     "rank90": 24658
+    },
+    {
+     "asin": "B0DGBMCN65",
+     "titulo": "Funko Pop! Town: Dragon Ball - Kame House with Master Roshi - Figura de Vinilo Coleccionable - Idea de Regalo - Mercancia Oficial - Juguetes para Niños y Adultos - Anime Fans",
+     "rank90": 30000
+    }
+   ],
+   "fichas_otros": [
+    [
+     "DE",
+     "B0DGB5PDMB"
+    ],
+    [
+     "DE",
+     "B0DGBMCN65"
+    ],
+    [
+     "FR",
+     "B0DGB5PDMB"
+    ],
+    [
+     "FR",
+     "B0DGBMCN65"
+    ],
+    [
+     "IT",
+     "B0DGB5PDMB"
+    ],
+    [
+     "IT",
+     "B0DGBMCN65"
+    ]
+   ],
+   "esperado": "B0DGB5PDMB",
+   "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
+   "cotejo_viejo": "OK",
+   "ambiguos_viejo": [
+    "B0DGB5PDMB"
+   ],
+   "escaner_detalle": "B0DGB5PDMB"
+  }
+ ]
+}

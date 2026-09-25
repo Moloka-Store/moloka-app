@@ -331,6 +331,11 @@ jobs:
       - name: 25 nonies) test_escaner2_elegidas.py
         run: python -u test_escaner2_elegidas.py
 
+      # (B5, 25-sep-2026) Elegir la ficha cuando un EAN tiene varias, con la regla del viejo leida de
+      # su fichero: los 13 casos reales del cruce 37eaa138 (sin precios) y la guarda que muerde.
+      - name: 25 decies) test_escaner2_elegir_ficha.py
+        run: python -u test_escaner2_elegir_ficha.py
+
       - name: 26) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
@@ -377,6 +382,7 @@ jobs:
             test_escaner2_formula.py
             test_escaner2_cajas_chase.py
             test_escaner2_elegidas.py
+            test_escaner2_elegir_ficha.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).
