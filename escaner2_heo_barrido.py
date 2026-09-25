@@ -2,27 +2,32 @@
 # -*- coding: utf-8 -*-
 """ESCANER 2 · EL BARRIDO DE HEO (pasos 1 y 2 del encargo B, 24-sep-2026) — EN SOMBRA.
 
-Lo lanza el boton «Barrer HEO» de la v2 (moloka-app-v2, /escaner/barrido-heo) por el
-workflow escaner2-heo-barrido.yml. Aqui viven las credenciales de HEO.
+Lo lanzan los dos botones de la v2 (moloka-app-v2, Escaneo PRO · pestaña HEO: «Barrer HEO» y
+«Barrer HEO · todas las marcas») por el workflow escaner2-heo-barrido.yml, con el input `modo`
+(marcas | todas, encargo B2). Aqui viven las credenciales de HEO.
 
 QUE HACE, EN ORDEN:
   1. abre una pasada en `escaner2_pasada` (estado 'descargando') con el id del run;
-  2. lee la regla HEO de `reglas_director` (SOLO LECTURA) y saca de director_heo_prep.py SU
-     filtro (`_quiere`), sin ejecutar aquel fichero;
+  2. modo 'marcas': lee la regla HEO de `reglas_director` (SOLO LECTURA) y saca de
+     director_heo_prep.py SU filtro (`_quiere`), sin ejecutar aquel fichero. Modo 'todas': ni
+     la lee; el filtro es solo «disponible»;
   3. baja el catalogo con `descargar_heo.descargar_catalogo_heo(con_chase=True)`, la MISMA
      funcion que usa el director;
   4. construye la foto con `escaner2_motor.construir_foto` (reglas de EAN/chase/caja del
      escaner viejo, sacadas de su fichero) y la guarda en `escaner2_foto`. 🔴 EL CUADRE EMPIEZA
      EN EL CATALOGO CRUDO (Fernando, 24-sep-2026): cada producto que devuelve HEO sale por una
-     PUERTA PREVIA (Funko chase, sin GTIN, no disponible, marca fuera, estado no servible, chase
-     suelto, EAN raro, duplicado) o entra en la foto, y crudo = previas + foto o la pasada
-     queda fallida. Los recuentos van a `escaner2_pasada.p_*`; las listas, a `escaner2_apartado`;
+     PUERTA PREVIA (caja con chase sin EAN de la figura, sin GTIN, no disponible, marca fuera,
+     estado no servible, chase suelto, EAN raro, duplicado) o entra en la foto, y crudo = previas
+     + foto o la pasada queda fallida. Los recuentos van a `escaner2_pasada.p_*`; las listas, a
+     `escaner2_apartado`. Las cajas con chase disponibles entran en la foto con el EAN de su
+     figura comun (encargo B2);
   5. deja en Storage (bucket `escaner2`, cerrado) la lista de EAN para el Visualizador, uno por
      linea: `heo/<pasada>/eans.txt` y, si pasa de una tanda, `eans_1.txt`, `eans_2.txt`…;
   6. cierra la pasada en 'esperando_csv' con sus cuentas, o en 'fallida' con el motivo.
 
-🔒 NO TOCA NADA DEL ESCANER VIEJO: ni `reglas_director` (se lee), ni `escaner_chase_asin` (el
-   director la refresca con los Funko chase; aqui solo se APARTAN y se cuentan), ni
+🔒 NO TOCA NADA DEL ESCANER VIEJO: ni `reglas_director` (se lee en el modo 'marcas'; en el
+   'todas', ni eso), ni `escaner_chase_asin` (el director la refresca con los Funko chase; aqui
+   las cajas se valoran en la foto, sin escribir ni leer esa tabla), ni `productos`, ni
    `escaner_memoria`, ni `escaner_resultados`, ni el buzon `informes/escaner_heo/`. Cero tokens
    de Keepa: esto no habla con Keepa ni con Amazon.
 🔒 LA LLAVE DE SERVICIO, O NO SE CORRE (la regla del #292, ver test_escaner_llave_servicio.py):
@@ -49,6 +54,11 @@ if not _llave_svc:
     abortar('sin llave de servicio')
 if not (os.environ.get('HEO_USER') and os.environ.get('HEO_PASS')):
     abortar('sin credenciales de HEO (HEO_USER y HEO_PASS)')
+# 🔑 El modo lo elige Fernando en la pantalla (input del workflow). Vacio = 'marcas', el de siempre
+#    (un disparo sin input, como los de antes del B2, barre como antes). Otra cosa: no se corre.
+MODO = (os.environ.get('MODO_BARRIDO') or 'marcas').strip().lower()
+if MODO not in ('marcas', 'todas'):
+    abortar(f'modo de barrido desconocido: {MODO!r} (marcas | todas)')
 
 from supabase import create_client  # noqa: E402
 
@@ -106,10 +116,10 @@ def _contar(tabla, **filtros):
 def main():
     pasada = str(uuid.uuid4())
     sb.table('escaner2_pasada').insert({
-        'id': pasada, 'proveedor': e2.PROVEEDOR, 'estado': 'descargando',
+        'id': pasada, 'proveedor': e2.PROVEEDOR, 'estado': 'descargando', 'modo': MODO,
         'run_id': int(RUN_ID) if (RUN_ID or '').isdigit() else None,
     }).execute()
-    print(f">>> Pasada {pasada} abierta (descargando).", flush=True)
+    print(f">>> Pasada {pasada} abierta (descargando) · modo {MODO}.", flush=True)
     try:
         cierre = barrer(pasada)
         # 🔒 El cierre va DENTRO del try: si la base lo rechaza (p. ej. el cuadre previo no
@@ -127,16 +137,25 @@ def main():
 
 
 def barrer(pasada):
-    # 1 · La regla HEO (solo lectura) y el filtro del director, el suyo.
-    res = sb.table('reglas_director').select('*').eq('proveedor', e2.PROVEEDOR).limit(1).execute()
-    regla = (res.data or [None])[0]
-    if not regla:
-        raise RuntimeError('no hay fila HEO en reglas_director: sin ella no se sabe qué marcas barrer')
-    quiere, info = e2.cargar_filtro_director(regla)
+    # 1 · El filtro. Modo 'marcas': la regla HEO (solo lectura) y el filtro del director, el suyo.
+    #     Modo 'todas': solo disponible, y `reglas_director` NI SE LEE (encargo B2).
+    regla = None
+    if MODO == 'marcas':
+        res = sb.table('reglas_director').select('*').eq('proveedor', e2.PROVEEDOR).limit(1).execute()
+        regla = (res.data or [None])[0]
+        if not regla:
+            raise RuntimeError('no hay fila HEO en reglas_director: sin ella no se sabe qué marcas barrer')
+        quiere, info = e2.cargar_filtro_director(regla)
+    else:
+        quiere, info = e2.filtro_todas()
     M = e2.cargar_motor()
     tanda = e2.tanda_visualizador()
-    print(f">>> Regla HEO (activa={regla.get('activo')}): marcas {info['marcas_reales']} | "
-          f"ofertas {info['quiere_ofertas']} | tanda del Visualizador {tanda}", flush=True)
+    if regla is not None:
+        print(f">>> Regla HEO (activa={regla.get('activo')}): marcas {info['marcas_reales']} | "
+              f"ofertas {info['quiere_ofertas']} | tanda del Visualizador {tanda}", flush=True)
+    else:
+        print(f">>> Modo TODAS LAS MARCAS: solo lo disponible, sin leer reglas_director | "
+              f"tanda del Visualizador {tanda}", flush=True)
 
     # 2 · El catalogo, con la MISMA funcion que el director (import tardio: lee HEO_USER al cargar).
     from descargar_heo import descargar_catalogo_heo
@@ -179,6 +198,7 @@ def barrer(pasada):
             'en_oferta': f['en_oferta'], 'campana': f['campana'] or None,
             'disponibilidad': f['disponibilidad'] or None, 'fin_de_vida': f['fin_de_vida'],
             'preorder': f['preorder'], 'imagen': f['imagen'] or None, 'aviso_caja': f['aviso_caja'],
+            'origen_ean': f['origen_ean'], 'aviso_ean': f['aviso_ean'],
         })
     _en_lotes('escaner2_foto', filas_foto)
     _en_lotes('escaner2_apartado', [dict(a, pasada_id=pasada) for a in apartados])
@@ -205,8 +225,11 @@ def barrer(pasada):
         for i, t in enumerate(tandas, 1):
             sb.storage.from_(BUCKET).upload(f'{base}/eans_{i}.txt', '\n'.join(t).encode('utf-8'), opciones)
 
+    n_cajas = sum(1 for f in foto if f['origen_ean'])
+    print(f">>> Cajas con chase en la foto: {n_cajas} (valoradas con el EAN de su figura común)", flush=True)
     cierre = {'estado': 'esperando_csv', 'terminada_en': _ahora(),
-              'regla_activa': bool(regla.get('activo')), 'marcas': info['marcas_reales'],
+              'regla_activa': (bool(regla.get('activo')) if regla is not None else None),
+              'marcas': info['marcas_reales'],
               'ofertas': info['quiere_ofertas'], 'n_crudo': n_crudo, 'n_foto': cuentas['n_foto'],
               'ruta_lista': f'{base}/eans.txt', 'n_eans_lista': len(codigos), 'n_tandas': len(tandas),
               'tanda': tanda}

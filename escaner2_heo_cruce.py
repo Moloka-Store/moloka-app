@@ -16,10 +16,14 @@ QUE HACE, EN ORDEN:
   5. guarda cada EAN con su puerta y cada pais con su cuenta, y CUADRA CONTRA LA BASE:
      entradas (filas de la foto) = suma de puertas. Si no cuadra, el cruce queda 'fallida';
   6. compara con el escaner viejo (ultimo Excel completo de HEO + novedades posteriores) y
-     deja un Excel con todo en `escaner2/heo/<pasada>/<cruce>/`.
+     deja un Excel con todo en `escaner2/heo/<pasada>/<cruce>/`. (B2) Las cajas con chase de HEO
+     son diferencia de criterio (el viejo no las valora) y, si la pasada es del modo «todas»,
+     tambien la marca que el viejo no mira: su lista sale de la ultima pasada de marcas de
+     siempre (escaner2_pasada.marcas), no de `reglas_director`, que el modo «todas» no lee.
 
 🔒 NO TOCA NADA DEL ESCANER VIEJO: `productos`, `escaner_resultados` y los Excel de
    `informes/resultados/` se LEEN; no se escribe en ninguna tabla ni carpeta que ya existiera.
+   Ni `reglas_director` ni `escaner_chase_asin` se leen siquiera.
 🔒 LA LLAVE DE SERVICIO, O NO SE CORRE: lee `productos` desatendido (ver
    test_escaner_llave_servicio.py, donde este programa esta en la lista PROGRAMAS).
 """
@@ -217,7 +221,8 @@ def cruzar(cruce, params, pasada):
 
     # ── 2 · La foto y el catalogo propio (el IVA de la ficha) ──────────────────────────
     foto = _todas('escaner2_foto', 'id,ean_original,ean_core,variantes,nombre,marca,precio_unidad,'
-                  'es_caja,uds_caja', 'id', pasada_id=PASADA)
+                  'precio_catalogo,es_caja,uds_caja,es_chase,en_oferta,origen_ean,aviso_ean', 'id',
+                  pasada_id=PASADA)
     if not foto:
         raise Fallo('la pasada no tiene foto')
     productos = _todas('productos', 'ean,asin,iva_pct,stock_moloka,stock_fba', 'id', activo=True)
@@ -294,10 +299,11 @@ def cruzar(cruce, params, pasada):
         motivo_fallo = f'la base no guarda lo calculado: {n_bd} frente a {cq["conteo"]}'
 
     # ── 5 · La comparacion con el viejo (si falla, se avisa y el run sale rojo al final) ─
-    cmp_filas, cmp_resumen, viejos_meta, rank_max = [], {}, [], None
+    cmp_filas, cmp_resumen, viejos_meta, rank_max, lista_viejo = [], {}, [], None, None
     try:
+        lista_viejo = lista_del_viejo(pasada)
         cmp_filas, cmp_resumen, viejos_meta, rank_max = comparar_con_el_viejo(
-            M, foto, resultados, dict(params, usados=usados), fecha_datos)
+            M, foto, resultados, dict(params, usados=usados), fecha_datos, lista_viejo)
         _en_lotes('escaner2_comparacion', [dict(c, cruce_id=cruce, fecha_viejo=_iso(c['fecha_viejo']),
                                                 fecha_nuevo=_iso(c['fecha_nuevo'])) for c in cmp_filas])
     except Exception as ex:
@@ -313,7 +319,7 @@ def cruzar(cruce, params, pasada):
         contenido = escribir_excel(foto, resultados, cmp_filas, {
             'pasada': PASADA, 'cruce': cruce, 'params': params, 'usados': usados, 'ficheros': ficheros,
             'n_entradas': n_entradas, 'n_bd': n_bd, 'cuadra': cuadra and not motivo_fallo,
-            'n_crudo': n_crudo, 'previas': previas,
+            'n_crudo': n_crudo, 'previas': previas, 'modo': pasada.get('modo'), 'lista_viejo': lista_viejo,
             'apartados': _todas('escaner2_apartado', 'ean_original,nombre,marca,precio_catalogo,motivo,detalle',
                                 'id', pasada_id=PASADA),
             'resumen': cmp_resumen, 'viejos': viejos_meta, 'avisos': avisos})
@@ -349,7 +355,24 @@ def _zona_madrid():
     return ZoneInfo('Europe/Madrid')
 
 
-def comparar_con_el_viejo(M, foto, resultados, params, fecha_datos):
+def lista_del_viejo(pasada):
+    """(B2) Solo para una pasada del modo «todas»: las marcas que mira el viejo, de la ULTIMA
+    pasada de marcas de siempre que las guardo al barrer (las de antes del B2 no tienen `modo`,
+    y eran de marcas). None si la pasada es de marcas. Si no hay ninguna, la comparacion falla con
+    su motivo: sin la lista no se puede decir que una marca «no la mira el viejo»."""
+    if (pasada.get('modo') or 'marcas') != 'todas':
+        return None
+    filas = (sb.table('escaner2_pasada').select('id,creada_en,modo,estado,marcas,ofertas')
+             .eq('proveedor', e2.PROVEEDOR).order('creada_en', desc=True).limit(50).execute().data) or []
+    for f in filas:
+        if (f.get('modo') or 'marcas') == 'marcas' and f.get('estado') == 'esperando_csv' and f.get('marcas'):
+            return {'pasada': f['id'], 'fecha': f['creada_en'], 'marcas': list(f['marcas']),
+                    'ofertas': bool(f.get('ofertas'))}
+    raise RuntimeError('pasada de todas las marcas sin ninguna pasada de marcas de siempre de la que sacar '
+                       'la lista del viejo: barre una vez con «Barrer HEO» y vuelve a cruzar')
+
+
+def comparar_con_el_viejo(M, foto, resultados, params, fecha_datos, lista_viejo=None):
     """El paso 6. Lee (SOLO LECTURA) las filas de HEO de `escaner_resultados` y sus Excel de
     `informes/resultados/`: el ultimo completo y las novedades posteriores."""
     filas = (sb.table('escaner_resultados').select('id,fecha,modo,fichero,rank_maximo')
@@ -383,7 +406,10 @@ def comparar_con_el_viejo(M, foto, resultados, params, fecha_datos):
     cmp = e2.comparar(viejo, nuevo, {'umbral': params['umbral'], 'paises': params['usados'],
                                       'paises_filtro': params['paises_filtro'],
                                       'rank_max': rank_max, 'apartados': apartados,
-                                      'fecha_nuevo': fecha_nuevo}, M)
+                                      'fecha_nuevo': fecha_nuevo,
+                                      'marca_fuera_viejo': (e2.marca_fuera_del_viejo(lista_viejo['marcas'],
+                                                                                     lista_viejo['ofertas'])
+                                                            if lista_viejo else None)}, M)
     if not hay_completo:
         print('AVISO: en las 300 filas de HEO de la biblioteca no hay ningún escaneo completo; '
               'se compara con las novedades que hay.', flush=True)
@@ -391,6 +417,17 @@ def comparar_con_el_viejo(M, foto, resultados, params, fecha_datos):
     print('COMPARACION con el viejo: ' + ' | '.join(f'{k[6:]}={v}' for k, v in resumen.items())
           + f" · Excel viejos: {', '.join(m['fichero'].split('/')[-1] for m in meta)}", flush=True)
     return cmp, resumen, meta, rank_max
+
+
+COLUMNAS_CAJA = ['Caja', 'Precio caja (€)', 'EAN de la figura', 'Origen del EAN', 'Aviso del EAN']
+
+
+def _columnas_caja(f):
+    """(B2) «caja con chase · N uds» y el precio de la CAJA; para las cajas con chase de HEO, ademas
+    el EAN de la figura comun con el que se valoran, de donde sale y su aviso si lo hay."""
+    return [e2.rotulo_caja(f) or None, f.get('precio_catalogo') if f.get('es_caja') else None,
+            f.get('ean_core') if f.get('origen_ean') else None,
+            e2.ORIGEN_EAN.get(f.get('origen_ean')), f.get('aviso_ean')]
 
 
 def escribir_excel(foto, resultados, cmp_filas, info):
@@ -415,12 +452,17 @@ def escribir_excel(foto, resultados, cmp_filas, info):
         return ws
 
     r = info['resumen'] or {}
+    lv = info.get('lista_viejo')
     filas_res = [['Pasada', info['pasada']], ['Cruce', info['cruce']],
-                 ['Umbral de caídas (30 días)', '> %d' % info['params']['umbral']],
-                 ['Países del filtro de ventas', ', '.join(info['params']['paises_filtro'])],
-                 ['Países que se calculan (si traen CSV)', ', '.join(info['params']['paises_calculo'])],
-                 ['Países con CSV', ', '.join(info['usados'])],
-                 ['Catálogo crudo de HEO', info['n_crudo']]]
+                 ['Modo del barrido', 'todas las marcas' if info.get('modo') == 'todas' else 'marcas de siempre']]
+    if lv:
+        filas_res += [['Lista del viejo (para comparar)', '%s%s · de la pasada %s (%s)'
+                       % (', '.join(lv['marcas']), ' y ofertas' if lv['ofertas'] else '', lv['pasada'], lv['fecha'])]]
+    filas_res += [['Umbral de caídas (30 días)', '> %d' % info['params']['umbral']],
+                  ['Países del filtro de ventas', ', '.join(info['params']['paises_filtro'])],
+                  ['Países que se calculan (si traen CSV)', ', '.join(info['params']['paises_calculo'])],
+                  ['Países con CSV', ', '.join(info['usados'])],
+                  ['Catálogo crudo de HEO', info['n_crudo']]]
     filas_res += [['Puerta previa · %s' % e2.NOMBRE_PUERTA_PREVIA[p], info['previas'][p]] for p in e2.PUERTAS_PREVIAS]
     filas_res += [['Entradas (filas de la foto)', info['n_entradas']]]
     filas_res += [['Puerta %s · %s' % (p, e2.NOMBRE_PUERTA[p]), info['n_bd'][p]] for p in e2.PUERTAS]
@@ -455,12 +497,16 @@ def escribir_excel(foto, resultados, cmp_filas, info):
             c = res['paises'].get(p)
             fila += ([c.get('caidas_30d'), round(c['margen'], 4) if c.get('margen') is not None else None,
                       c.get('decision'), 'sí' if c.get('vende_aqui') else 'NO VENDE AQUÍ'] if c else [None, None, None, None])
+        # (B2) Al FINAL, para no mover las columnas de arriba: la caja con su precio y, si es una
+        #      caja con chase de HEO, el EAN de la figura con el que se ha valorado y de donde sale.
+        fila += _columnas_caja(f)
         compras.append(fila)
     compras.sort(key=lambda x: (x[3] != 'COMPRAR', -(x[5] or 0)))
     cab = ['EAN', 'Nombre', 'Marca', 'Decisión', 'Mejor país', 'Margen', 'Beneficio (€)', 'Precio venta (€)',
            'Precio compra (€)', 'ASIN', 'Origen IVA']
     for p in calc:
         cab += ['%s caídas 30 d' % p, '%s margen' % p, '%s decisión' % p, '%s vende' % p]
+    cab += COLUMNAS_CAJA
     ws = hoja('COMPRAR y VALORAR', cab, compras, {'A': 15, 'B': 55, 'C': 16, 'J': 12, 'K': 14})
     for fila in ws.iter_rows(min_row=2):
         fila[5].number_format = '0.0%'
@@ -488,13 +534,13 @@ def escribir_excel(foto, resultados, cmp_filas, info):
     hoja('Varias fichas', ['EAN', 'Nombre HEO', 'País', 'ASIN', 'Título Amazon', 'Puesto',
                            'Caídas 30 d', 'Precio venta (€)'], varias, {'A': 15, 'B': 50, 'E': 60})
 
-    hoja('Puertas', ['EAN', 'Nombre', 'Marca', 'Precio compra (€)', 'Caja', 'Puerta', 'Motivo', 'Detalle'],
+    hoja('Puertas', ['EAN', 'Nombre', 'Marca', 'Precio compra (€)', 'Puerta', 'Motivo', 'Detalle'] + COLUMNAS_CAJA,
          [[por_foto[res['foto_id']]['ean_original'], por_foto[res['foto_id']]['nombre'],
            por_foto[res['foto_id']]['marca'], por_foto[res['foto_id']]['precio_unidad'],
-           'caja x%s' % por_foto[res['foto_id']]['uds_caja'] if por_foto[res['foto_id']]['es_caja'] else '',
            '%s · %s' % (res['puerta'], e2.NOMBRE_PUERTA[res['puerta']]), res['motivo'], res['detalle']]
+          + _columnas_caja(por_foto[res['foto_id']])
           for res in resultados],
-         {'A': 15, 'B': 55, 'C': 16, 'F': 24, 'G': 16, 'H': 70})
+         {'A': 15, 'B': 55, 'C': 16, 'E': 24, 'F': 16, 'G': 70, 'H': 26})
 
     # Las LISTAS de las puertas previas (las que la llevan), EAN a EAN con su motivo.
     hoja('Puertas previas', ['EAN tal como vino', 'Nombre', 'Marca', 'Precio catálogo (€)', 'Puerta previa', 'Detalle'],
