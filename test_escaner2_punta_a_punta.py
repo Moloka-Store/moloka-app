@@ -435,7 +435,7 @@ eq('2 · (B5) puertas: entradas 5 = a0 b1 c1 d0 e1 f2 (el DELTA, con dos fichas 
 _delta = [r for r in T['escaner2_resultado_ean'] if r['asin'] and r['asin'].startswith('B0DELT')][0]
 eq('2 · 🔴 (B5) el DELTA sigue con UNA ficha, la del viejo, y el porqué y las descartadas quedan en el resultado',
    (_delta['puerta'], _delta['asin'], [(fi['asin'], fi['elegida']) for fi in _delta['fichas'] if fi['pais'] == 'ES'],
-    _delta['detalle'].startswith('Ficha B0DELT0001 elegida como el viejo (⚠ DUDOSO'), 'descartadas B0DELT0002' in _delta['detalle']),
+    _delta['detalle'].startswith('Ficha B0DELT0001 elegida con la regla del viejo y el título en los cuatro países (⚠ DUDOSO'), 'descartadas B0DELT0002' in _delta['detalle']),
    ('f', 'B0DELT0001', [('B0DELT0001', True), ('B0DELT0002', False)], True, True))
 _epsi = [r for r in T['escaner2_resultado_ean'] if r['puerta'] == 'b'][0]
 eq('2 · (B5) el EPSILON sigue en b, y dice por qué no se pudo elegir',

@@ -1,5 +1,5 @@
 {
- "origen": "Cruce 37eaa138 (pasada ed95d086), puerta b; fichas de escaner2_resultado_ean.fichas; esperado = la ficha del «Análisis» del Excel del viejo; escaner_detalle = último registro (2-sep o antes). Leído el 25-sep-2026 con el conector de lectura y volcado por script (encargo B5). Sin precios.",
+ "origen": "Cruce 37eaa138 (pasada ed95d086), puerta b; fichas de escaner2_resultado_ean.fichas; esperado = la ficha del «Análisis» del Excel del viejo; escaner_detalle = último registro (2-sep o antes). Leído el 25-sep-2026 con el conector de lectura y volcado por script (encargo B5). Sin precios. (B6, 25-sep-2026) fichas_otros lleva ademas el titulo de cada ficha en IT/FR/DE, leido con el conector de lectura de escaner2_resultado_ean.fichas del mismo cruce y volcado por script.",
  "idf": {
   "n_nombres": 7815,
   "df": {
@@ -102,102 +102,126 @@
     }
    ],
    "fichas_otros": [
-    [
-     "DE",
-     "B08S74XPTK"
-    ],
-    [
-     "DE",
-     "B08T1DJQ4L"
-    ],
-    [
-     "DE",
-     "B09B44V1KT"
-    ],
-    [
-     "DE",
-     "B09B45ZVKG"
-    ],
-    [
-     "DE",
-     "B09B5S8QFY"
-    ],
-    [
-     "DE",
-     "B09BR8HHMR"
-    ],
-    [
-     "DE",
-     "B09HS11MH4"
-    ],
-    [
-     "DE",
-     "B09HS3KGM7"
-    ],
-    [
-     "FR",
-     "B08S74XPTK"
-    ],
-    [
-     "FR",
-     "B08T1DJQ4L"
-    ],
-    [
-     "FR",
-     "B09B44V1KT"
-    ],
-    [
-     "FR",
-     "B09B45ZVKG"
-    ],
-    [
-     "FR",
-     "B09B5S8QFY"
-    ],
-    [
-     "FR",
-     "B09BR8HHMR"
-    ],
-    [
-     "FR",
-     "B09HS11MH4"
-    ],
-    [
-     "FR",
-     "B09HS3KGM7"
-    ],
-    [
-     "IT",
-     "B08S74XPTK"
-    ],
-    [
-     "IT",
-     "B08T1DJQ4L"
-    ],
-    [
-     "IT",
-     "B09B44V1KT"
-    ],
-    [
-     "IT",
-     "B09B45ZVKG"
-    ],
-    [
-     "IT",
-     "B09B5S8QFY"
-    ],
-    [
-     "IT",
-     "B09BR8HHMR"
-    ],
-    [
-     "IT",
-     "B09HS11MH4"
-    ],
-    [
-     "IT",
-     "B09HS3KGM7"
-    ]
+    {
+     "pais": "DE",
+     "asin": "B08S74XPTK",
+     "titulo": "Ultimate Guard Magnetic Card Case 35 pt, Transparent"
+    },
+    {
+     "pais": "DE",
+     "asin": "B08T1DJQ4L",
+     "titulo": "Ultimate Guard Magnetisches Kartenetui, 35pt"
+    },
+    {
+     "pais": "DE",
+     "asin": "B09B44V1KT",
+     "titulo": "Ultimate Guard Magnetisches Kartenetui (10 x 35 pt)"
+    },
+    {
+     "pais": "DE",
+     "asin": "B09B45ZVKG",
+     "titulo": "Ultimate Guard Magnetisches Kartenetui Magnetlader (15 pt)"
+    },
+    {
+     "pais": "DE",
+     "asin": "B09B5S8QFY",
+     "titulo": "Ultimate Guard Magnetisches Kartenetui Magnetlader (5 x 35 pt)"
+    },
+    {
+     "pais": "DE",
+     "asin": "B09BR8HHMR",
+     "titulo": "Ultimate Guard Magnetisches Kartenetui, 20 x 35 pt"
+    },
+    {
+     "pais": "DE",
+     "asin": "B09HS11MH4",
+     "titulo": "Ultimate Guard Magnetischer Kartenetui, Magnetlader, 35pt x 80 Stück"
+    },
+    {
+     "pais": "DE",
+     "asin": "B09HS3KGM7",
+     "titulo": "Ultimate Guard Magnetischer Kartenetui, Magnetlader, 35 pt x 40 Stück"
+    },
+    {
+     "pais": "FR",
+     "asin": "B08S74XPTK",
+     "titulo": "Ultimate Guard Card Case Magnetic - 35 pt"
+    },
+    {
+     "pais": "FR",
+     "asin": "B08T1DJQ4L",
+     "titulo": "Ultimate Guard Étui magnétique pour cartes, 35pt"
+    },
+    {
+     "pais": "FR",
+     "asin": "B09B44V1KT",
+     "titulo": "Ultimate Guard Étui magnétique pour cartes (10 x 35 pt)"
+    },
+    {
+     "pais": "FR",
+     "asin": "B09B45ZVKG",
+     "titulo": "Ultimate Guard Chargeur magnétique pour étui à cartes (15 pt)"
+    },
+    {
+     "pais": "FR",
+     "asin": "B09B5S8QFY",
+     "titulo": "Ultimate Guard Étui magnétique pour cartes avec chargeur magnétique (5 x 35 pt)"
+    },
+    {
+     "pais": "FR",
+     "asin": "B09BR8HHMR",
+     "titulo": "Ultimate Guard Étui magnétique pour cartes 20 x 35 pt"
+    },
+    {
+     "pais": "FR",
+     "asin": "B09HS11MH4",
+     "titulo": "Ultimate Guard Étui magnétique pour cartes, 35pt x 80 unités"
+    },
+    {
+     "pais": "FR",
+     "asin": "B09HS3KGM7",
+     "titulo": "Ultimate Guard Étui magnétique pour cartes avec chargeur magnétique, 35 pt x 40 unités"
+    },
+    {
+     "pais": "IT",
+     "asin": "B08S74XPTK",
+     "titulo": "Ultimate Guard Card Case Magnetic - 35 pt"
+    },
+    {
+     "pais": "IT",
+     "asin": "B08T1DJQ4L",
+     "titulo": "Ultimate Guard Custodia per carte magnetiche, 35pt"
+    },
+    {
+     "pais": "IT",
+     "asin": "B09B44V1KT",
+     "titulo": "Ultimate Guard Caricatore magnetico per carte magnetiche (10 x 35 pt)"
+    },
+    {
+     "pais": "IT",
+     "asin": "B09B45ZVKG",
+     "titulo": "Ultimate Guard Caricatore magnetico per carte magnetiche (15 pt)"
+    },
+    {
+     "pais": "IT",
+     "asin": "B09B5S8QFY",
+     "titulo": "Ultimate Guard Caricatore magnetico per carte magnetiche (5 x 35 pt)"
+    },
+    {
+     "pais": "IT",
+     "asin": "B09BR8HHMR",
+     "titulo": "Ultimate Guard Porta carte magnetiche 20 x 35 pt"
+    },
+    {
+     "pais": "IT",
+     "asin": "B09HS11MH4",
+     "titulo": "Ultimate Guard Caricatore magnetico per carte magnetiche, 35pt x 80 pezzi"
+    },
+    {
+     "pais": "IT",
+     "asin": "B09HS3KGM7",
+     "titulo": "Ultimate Guard Caricatore magnetico per carte magnetiche, 35 pt x 40 pezzi"
+    }
    ],
    "esperado": "B08S74XPTK",
    "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
@@ -230,30 +254,36 @@
     }
    ],
    "fichas_otros": [
-    [
-     "DE",
-     "B0CG1YNJVH"
-    ],
-    [
-     "DE",
-     "B0CKGQ2FCW"
-    ],
-    [
-     "FR",
-     "B0CG1YNJVH"
-    ],
-    [
-     "FR",
-     "B0CKGQ2FCW"
-    ],
-    [
-     "IT",
-     "B0CG1YNJVH"
-    ],
-    [
-     "IT",
-     "B0CKGQ2FCW"
-    ]
+    {
+     "pais": "DE",
+     "asin": "B0CG1YNJVH",
+     "titulo": "Ultimate Guard Flip`n`Tray 133+ XenoSkin Monocolor, Farbe:Petrolblau"
+    },
+    {
+     "pais": "DE",
+     "asin": "B0CKGQ2FCW",
+     "titulo": "Ultimate Guard Flip 'n' Tray 133+, Deck-Hülle für 133 doppelärmelige TCG-Karten + Würfelablage, Petrol, unabhängiger Magnetverschluss & Mikrofaser-Innenfutter"
+    },
+    {
+     "pais": "FR",
+     "asin": "B0CG1YNJVH",
+     "titulo": "Ultimate Guard Flip'n'Tray 133+ Xenoskin - Petrol"
+    },
+    {
+     "pais": "FR",
+     "asin": "B0CKGQ2FCW",
+     "titulo": "Ultimate Guard FlipnTray 133 XenoSkin Petrol Boîte Deck pour 133 Cartes"
+    },
+    {
+     "pais": "IT",
+     "asin": "B0CG1YNJVH",
+     "titulo": "Ultimate Guard Flip`n`Tray 133+ XenoSkin Monocolor, colore: blu petrolio"
+    },
+    {
+     "pais": "IT",
+     "asin": "B0CKGQ2FCW",
+     "titulo": "Ultimate Guard Flip 'n' Tray 133+, custodia per 133 carte TCG a doppia manica + vassoio per dadi, benzina, chiusura magnetica indipendente e fodera interna in microfibra"
+    }
    ],
    "esperado": "B0CKGQ2FCW",
    "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
@@ -280,30 +310,36 @@
     }
    ],
    "fichas_otros": [
-    [
-     "DE",
-     "B00RLSISOY"
-    ],
-    [
-     "DE",
-     "B07TGKLSXH"
-    ],
-    [
-     "FR",
-     "B00RLSISOY"
-    ],
-    [
-     "FR",
-     "B07TGKLSXH"
-    ],
-    [
-     "IT",
-     "B00RLSISOY"
-    ],
-    [
-     "IT",
-     "B07TGKLSXH"
-    ]
+    {
+     "pais": "DE",
+     "asin": "B00RLSISOY",
+     "titulo": "Ultimate Guard Deck Case 80+ Standardgröße Blau"
+    },
+    {
+     "pais": "DE",
+     "asin": "B07TGKLSXH",
+     "titulo": "Ultimate Guard - Deck Case 80+ - Dark Blue"
+    },
+    {
+     "pais": "FR",
+     "asin": "B00RLSISOY",
+     "titulo": "Ultimate Guard Deck Case 80+ - Blue"
+    },
+    {
+     "pais": "FR",
+     "asin": "B07TGKLSXH",
+     "titulo": "Ultimate Guard Db : Deck Case 80Ct Blue Cards"
+    },
+    {
+     "pais": "IT",
+     "asin": "B00RLSISOY",
+     "titulo": "Ultimate Guard Deck Case 80+ Standard Size Dark-Blue Ultimate Guard"
+    },
+    {
+     "pais": "IT",
+     "asin": "B07TGKLSXH",
+     "titulo": "Ultimate Guard Db: Deck Case 80ct Carte Blu"
+    }
    ],
    "esperado": "B00RLSISOY",
    "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
@@ -330,30 +366,36 @@
     }
    ],
    "fichas_otros": [
-    [
-     "DE",
-     "B00M6XJWVM"
-    ],
-    [
-     "DE",
-     "B00RLSIUBK"
-    ],
-    [
-     "FR",
-     "B00M6XJWVM"
-    ],
-    [
-     "FR",
-     "B00RLSIUBK"
-    ],
-    [
-     "IT",
-     "B00M6XJWVM"
-    ],
-    [
-     "IT",
-     "B00RLSIUBK"
-    ]
+    {
+     "pais": "DE",
+     "asin": "B00M6XJWVM",
+     "titulo": "Ultimate Guard Deck Case 100+ Standardgröße Schwarz"
+    },
+    {
+     "pais": "DE",
+     "asin": "B00RLSIUBK",
+     "titulo": "Ultimate Guard Deck Case 80+ Standardgröße Gelb"
+    },
+    {
+     "pais": "FR",
+     "asin": "B00M6XJWVM",
+     "titulo": "Ultimate Guard Deck Case 100+ - Black"
+    },
+    {
+     "pais": "FR",
+     "asin": "B00RLSIUBK",
+     "titulo": "Ultimate Guard Deck Case 80+ - Yellow"
+    },
+    {
+     "pais": "IT",
+     "asin": "B00M6XJWVM",
+     "titulo": "Ultimate Guard Deck Case 100+ Standard Size Black Ultimate Guard"
+    },
+    {
+     "pais": "IT",
+     "asin": "B00RLSIUBK",
+     "titulo": "Ultimate Guard Deck Case 80+ Standard Size Yellow Ultimate Guard"
+    }
    ],
    "esperado": "B00RLSIUBK",
    "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
@@ -380,30 +422,36 @@
     }
    ],
    "fichas_otros": [
-    [
-     "DE",
-     "B00M6XJSN4"
-    ],
-    [
-     "DE",
-     "B01844MJUM"
-    ],
-    [
-     "FR",
-     "B00M6XJSN4"
-    ],
-    [
-     "FR",
-     "B01844MJUM"
-    ],
-    [
-     "IT",
-     "B00M6XJSN4"
-    ],
-    [
-     "IT",
-     "B01844MJUM"
-    ]
+    {
+     "pais": "DE",
+     "asin": "B00M6XJSN4",
+     "titulo": "Ultimate Guard Deck Case 100+ Standardgröße Orange"
+    },
+    {
+     "pais": "DE",
+     "asin": "B01844MJUM",
+     "titulo": "Deck Box (100 Karten), Orange"
+    },
+    {
+     "pais": "FR",
+     "asin": "B00M6XJSN4",
+     "titulo": "Ultimate Guard Deck Case 100+ - Orange"
+    },
+    {
+     "pais": "FR",
+     "asin": "B01844MJUM",
+     "titulo": "Deck Box (100 cartes), orange"
+    },
+    {
+     "pais": "IT",
+     "asin": "B00M6XJSN4",
+     "titulo": "Ultimate Guard Deck Case 100+ Standard Taglia Orange Ultimate Guard, arancione"
+    },
+    {
+     "pais": "IT",
+     "asin": "B01844MJUM",
+     "titulo": "Deck Box (100 carte), arancione"
+    }
    ],
    "esperado": "B00M6XJSN4",
    "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
@@ -430,30 +478,36 @@
     }
    ],
    "fichas_otros": [
-    [
-     "DE",
-     "B00TQ5S6D8"
-    ],
-    [
-     "DE",
-     "B07KBX9FMR"
-    ],
-    [
-     "FR",
-     "B00TQ5S6D8"
-    ],
-    [
-     "FR",
-     "B07KBX9FMR"
-    ],
-    [
-     "IT",
-     "B00TQ5S6D8"
-    ],
-    [
-     "IT",
-     "B07KBX9FMR"
-    ]
+    {
+     "pais": "DE",
+     "asin": "B00TQ5S6D8",
+     "titulo": "Funko POP! Movies: Harry Potter - Lord Voldemort"
+    },
+    {
+     "pais": "DE",
+     "asin": "B07KBX9FMR",
+     "titulo": "Funko POP! Movies Harry Potter - Voldemort Vinyl Figure 10cm"
+    },
+    {
+     "pais": "FR",
+     "asin": "B00TQ5S6D8",
+     "titulo": "Funko Pop! Movies: Harry Potter - Lord Voldemort- Figurine en Vinyle à Collectionner - Idée de Cadeau - Produits Officiels - Jouets pour Les Enfants et Adultes - Movies Fans"
+    },
+    {
+     "pais": "FR",
+     "asin": "B07KBX9FMR",
+     "titulo": "Figurine Pop ! Harry Potter 06 - Lord Voldemort"
+    },
+    {
+     "pais": "IT",
+     "asin": "B00TQ5S6D8",
+     "titulo": "Funko Pop! Movies: Harry Potter - Lord Voldemort- Figura in Vinile da Collezione - Idea Regalo - Merchandising Ufficiale - Giocattoli per Bambini e Adulti - Movies Fans"
+    },
+    {
+     "pais": "IT",
+     "asin": "B07KBX9FMR",
+     "titulo": "Funko Pop Harry Potter Lord Voldemort (FK5861)"
+    }
    ],
    "esperado": "B00TQ5S6D8",
    "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
@@ -480,30 +534,36 @@
     }
    ],
    "fichas_otros": [
-    [
-     "DE",
-     "B0716YVVZ4"
-    ],
-    [
-     "DE",
-     "B07D6CWXC8"
-    ],
-    [
-     "FR",
-     "B0716YVVZ4"
-    ],
-    [
-     "FR",
-     "B07D6CWXC8"
-    ],
-    [
-     "IT",
-     "B0716YVVZ4"
-    ],
-    [
-     "IT",
-     "B07D6CWXC8"
-    ]
+    {
+     "pais": "DE",
+     "asin": "B0716YVVZ4",
+     "titulo": "Funko Pop! Disney Lion King Rafiki with Baby Simba - The Lion King - König der Löwen, der - Vinyl-Sammelfigur - Geschenkidee - Offizielle Handelswaren - Spielzeug Für Kinder und Erwachsene"
+    },
+    {
+     "pais": "DE",
+     "asin": "B07D6CWXC8",
+     "titulo": "Disney Bobble Head Pop Nr. 301 - Rafiki with Simba"
+    },
+    {
+     "pais": "FR",
+     "asin": "B0716YVVZ4",
+     "titulo": "Funko Pop Disney Lion King Rafiki With Baby Simba - The Lion King - le Roi Lion - Figurine en Vinyle à Collectionner - Idée de Cadeau - Produits Officiels - Jouets pour les Enfants et Adultes"
+    },
+    {
+     "pais": "FR",
+     "asin": "B07D6CWXC8",
+     "titulo": "La Figure de la Pop Rafiki avec Simba - Disney Le Roi Lion"
+    },
+    {
+     "pais": "IT",
+     "asin": "B0716YVVZ4",
+     "titulo": "Funko Pop! Disney Lion King Rafiki with Baby Simba - The Lion King - Il Re Leone - Figura in Vinile da Collezione - Idea Regalo - Merchandising Ufficiale - Giocattoli per Bambini e Adulti"
+    },
+    {
+     "pais": "IT",
+     "asin": "B07D6CWXC8",
+     "titulo": "DISNEY - Bobble Head POP N° 301 - Rafiki with Simba"
+    }
    ],
    "esperado": "B0716YVVZ4",
    "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
@@ -530,30 +590,36 @@
     }
    ],
    "fichas_otros": [
-    [
-     "DE",
-     "B07KPT4L3N"
-    ],
-    [
-     "DE",
-     "B085RKHMTV"
-    ],
-    [
-     "FR",
-     "B07KPT4L3N"
-    ],
-    [
-     "FR",
-     "B085RKHMTV"
-    ],
-    [
-     "IT",
-     "B07KPT4L3N"
-    ],
-    [
-     "IT",
-     "B085RKHMTV"
-    ]
+    {
+     "pais": "DE",
+     "asin": "B07KPT4L3N",
+     "titulo": "Funko Pop! Heroes: Batman 80th - Batman - (1989) - DC Comics - Vinyl-Sammelfigur - Geschenkidee - Offizielle Handelswaren - Spielzeug Für Kinder und Erwachsene - Comic Books Fans"
+    },
+    {
+     "pais": "DE",
+     "asin": "B085RKHMTV",
+     "titulo": "Funko Pop Batman 80. Jahrestag 1989"
+    },
+    {
+     "pais": "FR",
+     "asin": "B07KPT4L3N",
+     "titulo": "Funko Pop! Heroes: Batman 80th - Batman - (1989) - DC Comics- Figurine en Vinyle à Collectionner - Idée de Cadeau - Produits Officiels - Jouets pour Les Enfants et Adultes - Comic Books Fans"
+    },
+    {
+     "pais": "FR",
+     "asin": "B085RKHMTV",
+     "titulo": "Funko Pop Batman 80th Anniversary 1989"
+    },
+    {
+     "pais": "IT",
+     "asin": "B07KPT4L3N",
+     "titulo": "Funko POP! Heroes: DC Comics - Batman 80th - Batman (1989)"
+    },
+    {
+     "pais": "IT",
+     "asin": "B085RKHMTV",
+     "titulo": "Funko Pop Batman 80° anniversario 1989"
+    }
    ],
    "esperado": "B07KPT4L3N",
    "excel_viejo": "Escaneo_HEO_TODAS_20260924_1135.xlsx",
@@ -580,30 +646,36 @@
     }
    ],
    "fichas_otros": [
-    [
-     "DE",
-     "B083Z1NQM6"
-    ],
-    [
-     "DE",
-     "B085PH46S5"
-    ],
-    [
-     "FR",
-     "B083Z1NQM6"
-    ],
-    [
-     "FR",
-     "B085PH46S5"
-    ],
-    [
-     "IT",
-     "B083Z1NQM6"
-    ],
-    [
-     "IT",
-     "B085PH46S5"
-    ]
+    {
+     "pais": "DE",
+     "asin": "B083Z1NQM6",
+     "titulo": "Funko Pop! HP: Harry Potter - 10\" Albus Dumbledore mit Fawkes - Vinyl-Sammelfigur - Geschenkidee - Offizielle Handelswaren - Spielzeug Für Kinder und Erwachsene - Movies Fans"
+    },
+    {
+     "pais": "DE",
+     "asin": "B085PH46S5",
+     "titulo": "Funko POP! Heroes: DC Holiday - Santa The Joker Comics - DC Comics - Vinyl-Sammelfigur - Geschenkidee - Offizielle Handelswaren - Spielzeug Für Kinder und Erwachsene - Comic Books Fans"
+    },
+    {
+     "pais": "FR",
+     "asin": "B083Z1NQM6",
+     "titulo": "Funko Pop! HP: Harry Potter - 10\" Albus Dumbledore with Fawkes- Figurine en Vinyle à Collectionner - Idée de Cadeau - Produits Officiels - Jouets pour Les Enfants et Adultes - Movies Fans"
+    },
+    {
+     "pais": "FR",
+     "asin": "B085PH46S5",
+     "titulo": "Funko Pop! Heroes: DC Holiday - Santa The Joker Comics - DC Comics - Figurine en Vinyle à Collectionner - Idée de Cadeau - Produits Officiels - Jouets pour Les Enfants et Adultes"
+    },
+    {
+     "pais": "IT",
+     "asin": "B083Z1NQM6",
+     "titulo": "Funko Pop! HP: Harry Potter - 10\" Albus Dumbledore with Fawkes - Albus Silente- Figura in Vinile da Collezione - Idea Regalo - Merchandising Ufficiale - Giocattoli per Bambini e Adulti"
+    },
+    {
+     "pais": "IT",
+     "asin": "B085PH46S5",
+     "titulo": "Funko Pop! Heroes: DC Holiday - Santa The Joker Comics - DC Comics- Figura in Vinile da Collezione - Idea Regalo - Merchandising Ufficiale - Giocattoli per Bambini e Adulti - Comic Books Fans"
+    }
    ],
    "esperado": "B083Z1NQM6",
    "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
@@ -625,30 +697,36 @@
     }
    ],
    "fichas_otros": [
-    [
-     "DE",
-     "B08YKC34GB"
-    ],
-    [
-     "DE",
-     "B09313R9HQ"
-    ],
-    [
-     "FR",
-     "B08YKC34GB"
-    ],
-    [
-     "FR",
-     "B09313R9HQ"
-    ],
-    [
-     "IT",
-     "B08YKC34GB"
-    ],
-    [
-     "IT",
-     "B09313R9HQ"
-    ]
+    {
+     "pais": "DE",
+     "asin": "B08YKC34GB",
+     "titulo": "Funko Pop! Artist Series: Marvel Infinity Saga - Hawkeye - Orange - Vinyl-Sammelfigur Inklusive Premium-Kunststoffschutz-Box - Geschenkidee - Offizielle Handelswaren - Modellfigur Für Sammler"
+    },
+    {
+     "pais": "DE",
+     "asin": "B09313R9HQ",
+     "titulo": "Funko POP! Animation: The Powerpuff Girls - Blossom"
+    },
+    {
+     "pais": "FR",
+     "asin": "B08YKC34GB",
+     "titulo": "Funko Pop! Artist Series: Marvel Infinity Saga - Hawkeye - Orange - Avengers - Figurine en Vinyle à Collectionner - Comprend Une Boite de Protection en Plastique de Première Qualité - Idée de Cadeau"
+    },
+    {
+     "pais": "FR",
+     "asin": "B09313R9HQ",
+     "titulo": "Funko Pop! Animation: Powerpuff Girls - Blossom - The Powerpuff Girls- Figurine en Vinyle à Collectionner - Idée de Cadeau - Produits Officiels - Jouets pour Les Enfants et Adultes - TV Fans"
+    },
+    {
+     "pais": "IT",
+     "asin": "B08YKC34GB",
+     "titulo": "Funko POP! Artist Series: Marvel Infinity Saga - Hawkeye (Orange)"
+    },
+    {
+     "pais": "IT",
+     "asin": "B09313R9HQ",
+     "titulo": "Funko POP! Animation: The Powerpuff Girls - Blossom"
+    }
    ],
    "esperado": "B09313R9HQ",
    "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
@@ -668,30 +746,36 @@
     }
    ],
    "fichas_otros": [
-    [
-     "DE",
-     "B09DL7ZL4M"
-    ],
-    [
-     "DE",
-     "B0CGGZ96M9"
-    ],
-    [
-     "FR",
-     "B09DL7ZL4M"
-    ],
-    [
-     "FR",
-     "B0CGGZ96M9"
-    ],
-    [
-     "IT",
-     "B09DL7ZL4M"
-    ],
-    [
-     "IT",
-     "B0CGGZ96M9"
-    ]
+    {
+     "pais": "DE",
+     "asin": "B09DL7ZL4M",
+     "titulo": "Funko POP! NBA Legends: Michael Jordan - White All Stars 1988"
+    },
+    {
+     "pais": "DE",
+     "asin": "B0CGGZ96M9",
+     "titulo": "Funko Pop! Movies: Harry Potter Prisoner of Azkaban - Hermione Granger mit Crookshanks - Hermine Granger- Vinyl-Sammelfigur - Geschenkidee - Offizielle Handelswaren - Movies Fans"
+    },
+    {
+     "pais": "FR",
+     "asin": "B09DL7ZL4M",
+     "titulo": "Funko Pop! NBA Legends: Michael Jordan - White All Stars 1988"
+    },
+    {
+     "pais": "FR",
+     "asin": "B0CGGZ96M9",
+     "titulo": "Funko Pop! Movies: Harry Potter - Hermione Granger with Crookshanks"
+    },
+    {
+     "pais": "IT",
+     "asin": "B09DL7ZL4M",
+     "titulo": "Funko POP! NBA Legends: Michael Jordan - White All Stars 1988"
+    },
+    {
+     "pais": "IT",
+     "asin": "B0CGGZ96M9",
+     "titulo": "Funko POP! & Buddy: Harry Potter prigioniero di Azkaban – Hermione Granger con Crookshanks – Statuetta in vinile da collezione – Idea regalo – Prodotto ufficiale – Giocattoli per bambini e adulti –"
+    }
    ],
    "esperado": "B0CGGZ96M9",
    "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
@@ -716,22 +800,26 @@
     }
    ],
    "fichas_otros": [
-    [
-     "DE",
-     "B0DGBZBJCC"
-    ],
-    [
-     "FR",
-     "B000AOG3UW"
-    ],
-    [
-     "FR",
-     "B0DGBZBJCC"
-    ],
-    [
-     "IT",
-     "B0DGBZBJCC"
-    ]
+    {
+     "pais": "DE",
+     "asin": "B0DGBZBJCC",
+     "titulo": "Funko POP! Movies: DC Superman (2025)"
+    },
+    {
+     "pais": "FR",
+     "asin": "B000AOG3UW",
+     "titulo": "Motormax - 73001w - Véhicule Miniature - Modèle À L'échelle - Ford GT Concept - Echelle 1/12"
+    },
+    {
+     "pais": "FR",
+     "asin": "B0DGBZBJCC",
+     "titulo": "Funko Pop! Movies: DC - Superman 2025 - Superman - Figurine en Vinyle de Collection - Idée Cadeau - Produit Officiel - Jouets pour Enfants et Adultes - Figurine modèle pour collectionneurs"
+    },
+    {
+     "pais": "IT",
+     "asin": "B0DGBZBJCC",
+     "titulo": "Funko POP! Movies: DC Superman (2025)"
+    }
    ],
    "esperado": "B0DGBZBJCC",
    "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",
@@ -758,30 +846,36 @@
     }
    ],
    "fichas_otros": [
-    [
-     "DE",
-     "B0DGB5PDMB"
-    ],
-    [
-     "DE",
-     "B0DGBMCN65"
-    ],
-    [
-     "FR",
-     "B0DGB5PDMB"
-    ],
-    [
-     "FR",
-     "B0DGBMCN65"
-    ],
-    [
-     "IT",
-     "B0DGB5PDMB"
-    ],
-    [
-     "IT",
-     "B0DGBMCN65"
-    ]
+    {
+     "pais": "DE",
+     "asin": "B0DGB5PDMB",
+     "titulo": "Funko POP! Movies: DC Superman - Krypto"
+    },
+    {
+     "pais": "DE",
+     "asin": "B0DGBMCN65",
+     "titulo": "Funko POP! Town: Dragon Ball - Kame House with Master Roshi"
+    },
+    {
+     "pais": "FR",
+     "asin": "B0DGB5PDMB",
+     "titulo": "Funko Pop! Movies: DC - Superman - Krypto - Figurine en Vinyle de Collection - Idée Cadeau - Produit Officiel - Jouets pour Enfants et Adultes - Figurine modèle pour collectionneurs et Exposition"
+    },
+    {
+     "pais": "FR",
+     "asin": "B0DGBMCN65",
+     "titulo": "Funko Pop! Town: Dragon Ball - Kame House with Master Roshi - Figurine en Vinyle à Collectionner - Idée de Cadeau - Produits Officiels - Anime Fans"
+    },
+    {
+     "pais": "IT",
+     "asin": "B0DGB5PDMB",
+     "titulo": "Funko POP! Movies: DC - Superman - Krypto - Figura in vinile da collezione - Idea regalo - Prodotto ufficiale - Giocattoli per bambini e adulti - Modello di figura per collezionisti ed esposizione"
+    },
+    {
+     "pais": "IT",
+     "asin": "B0DGBMCN65",
+     "titulo": "Funko POP! Town: Dragon Ball - Kame House with Master Roshi"
+    }
    ],
    "esperado": "B0DGB5PDMB",
    "excel_viejo": "Escaneo_HEO_TODAS_20260923_2006.xlsx",

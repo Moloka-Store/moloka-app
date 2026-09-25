@@ -336,6 +336,11 @@ jobs:
       - name: 25 decies) test_escaner2_elegir_ficha.py
         run: python -u test_escaner2_elegir_ficha.py
 
+      # (B6, 25-sep-2026) Los codigos de 14 cifras que empiezan por 0: se buscan con sus 13 (los 184
+      # codigos de forma rara reales de ed95d086, sin precios); los de caja y los de 8 siguen fuera.
+      - name: 25 undecies) test_escaner2_codigos14.py
+        run: python -u test_escaner2_codigos14.py
+
       - name: 26) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
@@ -383,6 +388,7 @@ jobs:
             test_escaner2_cajas_chase.py
             test_escaner2_elegidas.py
             test_escaner2_elegir_ficha.py
+            test_escaner2_codigos14.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).

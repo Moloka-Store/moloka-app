@@ -1,0 +1,1109 @@
+{
+ "origen": "Pasada ed95d086 (modo todas, 25-sep-2026 07:57), escaner2_apartado con motivo ean_forma_rara: los 184 codigos que el escaner viejo (y el 2 hasta el B5) tira por forma rara. Leidos el 25-sep-2026 con el conector de lectura y volcados por script (encargo B6). Sin precios. Huella md5 de los ean_original separados por comas, en orden: 9d26bb4193689563825a4a2f1ceae0ca.",
+ "filas": [
+  {
+   "producto_heo": "MATTHNW46-979P",
+   "ean_original": "00194735151295",
+   "marca": "Mattel",
+   "nombre": "Fast & Furious Hot Wheels Premium Vehículos Die-Cast 1/64 979P Surtido (10)"
+  },
+  {
+   "producto_heo": "MATTHNR88-979N",
+   "ean_original": "00194735152469",
+   "marca": "Mattel",
+   "nombre": "Fast &amp; Furious Hot Wheels Silver Series Vehicles Die-Cast 1/64 979N Surtido (24)"
+  },
+  {
+   "producto_heo": "MATTHNR88-979P",
+   "ean_original": "00194735152469",
+   "marca": "Mattel",
+   "nombre": "Fast & Furious Hot Wheels Silver Series Vehicles Die-Cast 1/64 979P Surtido (24)"
+  },
+  {
+   "producto_heo": "MATTHRT81-979J",
+   "ean_original": "00194735185856",
+   "marca": "Mattel",
+   "nombre": "Hot Wheels Silver Series Vehicles Die-Cast 1/64 Vintage 979J Surtido (10)"
+  },
+  {
+   "producto_heo": "MATTHXD63-979Q",
+   "ean_original": "00194735227440",
+   "marca": "Mattel",
+   "nombre": "Hot Wheels Premium Vehículos Die-Cast 1/64 Pop Culture 979Q Surtido (10)"
+  },
+  {
+   "producto_heo": "MATTJBJ17",
+   "ean_original": "00194735261383",
+   "marca": "Mattel",
+   "nombre": "Barbie Signature Muñeca 80th Anniversary Blonde"
+  },
+  {
+   "producto_heo": "MATTJJX97",
+   "ean_original": "00194735343904",
+   "marca": "Mattel",
+   "nombre": "Barbie Signature Muñeca Día De Muertos Ken"
+  },
+  {
+   "producto_heo": "MATTJJY07",
+   "ean_original": "00194735343911",
+   "marca": "Mattel",
+   "nombre": "Whitney Houston Barbie Signature Muñeca I Wanna Dance with Somebody"
+  },
+  {
+   "producto_heo": "MATTJJY03",
+   "ean_original": "00194735344062",
+   "marca": "Mattel",
+   "nombre": "Masters of the Universe Movie 2026 Barbie Signature Muñeca He-Man 30 cm"
+  },
+  {
+   "producto_heo": "MATTJJY00",
+   "ean_original": "00194735344338",
+   "marca": "Mattel",
+   "nombre": "Barbie Signature Muñeca Marilyn Monroe"
+  },
+  {
+   "producto_heo": "MATTJJY15",
+   "ean_original": "00194735344413",
+   "marca": "Mattel",
+   "nombre": "Barbie Signature Muñeca Clara (Nutcracker 25th Anniversary)"
+  },
+  {
+   "producto_heo": "MATTJKG65",
+   "ean_original": "00194735349357",
+   "marca": "Mattel",
+   "nombre": "Masters of the Universe Movie 2026 Barbie Signature Muñeca Teela 30 cm"
+  },
+  {
+   "producto_heo": "MATTJKR70",
+   "ean_original": "00194735355112",
+   "marca": "Mattel",
+   "nombre": "Masters of the Universe Little People Collector Set de Figuras He-Man & Battle Cat"
+  },
+  {
+   "producto_heo": "MATTJKR73",
+   "ean_original": "00194735355280",
+   "marca": "Mattel",
+   "nombre": "Lilo &amp; Stitch Little People Collector Pack de 3 Minifiguras Stitch &amp; The Cousins 7 cm"
+  },
+  {
+   "producto_heo": "MATTJMD52",
+   "ean_original": "00194735374649",
+   "marca": "Mattel",
+   "nombre": "DC Premier Vehículo Batmobile"
+  },
+  {
+   "producto_heo": "WOTCD45880000",
+   "ean_original": "00195166290669",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Avatar: The Last Airbender Cajas de Principiantes Caja (3) inglés"
+  },
+  {
+   "producto_heo": "WOTCD51680001",
+   "ean_original": "00195166308258",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Teenage Mutant Ninja Turtles Packs de Presentación Caja (15) inglés"
+  },
+  {
+   "producto_heo": "WOTCD51690001",
+   "ean_original": "00195166308340",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Teenage Mutant Ninja Turtles Mazos de Commander Caja (4) inglés"
+  },
+  {
+   "producto_heo": "WOTCD53610001",
+   "ean_original": "00195166313016",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Marvel Super Heroes Commander Decks Caja (4) inglés"
+  },
+  {
+   "producto_heo": "WOTCD53620000",
+   "ean_original": "00195166313092",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Marvel Super Heroes Collector's Edition Commander Decks Caja (4) inglés"
+  },
+  {
+   "producto_heo": "WOTCD53690000",
+   "ean_original": "00195166313115",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Marvel Super Heroes Cajas de escena (4) inglés"
+  },
+  {
+   "producto_heo": "WOTCD53680001",
+   "ean_original": "00195166315454",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Marvel Super Heroes Packs de Presentación Caja (15) inglés"
+  },
+  {
+   "producto_heo": "WOTCD53710000",
+   "ean_original": "00195166316512",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Marvel Super Heroes Cajas de Principiantes Caja (3) inglés"
+  },
+  {
+   "producto_heo": "MATTFPY86-976H",
+   "ean_original": "00887961619805",
+   "marca": "Mattel",
+   "nombre": "Hot Wheels Premium Vehículos Die-Cast 1/64 Car Culture 976H Surtido (10)"
+  },
+  {
+   "producto_heo": "MATTFPY86-976R",
+   "ean_original": "00887961619805",
+   "marca": "Mattel",
+   "nombre": "Hot Wheels Premium Vehículos Die-Cast 1/64 Car Culture 976R Surtido (10)"
+  },
+  {
+   "producto_heo": "3Z0811",
+   "ean_original": "04895250815094",
+   "marca": "ThreeZero",
+   "nombre": "Transformers: Age of Extinction Figura 1/6 DLX Lockdown 24 cm heo Exclusive "
+  },
+  {
+   "producto_heo": "3Z0855",
+   "ean_original": "04895250816244",
+   "marca": "ThreeZero",
+   "nombre": "Transformers Figura MDLX Lost Light Rodimus Prime Exclusive 18 cm  "
+  },
+  {
+   "producto_heo": "HASF6962",
+   "ean_original": "05010996143693",
+   "marca": "Hasbro",
+   "nombre": "Transformers Generations Legacy Evolution Voyager Class Action Figura Nacelle 18 cm"
+  },
+  {
+   "producto_heo": "HASG0265",
+   "ean_original": "05010996227409",
+   "marca": "Hasbro",
+   "nombre": "Star Wars The Mandalorian Vintage Collection Pack de 4 Figuras Mandalorian Shriek-Hawk 10 cm"
+  },
+  {
+   "producto_heo": "WOTCD38541000",
+   "ean_original": "05010996268198",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Final Fantasy Caja de Kits de inicio de 2024 (12) alemán"
+  },
+  {
+   "producto_heo": "WOTCD45881030",
+   "ean_original": "05010996316363",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Avatar: La Leggenda di Aang Cajas de Principiantes Caja (3) italiano"
+  },
+  {
+   "producto_heo": "WOTCD45881050",
+   "ean_original": "05010996316387",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Avatar: la leyenda de Aang Cajas de Principiantes Caja (3) castellano"
+  },
+  {
+   "producto_heo": "HASG0629",
+   "ean_original": "05010996338938",
+   "marca": "Hasbro",
+   "nombre": "Marvel Legends Pack de 2 Figuras Iron Man (Extremis) & Marvel's Mandarin 15 cm"
+  },
+  {
+   "producto_heo": "WOTCD51681000",
+   "ean_original": "05010996351128",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Teenage Mutant Ninja Turtles Packs de Presentación Caja (15) alemán"
+  },
+  {
+   "producto_heo": "WOTCD51681030",
+   "ean_original": "05010996351166",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Teenage Mutant Ninja Turtles Packs de Presentación Caja (15) italiano"
+  },
+  {
+   "producto_heo": "WOTCD51681050",
+   "ean_original": "05010996351180",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Teenage Mutant Ninja Turtles Packs de Presentación Caja (15) castellano"
+  },
+  {
+   "producto_heo": "WOTCD53611000",
+   "ean_original": "05010996357120",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Marvel Super Heroes Commander Decks Caja (4) alemán"
+  },
+  {
+   "producto_heo": "WOTCD53611010",
+   "ean_original": "05010996357144",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Marvel Super Heroes Commander Decks Caja (4) francés"
+  },
+  {
+   "producto_heo": "WOTCD53611050",
+   "ean_original": "05010996357168",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Marvel Super Heroes Commander Decks Caja (4) castellano"
+  },
+  {
+   "producto_heo": "WOTCD53611030",
+   "ean_original": "05010996357182",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Marvel Super Heroes Commander Decks Caja (4) italiano"
+  },
+  {
+   "producto_heo": "HASE5563",
+   "ean_original": "05010996362902",
+   "marca": "Hasbro",
+   "nombre": "Transformers Generations War for Cybertron: Siege Pack de 3 Figuras Autobot Alphastrike Counterforce"
+  },
+  {
+   "producto_heo": "HASE5564",
+   "ean_original": "05010996362933",
+   "marca": "Hasbro",
+   "nombre": "Transformers Generations War for Cybertron: Siege Voyager Class Pack de 4 Figuras Decepticon Phantomstrike Squadron 18 cm"
+  },
+  {
+   "producto_heo": "WOTCD53681000",
+   "ean_original": "05010996363466",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Marvel Super Heroes Packs de Presentación Caja (15) alemán"
+  },
+  {
+   "producto_heo": "WOTCD53681010",
+   "ean_original": "05010996363527",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Marvel Super Heroes Packs de Presentación Caja (15) francés"
+  },
+  {
+   "producto_heo": "WOTCD53681030",
+   "ean_original": "05010996363541",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Marvel Super Heroes Packs de Presentación Caja (15) italiano"
+  },
+  {
+   "producto_heo": "WOTCD53681050",
+   "ean_original": "05010996363565",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Marvel Super Heroes Packs de Presentación Caja (15) castellano"
+  },
+  {
+   "producto_heo": "WOTCD53711000",
+   "ean_original": "05010996364777",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Marvel Super Heroes Cajas de Principiantes Caja (3) alemán"
+  },
+  {
+   "producto_heo": "WOTCD53711010",
+   "ean_original": "05010996364791",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering Marvel Super Heroes Cajas de Principiantes Caja (3) francés"
+  },
+  {
+   "producto_heo": "WOTCD53391030",
+   "ean_original": "05010996371355",
+   "marca": "Wizards of the Coast",
+   "nombre": "Magic the Gathering I Segreti di Strixhaven Mazos de Commander Caja (5) italiano"
+  },
+  {
+   "producto_heo": "HASG3825",
+   "ean_original": "05010996434531",
+   "marca": "Hasbro",
+   "nombre": "Transformers Power of the Primes Figura Combiner Predaking 45 cm"
+  },
+  {
+   "producto_heo": "PHMO40254",
+   "ean_original": "08100872130842",
+   "marca": "Phat Mojo",
+   "nombre": "Poppy Playtime Minifiguras 7 cm Series 4 Nightmare Critters Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM22345",
+   "ean_original": "10077764223454",
+   "marca": "Monogram Int.",
+   "nombre": "Winnie-the-Pooh 3D Colgantes Expositor Series 2 (24)"
+  },
+  {
+   "producto_heo": "MNGM28905",
+   "ean_original": "10077764289054",
+   "marca": "Monogram Int.",
+   "nombre": "Star Wars Mandalorian 3D Colgantes PVC Series 2 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM29010",
+   "ean_original": "10077764290104",
+   "marca": "Monogram Int.",
+   "nombre": "Star Wars: El libro de Boba Fett 3D Colgantes de PVC Serie 1 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM29165",
+   "ean_original": "10077764291651",
+   "marca": "Monogram Int.",
+   "nombre": "Star Wars 3D Colgantes Peluche Expositor Andor (24)"
+  },
+  {
+   "producto_heo": "MNGM29220",
+   "ean_original": "10077764292207",
+   "marca": "Monogram Int.",
+   "nombre": "Star Wars 3D Colgantes Peluche Expositor Best of Grogu Serie 1 (24)"
+  },
+  {
+   "producto_heo": "MNGM29255",
+   "ean_original": "10077764292559",
+   "marca": "Monogram Int.",
+   "nombre": "The Mandalorian and Grogu 3D Colgantes Peluche Series 1 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM29265",
+   "ean_original": "10077764292658",
+   "marca": "Monogram Int.",
+   "nombre": "Star Wars: Maul - Shadow Lord 3D Colgantes Peluche Serie 1 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM30110",
+   "ean_original": "10077764301107",
+   "marca": "Monogram Int.",
+   "nombre": "Jujutsu Kaisen 3D Colgantes PVC Serie 1 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM32500",
+   "ean_original": "10077764325004",
+   "marca": "Monogram Int.",
+   "nombre": "Stranger Things Colgantes PVC Series 1 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM32505",
+   "ean_original": "10077764325059",
+   "marca": "Monogram Int.",
+   "nombre": "Stranger Things Colgantes PVC 3D Series 2 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM32555",
+   "ean_original": "10077764325554",
+   "marca": "Monogram Int.",
+   "nombre": "Stranger Things Colgantes Peluche Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM32580",
+   "ean_original": "10077764325806",
+   "marca": "Monogram Int.",
+   "nombre": "Castlevania Nocturne 3D Colgantes PVC Serie 1 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM32675",
+   "ean_original": "10077764326759",
+   "marca": "Monogram Int.",
+   "nombre": "Sakamoto Days 3D Colgantes Peluche Expositor Serie 2 (24)"
+  },
+  {
+   "producto_heo": "MNGM32685",
+   "ean_original": "10077764326858",
+   "marca": "Monogram Int.",
+   "nombre": "Stranger Things Bolígrafos 3D Head Topper Spinning Pen Blind Box Expositor (16)"
+  },
+  {
+   "producto_heo": "MNGM32740",
+   "ean_original": "10077764327404",
+   "marca": "Monogram Int.",
+   "nombre": "One Piece (2023) 3D Colgantes Peluche Series 2 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM32775",
+   "ean_original": "10077764327756",
+   "marca": "Monogram Int.",
+   "nombre": "K-Pop Demon Hunter 3D Colgantes PVCSeries 1 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM32830",
+   "ean_original": "10077764328302",
+   "marca": "Monogram Int.",
+   "nombre": "K-Pop Demon Hunter Bolígrafos con Topper 3D Expositor (16)"
+  },
+  {
+   "producto_heo": "MNGM36710",
+   "ean_original": "10077764367103",
+   "marca": "Monogram Int.",
+   "nombre": "Assassin's Creed Colgantes para Bolso de PVC 3D Serie 1 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM37035",
+   "ean_original": "10077764370356",
+   "marca": "Monogram Int.",
+   "nombre": "Minecraft Colgantes PVC 3D Expositor Series 1 Display (24)"
+  },
+  {
+   "producto_heo": "MNGM38500",
+   "ean_original": "10077764385008",
+   "marca": "Monogram Int.",
+   "nombre": "Smoko 3D Colgantes Peluche Serie 1 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM39015",
+   "ean_original": "10077764390156",
+   "marca": "Monogram Int.",
+   "nombre": "Barbie 3D Colgantes Peluche Expositor Serie 2 (24)"
+  },
+  {
+   "producto_heo": "MNGM39800",
+   "ean_original": "10077764398008",
+   "marca": "Monogram Int.",
+   "nombre": "Plants vs. Zombies 3D Colgantes Peluche Serie 1 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM45645",
+   "ean_original": "10077764456456",
+   "marca": "Monogram Int.",
+   "nombre": "Batman: la serie animada 3D Colgantes Peluche Series 1 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM45725",
+   "ean_original": "10077764457255",
+   "marca": "Monogram Int.",
+   "nombre": "Supergirl 3D Colgantes Peluche Serie 1 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM47550",
+   "ean_original": "10077764475501",
+   "marca": "Monogram Int.",
+   "nombre": "El Señor de los Anillos Colgantes para Bolso de PVC 3D Serie 2 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM63025",
+   "ean_original": "10077764630252",
+   "marca": "Monogram Int.",
+   "nombre": "Garfield 3D Colgantes Peluche Serie 1 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM69145",
+   "ean_original": "10077764691451",
+   "marca": "Monogram Int.",
+   "nombre": "X-Men '97 3D Colgantes PVC Series 2 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM69205",
+   "ean_original": "10077764692052",
+   "marca": "Monogram Int.",
+   "nombre": "Marvel Rivals 3D Colgantes PVC Jeff the Land Shark Series 17 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM69315",
+   "ean_original": "10077764693158",
+   "marca": "Monogram Int.",
+   "nombre": "Spider-Man: Brand New Day 3D Colgantes de PVC Serie 1 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM70105",
+   "ean_original": "10077764701051",
+   "marca": "Monogram Int.",
+   "nombre": "One Piece 3D Colgantes PVC Serie 1 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM72600",
+   "ean_original": "10077764726009",
+   "marca": "Monogram Int.",
+   "nombre": "Toilet-Bound Hanako-kun Colgantes PVC 3D Series 2 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM73510",
+   "ean_original": "10077764735100",
+   "marca": "Monogram Int.",
+   "nombre": "Hunter × Hunter 3D Colgantes Peluche Series 2 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM74650",
+   "ean_original": "10077764746502",
+   "marca": "Monogram Int.",
+   "nombre": "Demon Slayer Season 3 3D Colgantes Peluche Expositor Serie 8 (24)"
+  },
+  {
+   "producto_heo": "MNGM74695",
+   "ean_original": "10077764746953",
+   "marca": "Monogram Int.",
+   "nombre": "Demon Slayer 3D Colgantes Peluche Infinity Castle Serie 1 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM75110",
+   "ean_original": "10077764751100",
+   "marca": "Monogram Int.",
+   "nombre": "Tokidoki x Godzilla 3D Colgantes PVC Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM76375",
+   "ean_original": "10077764763752",
+   "marca": "Monogram Int.",
+   "nombre": "Minions: Minions &amp; Monsters Colgantes para Bolso de PVC 3D Serie 1 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM77800",
+   "ean_original": "10077764778008",
+   "marca": "Monogram Int.",
+   "nombre": "Playstation 3D Colgantes Peluche Expositor Serie 1 (24)"
+  },
+  {
+   "producto_heo": "MNGM77810",
+   "ean_original": "10077764778107",
+   "marca": "Monogram Int.",
+   "nombre": "Sony PlayStation Colgantes para Bolso de PVC 3D Serie 2 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM84080",
+   "ean_original": "10077764840804",
+   "marca": "Monogram Int.",
+   "nombre": "Zootrópolis 2 blind pack Series 1 Expositor (12)"
+  },
+  {
+   "producto_heo": "MNGM84230",
+   "ean_original": "10077764842303",
+   "marca": "Monogram Int.",
+   "nombre": "Zootopia 3D Colgantes Peluche Serie 73 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM84325",
+   "ean_original": "10077764843256",
+   "marca": "Monogram Int.",
+   "nombre": "Disney 3D Colgantes de PVC Personajes del Bosque Serie 76 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM84565",
+   "ean_original": "10077764845656",
+   "marca": "Monogram Int.",
+   "nombre": "101 dálmatas 3D Colgantes Peluche Serie 72 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM85060",
+   "ean_original": "10077764850605",
+   "marca": "Monogram Int.",
+   "nombre": "Lilo & Stitch Imáns 3D Series 2 Expositor (12)"
+  },
+  {
+   "producto_heo": "MNGM85075",
+   "ean_original": "10077764850759",
+   "marca": "Monogram Int.",
+   "nombre": "Lilo & Stitch Imáns Stitch 3D Series 5 Blind Pack Expositor (12)"
+  },
+  {
+   "producto_heo": "MNGM85080",
+   "ean_original": "10077764850803",
+   "marca": "Monogram Int.",
+   "nombre": "Lilo & Stitch Imáns Stitch 3D Series 6 Blind Pack Expositor (12)"
+  },
+  {
+   "producto_heo": "MNGM85085",
+   "ean_original": "10077764850858",
+   "marca": "Monogram Int.",
+   "nombre": "Lilo & Stitch Imáns blind pack Stitch Series 7 Expositor (12)"
+  },
+  {
+   "producto_heo": "MNGM85150",
+   "ean_original": "10077764851503",
+   "marca": "Monogram Int.",
+   "nombre": "Lilo & Stitch 3D Colgantes de PVC Serie 1 Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM85925",
+   "ean_original": "10077764859257",
+   "marca": "Monogram Int.",
+   "nombre": "Disney Gatos 3D Colgantes Peluche Expositor serie 69 (24)"
+  },
+  {
+   "producto_heo": "MNGM86770",
+   "ean_original": "10077764867702",
+   "marca": "Monogram Int.",
+   "nombre": "Descendants 3D Colgantes de PVC Serie 1 Expositor (24)"
+  },
+  {
+   "producto_heo": "MATTJMJ24",
+   "ean_original": "10194735377715",
+   "marca": "Mattel",
+   "nombre": "Masters of the Universe Origins Pack de 4 Figuras Battle for Subternia 14 cm"
+  },
+  {
+   "producto_heo": "BHTB40314",
+   "ean_original": "10603154050364",
+   "marca": "Beverly Hills Teddy Bear Company",
+   "nombre": "Mushmeez Figuras Antiestrés Sweet Friends 27 cm Expositor (12)"
+  },
+  {
+   "producto_heo": "MCF11660",
+   "ean_original": "10787926116608",
+   "marca": "McFarlane Toys",
+   "nombre": "Fallout (TV Show) Blind Bag minifiguras Serie 1 6 cm Expositor (24)"
+  },
+  {
+   "producto_heo": "MCF14318",
+   "ean_original": "10787926143185",
+   "marca": "McFarlane Toys",
+   "nombre": "Transformers Busto Optimus Prime 58 cm"
+  },
+  {
+   "producto_heo": "MCF15955",
+   "ean_original": "10787926159551",
+   "marca": "McFarlane Toys",
+   "nombre": "DC Direct Page Punchers Figuras 18 cm Wave 9 Surtido (6)"
+  },
+  {
+   "producto_heo": "MCF15985",
+   "ean_original": "10787926159858",
+   "marca": "McFarlane Toys",
+   "nombre": "DC Retro Figuras 15 cm Wave 12 Sortiment (6)"
+  },
+  {
+   "producto_heo": "MCF17395",
+   "ean_original": "10787926173953",
+   "marca": "McFarlane Toys",
+   "nombre": "DC Multiverse McFarlane Collector Edition Figura Wave 13 18 cm Surtido (6)"
+  },
+  {
+   "producto_heo": "MCF17485",
+   "ean_original": "10787926174851",
+   "marca": "McFarlane Toys",
+   "nombre": "DC Retro Figuras 15 cm Wave 13 Super Friends Sortiment (6)"
+  },
+  {
+   "producto_heo": "MCF17527",
+   "ean_original": "10787926175278",
+   "marca": "McFarlane Toys",
+   "nombre": "Superman (2025) DC Direct Playset Fortress of Solitude with Superman Robot"
+  },
+  {
+   "producto_heo": "MCF17669",
+   "ean_original": "10787926176695",
+   "marca": "McFarlane Toys",
+   "nombre": "Superman (2025) DC Direct Pack de 3 Figuras Super Powers Gold Label 11 cm"
+  },
+  {
+   "producto_heo": "MCF17770",
+   "ean_original": "10787926177708",
+   "marca": "McFarlane Toys",
+   "nombre": "The New Batman Adventures DC Multiverse McFarlane Collector Edition Figuras Wave 5 18 cm Surtido (6)"
+  },
+  {
+   "producto_heo": "MCF17845",
+   "ean_original": "10787926178453",
+   "marca": "McFarlane Toys",
+   "nombre": "DC Retro Super Friends Figuras 15 cm Wave 15 Surtido (6)"
+  },
+  {
+   "producto_heo": "MCF17990",
+   "ean_original": "10787926179900",
+   "marca": "McFarlane Toys",
+   "nombre": "DC Multiverse Figuras 18 cm Surtido (6)"
+  },
+  {
+   "producto_heo": "MCF20325",
+   "ean_original": "10787926203254",
+   "marca": "McFarlane Toys",
+   "nombre": "Batman: The Animated Series Q-Fig Deluxe Minifiguras 10 cm Wave 1 Surtodo (12)"
+  },
+  {
+   "producto_heo": "MCF20360",
+   "ean_original": "10787926203605",
+   "marca": "McFarlane Toys",
+   "nombre": "DC Comics QMx Q-Fig Figuras Mini Surtido (10)"
+  },
+  {
+   "producto_heo": "MCF20370",
+   "ean_original": "10787926203704",
+   "marca": "Quantum Mechanix",
+   "nombre": "DC Comics QMx Q-Fig Figuras Mini &nbsp;Surtido (10)"
+  },
+  {
+   "producto_heo": "MCF20385",
+   "ean_original": "10787926203858",
+   "marca": "McFarlane Toys",
+   "nombre": "Marvel Q-fig Figuras Mini Surtido (10)"
+  },
+  {
+   "producto_heo": "MCF90210",
+   "ean_original": "10787926902102",
+   "marca": "McFarlane Toys",
+   "nombre": "Spawn Figuras 18 cm Wave 8 30th Anniversary Sortiment (6)"
+  },
+  {
+   "producto_heo": "MCF90430",
+   "ean_original": "10787926904304",
+   "marca": "McFarlane Toys",
+   "nombre": "Spawn Figuras para montar Figuras Blind Bag 5 cm Expositor (36)"
+  },
+  {
+   "producto_heo": "BOTI38531",
+   "ean_original": "10840148203317",
+   "marca": "BOTI",
+   "nombre": "Jurassic World Zoom Riders Vehículo con Figura Surtido (24)"
+  },
+  {
+   "producto_heo": "SUP7-BB-SEST-10776",
+   "ean_original": "10840418807764",
+   "marca": "Super7",
+   "nombre": "Barrio Sésamo Figuras Mini Wave 06 Blind Box Display (12)"
+  },
+  {
+   "producto_heo": "SUP7-BB-PNUT-11512",
+   "ean_original": "10840418815134",
+   "marca": "Super7",
+   "nombre": "Peanuts Figuras Figuras ReAction Wave 08 Holiday 10 cm Cajas Sorpresas Expositor (12)"
+  },
+  {
+   "producto_heo": "YUME11530",
+   "ean_original": "10843309115306",
+   "marca": "YuMe Toys",
+   "nombre": "Sanrio Figuras mini Little Moon Light Series Hello Kitty and Friends 8 cm Expositor (12) "
+  },
+  {
+   "producto_heo": "YUME11645",
+   "ean_original": "10843309116457",
+   "marca": "YuMe Toys",
+   "nombre": "Sanrio Llaveros Peach Series Hello Kitty and Friends Expositor (12)"
+  },
+  {
+   "producto_heo": "YUME11685",
+   "ean_original": "10843309116853",
+   "marca": "YuMe Toys",
+   "nombre": "Sanrio Llaveros y Brazalete Celebration Series Hello Kitty and Friends Expositor (12)"
+  },
+  {
+   "producto_heo": "YUME11730",
+   "ean_original": "10843309117300",
+   "marca": "YuMe Toys",
+   "nombre": "Sanrio Llaveros Light-Up Star Series Hello Kitty and Friends Expositor (9)"
+  },
+  {
+   "producto_heo": "YUME11740",
+   "ean_original": "10843309117409",
+   "marca": "YuMe Toys",
+   "nombre": "Sanrio Figuras mini Memo Stand Party Time Series Hello Kitty and Friends 7 cm Expositor (12) "
+  },
+  {
+   "producto_heo": "YUME11950",
+   "ean_original": "10843309119502",
+   "marca": "YuMe Toys",
+   "nombre": "Sanrio Figuras mini Bedside Light TV Series Hello Kitty and Friends 8 cm Expositor (8) "
+  },
+  {
+   "producto_heo": "YUME15096",
+   "ean_original": "10843309150963",
+   "marca": "YuMe Toys",
+   "nombre": "Stranger Things Figuras mini Secret Capsule Upside Down Value TV Series 3 7 cm Expositor (24)"
+  },
+  {
+   "producto_heo": "FNMK-675507-MC",
+   "ean_original": "10850068675507",
+   "marca": "Funmaker Inc.",
+   "nombre": "Sesame Street Rokimoto Cup of Fun Figuras Blind Box 10 cm Wave 1 Expositor (12)"
+  },
+  {
+   "producto_heo": "SIM105950270",
+   "ean_original": "14006592009493",
+   "marca": "Simba",
+   "nombre": "Peanuts Llaveros Peluche cápsulas Display (5)"
+  },
+  {
+   "producto_heo": "PBP760021044",
+   "ean_original": "18425611310444",
+   "marca": "Play by Play",
+   "nombre": "Sonic - The Hedgehog Peluches Classic &amp; Friends 30 cm Surtido (24)"
+  },
+  {
+   "producto_heo": "PBP760022540",
+   "ean_original": "18425611325400",
+   "marca": "Play by Play",
+   "nombre": "La Casa de Muñecas de Gabby Figura de peluche Characters 18 cm Surtido (24)"
+  },
+  {
+   "producto_heo": "PBP760024840",
+   "ean_original": "18425611348409",
+   "marca": "Play by Play",
+   "nombre": "Los Minions Figura de peluche Characters 20 cm Surtido (24)"
+  },
+  {
+   "producto_heo": "PBP760024981",
+   "ean_original": "18425611349819",
+   "marca": "Play by Play",
+   "nombre": "Molang Figuras de peluche 25 cm Wave 1 Medium Surtido (12)"
+  },
+  {
+   "producto_heo": "CER2700001878",
+   "ean_original": "18445484524700",
+   "marca": "Cerdá",
+   "nombre": "Disney Cuaderno de Peluche Minnie Mouse Expositor (8)"
+  },
+  {
+   "producto_heo": "CER2100006503",
+   "ean_original": "18445484622123",
+   "marca": "Cerdá",
+   "nombre": "Star Wars Bolso XL"
+  },
+  {
+   "producto_heo": "CER2700002360",
+   "ean_original": "18445484633600",
+   "marca": "Cerdá",
+   "nombre": "Toy Story Cuaderno de Peluche Expositor (8)"
+  },
+  {
+   "producto_heo": "CER2700002365",
+   "ean_original": "18445484633709",
+   "marca": "Cerdá",
+   "nombre": "Disney Estuche de Silicona Toy Story Expositor (6)"
+  },
+  {
+   "producto_heo": "CER2700002384",
+   "ean_original": "18445484634041",
+   "marca": "Cerdá",
+   "nombre": "Disney Bolígrafo 10 colores Expositor (16)"
+  },
+  {
+   "producto_heo": "CER2700002496",
+   "ean_original": "18445484649984",
+   "marca": "Cerdá",
+   "nombre": "Harry Potter Marcadores Fluorescentes Apilables Expositor (16)"
+  },
+  {
+   "producto_heo": "LCTP40387",
+   "ean_original": "20022286210465",
+   "marca": "License 2 Play Toys",
+   "nombre": "Pembe llavero Blind Box 8 cm Bento Box Surtido (8)"
+  },
+  {
+   "producto_heo": "BOTI39327",
+   "ean_original": "20043377357906",
+   "marca": "BOTI",
+   "nombre": "Godzilla x Kong The new Empire Figuras 15 cm Surtido (4)"
+  },
+  {
+   "producto_heo": "MOTOMS19285",
+   "ean_original": "20630996192850",
+   "marca": "Moose Toys",
+   "nombre": "Bluey Fuzzies Pack de Episodio Expositor (12)"
+  },
+  {
+   "producto_heo": "MOTOMS19294",
+   "ean_original": "20630996192942",
+   "marca": "Moose Toys",
+   "nombre": "Bluey Fuzzies Pack de 2 Expositor (23)"
+  },
+  {
+   "producto_heo": "LCTP40604",
+   "ean_original": "20810186540894",
+   "marca": "License 2 Play Toys",
+   "nombre": "Aphmau Figuras Mini MyStreet Mystery Meemeow Blind Box Display (12)"
+  },
+  {
+   "producto_heo": "PHMO40300",
+   "ean_original": "20810189761043",
+   "marca": "Phat Mojo",
+   "nombre": "Grow a Garden Blind Bag Mini- Figuras Expositor (18)"
+  },
+  {
+   "producto_heo": "PHMO40378",
+   "ean_original": "20810189761364",
+   "marca": "Phat Mojo",
+   "nombre": "Steal a Brainrot Blind Bag Mini- Figuras Expositor (24)"
+  },
+  {
+   "producto_heo": "PHMO40376",
+   "ean_original": "20810189761531",
+   "marca": "Phat Mojo",
+   "nombre": "99 Nights Blind Bag Mini- Figuras Expositor (24)"
+  },
+  {
+   "producto_heo": "SUP7-RE-SEST-12472",
+   "ean_original": "20840418824720",
+   "marca": "Super7",
+   "nombre": "Sesame Street Figura ReAction Wave 06 Count Von Count (PJs) 10 cm      "
+  },
+  {
+   "producto_heo": "DSC-T2-004",
+   "ean_original": "23822139",
+   "marca": "Darkside Collectibles Studio",
+   "nombre": "Terminator 2 Judgement Day Estatua Premium 1/3 T-1000 Liquid Metal 30th Anniversary Edition 70 cm"
+  },
+  {
+   "producto_heo": "JADA9337015314R00",
+   "ean_original": "24052348026761",
+   "marca": "Jada Toys",
+   "nombre": "Toy Story Nanofigs Figuras Mini Blind Box Expositor (24)"
+  },
+  {
+   "producto_heo": "JADA9337024314R00",
+   "ean_original": "24052348027294",
+   "marca": "Jada Toys",
+   "nombre": "Sonic Vehículo 1:32 Knuckles 2016 Subaru WRX STI Surtido (6)"
+  },
+  {
+   "producto_heo": "JADA9385138300W06",
+   "ean_original": "24052348027454",
+   "marca": "Jada Toys",
+   "nombre": "Minecraft Figuras Mini Wave 6 7 cm Expositor (12)"
+  },
+  {
+   "producto_heo": "JADA9385139300W05",
+   "ean_original": "24052348027539",
+   "marca": "Jada Toys",
+   "nombre": "Marvel Figuras Mini Wave 5 6 cm Expositor (12)"
+  },
+  {
+   "producto_heo": "JADA9336884314R00",
+   "ean_original": "24052348027744",
+   "marca": "Jada Toys",
+   "nombre": "Lilo & Stitch Nanofigs Figuras Mini Stitch Blind Box Expositor (24)"
+  },
+  {
+   "producto_heo": "JADA36944",
+   "ean_original": "24052348027812",
+   "marca": "Jada Toys",
+   "nombre": "Star Wars: The Mandalorian & Grogu Figura RC 1/12 Imperial Remnant AT-AT 33 cm"
+  },
+  {
+   "producto_heo": "PP14459CB",
+   "ean_original": "25056577754296",
+   "marca": "Paladone Products",
+   "nombre": "Care Bears Colgantes para maletas Mystery Bags Scented Exspositor (24)"
+  },
+  {
+   "producto_heo": "PE201091M",
+   "ean_original": "27936887",
+   "marca": "CID",
+   "nombre": "Harry Potter Camiseta Magical Creatures Field Guide Talla M"
+  },
+  {
+   "producto_heo": "CER2300007084",
+   "ean_original": "28445484545177",
+   "marca": "Cerdá",
+   "nombre": "Disney Zapatillas de casa con aplicaciones 3D Stitch Surtido (12)"
+  },
+  {
+   "producto_heo": "MOTO24786",
+   "ean_original": "30630996247861",
+   "marca": "Moose Toys",
+   "nombre": "Mr. Beast Lab Swarms pack de 14 Figuras Mega Lab 1 3 cm Surtido (4)"
+  },
+  {
+   "producto_heo": "MOTO24788",
+   "ean_original": "30630996247885",
+   "marca": "Moose Toys",
+   "nombre": "Mr. Beast Lab Swarms pack de 14 Figuras Mega Lab 3 3 cm Surtido (4)"
+  },
+  {
+   "producto_heo": "MOTO24789",
+   "ean_original": "30630996247892",
+   "marca": "Moose Toys",
+   "nombre": "Mr. Beast Lab Swarms pack de 14 Figuras Mega Lab 4 3 cm Surtido (4)"
+  },
+  {
+   "producto_heo": "ALS1020721UXL",
+   "ean_original": "34751848",
+   "marca": "CID",
+   "nombre": "Harry Potter Sudadera capucha Dumbledores Army Talla XL"
+  },
+  {
+   "producto_heo": "KNBZ-SLEEPTOKEN100",
+   "ean_original": "42967835",
+   "marca": "Knucklebonz",
+   "nombre": "Sleep Token Estatua Rock Iconz Vessel 22 cm"
+  },
+  {
+   "producto_heo": "DSC-TH-01-MS",
+   "ean_original": "46195838",
+   "marca": "Darkside Collectibles Studio",
+   "nombre": "El Hobbit Un Viaje Estatua 1/3 MS Series Azog The Defiler John Howe Signature Edition Edition 90 cm"
+  },
+  {
+   "producto_heo": "SR2404545",
+   "ean_original": "50634570459514",
+   "marca": "Pyramid International",
+   "nombre": "Frozen Bolígrafo de gel borrable Characters Expositor (30)"
+  },
+  {
+   "producto_heo": "SR2404547",
+   "ean_original": "50634570459750",
+   "marca": "Pyramid International",
+   "nombre": "Lilo & Stitch Bolígrafo de gel borrable Planetary Expositor (30)"
+  },
+  {
+   "producto_heo": "SR2404548",
+   "ean_original": "50634570459828",
+   "marca": "Pyramid International",
+   "nombre": "Spidey & Friends Bolígrafo de gel borrable Friends Expositor (30)"
+  },
+  {
+   "producto_heo": "SR2404550",
+   "ean_original": "50634570460022",
+   "marca": "Pyramid International",
+   "nombre": "Super Mario Bolígrafo de gel borrable Expositor (30)"
+  },
+  {
+   "producto_heo": "SR2404552",
+   "ean_original": "50634570460268",
+   "marca": "Pyramid International",
+   "nombre": "Sonic - The Hedgehog Bolígrafo de gel borrable Characters Expositor (30)"
+  },
+  {
+   "producto_heo": "SR2404713",
+   "ean_original": "50634570476344",
+   "marca": "Pyramid International",
+   "nombre": "Disney Princess Bolígrafo de gel borrable Princesses Expositor (30)"
+  },
+  {
+   "producto_heo": "SR2404716",
+   "ean_original": "50634570476658",
+   "marca": "Pyramid International",
+   "nombre": "Hello Kitty Bolígrafo de gel borrable Poses Expositor (30)"
+  },
+  {
+   "producto_heo": "SR2404717",
+   "ean_original": "50634570476726",
+   "marca": "Pyramid International",
+   "nombre": "Wednesday Bolígrafo de gel borrable Black Expositor (30)"
+  },
+  {
+   "producto_heo": "SR2404718",
+   "ean_original": "50634570476894",
+   "marca": "Pyramid International",
+   "nombre": "Star Wars Bolígrafo de gel borrable Characters Expositor (30)"
+  },
+  {
+   "producto_heo": "SR2404989",
+   "ean_original": "50634570503996",
+   "marca": "Pyramid International",
+   "nombre": "Lilo & Stitch Bolígrafo de gel borrable Core Blue Expositor (30)"
+  },
+  {
+   "producto_heo": "SR2501383",
+   "ean_original": "50634570653240",
+   "marca": "Pyramid International",
+   "nombre": "Batman Bolígrafo de gel borrable Icons Expositor (30)"
+  },
+  {
+   "producto_heo": "DSC-MX-001",
+   "ean_original": "59588146",
+   "marca": "Darkside Collectibles Studio",
+   "nombre": "Matrix Estatua Premium 1/4 Neo 20th Anniversary Edition 53 cm"
+  },
+  {
+   "producto_heo": "LTCR003XL",
+   "ean_original": "63478327",
+   "marca": "CID",
+   "nombre": "Harry Potter Camiseta Ravenclaw 07 Quidditch Eagle Talla XL"
+  },
+  {
+   "producto_heo": "ALS1020721UXXXL",
+   "ean_original": "64561721",
+   "marca": "CID",
+   "nombre": "Harry Potter Sudadera capucha Dumbledores Army Talla XXXL"
+  },
+  {
+   "producto_heo": "TOMYM806520",
+   "ean_original": "68131876",
+   "marca": "Takara Tomy",
+   "nombre": "Blue Lock Minifiguras Twinchees Lil´Sleepers 5 cm Blind Pack Expositor (24)"
+  },
+  {
+   "producto_heo": "MNGM33055",
+   "ean_original": "69824241",
+   "marca": "Monogram Int.",
+   "nombre": "Wednesday Colgantes PVC 3D Series 2 Expositor (24)"
+  },
+  {
+   "producto_heo": "ASS1110521UL",
+   "ean_original": "73825913",
+   "marca": "CID",
+   "nombre": "Harry Potter Camiseta Mischief Managed Talla L"
+  },
+  {
+   "producto_heo": "HEOFKBOXLD-BUNDLE-10",
+   "ean_original": "96434734",
+   "marca": "Funko",
+   "nombre": "Funko POP! Surprise Box Bundle #10 08/2026"
+  }
+ ]
+}
