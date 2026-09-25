@@ -21,7 +21,16 @@ CASOS:
                   y a precio de caja ÷ 6; la agotada y la suelta del apellido, como toca; cuadra.
   8. [el viejo]   (B2) en todos los casos, NI UNA escritura en reglas_director, escaner_chase_asin,
                   escaner_memoria, escaner_resultados, escaner_detalle ni productos: el doble
-                  apunta cada operacion, y esas tablas acaban byte a byte como empezaron.
+                  apunta cada operacion, y esas tablas acaban byte a byte como empezaron. (B4) Y
+                  el buzon del viejo (`informes`, carpeta «resultados») acaba como empezo.
+  9. [elegidas]   (B4) barrido «marcas elegidas» con solo Funko: la foto solo trae Funko, el resto
+                  va a «marca no elegida» y cuadra crudo = previas + foto; ni se lee reglas_director;
+                  el cruce deja el Excel con las seis hojas del viejo delante, con SU formato.
+  (B4) En los casos 2 y 9, el formato de las seis hojas del viejo se COMPARA con la huella del Excel
+  viejo de verdad (huella_excel_viejo_heo.json): orden de hojas, cabeceras, anchos, formulas,
+  enlaces, tablas y formato condicional. Si cambia algo, en el nuevo o en el viejo, sale ROJO.
+ 10. [mala]       (B4) una seleccion malformada (no JSON, no lista, comillas, saltos de linea,
+                  vacia) → ROJO, la linea exacta y NINGUN cliente creado: no se ejecuta nada.
 """
 import base64
 import csv
@@ -286,7 +295,8 @@ def hijo(ruta_estado, programa):
 
 def correr(ruta_estado, programa, env_extra):
     env = {k: v for k, v in os.environ.items()
-           if k not in ('SUPABASE_SERVICE_KEY', 'HEO_USER', 'HEO_PASS', 'PASADA', 'MODO_BARRIDO', 'E2_ESCENA')}
+           if k not in ('SUPABASE_SERVICE_KEY', 'HEO_USER', 'HEO_PASS', 'PASADA', 'MODO_BARRIDO', 'E2_ESCENA',
+                        'MARCAS_ELEGIDAS', 'OFERTAS_ELEGIDAS')}
     env.update(env_extra, PYTHONIOENCODING='utf-8', SUPABASE_URL='https://doble.invalid')
     p = subprocess.run([sys.executable, '-u', os.path.abspath(__file__), '--hijo', ruta_estado, programa],
                        capture_output=True, text=True, encoding='utf-8', errors='replace', env=env, cwd=AQUI)
@@ -328,7 +338,7 @@ def estado_inicial(e2, M, frenar=None):
 SIEMBRA = {}
 
 
-def caso(nombre, frenar=None, crudo=None, modo=None, escena=None):
+def caso(nombre, frenar=None, crudo=None, modo=None, escena=None, extra=None):
     e2, pro, M = _escena()
     tmp = tempfile.mkdtemp(prefix='e2pp_')
     ruta = os.path.join(tmp, 'estado.json')
@@ -343,6 +353,7 @@ def caso(nombre, frenar=None, crudo=None, modo=None, escena=None):
         llave['MODO_BARRIDO'] = modo
     if escena is not None:
         llave['E2_ESCENA'] = escena
+    llave.update(extra or {})
     cod, log = correr(ruta, 'escaner2_heo_barrido.py', llave)
     bd = json.load(open(ruta, encoding='utf-8'))
     pasada = [p for p in bd['tablas']['escaner2_pasada'] if p.get('run_id') == 424242][0]
@@ -444,7 +455,55 @@ eq('2 · el Excel del cruce queda en el bucket escaner2 y apuntado en el cruce',
    (1, True))
 from openpyxl import load_workbook  # noqa: E402
 _wb = load_workbook(io.BytesIO(base64.b64decode(bd['storage']['escaner2'][_xl[0]])), read_only=True)
-eq('2 · …con sus seis hojas (la última, las listas de las puertas previas)', _wb.sheetnames, ['Resumen', 'COMPRAR y VALORAR', 'Comparación', 'Varias fichas', 'Puertas', 'Puertas previas'])
+# (B4) «exactamente el mismo formato de excel del escaner antiguo»: sus seis hojas DELANTE, en su
+#      orden y escritas por SU codigo; las del escaner 2, DETRAS.
+HOJAS_VIEJO = ['Análisis', 'Descartados', 'Ambiguos', 'Sin_rank', 'Precio por lote', 'Chase_manual']
+HOJAS_E2 = ['Resumen', 'Comparación', 'Varias fichas', 'Puertas', 'Puertas previas']
+eq('2 · 🔴 (B4) las seis hojas del viejo delante, en su orden, y las del escáner 2 detrás',
+   _wb.sheetnames, HOJAS_VIEJO + HOJAS_E2)
+_COLS = e2.sacar_piezas(os.path.join(AQUI, e2.RUTA_MOTOR), (), ('COLS',))['COLS']
+_an = list(_wb['Análisis'].iter_rows(values_only=True))
+eq('2 · 🔴 (B4) «Análisis» lleva las cabeceras de COLS del viejo, en su orden', list(_an[0]), list(_COLS))
+_ia = {h: k for k, h in enumerate(_an[0])}
+# Lo esperado sale de la BASE del doble, no de la hoja: los productos de las puertas d, e y f, del
+# de más margen en ES al de menos, y cada uno en los cuatro países del viejo.
+_foto_ean = {f['id']: f['ean_original'] for f in T['escaner2_foto']}
+_mes = {r['foto_id']: r['margen'] for r in T['escaner2_resultado_pais'] if r['pais'] == 'ES'}
+_def = sorted((r['foto_id'] for r in T['escaner2_resultado_ean'] if r['puerta'] in 'def'),
+              key=lambda fid: _mes.get(fid) if _mes.get(fid) is not None else -10 ** 9, reverse=True)
+eq('2 · (B4) una fila por país (ES, IT, FR, DE) de cada producto que se vende (puertas d, e, f: 2 aquí), por margen de ES',
+   ([(r[_ia['EAN']], r[_ia['País']]) for r in _an[1:]], len(_def)),
+   ([(_foto_ean[fid], pais) for fid in _def for pais in ('ES', 'IT', 'FR', 'DE')], 2))
+_fil_es = [r for r in _an[1:] if r[_ia['EAN']] == _ean(M, 1) and r[_ia['País']] == 'ES'][0]
+eq('2 · (B4) el ALFA en ES: la decisión es la GUARDADA y el beneficio, la fórmula VIVA del viejo con su IVA de ficha (10 %)',
+   (_fil_es[_ia['Decisión']], _fil_es[_ia['Beneficio (€)']], _fil_es[_ia['Margen']]),
+   (_es1['decision'], '=(J2/1.1)-E2-N2-O2-P2', '=R2/J2'))
+eq('2 · (B4) «En mi BD» sale del catálogo propio con la función del viejo (el ALFA es nuestro: 3 en FBA)',
+   _fil_es[_ia['En mi BD']], 'OK Alm:0 FBA:3')
+_fil_fr = [r for r in _an[1:] if r[_ia['EAN']] == _ean(M, 1) and r[_ia['País']] == 'FR'][0]
+eq('2 · (B4) sin CSV de FR, su fila dice «Sin datos» y no inventa números',
+   (_fil_fr[_ia['Decisión']], _fil_fr[_ia['Margen']], _fil_fr[_ia['Precio venta (€)']]), ('Sin datos', None, None))
+_VACIAS = ('Vendidos/mes', 'Nº ofertas', 'Coincide', 'Cotejo', 'Cotejo (detalle)', 'Promo activa', 'OcioStock')
+eq('2 · (B4) las columnas que el escáner 2 no tiene van VACÍAS, con su cabecera',
+   {c: [r[_ia[c]] for r in _an[1:] if r[_ia[c]] not in (None, '')] for c in _VACIAS}, {c: [] for c in _VACIAS})
+_puerta = {_foto_ean[r['foto_id']]: r['puerta'] for r in T['escaner2_resultado_ean']}
+eq('2 · (B4) Ambiguos ← puerta b; Sin_rank ← c sin dato; Descartados ← puerta a + apartados (no la marca fuera)',
+   ([r[0] for r in list(_wb['Ambiguos'].iter_rows(values_only=True))[1:]],
+    sorted(r[0] for r in list(_wb['Descartados'].iter_rows(values_only=True))[1:])),
+   ([e for e, pu in _puerta.items() if pu == 'b'],
+    sorted([e for e, pu in _puerta.items() if pu == 'a']
+           + [a['ean_original'] for a in T['escaner2_apartado'] if a['motivo'] in ('chase_suelto', 'ean_forma_rara',
+                                                                                  'duplicado_proveedor', 'estado_no_servible')])))
+eq('2 · (B4) Chase_manual ← la caja con chase sin EAN de la figura, con su precio de caja',
+   [r[:5] for r in list(_wb['Chase_manual'].iter_rows(values_only=True))[1:]],
+   [('Funko Pop Omega w/CH Surtido (6)', 'HEO9001', '9990000000011', 70.0, 11.67)])
+import escaner2_huella_excel as HU  # noqa: E402
+_REF = json.load(open(os.path.join(AQUI, 'huella_excel_viejo_heo.json'), encoding='utf-8'))
+_h2 = HU.huella(base64.b64decode(bd['storage']['escaner2'][_xl[0]]))
+eq('2 · 🔴 (B4) el FORMATO de las seis hojas es el del Excel viejo de verdad (huella_excel_viejo_heo.json)',
+   HU.diferencias(_REF, _h2, solo_hojas=HOJAS_VIEJO, vacias=('Sin_rank',)), [])
+eq('2 · (B4) …con Sin_rank vacía (ningún «sin dato» en esta escena), escrita como la escribe el viejo',
+   list(next(_wb['Sin_rank'].iter_rows(values_only=True))), ['(vacio)'])
 eq('2 · el log deja el CUADRE, cuadre o no', 'CUADRE [HEO]: crudo=11 | previas=6' in log2
    and '| entradas=5 | suma de puertas=5' in log2, True)
 eq('2 · 🔴 el cruce guarda el crudo y las previas: crudo 11 = previas 6 + puertas 5',
@@ -533,16 +592,73 @@ eq('7 · 🔴 en la comparación: «diferencia de criterio: el viejo no valora c
    (True, 'Diferencia de criterio: el viejo no valora cajas con chase de HEO'))
 _xl = [k for k in bd['storage']['escaner2'] if k.startswith('heo/%s/%s/Escaner2_HEO_' % (pasada, c['id']))]
 _wb = load_workbook(io.BytesIO(base64.b64decode(bd['storage']['escaner2'][_xl[0]])), read_only=True)
-_filas = list(_wb['COMPRAR y VALORAR'].iter_rows(values_only=True))
+_filas = list(_wb['Puertas'].iter_rows(values_only=True))
 _i = {h: k for k, h in enumerate(_filas[0])}
 _fc = [f for f in _filas[1:] if f[0] == _caja[0]['ean_original']][0]
-eq('7 · 🔴 el Excel dice «caja con chase · 6 uds», el precio de la CAJA y el EAN de la figura',
+eq('7 · 🔴 el Excel (hoja «Puertas») dice «caja con chase · 6 uds», el precio de la CAJA y el EAN de la figura',
    (_fc[_i['Caja']], _fc[_i['Precio caja (€)']], _fc[_i['EAN de la figura']], _fc[_i['Origen del EAN']]),
    ('caja con chase · 6 uds', 60.0, '889698872454', 'código GS1 de la caja'))
 _pp = list(_wb['Puertas previas'].iter_rows(values_only=True))
 eq('7 · (B2) la hoja «Puertas previas» lleva la marca fuera, con su EAN, nombre, marca y precio',
    [(r[0], r[1], r[2], r[3]) for r in _pp[1:] if r[4] == 'Marca fuera de la lista'],
    [(_ean(M, 7), 'Hasbro fuera', 'Hasbro', 5.0)])
+
+print('\n9 · [elegidas] (B4) barrido «marcas elegidas», solo Funko → cruce')
+cod, log, cod2, log2, bd, pasada, M, e2 = caso('elegidas', modo='elegidas',
+                                               extra={'MARCAS_ELEGIDAS': '["Funko"]', 'OFERTAS_ELEGIDAS': 'false'})
+BDS['elegidas'] = bd
+T = bd['tablas']
+p = [x for x in T['escaner2_pasada'] if x['id'] == pasada][0]
+eq('9 · el barrido sale en VERDE y la pasada guarda su modo, lo elegido y la casilla',
+   (cod, p['estado'], p['modo'], p['marcas'], p['ofertas'], p['regla_activa']),
+   (0, 'esperando_csv', 'elegidas', ['Funko'], False, None))
+eq('9 · 🔴 la foto SOLO trae Funko (HEO lo escribe «FUNKO»: sin distinguir mayúsculas)',
+   (p['n_foto'], sorted({f['marca'] for f in T['escaner2_foto']})), (5, ['FUNKO']))
+_mf = [a for a in T['escaner2_apartado'] if a['motivo'] == 'marca_fuera']
+eq('9 · 🔴 el Hasbro va a la puerta de la marca fuera, «no elegida», con su oferta apuntada',
+   [(a['marca'], a['detalle'], a['en_oferta']) for a in _mf], [('Hasbro', "Marca 'Hasbro' no elegida", False)])
+eq('9 · 🔴 CUADRA: crudo 11 = previas 6 + foto 5',
+   (p['n_crudo'], sum(p['p_' + x] for x in e2.PUERTAS_PREVIAS), p['n_foto']), (11, 6, 5))
+eq('9 · 🔴 el modo «elegidas» NO toca reglas_director, ni para leer', [o for o in bd['ops'] if o[2] == 'reglas_director'], [])
+c = T['escaner2_cruce'][0]
+eq('9 · el cruce sale en VERDE, LISTA y cuadrado', (cod2, c['estado'], c['cuadra']), (0, 'lista', True))
+_xl = [k for k in bd['storage']['escaner2'] if k.startswith('heo/%s/%s/Escaner2_HEO_' % (pasada, c['id']))]
+_wb = load_workbook(io.BytesIO(base64.b64decode(bd['storage']['escaner2'][_xl[0]])), read_only=True)
+eq('9 · 🔴 el Excel lleva las seis hojas del viejo delante, con las cabeceras de COLS en «Análisis»',
+   (_wb.sheetnames, list(next(_wb['Análisis'].iter_rows(values_only=True)))), (HOJAS_VIEJO + HOJAS_E2, list(_COLS)))
+eq('9 · 🔴 …y con el FORMATO del Excel viejo de verdad',
+   HU.diferencias(_REF, HU.huella(base64.b64decode(bd['storage']['escaner2'][_xl[0]])), solo_hojas=HOJAS_VIEJO, vacias=('Sin_rank',)), [])
+_res = {r[0]: r[1] for r in _wb['Resumen'].iter_rows(values_only=True)}
+eq('9 · el Resumen dice el modo, las marcas elegidas y la casilla, y «Marca no elegida» en su puerta previa',
+   (_res.get('Modo del barrido'), _res.get('Marcas elegidas'), _res.get('Ofertas de cualquier marca'),
+    _res.get('Puerta previa · Marca no elegida')), ('marcas elegidas', 'Funko', 'no', 1))
+_pp = list(_wb['Puertas previas'].iter_rows(values_only=True))
+eq('9 · la hoja «Puertas previas» llama al Hasbro «Marca no elegida»',
+   [(r[2], r[4]) for r in _pp[1:] if r[2] == 'Hasbro'], [('Hasbro', 'Marca no elegida')])
+
+print('\n10 · [mala] (B4) una selección que no vale → no se ejecuta nada')
+_tmp10 = tempfile.mkdtemp(prefix='e2pp_')
+_ruta10 = os.path.join(_tmp10, 'estado.json')
+_ini10 = estado_inicial(_e2, _M)
+json.dump(_ini10, open(_ruta10, 'w', encoding='utf-8'))
+for _nombre, _marcas, _ofertas in (
+        ('no es JSON', 'Funko, CID', 'false'),
+        ('JSON pero no una lista', '{"marca": "Funko"}', 'false'),
+        ('una lista con un número', '["Funko", 7]', 'false'),
+        ('comillas dobles dentro de una marca', '["Funko", "Mal\\"a"]', 'false'),
+        ('un salto de línea escapado dentro de una marca', '["Fun\\nko"]', 'false'),
+        ('un salto de línea de verdad en el input', '["Funko"]\n$(rm -rf /)', 'false'),
+        ('un acento grave', '["Fun`ko`"]', 'false'),
+        ('selección vacía', '[]', 'false'),
+        ('la casilla de ofertas que no es true ni false', '["Funko"]', 'si'),
+        ('sin lista', '', 'true')):
+    _cod, _log = correr(_ruta10, 'escaner2_heo_barrido.py',
+                        {'SUPABASE_SERVICE_KEY': 'svc-de-mentira', 'HEO_USER': 'u', 'HEO_PASS': 'p', 'GITHUB_RUN_ID': '1',
+                         'MODO_BARRIDO': 'elegidas', 'MARCAS_ELEGIDAS': _marcas, 'OFERTAS_ELEGIDAS': _ofertas})
+    eq('10 · %s → ROJO, «selección de marcas no válida» y NINGÚN cliente creado' % _nombre,
+       (_cod, 'ESCANER2_NO_EJECUTADO: selección de marcas no válida' in _log, 'CLIENTES_CREADOS=0' in _log), (1, True, True))
+eq('10 · 🔴 …y la base acaba exactamente como empezó (ni una pasada abierta)',
+   json.load(open(_ruta10, encoding='utf-8'))['tablas'], _ini10['tablas'])
 
 print('\n8 · [el viejo] (B2) ni una escritura en sus tablas, en ningún caso')
 for _n, _bd in BDS.items():
@@ -552,6 +668,10 @@ for _n, _bd in BDS.items():
        {t: _bd['tablas'].get(t) for t in TABLAS_VIEJO}, SIEMBRA[_n])
     eq('8 · %s: ni se leen reglas del chase ni la puente (escaner_chase_asin, escaner_memoria, escaner_detalle)' % _n,
        [o for o in _bd['ops'] if o[2] in ('escaner_chase_asin', 'escaner_memoria', 'escaner_detalle')], [])
+    # (B4) Y el buzon del viejo: los Excel del escaner 2 NO van a `informes/resultados/` (sus Excel los
+    #      leen otros programas por letra de columna); ahi solo sigue el Excel viejo sembrado.
+    eq('8 · %s: 🔴 el buzón del viejo (informes) acaba con lo sembrado y nada más' % _n,
+       sorted(_bd['storage'].get('informes', {})), ['resultados/Escaneo_HEO_TODAS_20260923_2006.xlsx'])
 
 print('\n5 · [rescate] el run muere a medias → SU fila queda fallida, las demás no se tocan')
 _ruta = os.path.join(_tmp, 'rescate.json')

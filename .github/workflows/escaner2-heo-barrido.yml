@@ -3,9 +3,16 @@
 #
 # Lo disparan los dos botones de la v2 (moloka-app-v2, Escaneo PRO · pestaña HEO), con el
 # mismo mecanismo que el escaneo de factura (workflow_dispatch con GH_TOKEN). Vive aqui porque
-# aqui estan las credenciales de HEO. El input `modo` (encargo B2) dice cual de los dos:
-#   marcas · las marcas de reglas_director, como siempre (y el valor si no llega nada);
-#   todas  · todas las marcas, solo lo disponible, SIN leer reglas_director.
+# aqui estan las credenciales de HEO. El input `modo` dice cual de los tres:
+#   marcas   · las marcas de reglas_director, como siempre (y el valor si no llega nada);
+#   todas    · (B2) todas las marcas, solo lo disponible, SIN leer reglas_director;
+#   elegidas · (B4) las marcas del selector de la v2 (input `marcas`, lista JSON) y, si se marca
+#              la casilla (input `ofertas`), las ofertas de cualquier marca. SIN leer reglas_director.
+#
+# 🔴 LOS INPUTS VIAJAN POR `env:`, NUNCA DENTRO DE `run:`. Un `${{ inputs.marcas }}` escrito en el
+#    `run:` se pega en el script de bash ANTES de ejecutarlo: una marca con comillas o `$(...)`
+#    seria codigo. Por env llegan como texto, y el programa los valida (JSON, lista de textos,
+#    topes, sin comillas ni saltos de linea) antes de abrir ningun cliente; si no valen, no corre.
 #
 # Baja el catalogo de HEO con descargar_heo.py (la misma funcion del director), aplica el
 # filtro de director_heo_prep.py y las reglas de EAN/chase/caja del escaner viejo (leidas de
@@ -22,10 +29,20 @@ on:
   workflow_dispatch:
     inputs:
       modo:
-        description: 'marcas (las de siempre) o todas (todas las marcas, sin leer reglas_director)'
+        description: 'marcas (las de siempre), todas (todas las marcas) o elegidas (las del selector de la v2)'
         type: choice
-        options: [marcas, todas]
-        default: marcas
+        options: ['marcas', 'todas', 'elegidas']
+        default: 'marcas'
+        required: false
+      marcas:
+        description: 'Solo en el modo elegidas: la lista de marcas, en JSON (["Funko", "CID"])'
+        type: string
+        default: ''
+        required: false
+      ofertas:
+        description: 'Solo en el modo elegidas: ademas, las ofertas de cualquier marca'
+        type: boolean
+        default: false
         required: false
 
 # 🔒 Barrido y cruce de HEO, de uno en uno: el cruce lee la foto que el barrido deja.
@@ -62,6 +79,8 @@ jobs:
           HEO_USER:             ${{ secrets.HEO_USER }}
           HEO_PASS:             ${{ secrets.HEO_PASS }}
           MODO_BARRIDO:         ${{ inputs.modo }}
+          MARCAS_ELEGIDAS:      ${{ inputs.marcas }}
+          OFERTAS_ELEGIDAS:     ${{ inputs.ofertas }}
         run: python -u escaner2_heo_barrido.py
 
       # 🔴 SI EL RUN MUERE A MEDIAS, LA FILA NO SE QUEDA COLGADA: sin esto, una pasada que se

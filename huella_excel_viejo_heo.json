@@ -1,0 +1,844 @@
+{
+ "hojas": [
+  {
+   "anchos": {
+    "ASIN": 12.0,
+    "Amazon (título)": 50.0,
+    "Coherencia caja": 46.0,
+    "Coincide": 11.0,
+    "Cotejo": 16.0,
+    "Cotejo (detalle)": 46.0,
+    "Decisión": 15.0,
+    "EAN": 14.0,
+    "En mi BD": 20.0,
+    "ISD s/ Fee Log. (€)": 17.0,
+    "Marca": 12.0,
+    "Nombre": 50.0,
+    "OcioStock": 13.0,
+    "Origen IVA": 14.0
+   },
+   "cabecera": [
+    "Nombre",
+    "EAN",
+    "ASIN",
+    "Marca",
+    "PA (€)",
+    "País",
+    "Rank actual",
+    "Rank 90d",
+    "Vendidos/mes",
+    "Precio venta (€)",
+    "Canal BB",
+    "Nº ofertas",
+    "% Comisión",
+    "Com. Amazon (€)",
+    "Fee Logística (€)",
+    "Almacén (€)",
+    "Promo activa",
+    "Beneficio (€)",
+    "ROI",
+    "Margen",
+    "Decisión",
+    "En mi BD",
+    "EAN ambiguo",
+    "Amazon (título)",
+    "Coincide",
+    "Cotejo",
+    "Cotejo (detalle)",
+    "Coherencia caja",
+    "OcioStock",
+    "ISD s/ Fee Log. (€)",
+    "Origen IVA"
+   ],
+   "columnas": {
+    "% Comisión": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "0.00%"
+     ],
+     "formula": []
+    },
+    "ASIN": {
+     "color_letra": [
+      "000563C1"
+     ],
+     "enlace": true,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "Almacén (€)": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "0.00"
+     ],
+     "formula": []
+    },
+    "Amazon (título)": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "Beneficio (€)": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "0.00"
+     ],
+     "formula": [
+      "=(C[-8]R[0]/k)-C[-13]R[0]-C[-4]R[0]-C[-3]R[0]-C[-2]R[0]"
+     ]
+    },
+    "Canal BB": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "Coherencia caja": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "Coincide": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "Com. Amazon (€)": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "0.00"
+     ],
+     "formula": [
+      "=C[-4]R[0]*C[-1]R[0]+C[16]R[0]"
+     ]
+    },
+    "Cotejo": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "Cotejo (detalle)": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "Decisión": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "EAN": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "EAN ambiguo": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "En mi BD": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "Fee Logística (€)": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "0.00"
+     ],
+     "formula": []
+    },
+    "ISD s/ Fee Log. (€)": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "0.00"
+     ],
+     "formula": [
+      "=C[-15]R[0]*k"
+     ]
+    },
+    "Marca": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "Margen": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "0.0%"
+     ],
+     "formula": [
+      "=C[-2]R[0]/C[-10]R[0]"
+     ]
+    },
+    "Nombre": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "Nº ofertas": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "OcioStock": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [],
+     "formula": []
+    },
+    "Origen IVA": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "PA (€)": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "0.00"
+     ],
+     "formula": []
+    },
+    "País": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "Precio venta (€)": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "0.00"
+     ],
+     "formula": []
+    },
+    "Promo activa": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [],
+     "formula": []
+    },
+    "ROI": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "0.0%"
+     ],
+     "formula": [
+      "=C[-1]R[0]/C[-14]R[0]"
+     ]
+    },
+    "Rank 90d": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "Rank actual": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "Vendidos/mes": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [],
+     "formula": []
+    }
+   },
+   "congelada": "A2",
+   "formato_condicional": [
+    {
+     "columnas": [
+      [
+       "Coherencia caja",
+       "Coherencia caja"
+      ]
+     ],
+     "corta": false,
+     "formula": [
+      "ISNUMBER(SEARCH(\"INCOHERENTE\",ABn))"
+     ],
+     "letra": "009C0006",
+     "operador": null,
+     "relleno": "00FFC7CE",
+     "tipo": "expression"
+    },
+    {
+     "columnas": [
+      [
+       "Coincide",
+       "Coincide"
+      ]
+     ],
+     "corta": false,
+     "formula": [
+      "ISNUMBER(SEARCH(\"NO\",Yn))"
+     ],
+     "letra": "009C0006",
+     "operador": null,
+     "relleno": "00FFC7CE",
+     "tipo": "expression"
+    },
+    {
+     "columnas": [
+      [
+       "Cotejo",
+       "Cotejo"
+      ]
+     ],
+     "corta": true,
+     "formula": [
+      "ISNUMBER(SEARCH(\"DUDOSO\",Zn))"
+     ],
+     "letra": "009C0006",
+     "operador": null,
+     "relleno": "00FFC7CE",
+     "tipo": "expression"
+    },
+    {
+     "columnas": [
+      [
+       "Cotejo",
+       "Cotejo"
+      ]
+     ],
+     "corta": true,
+     "formula": [
+      "ISNUMBER(SEARCH(\"OK\",Zn))"
+     ],
+     "letra": "00006100",
+     "operador": null,
+     "relleno": "00C6EFCE",
+     "tipo": "expression"
+    },
+    {
+     "columnas": [
+      [
+       "Cotejo",
+       "Cotejo"
+      ]
+     ],
+     "corta": true,
+     "formula": [
+      "ISNUMBER(SEARCH(\"n/d\",Zn))"
+     ],
+     "letra": "00808080",
+     "operador": null,
+     "relleno": "00E7E6E6",
+     "tipo": "expression"
+    },
+    {
+     "columnas": [
+      [
+       "Decisión",
+       "Decisión"
+      ]
+     ],
+     "corta": true,
+     "formula": [
+      "ISNUMBER(SEARCH(\"COMPRAR\",Un))"
+     ],
+     "letra": "00006100",
+     "operador": null,
+     "relleno": "00C6EFCE",
+     "tipo": "expression"
+    },
+    {
+     "columnas": [
+      [
+       "Decisión",
+       "Decisión"
+      ]
+     ],
+     "corta": true,
+     "formula": [
+      "ISNUMBER(SEARCH(\"NO COMPRAR\",Un))"
+     ],
+     "letra": "009C0006",
+     "operador": null,
+     "relleno": "00FFC7CE",
+     "tipo": "expression"
+    },
+    {
+     "columnas": [
+      [
+       "Decisión",
+       "Decisión"
+      ]
+     ],
+     "corta": true,
+     "formula": [
+      "ISNUMBER(SEARCH(\"Sin datos\",Un))"
+     ],
+     "letra": "00808080",
+     "operador": null,
+     "relleno": "00E7E6E6",
+     "tipo": "expression"
+    },
+    {
+     "columnas": [
+      [
+       "Decisión",
+       "Decisión"
+      ]
+     ],
+     "corta": true,
+     "formula": [
+      "ISNUMBER(SEARCH(\"VALORAR\",Un))"
+     ],
+     "letra": "009C6500",
+     "operador": null,
+     "relleno": "00FFEB9C",
+     "tipo": "expression"
+    },
+    {
+     "columnas": [
+      [
+       "Margen",
+       "Margen"
+      ]
+     ],
+     "corta": false,
+     "formula": [
+      "n.n"
+     ],
+     "letra": "00006100",
+     "operador": "greaterThan",
+     "relleno": null,
+     "tipo": "cellIs"
+    },
+    {
+     "columnas": [
+      [
+       "Nombre",
+       "Origen IVA"
+      ]
+     ],
+     "corta": false,
+     "formula": [
+      "ISODD(INT((ROW()-n)/n))"
+     ],
+     "letra": null,
+     "operador": null,
+     "relleno": "00D9D9D9",
+     "tipo": "expression"
+    }
+   ],
+   "hoja": "Análisis",
+   "negrita_cabecera": true,
+   "tablas": [
+    {
+     "columnas": [
+      [
+       "Nombre",
+       "Origen IVA"
+      ]
+     ],
+     "estilo": "TableStyleMedium2",
+     "nombre": "T_Analisis",
+     "rayas_filas": false
+    }
+   ]
+  },
+  {
+   "anchos": {},
+   "cabecera": [
+    "EAN",
+    "Cabecera",
+    "Motivo"
+   ],
+   "columnas": {
+    "Cabecera": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "EAN": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "Motivo": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    }
+   },
+   "congelada": null,
+   "formato_condicional": [],
+   "hoja": "Descartados",
+   "negrita_cabecera": false,
+   "tablas": []
+  },
+  {
+   "anchos": {},
+   "cabecera": [
+    "EAN",
+    "asin_elegido"
+   ],
+   "columnas": {
+    "EAN": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "asin_elegido": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    }
+   },
+   "congelada": null,
+   "formato_condicional": [],
+   "hoja": "Ambiguos",
+   "negrita_cabecera": false,
+   "tablas": []
+  },
+  {
+   "anchos": {},
+   "cabecera": [
+    "EAN",
+    "ASIN",
+    "Nombre",
+    "rank_act",
+    "rank90"
+   ],
+   "columnas": {
+    "ASIN": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "EAN": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "Nombre": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "rank90": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "rank_act": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    }
+   },
+   "congelada": null,
+   "formato_condicional": [],
+   "hoja": "Sin_rank",
+   "negrita_cabecera": false,
+   "tablas": []
+  },
+  {
+   "anchos": {},
+   "cabecera": [
+    "Nombre",
+    "EAN",
+    "ASIN",
+    "Marca",
+    "País",
+    "Precio venta (€)",
+    "PA suelto (€)",
+    "PA lote (€)",
+    "Ahorro/ud (€)",
+    "Beneficio lote (€)",
+    "Margen lote",
+    "Decisión lote",
+    "Uds. para ese precio",
+    "Coherencia"
+   ],
+   "columnas": {
+    "ASIN": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [],
+     "formula": []
+    },
+    "Ahorro/ud (€)": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [],
+     "formula": []
+    },
+    "Beneficio lote (€)": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [],
+     "formula": []
+    },
+    "Coherencia": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [],
+     "formula": []
+    },
+    "Decisión lote": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [],
+     "formula": []
+    },
+    "EAN": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [],
+     "formula": []
+    },
+    "Marca": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [],
+     "formula": []
+    },
+    "Margen lote": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [],
+     "formula": []
+    },
+    "Nombre": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [],
+     "formula": []
+    },
+    "PA lote (€)": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [],
+     "formula": []
+    },
+    "PA suelto (€)": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [],
+     "formula": []
+    },
+    "País": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [],
+     "formula": []
+    },
+    "Precio venta (€)": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [],
+     "formula": []
+    },
+    "Uds. para ese precio": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [],
+     "formula": []
+    }
+   },
+   "congelada": null,
+   "formato_condicional": [],
+   "hoja": "Precio por lote",
+   "negrita_cabecera": true,
+   "tablas": []
+  },
+  {
+   "anchos": {
+    "ASIN (pégalo en Supabase)": 26.0,
+    "Buscar en Amazon": 16.0,
+    "Código HEO": 16.0,
+    "EAN caja": 16.0,
+    "Imagen": 14.0,
+    "Nombre": 55.0
+   },
+   "cabecera": [
+    "Nombre",
+    "Código HEO",
+    "EAN caja",
+    "Precio caja (€)",
+    "Precio /6 (€)",
+    "Estado",
+    "Imagen",
+    "Buscar en Amazon",
+    "ASIN (pégalo en Supabase)"
+   ],
+   "columnas": {
+    "ASIN (pégalo en Supabase)": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [],
+     "formula": []
+    },
+    "Buscar en Amazon": {
+     "color_letra": [
+      "000563C1"
+     ],
+     "enlace": true,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "Código HEO": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "EAN caja": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "Estado": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "Imagen": {
+     "color_letra": [
+      "000563C1"
+     ],
+     "enlace": true,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "Nombre": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "General"
+     ],
+     "formula": []
+    },
+    "Precio /6 (€)": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "0.00"
+     ],
+     "formula": []
+    },
+    "Precio caja (€)": {
+     "color_letra": [],
+     "enlace": false,
+     "formato": [
+      "0.00"
+     ],
+     "formula": []
+    }
+   },
+   "congelada": "A2",
+   "formato_condicional": [],
+   "hoja": "Chase_manual",
+   "negrita_cabecera": true,
+   "tablas": []
+  }
+ ],
+ "origen": "informes/resultados/Escaneo_HEO_TODAS_20260923_2006.xlsx (escaner viejo, 23-sep-2026), sacada el 25-sep-2026 con escaner2_huella_excel.huella: solo el formato, ni un dato"
+}

@@ -20,6 +20,10 @@ QUE HACE, EN ORDEN:
      son diferencia de criterio (el viejo no las valora) y, si la pasada es del modo «todas»,
      tambien la marca que el viejo no mira: su lista sale de la ultima pasada de marcas de
      siempre (escaner2_pasada.marcas), no de `reglas_director`, que el modo «todas» no lee.
+     (B4) Tambien el modo «elegidas». Y el Excel lleva DELANTE las seis hojas del viejo (Análisis,
+     Descartados, Ambiguos, Sin_rank, Precio por lote, Chase_manual) escritas por SU codigo
+     (`escaner2_motor.excel_como_el_viejo`), y DETRAS las del escaner 2. Se guarda en el bucket
+     `escaner2`, NUNCA en `informes/resultados/` (sus Excel los leen otros programas por letra).
 
 🔒 NO TOCA NADA DEL ESCANER VIEJO: `productos`, `escaner_resultados` y los Excel de
    `informes/resultados/` se LEEN; no se escribe en ninguna tabla ni carpeta que ya existiera.
@@ -221,7 +225,7 @@ def cruzar(cruce, params, pasada):
 
     # ── 2 · La foto y el catalogo propio (el IVA de la ficha) ──────────────────────────
     foto = _todas('escaner2_foto', 'id,ean_original,ean_core,variantes,nombre,marca,precio_unidad,'
-                  'precio_catalogo,es_caja,uds_caja,es_chase,en_oferta,origen_ean,aviso_ean', 'id',
+                  'precio_catalogo,es_caja,uds_caja,es_chase,en_oferta,origen_ean,aviso_ean,aviso_caja', 'id',
                   pasada_id=PASADA)
     if not foto:
         raise Fallo('la pasada no tiene foto')
@@ -320,7 +324,8 @@ def cruzar(cruce, params, pasada):
             'pasada': PASADA, 'cruce': cruce, 'params': params, 'usados': usados, 'ficheros': ficheros,
             'n_entradas': n_entradas, 'n_bd': n_bd, 'cuadra': cuadra and not motivo_fallo,
             'n_crudo': n_crudo, 'previas': previas, 'modo': pasada.get('modo'), 'lista_viejo': lista_viejo,
-            'apartados': _todas('escaner2_apartado', 'ean_original,nombre,marca,precio_catalogo,motivo,detalle',
+            'marcas': pasada.get('marcas'), 'ofertas': pasada.get('ofertas'), 'motor': M,
+            'apartados': _todas('escaner2_apartado', 'ean_original,nombre,marca,precio_catalogo,motivo,detalle,producto_heo',
                                 'id', pasada_id=PASADA),
             'resumen': cmp_resumen, 'viejos': viejos_meta, 'avisos': avisos})
         sb.storage.from_(BUCKET).upload(ruta_excel, contenido, {
@@ -346,6 +351,11 @@ def cruzar(cruce, params, pasada):
     return cierre, rojo
 
 
+def nombre_modo(modo):
+    """Como se llama el modo de la pasada en el Excel (y en la biblioteca de la v2)."""
+    return {'todas': 'todas las marcas', 'elegidas': 'marcas elegidas'}.get(modo or 'marcas', 'marcas de siempre')
+
+
 def _iso(d):
     return d.isoformat() if isinstance(d, datetime) else d
 
@@ -356,11 +366,12 @@ def _zona_madrid():
 
 
 def lista_del_viejo(pasada):
-    """(B2) Solo para una pasada del modo «todas»: las marcas que mira el viejo, de la ULTIMA
+    """(B2) Solo para una pasada del modo «todas» (y, desde el B4, «elegidas»: una marca elegida
+    puede no estar en la lista del viejo): las marcas que mira el viejo, de la ULTIMA
     pasada de marcas de siempre que las guardo al barrer (las de antes del B2 no tienen `modo`,
     y eran de marcas). None si la pasada es de marcas. Si no hay ninguna, la comparacion falla con
     su motivo: sin la lista no se puede decir que una marca «no la mira el viejo»."""
-    if (pasada.get('modo') or 'marcas') != 'todas':
+    if (pasada.get('modo') or 'marcas') not in ('todas', 'elegidas'):
         return None
     filas = (sb.table('escaner2_pasada').select('id,creada_en,modo,estado,marcas,ofertas')
              .eq('proveedor', e2.PROVEEDOR).order('creada_en', desc=True).limit(50).execute().data) or []
@@ -368,8 +379,9 @@ def lista_del_viejo(pasada):
         if (f.get('modo') or 'marcas') == 'marcas' and f.get('estado') == 'esperando_csv' and f.get('marcas'):
             return {'pasada': f['id'], 'fecha': f['creada_en'], 'marcas': list(f['marcas']),
                     'ofertas': bool(f.get('ofertas'))}
-    raise RuntimeError('pasada de todas las marcas sin ninguna pasada de marcas de siempre de la que sacar '
-                       'la lista del viejo: barre una vez con «Barrer HEO» y vuelve a cruzar')
+    raise RuntimeError('pasada de %s sin ninguna pasada de marcas de siempre de la que sacar '
+                       'la lista del viejo: barre una vez con «Barrer HEO» y vuelve a cruzar'
+                       % ('marcas elegidas' if pasada.get('modo') == 'elegidas' else 'todas las marcas'))
 
 
 def comparar_con_el_viejo(M, foto, resultados, params, fecha_datos, lista_viejo=None):
@@ -431,16 +443,17 @@ def _columnas_caja(f):
 
 
 def escribir_excel(foto, resultados, cmp_filas, info):
-    """El Excel del cruce: Resumen, COMPRAR y VALORAR, Comparación, Varias fichas y Puertas.
+    """El Excel del cruce. (B4, Fernando: «exactamente el mismo formato de excel del escaner
+    antiguo») DELANTE, las seis hojas del viejo (Análisis, Descartados, Ambiguos, Sin_rank, Precio
+    por lote y Chase_manual), escritas por SU codigo (`e2.excel_como_el_viejo`); DETRAS, las del
+    escaner 2 (Resumen, Comparación, Varias fichas, Puertas y Puertas previas), sin mover aquellas.
     Solo lo que ya esta calculado y guardado: aqui no se decide nada."""
-    from openpyxl import Workbook
     from openpyxl.styles import Font
     por_foto = {f['id']: f for f in foto}
-    wb = Workbook()
+    wb = e2.excel_como_el_viejo(foto, resultados, info['apartados'], info['motor'])
 
     def hoja(nombre, cabecera, filas, anchos=None):
-        ws = wb.create_sheet(nombre) if wb.worksheets[0].title != 'Sheet' else wb.worksheets[0]
-        ws.title = nombre
+        ws = wb.create_sheet(nombre)
         ws.append(cabecera)
         for c in ws[1]:
             c.font = Font(bold=True)
@@ -454,7 +467,10 @@ def escribir_excel(foto, resultados, cmp_filas, info):
     r = info['resumen'] or {}
     lv = info.get('lista_viejo')
     filas_res = [['Pasada', info['pasada']], ['Cruce', info['cruce']],
-                 ['Modo del barrido', 'todas las marcas' if info.get('modo') == 'todas' else 'marcas de siempre']]
+                 ['Modo del barrido', nombre_modo(info.get('modo'))]]
+    if info.get('modo') == 'elegidas':
+        filas_res += [['Marcas elegidas', ', '.join(info.get('marcas') or []) or '(ninguna)'],
+                      ['Ofertas de cualquier marca', 'SÍ' if info.get('ofertas') else 'no']]
     if lv:
         filas_res += [['Lista del viejo (para comparar)', '%s%s · de la pasada %s (%s)'
                        % (', '.join(lv['marcas']), ' y ofertas' if lv['ofertas'] else '', lv['pasada'], lv['fecha'])]]
@@ -463,7 +479,8 @@ def escribir_excel(foto, resultados, cmp_filas, info):
                   ['Países que se calculan (si traen CSV)', ', '.join(info['params']['paises_calculo'])],
                   ['Países con CSV', ', '.join(info['usados'])],
                   ['Catálogo crudo de HEO', info['n_crudo']]]
-    filas_res += [['Puerta previa · %s' % e2.NOMBRE_PUERTA_PREVIA[p], info['previas'][p]] for p in e2.PUERTAS_PREVIAS]
+    filas_res += [['Puerta previa · %s' % e2.nombre_previa(p, info.get('modo')), info['previas'][p]]
+                  for p in e2.PUERTAS_PREVIAS]
     filas_res += [['Entradas (filas de la foto)', info['n_entradas']]]
     filas_res += [['Puerta %s · %s' % (p, e2.NOMBRE_PUERTA[p]), info['n_bd'][p]] for p in e2.PUERTAS]
     filas_res += [['Puertas previas + suma de puertas',
@@ -481,37 +498,6 @@ def escribir_excel(foto, resultados, cmp_filas, info):
                   for f in info['ficheros']]
     filas_res += [['Aviso', a] for a in info['avisos']]
     hoja('Resumen', ['Qué', 'Valor'], filas_res, {'A': 44, 'B': 90})
-
-    # Los paises CALCULADOS, uno al lado del otro: caidas, margen, decision y si vende alli.
-    calc = info['usados']
-    compras = []
-    for res in resultados:
-        if res['puerta'] not in ('e', 'f'):
-            continue
-        f, m = por_foto[res['foto_id']], res['mejor']
-        fila = [f['ean_original'], f['nombre'], f['marca'], e2.NOMBRE_PUERTA[res['puerta']],
-                m['pais'], round(m['margen'], 4), round(m['beneficio'], 2), m['precio_venta'],
-                round(f['precio_unidad'], 2) if f['precio_unidad'] is not None else None, res['asin'],
-                (res['paises'].get(m['pais']) or {}).get('iva_origen')]
-        for p in calc:
-            c = res['paises'].get(p)
-            fila += ([c.get('caidas_30d'), round(c['margen'], 4) if c.get('margen') is not None else None,
-                      c.get('decision'), 'sí' if c.get('vende_aqui') else 'NO VENDE AQUÍ'] if c else [None, None, None, None])
-        # (B2) Al FINAL, para no mover las columnas de arriba: la caja con su precio y, si es una
-        #      caja con chase de HEO, el EAN de la figura con el que se ha valorado y de donde sale.
-        fila += _columnas_caja(f)
-        compras.append(fila)
-    compras.sort(key=lambda x: (x[3] != 'COMPRAR', -(x[5] or 0)))
-    cab = ['EAN', 'Nombre', 'Marca', 'Decisión', 'Mejor país', 'Margen', 'Beneficio (€)', 'Precio venta (€)',
-           'Precio compra (€)', 'ASIN', 'Origen IVA']
-    for p in calc:
-        cab += ['%s caídas 30 d' % p, '%s margen' % p, '%s decisión' % p, '%s vende' % p]
-    cab += COLUMNAS_CAJA
-    ws = hoja('COMPRAR y VALORAR', cab, compras, {'A': 15, 'B': 55, 'C': 16, 'J': 12, 'K': 14})
-    for fila in ws.iter_rows(min_row=2):
-        fila[5].number_format = '0.0%'
-        for k in range(len(calc)):
-            fila[11 + 4 * k + 1].number_format = '0.0%'
 
     hoja('Comparación', ['EAN', 'Nombre', 'Categoría', 'Viejo', 'País viejo', 'Fecha viejo (UTC)',
                          'Excel viejo', 'Puerta nuevo', 'Nuevo', 'País nuevo', 'Fecha nuevo (UTC)',
@@ -545,7 +531,8 @@ def escribir_excel(foto, resultados, cmp_filas, info):
     # Las LISTAS de las puertas previas (las que la llevan), EAN a EAN con su motivo.
     hoja('Puertas previas', ['EAN tal como vino', 'Nombre', 'Marca', 'Precio catálogo (€)', 'Puerta previa', 'Detalle'],
          [[a['ean_original'], a['nombre'], a['marca'], a['precio_catalogo'],
-           e2.NOMBRE_PUERTA_PREVIA.get(a['motivo'], a['motivo']), a['detalle']] for a in info['apartados']],
+           (e2.nombre_previa(a['motivo'], info.get('modo')) if a['motivo'] in e2.NOMBRE_PUERTA_PREVIA
+            else a['motivo']), a['detalle']] for a in info['apartados']],
          {'A': 18, 'B': 55, 'C': 16, 'E': 32, 'F': 80})
     salida = io.BytesIO()
     wb.save(salida)

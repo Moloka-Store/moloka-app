@@ -69,10 +69,12 @@ MOTIVOS = {
 # `marca_fuera` se lista desde el encargo B2 (25-sep-2026): antes solo se contaba.
 MOTIVOS_APARTADO = ('chase_funko', 'marca_fuera', 'estado_no_servible', 'chase_suelto', 'ean_forma_rara',
                     'duplicado_proveedor')
-# 🔑 LOS DOS MODOS DE BARRIDO (encargo B2), elegidos en la pantalla en cada pasada:
-#    · 'marcas' · el filtro del director, con las marcas de `reglas_director` (como siempre);
-#    · 'todas'  · solo «disponible»: sin filtro de marca y SIN LEER `reglas_director`.
-MODOS = ('marcas', 'todas')
+# 🔑 LOS MODOS DE BARRIDO, elegidos en la pantalla en cada pasada:
+#    · 'marcas'   · el filtro del director, con las marcas de `reglas_director` (como siempre);
+#    · 'todas'    · (B2) solo «disponible»: sin filtro de marca y SIN LEER `reglas_director`;
+#    · 'elegidas' · (B4) las marcas que Fernando marca en el selector de la v2 y, si quiere, las
+#                   ofertas de cualquier marca. Tampoco lee `reglas_director`.
+MODOS = ('marcas', 'todas', 'elegidas')
 # El tope del Visualizador de Keepa: 10.000 códigos por lista. La tanda del motor no lo pasa.
 TOPE_VISUALIZADOR = 10000
 # 🔴 LAS PUERTAS PREVIAS (Fernando, 24-sep-2026): el cuadre empieza en el catalogo CRUDO de HEO,
@@ -97,6 +99,16 @@ NOMBRE_PUERTA_PREVIA = {
     'ean_forma_rara': 'Código de barras con forma rara',
     'duplicado_proveedor': 'Duplicado del proveedor',
 }
+# (B4) En el modo 'elegidas' la marca que se cae no está «fuera de la lista del director»: es una
+#      marca que Fernando no ha elegido. La puerta es la MISMA (`marca_fuera`), cambia el rótulo.
+NOMBRE_MARCA_NO_ELEGIDA = 'Marca no elegida'
+
+
+def nombre_previa(p, modo):
+    """El nombre de una puerta previa EN SU PASADA (el mismo que pinta la v2 con `nombrePrevia`)."""
+    if p == 'marca_fuera' and modo == 'elegidas':
+        return NOMBRE_MARCA_NO_ELEGIDA
+    return NOMBRE_PUERTA_PREVIA[p]
 
 
 class PiezaNoEncontrada(Exception):
@@ -223,6 +235,94 @@ def filtro_todas():
     return _quiere_todas, {'marcas_reales': None, 'quiere_ofertas': None, 'rank_max': None}
 
 
+# ── (B4) EL MODO «MARCAS ELEGIDAS» ─────────────────────────────────────────────────────────
+# La lista llega de la v2 como input del workflow (JSON, por env: NUNCA interpolada dentro de un
+# `run:`), y aqui se vuelve a validar ANTES de abrir ningun cliente: si no vale, no se corre.
+class SeleccionInvalida(ValueError):
+    """La seleccion de marcas que llega del workflow no se puede usar: la pasada no arranca."""
+
+
+# Topes de la seleccion. HEO tiene 265 marcas con algo disponible (25-sep-2026) y la mas larga
+# mide 37 caracteres: los topes dejan holgura y cortan cualquier otra cosa.
+MAX_MARCAS = 500
+MAX_LARGO_MARCA = 80
+MAX_TEXTO_MARCAS = 20000
+# 🔴 Lo que no puede llevar un nombre de marca: comillas dobles, acento grave, barra invertida,
+#    `$ < > ; | { }` y cualquier caracter de control o salto de linea. El apostrofo SI pasa:
+#    HEO tiene una marca que lo lleva («Loop' », medido el 25-sep-2026) y cae en «Otras».
+_PROHIBIDOS_MARCA = set('"`\\$<>;|{}')
+
+
+def _caracter_prohibido(c):
+    import unicodedata
+    return c in _PROHIBIDOS_MARCA or unicodedata.category(c) in ('Cc', 'Cf', 'Zl', 'Zp')
+
+
+def validar_seleccion(texto_marcas, texto_ofertas):
+    """(marcas, ofertas) de los dos inputs del modo 'elegidas', o SeleccionInvalida con el porque.
+    `texto_marcas`: una lista JSON de textos; `texto_ofertas`: 'true' o 'false' (el booleano de
+    `workflow_dispatch`). Las marcas salen sin espacios a los lados y sin repetir (sin distinguir
+    mayusculas), en el orden en que llegan."""
+    if texto_ofertas not in ('true', 'false'):
+        raise SeleccionInvalida('la casilla de ofertas no es true ni false: %r' % (texto_ofertas,))
+    ofertas = texto_ofertas == 'true'
+    if not isinstance(texto_marcas, str) or not texto_marcas.strip():
+        raise SeleccionInvalida('no llega la lista de marcas')
+    if len(texto_marcas) > MAX_TEXTO_MARCAS:
+        raise SeleccionInvalida('la lista de marcas pasa de %d caracteres' % MAX_TEXTO_MARCAS)
+    import json
+    try:
+        lista = json.loads(texto_marcas)
+    except ValueError as ex:
+        raise SeleccionInvalida('la lista de marcas no es JSON: %s' % ex)
+    if not isinstance(lista, list):
+        raise SeleccionInvalida('la lista de marcas no es una lista')
+    if len(lista) > MAX_MARCAS:
+        raise SeleccionInvalida('la lista trae %d marcas; el tope es %d' % (len(lista), MAX_MARCAS))
+    marcas, vistas = [], set()
+    for i, m in enumerate(lista):
+        if not isinstance(m, str):
+            raise SeleccionInvalida('la marca %d no es un texto: %r' % (i + 1, m))
+        malos = sorted({c for c in m if _caracter_prohibido(c)})
+        if malos:
+            raise SeleccionInvalida('la marca %d lleva caracteres que no puede llevar: %s'
+                                    % (i + 1, ' '.join(repr(c) for c in malos)))
+        limpia = m.strip()
+        if len(limpia) > MAX_LARGO_MARCA:
+            raise SeleccionInvalida('la marca %d pasa de %d caracteres' % (i + 1, MAX_LARGO_MARCA))
+        if clave_marca(limpia) not in vistas:
+            vistas.add(clave_marca(limpia))
+            marcas.append(limpia)
+    if not marcas and not ofertas:
+        raise SeleccionInvalida('selección vacía: ni una marca ni las ofertas')
+    return marcas, ofertas
+
+
+def clave_marca(m):
+    """La marca con la que se compara: sin espacios a los lados y sin distinguir mayusculas."""
+    return str(m or '').strip().lower()
+
+
+def filtro_elegidas(marcas, ofertas):
+    """(quiere, info) del modo 'elegidas', con la misma forma que `cargar_filtro_director`.
+
+    🔴 COINCIDENCIA EXACTA con el nombre de marca de HEO (sin espacios a los lados, sin
+       distinguir mayusculas), NO por trozo como el `_quiere` del director (`mr.lower() in m`):
+       con 265 marcas, «CID» metería cualquier marca que lleve esas tres letras. Lo disponible,
+       y de una marca elegida o (con la casilla) en oferta; el resto de lo disponible es marca no
+       elegida (la puerta `marca_fuera`)."""
+    elegidas = frozenset(clave_marca(m) for m in marcas)
+    ofertas = bool(ofertas)
+
+    def quiere(f):
+        if f.get('estado') != 'disponible':
+            return False
+        if clave_marca(f.get('marca')) in elegidas:
+            return True
+        return ofertas and f.get('en_oferta') == 'SI'
+    return quiere, {'marcas_reales': list(marcas), 'quiere_ofertas': ofertas, 'rank_max': None}
+
+
 def tanda_visualizador(ruta=RUTA_DESCARGAR_HEO):
     """Cuantos EAN caben en una tanda del Visualizador: la `TANDA` de descargar_heo.py (modo
     completo), evaluada igual que alli (acepta HEO_TANDA del entorno). Una sola asignacion o
@@ -259,11 +359,13 @@ def columnas_keepa(ruta=RUTA_ESCAPARATE):
 # ═══════════════════════════════════════════════════════════════════════════════
 # 2 · LA FOTO DEL CATALOGO (paso 2 del encargo)
 # ═══════════════════════════════════════════════════════════════════════════════
-def _apartado(fila, motivo, detalle, ean=None, precio=None):
+def _apartado(fila, motivo, detalle, ean=None, precio=None, en_oferta=None):
+    # (B4) `en_oferta` solo se rellena en la marca fuera: es lo que el selector de marcas de la v2
+    #      cuenta como «N en oferta» de las marcas que no entraron en la foto. En el resto, None.
     return {'producto_heo': fila.get('productNumber') or fila.get('producto_heo'),
             'ean_original': str(ean if ean is not None else (fila.get('ean') or '')).strip(),
             'nombre': fila.get('nombre') or '', 'marca': fila.get('marca') or '',
-            'precio_catalogo': precio, 'motivo': motivo, 'detalle': detalle}
+            'precio_catalogo': precio, 'motivo': motivo, 'detalle': detalle, 'en_oferta': en_oferta}
 
 
 # ── Las CAJAS CON CHASE de HEO (encargo B2, 25-sep-2026) ─────────────────────────────────
@@ -365,7 +467,8 @@ def _fila_de_chase(c):
             'disponibilidad': '', 'imagen': c.get('imagen') or '', 'fin_de_vida': '', 'preorder': ''}
 
 
-def construir_foto(filas_heo, chase_heo, quiere, M, n_crudo=None, n_sin_gtin=None, n_declarado=None):
+def construir_foto(filas_heo, chase_heo, quiere, M, n_crudo=None, n_sin_gtin=None, n_declarado=None,
+                   modo='marcas'):
     """Del catalogo CRUDO de HEO a la foto de la pasada, sin perder a nadie por el camino.
 
     `filas_heo, chase_heo` es lo que devuelve `descargar_catalogo_heo(con_chase=True)`;
@@ -380,7 +483,8 @@ def construir_foto(filas_heo, chase_heo, quiere, M, n_crudo=None, n_sin_gtin=Non
          chase; los que no, vuelven al flujo normal como figura suelta con su codigo;
       1. el filtro (`quiere`: el del director o, en el modo «todas», solo disponible): lo que no
          esta disponible, y lo disponible cuya marca no esta en la regla (ni es oferta, si la
-         regla pide ofertas), que se LISTA;
+         regla pide ofertas), que se LISTA con su oferta. (B4) En el modo 'elegidas' la regla son
+         las marcas elegidas, y el detalle dice «no elegida» (`modo`);
       1 bis. la caja con chase que pasa el filtro: el EAN de su figura comun
          (`ean_de_la_figura`) o, si no hay forma de sacarlo, puerta previa `chase_funko`;
       2. Celda 4: estado servible, chase SUELTO fuera, EAN de forma rara fuera (los GTIN-14 caen
@@ -407,8 +511,9 @@ def construir_foto(filas_heo, chase_heo, quiere, M, n_crudo=None, n_sin_gtin=Non
         if f.get('estado') != 'disponible':
             previas['no_disponible'] += 1
         else:
-            apartados.append(_apartado(f, 'marca_fuera', 'Marca %r fuera de la lista del director'
-                                       % (f.get('marca') or ''), precio=M._num(f.get('precio', ''))))
+            detalle = 'Marca %r no elegida' if modo == 'elegidas' else 'Marca %r fuera de la lista del director'
+            apartados.append(_apartado(f, 'marca_fuera', detalle % (f.get('marca') or ''),
+                                       precio=M._num(f.get('precio', '')), en_oferta=f.get('en_oferta') == 'SI'))
         return False
 
     sel = [f for f in list(filas_heo) + sueltas_chase if filtro(f)]
@@ -1062,3 +1167,138 @@ def nuevo_por_ean(foto, resultados_por_foto, M):
         if prev is None or _ORDEN_PUERTA[cand['puerta']] > _ORDEN_PUERTA[prev['puerta']]:
             salida[k] = cand
     return salida
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 6 · (B4) EL EXCEL CON EL FORMATO DEL VIEJO
+# ═══════════════════════════════════════════════════════════════════════════════
+# Fernando (25-sep-2026): «yo necesito exactamente el mismo formato de excel del escaner antiguo».
+# 🔴 NO SE COPIA: SE EJECUTA EL SUYO. La «Celda 9» de moloka_escaner_nube.py (la que escribe
+#    Análisis, Descartados, Ambiguos, Sin_rank, Precio por lote y Chase_manual) va EN LINEA, no en una
+#    funcion, asi que se saca del fichero por ESTRUCTURA: las sentencias de nivel superior desde los
+#    `import` de openpyxl que preceden a `COLS = …` hasta la anterior a `_sin_excel = …`, dos anclas
+#    unicas o no arranca. Se ejecutan con los datos del escaner 2 vestidos como los suyos
+#    (`registros`, `problematicos`, …): mismas hojas, columnas, formulas vivas, anchos y semaforo, y
+#    si alguien cambia el viejo, el nuevo lo hereda sin tocar este fichero. El viejo NO se modifica.
+# 🔑 Si el bloque empieza a usar un nombre que aqui no se le da, NO se adivina: revienta con el nombre.
+PUERTAS_ANALISIS = ('d', 'e', 'f')
+_ANCLA_INICIO_EXCEL, _ANCLA_FIN_EXCEL = 'COLS', '_sin_excel'
+
+
+def _nombres_libres(nodos):
+    """Los nombres que el bloque LEE y no define el mismo (ni son del lenguaje)."""
+    import builtins
+    leidos, definidos = set(), set()
+    for n in nodos:
+        for x in ast.walk(n):
+            if isinstance(x, ast.Name):
+                (leidos if isinstance(x.ctx, ast.Load) else definidos).add(x.id)
+            elif isinstance(x, (ast.FunctionDef, ast.ClassDef)):
+                definidos.add(x.name)
+            elif isinstance(x, ast.arg):
+                definidos.add(x.arg)
+            elif isinstance(x, (ast.Import, ast.ImportFrom)):
+                definidos.update((a.asname or a.name).split('.')[0] for a in x.names)
+    return leidos - definidos - set(dir(builtins))
+
+
+def sacar_bloque_excel(ruta=RUTA_MOTOR):
+    """(codigo, nombres_que_necesita) de la Celda 9 del viejo. Falla CERRADO si una ancla falta,
+    esta dos veces o estan al reves."""
+    with io.open(ruta, encoding='utf-8') as fh:
+        arbol = ast.parse(fh.read(), ruta)
+    cuerpo = arbol.body
+
+    def ancla(nombre):
+        idx = [i for i, n in enumerate(cuerpo) if isinstance(n, ast.Assign) and nombre in _nombres_asignados(n)]
+        if len(idx) != 1:
+            raise PiezaNoEncontrada('%s: se esperaba UNA asignacion de nivel superior a %s y hay %d'
+                                    % (ruta, nombre, len(idx)))
+        return idx[0]
+    ini, fin = ancla(_ANCLA_INICIO_EXCEL), ancla(_ANCLA_FIN_EXCEL)
+    while ini > 0 and isinstance(cuerpo[ini - 1], (ast.Import, ast.ImportFrom)):
+        ini -= 1
+    if not ini < fin:
+        raise PiezaNoEncontrada('%s: %s no va antes de %s' % (ruta, _ANCLA_INICIO_EXCEL, _ANCLA_FIN_EXCEL))
+    nodos = cuerpo[ini:fin]
+    return compile(ast.Module(body=nodos, type_ignores=[]), ruta, 'exec'), _nombres_libres(nodos)
+
+
+def _pais_viejo(c):
+    """Un pais calculado por el cruce, con las llaves con que la Celda 9 del viejo lo lee.
+    `vendidos` y `n_of` no los guarda el cruce: van vacios, no inventados."""
+    return {'rank_act': c.get('rank'), 'rank90': c.get('rank_90d'), 'vendidos': None, 'precio': c.get('precio_venta'),
+            'canal': c.get('canal'), 'n_of': None, 'ref_pct': c.get('ref_pct'), 'fee': c.get('fee_fba'),
+            'iva': c.get('iva'), 'decision': c.get('decision'), 'margen': c.get('margen')}
+
+
+def datos_como_el_viejo(foto, resultados, apartados, M):
+    """Los datos del cruce con la forma de los del viejo, hoja a hoja (la correspondencia):
+      · Análisis        ← los que SE VENDEN (puertas d, e y f), del de mas margen en ES al de menos,
+                          como el viejo (que dejaba fuera por puesto lo que no se vende);
+      · Descartados     ← EAN de forma rara y estado no servible (sus `problematicos`) + puerta a
+                          (sus `no_encontrados`) + chase suelto + duplicado del proveedor, en su orden;
+      · Ambiguos        ← puerta b (el nuevo no elige ASIN: `asin_elegido` vacio);
+      · Sin_rank        ← puerta c sin dato de caidas;
+      · Precio por lote ← nada (es de OcioStock: en HEO el viejo tambien la deja solo con su cabecera);
+      · Chase_manual    ← las cajas con chase sin EAN de la figura (puerta previa `chase_funko`).
+    La marca fuera (o no elegida) NO va a Descartados: el viejo nunca la vio (el director la
+    filtraba antes); esta en «Puertas previas»."""
+    por_foto = {f['id']: f for f in foto}
+    registros = []
+    for r in resultados:
+        if r['puerta'] not in PUERTAS_ANALISIS:
+            continue
+        f = por_foto[r['foto_id']]
+        calc = r.get('paises') or {}
+        titulo = next((calc[p].get('titulo') for p in M.PAISES if p in calc and calc[p].get('titulo')), '')
+        registros.append({
+            'nombre': f.get('nombre') or '', 'ean': f['ean_original'], 'asin': r['asin'], 'marca': f.get('marca') or '',
+            'core': f['ean_core'], '_pa_efectivo': f.get('precio_unidad'), 'ambiguo': False, 'titulo_amz': titulo,
+            # «Coincide» y «Cotejo» los saca el viejo con Keepa; el cruce no: vacios (None), no inventados.
+            'coincide': None, 'coherencia_caja': f.get('aviso_caja'), 'url': '', 'volumen': None,
+            '_paises_calc': {p: _pais_viejo(c) for p, c in calc.items()},
+            '_margen_es': (calc.get('ES') or {}).get('margen')})
+    registros.sort(key=lambda x: x['_margen_es'] if x['_margen_es'] is not None else -10 ** 9, reverse=True)
+
+    def fila(ean, nombre, motivo):
+        return {'EAN': ean, 'Cabecera': nombre or '', 'Motivo': motivo}
+
+    def de(*motivos):
+        return [fila(a['ean_original'], a['nombre'], a['detalle']) for a in apartados if a['motivo'] in motivos]
+    ambiguos, sin_rank, no_encontrados = [], [], []
+    for r in resultados:
+        f = por_foto[r['foto_id']]
+        if r['puerta'] == 'a':
+            no_encontrados.append(fila(f['ean_original'], f.get('nombre'), r['detalle']))
+        elif r['puerta'] == 'b':
+            ambiguos.append({'EAN': f['ean_original'], 'asin_elegido': None})
+        elif r['motivo'] == 'c_sin_dato':
+            es = (r.get('paises') or {}).get('ES') or {}
+            sin_rank.append({'ean_in': f['ean_original'], 'asin': r['asin'], 'fila': {'nombre': f.get('nombre') or ''},
+                             'r_act': es.get('rank'), 'r_90': es.get('rank_90d')})
+    # Las cajas con chase sin EAN de la figura pasaron el filtro, que exige «disponible»: de ahi su estado.
+    chase = [{'nombre': a['nombre'] or '', 'producto_heo': a.get('producto_heo') or '', 'ean_caja': a['ean_original'],
+              'precio_caja': a['precio_catalogo'], 'estado': 'disponible', 'imagen': '', 'link_amazon': ''}
+             for a in apartados if a['motivo'] == 'chase_funko']
+    return {'registros': registros, 'problematicos': de('ean_forma_rara', 'estado_no_servible'),
+            'no_encontrados': no_encontrados, 'chase_sueltos': de('chase_suelto'), '_dups': de('duplicado_proveedor'),
+            'ambiguos': ambiguos, 'sin_rank': sin_rank, 'chase_pendientes': chase,
+            # Sin cotejo en el escaner 2: la celda va vacia (el viejo pone «—» cuando no lo hizo).
+            'cotejo_info': {x['ean']: {'veredicto': None, 'detalle': None} for x in registros},
+            'PROVEEDOR': PROVEEDOR}
+
+
+def excel_como_el_viejo(foto, resultados, apartados, M, ruta=RUTA_MOTOR):
+    """El libro de openpyxl con las SEIS hojas del viejo, escritas por SU codigo. El catalogo propio
+    (`M.poner_catalogo_propio`) tiene que estar puesto: «En mi BD» sale de el, con `en_bd_txt` del viejo."""
+    from contextlib import redirect_stdout
+    codigo, necesita = sacar_bloque_excel(ruta)
+    ns = sacar_piezas(ruta, ('pct_comision_celda', 'en_bd_txt'), (), base=M._ns)
+    ns.update(datos_como_el_viejo(foto, resultados, apartados, M))
+    faltan = sorted(n for n in necesita if n not in ns)
+    if faltan:
+        raise PiezaNoEncontrada('%s: la Celda 9 del viejo usa %s y el escaner 2 no se lo da' % (ruta, ', '.join(faltan)))
+    with redirect_stdout(io.StringIO()):     # sus `print` de la hoja no ensucian el log del cruce
+        exec(codigo, ns)
+    return ns['wb']
