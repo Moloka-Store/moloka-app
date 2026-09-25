@@ -821,7 +821,7 @@ def _pct(x):
     return ('%.1f %%' % (x * 100)).replace('.', ',') if x is not None else '—'
 
 
-def decidir(fila_foto, cands_por_pais, caidas_por_pais, params, M):
+def decidir(fila_foto, cands_por_pais, caidas_por_pais, params, M, eleccion=None):
     """La PUERTA de una fila de la foto. Devuelve {'puerta', 'motivo', 'detalle', 'asin',
     'fichas', 'paises': {pais: calculo}, 'caidas': {pais: n o None}, 'mejor': {...} o None}.
 
@@ -833,16 +833,17 @@ def decidir(fila_foto, cands_por_pais, caidas_por_pais, params, M):
         mejor pais sale de TODOS los calculados, venda o no alli: cada pais lleva `vende_aqui`
         y la pantalla marca «no vende aquí», pero se ve (decide Fernando).
 
+    (B4 → B5) `eleccion` (`cargar_eleccion_viejo`): con dos o mas fichas, la del viejo elige UNA
+    entre las de ES y el EAN sigue como si solo tuviera esa; su porque va en `detalle` y cada ficha
+    lleva `elegida`.
+
     Orden de las puertas (una y solo una):
       a · ninguna ficha con ASIN en ningun CSV;
-      b · dos o mas ASIN distintos para el mismo EAN (no se calcula: se listan);
+      b · dos o mas ASIN distintos para el mismo EAN y la regla del viejo no puede elegir (B5: sin
+          `eleccion`, o sin ninguna ficha en ES, que es donde elige el viejo); se listan;
       c · no se vende: ningun pais del FILTRO con MAS de `umbral` caidas en 30 dias;
       d/e/f · se vende: COMPRAR si algun pais da COMPRAR, VALORAR si alguno da VALORAR, y si
               ninguno, sin margen. El mejor pais es el de mas margen dentro de esa decision."""
-    umbral = params['umbral']
-    filtro = list(params['paises_filtro'])
-    # Los que se calculan, en el orden de los parametros; solo los que traen CSV.
-    paises = [p for p in params['paises_calculo'] if p in cands_por_pais]
     todas = [(p, r) for p in cands_por_pais for r in cands_por_pais[p]]
     asins = list(dict.fromkeys(r['asin'] for _p, r in todas if r.get('asin')))
     base = {'asin': None, 'fichas': None, 'paises': {}, 'caidas': {}, 'mejor': None}
@@ -862,11 +863,30 @@ def decidir(fila_foto, cands_por_pais, caidas_por_pais, params, M):
                            'rank': r.get('rank'), 'rank_90d': r.get('rank90'),
                            'caidas_30d': caidas_por_pais.get(p, {}).get(r['asin']),
                            'precio_venta': precio, 'canal': canal})
-        return dict(base, puerta='b', motivo='b_varias_fichas',
-                    detalle='%d fichas para el mismo EAN: %s' % (len(asins), ', '.join(asins)),
-                    fichas=fichas)
+        detalle = '%d fichas para el mismo EAN: %s' % (len(asins), ', '.join(asins))
+        elegida = eleccion.elegir(fila_foto.get('nombre') or '', cands_por_pais.get('ES') or []) if eleccion else None
+        if elegida is None:
+            if eleccion is not None:
+                detalle += ' · ninguna en ES: el viejo elige entre las de ES, y aquí no hay ninguna'
+            return dict(base, puerta='b', motivo='b_varias_fichas', detalle=detalle, fichas=fichas)
+        # (B5) La del viejo ha elegido: el EAN sigue con ESA ficha, como si fuera la unica.
+        for fi in fichas:
+            fi['elegida'] = fi['asin'] == elegida['asin']
+        salida = _decidir_con_asin(fila_foto, cands_por_pais, caidas_por_pais, params, M, elegida['asin'], base)
+        descartadas = [a for a in asins if a != elegida['asin']]
+        return dict(salida, fichas=fichas, eleccion=elegida,
+                    detalle='Ficha %s elegida como el viejo (%s: %s; descartadas %s) · %s'
+                            % (elegida['asin'], elegida['veredicto'], elegida['detalle'],
+                               ', '.join(descartadas), salida['detalle']))
+    return _decidir_con_asin(fila_foto, cands_por_pais, caidas_por_pais, params, M, asins[0], base)
 
-    asin = asins[0]
+
+def _decidir_con_asin(fila_foto, cands_por_pais, caidas_por_pais, params, M, asin, base):
+    """Las puertas c, d, e y f para UNA ficha (la unica, o la que eligio la regla del viejo)."""
+    umbral = params['umbral']
+    filtro = list(params['paises_filtro'])
+    # Los que se calculan, en el orden de los parametros; solo los que traen CSV.
+    paises = [p for p in params['paises_calculo'] if p in cands_por_pais]
     calculos, caidas = {}, {}
     for p in paises:
         rec = next((r for r in cands_por_pais.get(p, []) if r.get('asin') == asin), None)
@@ -1232,13 +1252,16 @@ def _pais_viejo(c):
             'iva': c.get('iva'), 'decision': c.get('decision'), 'margen': c.get('margen')}
 
 
-def datos_como_el_viejo(foto, resultados, apartados, M):
+def datos_como_el_viejo(foto, resultados, apartados, M, eleccion=None):
     """Los datos del cruce con la forma de los del viejo, hoja a hoja (la correspondencia):
       · Análisis        ← los que SE VENDEN (puertas d, e y f), del de mas margen en ES al de menos,
                           como el viejo (que dejaba fuera por puesto lo que no se vende);
       · Descartados     ← EAN de forma rara y estado no servible (sus `problematicos`) + puerta a
                           (sus `no_encontrados`) + chase suelto + duplicado del proveedor, en su orden;
-      · Ambiguos        ← puerta b (el nuevo no elige ASIN: `asin_elegido` vacio);
+      · Ambiguos        ← (B5) cada EAN con dos o mas fichas en ES, con las filas que escribe el
+                          viejo: `asin_elegido` = la que va ganando POR PUESTO al registrar cada
+                          ficha (no la del cotejo); y los que siguen en la puerta b (sin ficha en ES),
+                          con `asin_elegido` vacio;
       · Sin_rank        ← puerta c sin dato de caidas;
       · Precio por lote ← nada (es de OcioStock: en HEO el viejo tambien la deja solo con su cabecera);
       · Chase_manual    ← las cajas con chase sin EAN de la figura (puerta previa `chase_funko`).
@@ -1266,13 +1289,19 @@ def datos_como_el_viejo(foto, resultados, apartados, M):
 
     def de(*motivos):
         return [fila(a['ean_original'], a['nombre'], a['detalle']) for a in apartados if a['motivo'] in motivos]
-    ambiguos, sin_rank, no_encontrados = [], [], []
+    ambiguos, sin_rank, no_encontrados, cotejo = [], [], [], {}
     for r in resultados:
         f = por_foto[r['foto_id']]
-        if r['puerta'] == 'a':
-            no_encontrados.append(fila(f['ean_original'], f.get('nombre'), r['detalle']))
+        # (B5) Las fichas de ES en el orden en que llegaron, con su puesto de 90 dias.
+        es = [{'asin': x['asin'], 'rank90': x.get('rank_90d')} for x in (r.get('fichas') or []) if x.get('pais') == 'ES']
+        if eleccion is not None and len({x['asin'] for x in es}) >= 2:
+            ambiguos += [{'EAN': f['ean_original'], 'asin_elegido': a} for a in eleccion.ganador_por_puesto(es)]
         elif r['puerta'] == 'b':
             ambiguos.append({'EAN': f['ean_original'], 'asin_elegido': None})
+        if (r.get('eleccion') or {}).get('n', 0) >= 2:
+            cotejo[f['ean_original']] = {'veredicto': r['eleccion']['veredicto'], 'detalle': r['eleccion']['detalle']}
+        if r['puerta'] == 'a':
+            no_encontrados.append(fila(f['ean_original'], f.get('nombre'), r['detalle']))
         elif r['motivo'] == 'c_sin_dato':
             es = (r.get('paises') or {}).get('ES') or {}
             sin_rank.append({'ean_in': f['ean_original'], 'asin': r['asin'], 'fila': {'nombre': f.get('nombre') or ''},
@@ -1284,21 +1313,158 @@ def datos_como_el_viejo(foto, resultados, apartados, M):
     return {'registros': registros, 'problematicos': de('ean_forma_rara', 'estado_no_servible'),
             'no_encontrados': no_encontrados, 'chase_sueltos': de('chase_suelto'), '_dups': de('duplicado_proveedor'),
             'ambiguos': ambiguos, 'sin_rank': sin_rank, 'chase_pendientes': chase,
-            # Sin cotejo en el escaner 2: la celda va vacia (el viejo pone «—» cuando no lo hizo).
-            'cotejo_info': {x['ean']: {'veredicto': None, 'detalle': None} for x in registros},
+            # Cotejo: el del viejo donde se ha elegido entre varias fichas (B5); en el resto la celda
+            # va vacia (el viejo coteja tambien las de una sola ficha, y aqui eso no se hace).
+            'cotejo_info': {x['ean']: cotejo.get(x['ean'], {'veredicto': None, 'detalle': None}) for x in registros},
             'PROVEEDOR': PROVEEDOR}
 
 
-def excel_como_el_viejo(foto, resultados, apartados, M, ruta=RUTA_MOTOR):
+def excel_como_el_viejo(foto, resultados, apartados, M, ruta=RUTA_MOTOR, eleccion=None):
     """El libro de openpyxl con las SEIS hojas del viejo, escritas por SU codigo. El catalogo propio
     (`M.poner_catalogo_propio`) tiene que estar puesto: «En mi BD» sale de el, con `en_bd_txt` del viejo."""
     from contextlib import redirect_stdout
     codigo, necesita = sacar_bloque_excel(ruta)
     ns = sacar_piezas(ruta, ('pct_comision_celda', 'en_bd_txt'), (), base=M._ns)
-    ns.update(datos_como_el_viejo(foto, resultados, apartados, M))
+    ns.update(datos_como_el_viejo(foto, resultados, apartados, M, eleccion))
     faltan = sorted(n for n in necesita if n not in ns)
     if faltan:
         raise PiezaNoEncontrada('%s: la Celda 9 del viejo usa %s y el escaner 2 no se lo da' % (ruta, ', '.join(faltan)))
     with redirect_stdout(io.StringIO()):     # sus `print` de la hoja no ensucian el log del cruce
         exec(codigo, ns)
     return ns['wb']
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 7 · (B5) ELEGIR LA FICHA CUANDO UN EAN TIENE VARIAS, CON LA REGLA DEL VIEJO
+# ═══════════════════════════════════════════════════════════════════════════════
+# moloka_escaner_nube.py, Celda 6 (Fase 1) y su COTEJO: el viejo pregunta a Keepa SOLO en ES; todas
+# las fichas que devuelve para un EAN son candidatas (`cands_por_ean`), y `elegir_candidato` elige:
+#   1. coteja el TITULO de cada ficha con el nombre del proveedor (`cotejar`: palabras distintivas
+#      segun lo raras que son en el CATALOGO DEL PROPIO ESCANEO, `construir_idf`);
+#   2. si alguna casa, de las que casan, la de menor puesto medio de 90 dias en ES (`keyrank`: sin
+#      puesto de 90 dias, va la ultima);
+#   3. si ninguna casa, la MAS PARECIDA (y a igualdad, la de mejor puesto), marcada «⚠ DUDOSO»; si
+#      ninguna se parece en nada, la de mejor puesto, tambien «⚠ DUDOSO»;
+#   4. si no hay texto con que cotejar, la de mejor puesto («n/d»). NUNCA se rinde: siempre elige.
+# 🔴 NO SE COPIA: se sacan del fichero del viejo, por estructura, `_tok_cot`, `construir_idf`, `_idf`,
+#    `_distintivo`, `cotejar`, `elegir_candidato`, `UMBRAL_COTEJO` y `keyrank` (que va anidada dentro
+#    del `if filas:`, por eso se busca por nombre en todo el arbol y tiene que ser UNA). El cotejo
+#    corre como en el viejo con HEO: activo (ningun workflow le pasa COTEJO_MODO=off y HEO trae nombre).
+# 🔒 El ASIN elegido vive SOLO en el resultado del cruce: ni `productos` ni ninguna tabla de identidad.
+DEFS_ELECCION = ('_tok_cot', 'construir_idf', '_idf', '_distintivo', 'cotejar', 'elegir_candidato')
+NOMBRES_ELECCION = ('UMBRAL_COTEJO',)
+
+
+def _def_anidada(ruta, nombre):
+    """El `def` de ese nombre, este donde este dentro del fichero; tiene que haber UNO."""
+    with io.open(ruta, encoding='utf-8') as fh:
+        arbol = ast.parse(fh.read(), ruta)
+    defs = [n for n in ast.walk(arbol) if isinstance(n, ast.FunctionDef) and n.name == nombre]
+    if len(defs) != 1:
+        raise PiezaNoEncontrada('%s: se esperaba UN def %s y hay %d' % (ruta, nombre, len(defs)))
+    return defs[0]
+
+
+class EleccionViejo:
+    """La regla del viejo, lista para usar en un cruce. `nombres`: los del catalogo del escaneo (la
+    foto de la pasada), sobre los que se calcula que palabras distinguen, como `construir_idf(filas)`."""
+
+    def __init__(self, nombres, ruta=RUTA_MOTOR):
+        from collections import Counter
+        self._ns = sacar_piezas(ruta, DEFS_ELECCION, NOMBRES_ELECCION,
+                                base={'re': re, 'math': math, 'unicodedata': __import__('unicodedata'),
+                                      'Counter': Counter, '_DF': Counter(), '_NDOC': 1, 'COTEJO_ACTIVO': True})
+        exec(compile(ast.Module(body=[_def_anidada(ruta, 'keyrank')], type_ignores=[]), ruta, 'exec'), self._ns)
+        self._ns['construir_idf'](list(nombres))
+
+    @property
+    def n_nombres(self):
+        return self._ns['_NDOC']
+
+    def elegir(self, nombre, registros_es):
+        """`registros_es`: las filas del CSV de ES de este EAN. → {'asin', 'veredicto', 'detalle', 'n'}
+        o None si en ES no hay ninguna ficha con ASIN (el viejo solo mira ES)."""
+        cands, vistos = [], set()
+        for r in registros_es:
+            a = r.get('asin')
+            if a and a not in vistos:
+                vistos.add(a)
+                cands.append({'asin': a, 'title': r.get('titulo') or '', 'r_90': r.get('rank90')})
+        if not cands:
+            return None
+        if len(cands) == 1:
+            return {'asin': cands[0]['asin'], 'veredicto': 'única en ES', 'n': 1,
+                    'detalle': 'solo hay una ficha en ES, que es donde mira el viejo'}
+        elegido, veredicto, detalle = self._ns['elegir_candidato'](nombre, cands, self._ns['keyrank'])
+        return {'asin': elegido['asin'], 'veredicto': veredicto, 'detalle': detalle, 'n': len(cands)}
+
+    def ganador_por_puesto(self, registros_es):
+        """Las filas de la hoja «Ambiguos» del viejo para este EAN: al registrar cada ficha nueva, la
+        que va ganando POR PUESTO (`keyrank`, con «<» estricto: a igualdad se queda la de antes). Es lo
+        que el viejo escribe en `asin_elegido`, que NO es la elegida por el cotejo."""
+        kr = self._ns['keyrank']
+        filas, prev = [], None
+        vistos = set()
+        for r in registros_es:
+            a = r.get('asin')
+            if not a or a in vistos:
+                continue
+            vistos.add(a)
+            c = {'asin': a, 'r_90': r.get('rank90')}
+            if prev is not None:
+                filas.append(c['asin'] if kr(c) < kr(prev) else prev['asin'])
+                if kr(c) < kr(prev):
+                    prev = c
+            else:
+                prev = c
+        return filas
+
+
+def cargar_eleccion_viejo(nombres, ruta=RUTA_MOTOR):
+    return EleccionViejo(nombres, ruta)
+
+
+# ── (B5-bis) EL CORPUS DEL COTEJO NO DEPENDE DE LAS MARCAS ELEGIDAS ─────────────────────────
+# Las palabras «distintivas» se miden sobre un catalogo. Si fuera solo la FOTO, con marcas elegidas el
+# catalogo encoge y cambia que palabra distingue (en d053378c, «deck» y «case» dejan de serlo): la
+# eleccion dependeria de lo que Fernando marco. El corpus es el que tendria la pasada en modo «todas»:
+# la foto + lo apartado por MARCA (marca fuera / no elegida) que habria pasado las demas puertas previas.
+#   · estado no servible: la marca fuera se lista SOLO si esta «disponible», que es lo unico que HEO
+#     admite (PERFILES['HEO']['estados_ok']): la pasa siempre;
+#   · chase suelto y EAN de forma rara: las mismas funciones del viejo (`clasificar_chase`, `core_ean`);
+#   · caja con chase (lista `chase` de descargar_heo, con unidades en el nombre): el mismo camino que en
+#     `construir_foto` (`ean_de_la_figura`); si no sale EAN de la figura, iria a su puerta previa;
+#   · duplicado del proveedor: una por (EAN, chase), la MAS BARATA, contando tambien con la foto.
+def corpus_cotejo(foto, apartados, M):
+    """(nombres, n_de_fuera): los nombres del corpus del cotejo y cuantos vienen de fuera de la foto."""
+    perfil = M.PERFILES[PROVEEDOR]
+    mejor = {}                                       # clave → (precio, nombre, de_fuera)
+
+    def poner(clave, precio, nombre, de_fuera):
+        prev = mejor.get(clave)
+        if prev is None or (precio is not None and (prev[0] is None or precio < prev[0])):
+            mejor[clave] = (precio, nombre, de_fuera)
+    for f in foto:
+        poner((M.norm(f['ean_core']), bool(f.get('es_chase'))), f.get('precio_catalogo'), f.get('nombre') or '', False)
+    for a in apartados:
+        if a.get('motivo') != 'marca_fuera':
+            continue
+        if perfil.get('estados_ok') and 'disponible' not in perfil['estados_ok']:
+            continue
+        nombre, ean = a.get('nombre') or '', str(a.get('ean_original') or '').strip()
+        es_case, _es_caja6, descartar = M.clasificar_chase(nombre, ean)
+        core = M.core_ean(ean)
+        if (not core.isdigit()) or len(core) not in (12, 13):
+            # ¿Una caja con chase de la lista `chase`? Entonces el EAN es el de su figura.
+            if unidades_caja_chase(nombre) is None:
+                continue
+            figura, _origen, _aviso = ean_de_la_figura(ean, a.get('producto_heo'), M)
+            if figura is None:
+                continue
+            poner((M.norm(figura), True), a.get('precio_catalogo'), nombre, True)
+            continue
+        if descartar:
+            continue
+        poner((M.norm(core), bool(es_case)), a.get('precio_catalogo'), nombre, True)
+    nombres = [v[1] for v in mejor.values()]
+    return nombres, sum(1 for v in mejor.values() if v[2])

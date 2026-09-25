@@ -367,7 +367,10 @@ def caso(nombre, frenar=None, crudo=None, modo=None, escena=None, extra=None):
               # (B2) el Hasbro (EAN 7: solo entra en el modo «todas») y la figura comun de FK87245.
               ('B0HASB0001', 7, '30', '22.00'), ('B0CAJA0001', '889698872454', '30', '30.00')]),
             ('KeepaExport-2026-09-24-VisualizadorDeProductos (1).csv', 'de',
-             [('B0ALFA0001', 1, '12', '21.00'), ('B0GAMA0001', 3, '2', '21.00')])):
+             [('B0ALFA0001', 1, '12', '21.00'), ('B0GAMA0001', 3, '2', '21.00'),
+              # (B5) el EPSILON: dos fichas, y SOLO en DE. El viejo elige entre las de ES y aquí no hay
+              #      ninguna → sigue en la puerta b. (El DELTA, con dos en ES, ahora se elige.)
+              ('B0EPSI0001', 5, '12', '21.00'), ('B0EPSI0002', 5, '12', '21.00')])):
         bd['storage']['escaner2'][carpeta + '20260924-1200-' + nombre_fichero] = base64.b64encode(
             csv_visualizador(e2, pro, M, pais, filas)).decode()
     if nombre == 'bueno':
@@ -427,12 +430,20 @@ eq('2 · el pais de cada CSV sale del dato', sorted((f['pais'] or '', f['usado']
    [('', False), ('DE', True), ('ES', True), ('ES', True), ('IT', True)])
 eq('2 · 🔴 el CSV roto se dice (en ficheros) y NO tumba el cruce',
    [(f['nombre'].endswith('roto.csv'), bool(f['error'])) for f in c['ficheros'] if f['error']], [(True, True)])
-eq('2 · puertas: entradas 5 = a1 b1 c1 d0 e1 f1', (c['n_entradas'], c['n_a'], c['n_b'], c['n_c'], c['n_d'], c['n_e'], c['n_f']),
-   (5, 1, 1, 1, 0, 1, 1))
+eq('2 · (B5) puertas: entradas 5 = a0 b1 c1 d0 e1 f2 (el DELTA, con dos fichas en ES, se elige; el EPSILON, solo en DE, sigue en b)',
+   (c['n_entradas'], c['n_a'], c['n_b'], c['n_c'], c['n_d'], c['n_e'], c['n_f']), (5, 0, 1, 1, 0, 1, 2))
+_delta = [r for r in T['escaner2_resultado_ean'] if r['asin'] and r['asin'].startswith('B0DELT')][0]
+eq('2 · 🔴 (B5) el DELTA sigue con UNA ficha, la del viejo, y el porqué y las descartadas quedan en el resultado',
+   (_delta['puerta'], _delta['asin'], [(fi['asin'], fi['elegida']) for fi in _delta['fichas'] if fi['pais'] == 'ES'],
+    _delta['detalle'].startswith('Ficha B0DELT0001 elegida como el viejo (⚠ DUDOSO'), 'descartadas B0DELT0002' in _delta['detalle']),
+   ('f', 'B0DELT0001', [('B0DELT0001', True), ('B0DELT0002', False)], True, True))
+_epsi = [r for r in T['escaner2_resultado_ean'] if r['puerta'] == 'b'][0]
+eq('2 · (B5) el EPSILON sigue en b, y dice por qué no se pudo elegir',
+   (_epsi['asin'], 'ninguna en ES' in _epsi['detalle']), (None, True))
 eq('2 · …una fila por EAN, ni mas ni menos', len(T['escaner2_resultado_ean']), 5)
 _f1 = [r for r in T['escaner2_resultado_ean'] if r['puerta'] == 'f']
-eq('2 · COMPRAR con su mejor pais (ES: IVA de ficha 10 %)', sorted((r['asin'], r['mejor_pais']) for r in _f1),
-   [('B0ALFA0001', 'ES')])
+eq('2 · COMPRAR con su mejor pais (ES: IVA de ficha 10 %; y el DELTA, ya elegido)', sorted((r['asin'], r['mejor_pais']) for r in _f1),
+   [('B0ALFA0001', 'ES'), ('B0DELT0001', 'ES')])
 _es1 = [r for r in T['escaner2_resultado_pais'] if r['asin'] == 'B0ALFA0001' and r['pais'] == 'ES'][0]
 _alfa_p = {r['pais']: r for r in T['escaner2_resultado_pais'] if r['asin'] == 'B0ALFA0001'}
 eq('2 · 🔴 el ALFA se calcula en ES, IT y DE (el IT también), cada uno con su marca «vende aquí»',
@@ -471,9 +482,9 @@ _foto_ean = {f['id']: f['ean_original'] for f in T['escaner2_foto']}
 _mes = {r['foto_id']: r['margen'] for r in T['escaner2_resultado_pais'] if r['pais'] == 'ES'}
 _def = sorted((r['foto_id'] for r in T['escaner2_resultado_ean'] if r['puerta'] in 'def'),
               key=lambda fid: _mes.get(fid) if _mes.get(fid) is not None else -10 ** 9, reverse=True)
-eq('2 · (B4) una fila por país (ES, IT, FR, DE) de cada producto que se vende (puertas d, e, f: 2 aquí), por margen de ES',
+eq('2 · (B4) una fila por país (ES, IT, FR, DE) de cada producto que se vende (puertas d, e, f: 3 aquí, con el DELTA elegido), por margen de ES',
    ([(r[_ia['EAN']], r[_ia['País']]) for r in _an[1:]], len(_def)),
-   ([(_foto_ean[fid], pais) for fid in _def for pais in ('ES', 'IT', 'FR', 'DE')], 2))
+   ([(_foto_ean[fid], pais) for fid in _def for pais in ('ES', 'IT', 'FR', 'DE')], 3))
 _fil_es = [r for r in _an[1:] if r[_ia['EAN']] == _ean(M, 1) and r[_ia['País']] == 'ES'][0]
 eq('2 · (B4) el ALFA en ES: la decisión es la GUARDADA y el beneficio, la fórmula VIVA del viejo con su IVA de ficha (10 %)',
    (_fil_es[_ia['Decisión']], _fil_es[_ia['Beneficio (€)']], _fil_es[_ia['Margen']]),
@@ -483,14 +494,20 @@ eq('2 · (B4) «En mi BD» sale del catálogo propio con la función del viejo (
 _fil_fr = [r for r in _an[1:] if r[_ia['EAN']] == _ean(M, 1) and r[_ia['País']] == 'FR'][0]
 eq('2 · (B4) sin CSV de FR, su fila dice «Sin datos» y no inventa números',
    (_fil_fr[_ia['Decisión']], _fil_fr[_ia['Margen']], _fil_fr[_ia['Precio venta (€)']]), ('Sin datos', None, None))
-_VACIAS = ('Vendidos/mes', 'Nº ofertas', 'Coincide', 'Cotejo', 'Cotejo (detalle)', 'Promo activa', 'OcioStock')
+_VACIAS = ('Vendidos/mes', 'Nº ofertas', 'Coincide', 'Promo activa', 'OcioStock')
 eq('2 · (B4) las columnas que el escáner 2 no tiene van VACÍAS, con su cabecera',
    {c: [r[_ia[c]] for r in _an[1:] if r[_ia[c]] not in (None, '')] for c in _VACIAS}, {c: [] for c in _VACIAS})
+eq('2 · (B5) «Cotejo» lleva el veredicto del viejo SOLO donde se eligió entre varias fichas (el DELTA)',
+   sorted({(r[_ia['EAN']], r[_ia['Cotejo']]) for r in _an[1:] if r[_ia['Cotejo']]}), [(_ean(M, 4), '⚠ DUDOSO')])
 _puerta = {_foto_ean[r['foto_id']]: r['puerta'] for r in T['escaner2_resultado_ean']}
-eq('2 · (B4) Ambiguos ← puerta b; Sin_rank ← c sin dato; Descartados ← puerta a + apartados (no la marca fuera)',
-   ([r[0] for r in list(_wb['Ambiguos'].iter_rows(values_only=True))[1:]],
+eq('2 · (B5) Ambiguos: el DELTA con el ganador POR PUESTO (lo que escribe el viejo) y el EPSILON, que sigue en b, vacío',
+   # (sin orden: las filas siguen el de la foto, que aquí sale de un id aleatorio)
+   sorted((tuple(r) for r in list(_wb['Ambiguos'].iter_rows(values_only=True))[1:]), key=str),
+   sorted([(_ean(M, 4), 'B0DELT0001'), (_ean(M, 5), None)], key=str))
+eq('2 · (B4) Descartados ← puerta a + apartados (no la marca fuera)',
+   ([],
     sorted(r[0] for r in list(_wb['Descartados'].iter_rows(values_only=True))[1:])),
-   ([e for e, pu in _puerta.items() if pu == 'b'],
+   ([],
     sorted([e for e, pu in _puerta.items() if pu == 'a']
            + [a['ean_original'] for a in T['escaner2_apartado'] if a['motivo'] in ('chase_suelto', 'ean_forma_rara',
                                                                                   'duplicado_proveedor', 'estado_no_servible')])))
@@ -622,6 +639,9 @@ eq('9 · 🔴 CUADRA: crudo 11 = previas 6 + foto 5',
 eq('9 · 🔴 el modo «elegidas» NO toca reglas_director, ni para leer', [o for o in bd['ops'] if o[2] == 'reglas_director'], [])
 c = T['escaner2_cruce'][0]
 eq('9 · el cruce sale en VERDE, LISTA y cuadrado', (cod2, c['estado'], c['cuadra']), (0, 'lista', True))
+_linea = [x for x in log2.splitlines() if 'ELECCION DE FICHA' in x]
+eq('9 · (B5-bis) el log del cruce dice el corpus del cotejo y cuántos vienen de fuera de la foto (la foto 5 + el Hasbro no elegido)',
+   [('corpus del cotejo 6 nombres' in x, '1 de fuera de la foto' in x) for x in _linea], [(True, True)])
 _xl = [k for k in bd['storage']['escaner2'] if k.startswith('heo/%s/%s/Escaner2_HEO_' % (pasada, c['id']))]
 _wb = load_workbook(io.BytesIO(base64.b64decode(bd['storage']['escaner2'][_xl[0]])), read_only=True)
 eq('9 · 🔴 el Excel lleva las seis hojas del viejo delante, con las cabeceras de COLS en «Análisis»',
