@@ -66,20 +66,29 @@ MOTIVOS = {
     'f_comprar': 'f',
 }
 # Lo que se aparta ANTES de la foto y se guarda EAN a EAN, con su motivo (escaner2_apartado).
-MOTIVOS_APARTADO = ('chase_funko', 'estado_no_servible', 'chase_suelto', 'ean_forma_rara',
+# `marca_fuera` se lista desde el encargo B2 (25-sep-2026): antes solo se contaba.
+MOTIVOS_APARTADO = ('chase_funko', 'marca_fuera', 'estado_no_servible', 'chase_suelto', 'ean_forma_rara',
                     'duplicado_proveedor')
+# 🔑 LOS DOS MODOS DE BARRIDO (encargo B2), elegidos en la pantalla en cada pasada:
+#    · 'marcas' · el filtro del director, con las marcas de `reglas_director` (como siempre);
+#    · 'todas'  · solo «disponible»: sin filtro de marca y SIN LEER `reglas_director`.
+MODOS = ('marcas', 'todas')
+# El tope del Visualizador de Keepa: 10.000 códigos por lista. La tanda del motor no lo pasa.
+TOPE_VISUALIZADOR = 10000
 # 🔴 LAS PUERTAS PREVIAS (Fernando, 24-sep-2026): el cuadre empieza en el catalogo CRUDO de HEO,
 #    no en la foto. Todo producto que devuelve HEO sale por UNA de estas o entra en la foto:
 #        crudo = puertas previas + foto        y, al cruzar,        crudo = previas + a..f
 #    En el orden en que se aplican. Ninguna regla de descarte cambia: solo se cuentan y se ven.
-#    `sin_gtin`, `no_disponible` y `marca_fuera` solo se CUENTAN (sin GTIN no hay EAN que listar;
-#    no disponible y marca fuera son el catalogo entero de HEO menos lo que se mira); las otras
-#    cinco (MOTIVOS_APARTADO: el Funko chase y las cuatro ultimas) ademas se LISTAN en
-#    escaner2_apartado.
+#    `sin_gtin` y `no_disponible` solo se CUENTAN (sin GTIN no hay EAN que listar; no disponible
+#    es el catalogo entero de HEO menos lo que se puede pedir); las otras seis (MOTIVOS_APARTADO)
+#    ademas se LISTAN en escaner2_apartado.
+#    🔑 Desde el B2, `chase_funko` es SOLO la caja con chase de la que no se puede sacar el EAN de
+#       la figura comun: las demas entran en la foto (disponibles), cuentan como no disponibles
+#       (agotadas) o, si el nombre no dice unidades, siguen el flujo normal como figura suelta.
 PUERTAS_PREVIAS = ('chase_funko', 'sin_gtin', 'no_disponible', 'marca_fuera', 'estado_no_servible',
                    'chase_suelto', 'ean_forma_rara', 'duplicado_proveedor')
 NOMBRE_PUERTA_PREVIA = {
-    'chase_funko': 'Funko chase (código de caja)',
+    'chase_funko': 'Caja con chase sin EAN de la figura',
     'sin_gtin': 'Sin GTIN',
     'no_disponible': 'No disponible',
     'marca_fuera': 'Marca fuera de la lista',
@@ -148,7 +157,7 @@ def sacar_piezas(ruta, defs, nombres, base=None):
 
 # Lo que el escaner nuevo usa del viejo. Si alguna desaparece, el arranque lo dice por su nombre.
 DEFS_MOTOR = ('norm', '_num', 'partir_ean', 'clasificar', 'core_ean', 'clasificar_chase',
-              '_chk13', '_ean_ok', 'variantes_ean', 'aviso_caja_incoherente',
+              '_chk13', '_ean_ok', '_gtin14_ok', 'rescatar_gtin', 'variantes_ean', 'aviso_caja_incoherente',
               'calc_rentabilidad', 'decision_de',
               '_sup', 'iva_es_con_origen', 'iva_es_de', 'origen_iva_fila', 'es_propio')
 NOMBRES_MOTOR = ('PAISES', 'IVA_DEFAULT_ES', 'IVA_IT', 'IVA_FR', 'IVA_DE', 'ALMACEN',
@@ -202,10 +211,24 @@ def cargar_filtro_director(regla, ruta=RUTA_DIRECTOR_HEO):
                            'rank_max': ns['rank_max']}
 
 
+def _quiere_todas(f):
+    """El filtro del modo «todas las marcas»: SOLO lo disponible, la primera condicion del
+    `_quiere` del director. Ni marcas ni ofertas: no se lee `reglas_director`."""
+    return f.get('estado') == 'disponible'
+
+
+def filtro_todas():
+    """(quiere, info) del modo 'todas', con la misma forma que `cargar_filtro_director`: sin
+    marcas ni ofertas (None: no se han leido, no es que la lista este vacia)."""
+    return _quiere_todas, {'marcas_reales': None, 'quiere_ofertas': None, 'rank_max': None}
+
+
 def tanda_visualizador(ruta=RUTA_DESCARGAR_HEO):
     """Cuantos EAN caben en una tanda del Visualizador: la `TANDA` de descargar_heo.py (modo
     completo), evaluada igual que alli (acepta HEO_TANDA del entorno). Una sola asignacion o
-    nada: si hubiera dos, no se sabria cual manda."""
+    nada: si hubiera dos, no se sabria cual manda. 🔴 Y nunca mas que el tope del Visualizador
+    (10.000 por lista): si alguien la sube por encima, no arranca, en vez de dejar tandas que
+    Keepa no acepta enteras."""
     with io.open(ruta, encoding='utf-8') as fh:
         arbol = ast.parse(fh.read(), ruta)
     asignaciones = [n for n in ast.walk(arbol)
@@ -215,6 +238,9 @@ def tanda_visualizador(ruta=RUTA_DESCARGAR_HEO):
     valor = eval(compile(ast.Expression(asignaciones[0].value), ruta, 'eval'), {'int': int, 'os': os})
     if not isinstance(valor, int) or valor <= 0:
         raise PiezaNoEncontrada('%s: TANDA no es un entero positivo (%r)' % (ruta, valor))
+    if valor > TOPE_VISUALIZADOR:
+        raise PiezaNoEncontrada('%s: TANDA %d pasa del tope del Visualizador (%d por lista)'
+                                % (ruta, valor, TOPE_VISUALIZADOR))
     return valor
 
 
@@ -240,6 +266,105 @@ def _apartado(fila, motivo, detalle, ean=None, precio=None):
             'precio_catalogo': precio, 'motivo': motivo, 'detalle': detalle}
 
 
+# ── Las CAJAS CON CHASE de HEO (encargo B2, 25-sep-2026) ─────────────────────────────────
+# `descargar_heo._es_funko_chase` (regex por NOMBRE) desvia a una lista aparte todo Funko que
+# «suena» a chase, con el codigo de la CAJA y no el de la figura. El escaner viejo los manda a la
+# puente `escaner_chase_asin` para un ASIN a mano que nunca se ha puesto (0 de 120 el 25-sep), asi
+# que ninguna caja chase de HEO se ha valorado nunca. Aqui se valoran con la regla de siempre de
+# la caja con chase: precio de la caja ÷ unidades, sobre la figura COMUN (su EAN, y el ASIN que
+# Keepa le da a ese EAN). 🔴 El chase nunca recibe ASIN propio, y nada de esto escribe en
+# `productos` ni en la puente.
+#
+# Unidades: SOLO del nombre. «Surtido (6)», «Surtido 6», «Asst. (6)» (medido en las 83 del
+# 25-sep-2026: «Surtido (6)», «Surtido (3)» y un «Asst.  (6)» con dos espacios). Un «Surtido 9 cm»
+# no son 9 unidades. Si el nombre no lo dice, NO es caja (el regex tambien pesca un apellido,
+# «Ja'Marr Chase», o un pack «w/CH» a precio de unidad): va al flujo normal como figura suelta.
+_RE_UDS_CAJA = re.compile(r'\b(?:surtido|asst\.?)\s*(?:\(\s*(\d+)\s*\)|(\d+)\b(?!\s*(?:cm|mm)\b))', re.I)
+# El numero de HEO de un Funko (FK87245, FK72611-01, FK95150-1): sus cinco cifras son las del UPC
+# de Funko, 889698 + esas cinco + control (medido en las 38 cajas con codigo GS1 del 25-sep).
+_RE_NUMERO_FUNKO = re.compile(r'^FK(\d{5})(?!\d)', re.I)
+PREFIJO_FUNKO = '889698'
+# De donde sale el EAN de la figura comun de una caja (escaner2_foto.origen_ean).
+ORIGEN_EAN = {
+    'gs1_caja': 'código GS1 de la caja',
+    'ean_caja': 'EAN que trae la caja',
+    'numero_heo': 'deducido del número de HEO',
+}
+
+
+def unidades_caja_chase(nombre):
+    """Las unidades de la caja segun el nombre, o None si el nombre no las dice."""
+    m = _RE_UDS_CAJA.search(str(nombre or ''))
+    if not m:
+        return None
+    n = int(m.group(1) or m.group(2))
+    return n if n > 0 else None
+
+
+def _upc_ok(s):
+    return s.isdigit() and len(s) == 12
+
+
+def _a_upc(ean13):
+    """Un EAN-13 que empieza por 0 es un UPC-A de 12: se guarda en su forma de 12 (la de Funko)."""
+    return ean13[1:] if len(ean13) == 13 and ean13.startswith('0') else ean13
+
+
+def ean_de_la_figura(ean_caja, producto_heo, M):
+    """El EAN de la figura COMUN de una caja con chase de HEO → (ean, origen, aviso) o
+    (None, None, motivo) si no se puede sacar. Por este orden (encargo B2):
+      1. codigo GS1 «01» + GTIN-14 (+ «21»…) con su control valido → el interior del GTIN-14 con
+         el control recalculado (`rescatar_gtin` del escaner viejo, leida de su fichero);
+      2. si el codigo ya es un EAN-13 o un UPC-12 valido → ese;
+      3. si no → 889698 + las cinco cifras del numero FK de HEO + control, y lo dice.
+    Si 1 o 2 no coinciden con 3, se avisa en la fila (no se descarta)."""
+    codigo = re.sub(r'\s+', '', str(ean_caja or ''))
+    m = _RE_NUMERO_FUNKO.match(str(producto_heo or '').strip())
+    deducido = None
+    if m:
+        cuerpo = PREFIJO_FUNKO + m.group(1)
+        deducido = cuerpo + M._chk13('0' + cuerpo)
+    visto, origen = None, None
+    if codigo.isdigit() and codigo.startswith('01') and len(codigo) >= 16 and M._gtin14_ok(codigo[2:16]):
+        visto, origen = _a_upc(M.rescatar_gtin(codigo[2:16])), 'gs1_caja'
+    elif codigo.isdigit() and len(codigo) == 13 and M._ean_ok(codigo):
+        visto, origen = _a_upc(codigo), 'ean_caja'
+    elif _upc_ok(codigo) and M._ean_ok('0' + codigo):
+        visto, origen = codigo, 'ean_caja'
+    if visto is None:
+        if deducido is None:
+            return None, None, ('el código de la caja (%r) no es GS1 ni EAN, y el número de HEO (%r) no es '
+                                'FK + cinco cifras' % (codigo, producto_heo))
+        return deducido, 'numero_heo', None
+    aviso = None
+    if deducido is not None and M.norm(visto) != M.norm(deducido):
+        aviso = ('el %s da %s y el número de HEO %s da %s'
+                 % (ORIGEN_EAN[origen], visto, producto_heo, deducido))
+    return visto, origen, aviso
+
+
+def rotulo_caja(f):
+    """Lo que dice la fila de su caja, en pantalla y en el Excel: «caja con chase · N uds» (la
+    caja con chase de HEO y la 5+1 del viejo, que es lo mismo), «caja x N» si es caja sin chase, o
+    '' si es una unidad suelta."""
+    if not f.get('es_caja'):
+        return ''
+    if f.get('es_chase'):
+        return 'caja con chase · %s uds' % f.get('uds_caja')
+    return 'caja x%s' % f.get('uds_caja')
+
+
+def _fila_de_chase(c):
+    """Una entrada de la lista `chase` de descargar_heo con la forma de una fila del catalogo,
+    para que pase por el MISMO filtro y las MISMAS reglas que las demas. descargar_heo no calcula
+    la oferta de estas (no se toca): sin dato, no es oferta."""
+    return {'productNumber': c.get('producto_heo'), 'ean': c.get('ean_caja') or '',
+            'nombre': c.get('nombre') or '', 'marca': c.get('marca') or '', 'categoria': '',
+            'precio': '' if c.get('precio_caja') is None else c.get('precio_caja'),
+            'precio_base': '', 'en_oferta': '', 'campana': '', 'estado': c.get('estado') or '',
+            'disponibilidad': '', 'imagen': c.get('imagen') or '', 'fin_de_vida': '', 'preorder': ''}
+
+
 def construir_foto(filas_heo, chase_heo, quiere, M, n_crudo=None, n_sin_gtin=None, n_declarado=None):
     """Del catalogo CRUDO de HEO a la foto de la pasada, sin perder a nadie por el camino.
 
@@ -250,36 +375,61 @@ def construir_foto(filas_heo, chase_heo, quiere, M, n_crudo=None, n_sin_gtin=Non
 
     Devuelve (foto, apartados, cuentas). Cada producto crudo sale por UNA puerta previa
     (PUERTAS_PREVIAS) o entra en la foto, en el MISMO orden que el viejo para el perfil HEO:
-      0. descargar_heo desvia los Funko chase (codigo de caja; el viejo los manda a la puente de
-         ASIN manual, que aqui NO se toca) y tira los que no traen GTIN;
-      1. el filtro del director (`_quiere`): lo que no esta disponible, y lo disponible cuya marca
-         no esta en la regla (ni es oferta, si la regla pide ofertas);
+      0. descargar_heo desvia los Funko chase (codigo de caja) y tira los que no traen GTIN. De
+         los desviados (encargo B2): los que el nombre dice CAJA de N van al paso 1 como caja con
+         chase; los que no, vuelven al flujo normal como figura suelta con su codigo;
+      1. el filtro (`quiere`: el del director o, en el modo «todas», solo disponible): lo que no
+         esta disponible, y lo disponible cuya marca no esta en la regla (ni es oferta, si la
+         regla pide ofertas), que se LISTA;
+      1 bis. la caja con chase que pasa el filtro: el EAN de su figura comun
+         (`ean_de_la_figura`) o, si no hay forma de sacarlo, puerta previa `chase_funko`;
       2. Celda 4: estado servible, chase SUELTO fuera, EAN de forma rara fuera (los GTIN-14 caen
          aqui: el viejo los rechaza ANTES del rescate);
       3. dedup del proveedor: una fila por (EAN, caja), la mas barata;
       4. guardarrail caja-vs-suelta (marca, no borra) y el precio POR UNIDAD (Celda 8)."""
     perfil = M.PERFILES[PROVEEDOR]
     previas = {p: 0 for p in PUERTAS_PREVIAS}
-    sel = []
-    for f in filas_heo:
+    chase_todo = list(chase_heo or [])
+    sueltas_chase, cajas = [], []
+    for c in chase_todo:
+        uds = unidades_caja_chase(c.get('nombre'))
+        if uds is None:
+            sueltas_chase.append(_fila_de_chase(c))
+        else:
+            cajas.append((c, _fila_de_chase(c), uds))
+    apartados = []
+
+    def filtro(f):
+        """🔑 `quiere` es quien DECIDE; esto solo pone nombre al porque, con su misma primera
+        condicion: lo que no esta disponible no pasa; lo disponible que no pasa es por marca."""
         if quiere(f):
-            sel.append(f)
-        # 🔑 `_quiere` es quien DECIDE; esto solo pone nombre al porque, con su misma primera
-        #    condicion: lo que no esta disponible no pasa; lo disponible que no pasa es por marca.
-        elif f.get('estado') != 'disponible':
+            return True
+        if f.get('estado') != 'disponible':
             previas['no_disponible'] += 1
         else:
-            previas['marca_fuera'] += 1
-    chase_todo = list(chase_heo or [])
-    apartados = []
-    for c in chase_todo:
-        apartados.append(_apartado(
-            c, 'chase_funko',
-            'Funko chase: HEO lo vende en caja con código de caja y no cruza por EAN '
-            '(el escáner viejo lo manda a la tabla de ASIN a mano)',
-            ean=c.get('ean_caja') or '', precio=c.get('precio_caja')))
+            apartados.append(_apartado(f, 'marca_fuera', 'Marca %r fuera de la lista del director'
+                                       % (f.get('marca') or ''), precio=M._num(f.get('precio', ''))))
+        return False
+
+    sel = [f for f in list(filas_heo) + sueltas_chase if filtro(f)]
 
     filas = []
+    for c, f, uds in cajas:
+        if not filtro(f):
+            continue
+        ean, origen, aviso = ean_de_la_figura(c.get('ean_caja'), c.get('producto_heo'), M)
+        if ean is None:
+            apartados.append(_apartado(c, 'chase_funko', 'Caja con chase: ' + aviso,
+                                       ean=c.get('ean_caja') or '', precio=M._num(f['precio'])))
+            continue
+        filas.append({
+            'producto_heo': c.get('producto_heo'), 'ean_in': f['ean'], 'core': ean,
+            'nombre': f['nombre'], 'marca': f['marca'], 'categoria': '', 'pa': M._num(f['precio']),
+            'es_chase': True, 'es_caja': True, 'uds_caja': uds,
+            'en_oferta': False, 'campana': '', 'disponibilidad': '', 'fin_de_vida': False,
+            'preorder': False, 'imagen': f['imagen'], 'origen_ean': origen, 'aviso_ean': aviso,
+        })
+
     for f in sel:
         # Celda 4 del viejo, perfil HEO: estado permitido, sin columna de stock (se asume 1).
         if perfil.get('estados_ok'):
@@ -311,6 +461,7 @@ def construir_foto(filas_heo, chase_heo, quiere, M, n_crudo=None, n_sin_gtin=Non
             'en_oferta': f.get('en_oferta') == 'SI', 'campana': f.get('campana') or '',
             'disponibilidad': f.get('disponibilidad') or '', 'fin_de_vida': f.get('fin_de_vida') == 'SI',
             'preorder': f.get('preorder') == 'SI', 'imagen': f.get('imagen') or '',
+            'origen_ean': None, 'aviso_ean': None,
         })
 
     # DEDUP del proveedor (moloka_escaner_nube.py, "DEDUP del proveedor"): una fila por
@@ -365,6 +516,7 @@ def construir_foto(filas_heo, chase_heo, quiere, M, n_crudo=None, n_sin_gtin=Non
             'es_chase': f['es_chase'], 'en_oferta': f['en_oferta'], 'campana': f['campana'],
             'disponibilidad': f['disponibilidad'], 'fin_de_vida': f['fin_de_vida'],
             'preorder': f['preorder'], 'imagen': f['imagen'], 'aviso_caja': f['aviso_caja'],
+            'origen_ean': f['origen_ean'], 'aviso_ean': f['aviso_ean'],
         })
 
     for m in MOTIVOS_APARTADO:
@@ -782,7 +934,10 @@ def comparar(viejo, nuevo, contexto, M):
     DIFERENCIA DE CRITERIO lo que se explica por lo que el encargo nombra:
       · el viejo filtra por puesto ≤ rank_max en ES (actual o media de 90 dias) y el nuevo
         por caidas de 30 dias en ES o DE;
-      · el viejo calcula ES/IT/FR/DE y el nuevo solo los paises configurados.
+      · el viejo calcula ES/IT/FR/DE y el nuevo solo los paises configurados;
+      · (B2) el viejo no valora cajas con chase de HEO: toda fila cuyo lado nuevo es una;
+      · (B2) en el modo «todas», la marca que el viejo no mira: `contexto['marca_fuera_viejo']`,
+        una funcion (fila nueva → texto o None) con la lista del viejo; None si no aplica.
     Todo lo demas queda como SIN EXPLICAR, con una nota de lo que dice cada lado."""
     # `paises_filtro`: donde el nuevo mira si se vende; `paises`: los que el nuevo CALCULO (con CSV).
     umbral, paises, rank_max = contexto['umbral'], list(contexto['paises']), contexto['rank_max']
@@ -802,6 +957,10 @@ def comparar(viejo, nuevo, contexto, M):
             categoria = 'solo_nuevo'
 
         criterio, notas = [], []
+        # 🔑 El viejo manda las cajas con chase de HEO a la puente de ASIN a mano y no las valora
+        #    nunca: cualquier diferencia con una de ellas es de criterio, no un misterio.
+        if categoria != 'ambos' and n is not None and n.get('caja_chase_heo'):
+            criterio.append('el viejo no valora cajas con chase de HEO')
         if categoria == 'solo_viejo':
             if n is None:
                 # No es criterio: es que HOY no esta en el catalogo filtrado (o se aparto antes).
@@ -823,6 +982,10 @@ def comparar(viejo, nuevo, contexto, M):
                 if not criterio:
                     notas.append('nuevo: puerta %s · %s' % (n['puerta'], n['detalle']))
         elif categoria == 'solo_nuevo':
+            fuera = contexto.get('marca_fuera_viejo')
+            fuera = fuera(n) if (fuera and v is None) else None
+            if fuera:
+                criterio.append(fuera)
             if v is not None:
                 notas.append('el viejo lo evaluó: ' + ', '.join('%s %s' % (p, d) for p, d in sorted(v['decisiones'].items())))
             else:
@@ -852,6 +1015,20 @@ def comparar(viejo, nuevo, contexto, M):
     return filas
 
 
+def marca_fuera_del_viejo(marcas, ofertas, ruta=RUTA_DIRECTOR_HEO):
+    """(B2) Para comparar una pasada en modo «todas»: una funcion fila nueva → texto si su marca
+    NO la miraria el viejo (su `_quiere`, el del director, con `marcas` y `ofertas`), o None.
+    La lista NO sale de `reglas_director` (el modo «todas» no la lee): quien llama la toma de la
+    ultima pasada de marcas de siempre, que la guardo al barrer (escaner2_pasada.marcas)."""
+    quiere, info = cargar_filtro_director({'marcas': list(marcas or []) + (['OFERTAS'] if ofertas else [])}, ruta)
+    lista = ', '.join(info['marcas_reales']) + (' y ofertas' if info['quiere_ofertas'] else '')
+
+    def fuera(n):
+        f = {'estado': 'disponible', 'marca': n.get('marca') or '', 'en_oferta': 'SI' if n.get('en_oferta') else ''}
+        return None if quiere(f) else 'marca fuera de la lista del viejo (%s)' % lista
+    return fuera
+
+
 def _num_o_raya(x):
     return '—' if x is None or (isinstance(x, float) and math.isnan(x)) or x <= 0 else '{:,}'.format(int(x)).replace(',', '.')
 
@@ -878,7 +1055,9 @@ def nuevo_por_ean(foto, resultados_por_foto, M):
                 'decision': {'f': 'COMPRAR', 'e': 'VALORAR'}.get(r['puerta']),
                 'ean': f['ean_original'], 'nombre': f['nombre'], 'core': f['ean_core'],
                 'rank_es': es.get('rank'), 'rank90_es': es.get('rank_90d'),
-                'propio': M.es_propio(f['ean_core'])}
+                'propio': M.es_propio(f['ean_core']),
+                'caja_chase_heo': bool(f.get('origen_ean')), 'marca': f.get('marca') or '',
+                'en_oferta': bool(f.get('en_oferta'))}
         prev = salida.get(k)
         if prev is None or _ORDEN_PUERTA[cand['puerta']] > _ORDEN_PUERTA[prev['puerta']]:
             salida[k] = cand

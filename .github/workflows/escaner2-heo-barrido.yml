@@ -1,9 +1,11 @@
 # ============================================================
 # Moloka - Escaner 2 · BARRIDO DE HEO (en sombra, encargo B, 24-sep-2026)
 #
-# Lo dispara el boton «Barrer HEO» de la v2 (moloka-app-v2, /escaner/barrido-heo), con el
+# Lo disparan los dos botones de la v2 (moloka-app-v2, Escaneo PRO · pestaña HEO), con el
 # mismo mecanismo que el escaneo de factura (workflow_dispatch con GH_TOKEN). Vive aqui porque
-# aqui estan las credenciales de HEO.
+# aqui estan las credenciales de HEO. El input `modo` (encargo B2) dice cual de los dos:
+#   marcas · las marcas de reglas_director, como siempre (y el valor si no llega nada);
+#   todas  · todas las marcas, solo lo disponible, SIN leer reglas_director.
 #
 # Baja el catalogo de HEO con descargar_heo.py (la misma funcion del director), aplica el
 # filtro de director_heo_prep.py y las reglas de EAN/chase/caja del escaner viejo (leidas de
@@ -18,6 +20,13 @@ name: Moloka - Escaner 2 · Barrido HEO
 
 on:
   workflow_dispatch:
+    inputs:
+      modo:
+        description: 'marcas (las de siempre) o todas (todas las marcas, sin leer reglas_director)'
+        type: choice
+        options: [marcas, todas]
+        default: marcas
+        required: false
 
 # 🔒 Barrido y cruce de HEO, de uno en uno: el cruce lee la foto que el barrido deja.
 concurrency:
@@ -52,6 +61,7 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           HEO_USER:             ${{ secrets.HEO_USER }}
           HEO_PASS:             ${{ secrets.HEO_PASS }}
+          MODO_BARRIDO:         ${{ inputs.modo }}
         run: python -u escaner2_heo_barrido.py
 
       # 🔴 SI EL RUN MUERE A MEDIAS, LA FILA NO SE QUEDA COLGADA: sin esto, una pasada que se

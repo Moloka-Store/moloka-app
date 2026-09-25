@@ -293,8 +293,11 @@ _por_ean = {f['ean_original']: f for f in FOTO}
 eq('(E) en la foto: los 13 de la escena + la oferta de Hasbro, sin el agotado ni el de otra marca',
    sorted(f['producto_heo'] for f in FOTO),
    sorted(['HEO%04d' % n for n in range(1, 15)]))
+# (B2) La marca fuera (el Hasbro sin oferta) se LISTA desde el encargo B2; antes solo se contaba.
+#      La caja con chase de la escena (HEO9001, codigo 999… que no es EAN y numero que no es FK) no
+#      tiene EAN de figura posible: sigue en su puerta previa.
 eq('(E) apartados (las listas de las puertas previas), cada uno con su motivo', sorted(a['motivo'] for a in APARTADOS),
-   sorted(['chase_funko', 'chase_suelto', 'ean_forma_rara', 'ean_forma_rara', 'duplicado_proveedor']))
+   sorted(['chase_funko', 'marca_fuera', 'chase_suelto', 'ean_forma_rara', 'ean_forma_rara', 'duplicado_proveedor']))
 eq('(E) el GTIN-14 de 14 cifras se aparta como EAN de forma rara (len=14), igual que en el viejo, y lo dice',
    [a['detalle'] for a in APARTADOS if a['ean_original'] == GTIN14],
    ['EAN forma rara (len=14): GTIN-14, el escáner viejo lo rechaza antes del rescate'])
@@ -306,11 +309,11 @@ eq('(E) 🔴 crudo 24 = previas 10 + foto 14 → cuadra', (CUENTAS['n_previas'],
 eq('(E) las puertas previas son las de la migración, en su orden',
    list(e2.PUERTAS_PREVIAS), ['chase_funko', 'sin_gtin', 'no_disponible', 'marca_fuera', 'estado_no_servible',
                               'chase_suelto', 'ean_forma_rara', 'duplicado_proveedor'])
-# Un Funko chase AGOTADO tambien sale por su puerta previa: descargar_heo lo desvia antes que nada.
+# Una caja con chase AGOTADA tambien se cuenta: desde el B2, como «no disponible» (antes, Funko chase).
 _chase2 = CHASE_HEO + [dict(CHASE_HEO[0], producto_heo='HEO9002', estado='agotado')]
 _, _, _c2 = e2.construir_foto(FILAS_HEO, _chase2, QUIERE, M, n_crudo=25, n_sin_gtin=3, n_declarado=25)
-eq('(E) 🔴 el Funko chase que no pasa el filtro también se cuenta (antes se perdía)',
-   (_c2['previas']['chase_funko'], _c2['cuadra_previo']), (2, True))
+eq('(E) 🔴 la caja con chase que no pasa el filtro también se cuenta: agotada → no disponible (B2)',
+   (_c2['previas']['chase_funko'], _c2['previas']['no_disponible'], _c2['cuadra_previo']), (1, 2, True))
 # Los rojos: el cuadre previo no puede salir verde por las malas.
 _, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=24, n_sin_gtin=None, n_declarado=24)
 eq('(E) 🔴 sin el recuento de sin GTIN (log ilegible) → NO cuadra, y dice cuál falta',

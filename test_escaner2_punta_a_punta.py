@@ -15,6 +15,13 @@ CASOS:
   3. [frenado]    la base ACEPTA el insert de las puertas y se come las de la puerta b (lo que
                   haria una politica que frena: 200 y cero filas) → el cruce CUENTA en la base,
                   ve que no cuadra y queda 'fallida' en ROJO. Es el cuadre del encargo en vivo.
+  6. [todas]      (B2) barrido «todas las marcas»: sin leer reglas_director, sin filtro de marca,
+                  cuadra; y la marca que el viejo no mira sale como diferencia de criterio.
+  7. [cajas]      (B2) cajas con chase REALES de HEO: la disponible entra con el EAN de su figura
+                  y a precio de caja ÷ 6; la agotada y la suelta del apellido, como toca; cuadra.
+  8. [el viejo]   (B2) en todos los casos, NI UNA escritura en reglas_director, escaner_chase_asin,
+                  escaner_memoria, escaner_resultados, escaner_detalle ni productos: el doble
+                  apunta cada operacion, y esas tablas acaban byte a byte como empezaron.
 """
 import base64
 import csv
@@ -56,6 +63,14 @@ class _Consulta:
         self.op, self.cuenta = 'select', (count == 'exact')
         return self
 
+    def upsert(self, filas, **_kw):
+        self.op, self.payload = 'upsert', filas if isinstance(filas, list) else [filas]
+        return self
+
+    def delete(self):
+        self.op = 'delete'
+        return self
+
     def insert(self, filas):
         self.op, self.payload = 'insert', filas if isinstance(filas, list) else [filas]
         return self
@@ -81,7 +96,11 @@ class _Consulta:
         return self
 
     def execute(self):
+        # (B2) Cada operacion queda apuntada: quien la hizo, cual y sobre que tabla.
+        self.bd.setdefault('ops', []).append([self.bd.get('programa'), self.op, self.tabla])
         filas = self.bd['tablas'].setdefault(self.tabla, [])
+        if self.op in ('upsert', 'delete'):
+            return _Resp([])          # apuntada y sin efecto: el banco exige que no ocurra
         if self.op == 'insert':
             for f in self.payload:
                 if self.bd.get('frenar') and self.tabla == self.bd['frenar'][0] and f.get('puerta') == self.bd['frenar'][1]:
@@ -175,8 +194,9 @@ def csv_visualizador(e2, pro, M, pais, filas):
     w = csv.writer(buf)
     w.writerow(cab)
     for asin, n, caidas, bb in filas:
-        w.writerow([asin, pais, 'Funko %d' % n, _ean(M, n), '12000', '15000', caidas, bb, 'yes', bb,
-                    '3.50', '15.01 %', '10', '50', '', '0'])
+        # `n` entero: el EAN de la escena; texto: un EAN real (el de la figura de una caja, B2).
+        w.writerow([asin, pais, 'Funko %s' % n, _ean(M, n) if isinstance(n, int) else n, '12000', '15000', caidas, bb,
+                    'yes', bb, '3.50', '15.01 %', '10', '50', '', '0'])
     return ('﻿' + buf.getvalue()).encode('utf-8')
 
 
@@ -199,9 +219,34 @@ def excel_viejo(e2, M, filas):
 # ═══════════════════════════════════════════════════════════════════════════════
 # EL HIJO: monta los dobles y corre el programa de verdad
 # ═══════════════════════════════════════════════════════════════════════════════
+def chase_de(escena):
+    """La lista `chase` de descargar_heo en cada escena. 'base': una caja con chase de la que no
+    se puede sacar el EAN de la figura (codigo 999… y numero que no es FK) → su puerta previa.
+    'cajas' (B2): cuatro filas REALES de la pasada 8ac9a9de (ver test_escaner2_cajas_chase.py;
+    precio redondo donde el encargo no lo cita)."""
+    if escena == 'cajas':
+        return [
+            {'producto_heo': 'FK87245', 'nombre': '*heo Exclusive Edition* One Piece POP!&Buddy Animation Vinyl '
+             'Figuren Rob Lucci with Hattori w/Chase 10 cm Surtido (6)', 'ean_caja': '01108896988724512110000',
+             'marca': 'Funko', 'precio_caja': 60.0, 'estado': 'disponible', 'imagen': '', 'link_amazon': ''},
+            {'producto_heo': 'FK93057', 'nombre': "NFL Figura POP! Vinyl : Bengals- Ja'Marr Chase (clear visor) 9 cm",
+             'ean_caja': '889698930574', 'marca': 'Funko', 'precio_caja': 8.62, 'estado': 'agotado', 'imagen': '',
+             'link_amazon': ''},
+            {'producto_heo': 'FK91391', 'nombre': 'X-Men Pack de 4 Figuras Bitty POP! Vinyl Jean Grey w/CH 2,5 cm',
+             'ean_caja': '889698913911', 'marca': 'Funko', 'precio_caja': 6.59, 'estado': 'disponible', 'imagen': '',
+             'link_amazon': ''},
+            {'producto_heo': 'FK13318', 'nombre': 'Stranger Things POP! TV Vinyl Figuren Eleven With Eggos 9 cm Surtido (6)',
+             'ean_caja': '01108896981331872110000', 'marca': 'Funko', 'precio_caja': 60.0, 'estado': 'agotado',
+             'imagen': '', 'link_amazon': ''},
+        ]
+    return [{'producto_heo': 'HEO9001', 'nombre': 'Funko Pop Omega w/CH Surtido (6)', 'ean_caja': '9990000000011',
+             'marca': 'FUNKO', 'precio_caja': 70.0, 'estado': 'disponible', 'imagen': '', 'link_amazon': ''}]
+
+
 def hijo(ruta_estado, programa):
     with open(ruta_estado, encoding='utf-8') as fh:
         bd = json.load(fh)
+    bd['programa'] = programa
     clientes = []
 
     def crear(url, llave):
@@ -214,13 +259,13 @@ def hijo(ruta_estado, programa):
 
     def descargar_catalogo_heo(max_paginas=None, con_chase=False):
         # Las dos lineas del log de la funcion de verdad (descargar_heo.py) de las que el barrido
-        # saca el catalogo CRUDO y los tirados sin GTIN: 7 con EAN + 1 Funko chase + 3 sin GTIN.
+        # saca el catalogo CRUDO y los tirados sin GTIN: 7 con EAN + la lista chase + 3 sin GTIN.
         # …y la de `_paginar`: lo que HEO DICE que tiene (totalElements). En la de verdad sale antes.
-        print('  catalog/products: %d items | 1 paginas | pageSize 500' % int(os.environ.get('E2_DECLARADO', '11')))
-        print('>>> Cruzando: %d productos | 0 precios | 0 disponibilidades' % int(os.environ.get('E2_CRUDO', '11')))
+        chase = chase_de(os.environ.get('E2_ESCENA', 'base'))
+        crudo = 7 + len(chase) + 3
+        print('  catalog/products: %d items | 1 paginas | pageSize 500' % int(os.environ.get('E2_DECLARADO', crudo)))
+        print('>>> Cruzando: %d productos | 0 precios | 0 disponibilidades' % int(os.environ.get('E2_CRUDO', crudo)))
         print('>>> Catalogo cruzado: 7 filas con EAN (descartadas 3 sin GTIN)')
-        chase = [{'producto_heo': 'HEO9001', 'nombre': 'Funko Pop Omega w/CH', 'ean_caja': '9990000000011',
-                  'marca': 'FUNKO', 'precio_caja': 70.0, 'estado': 'disponible', 'imagen': '', 'link_amazon': ''}]
         return (filas_heo(M), chase) if con_chase else filas_heo(M)
 
     sys.modules['descargar_heo'] = types.ModuleType('descargar_heo')
@@ -240,11 +285,17 @@ def hijo(ruta_estado, programa):
 
 
 def correr(ruta_estado, programa, env_extra):
-    env = {k: v for k, v in os.environ.items() if k not in ('SUPABASE_SERVICE_KEY', 'HEO_USER', 'HEO_PASS', 'PASADA')}
+    env = {k: v for k, v in os.environ.items()
+           if k not in ('SUPABASE_SERVICE_KEY', 'HEO_USER', 'HEO_PASS', 'PASADA', 'MODO_BARRIDO', 'E2_ESCENA')}
     env.update(env_extra, PYTHONIOENCODING='utf-8', SUPABASE_URL='https://doble.invalid')
     p = subprocess.run([sys.executable, '-u', os.path.abspath(__file__), '--hijo', ruta_estado, programa],
                        capture_output=True, text=True, encoding='utf-8', errors='replace', env=env, cwd=AQUI)
     return p.returncode, (p.stdout or '') + (p.stderr or '')
+
+
+# (B2) Las tablas del escaner viejo, sembradas: al final de cada caso tienen que seguir IGUAL.
+TABLAS_VIEJO = ('reglas_director', 'escaner_chase_asin', 'escaner_memoria', 'escaner_resultados', 'escaner_detalle',
+                'productos')
 
 
 def estado_inicial(e2, M, frenar=None):
@@ -252,6 +303,15 @@ def estado_inicial(e2, M, frenar=None):
     return {
         'frenar': frenar,
         'tablas': {
+            # (B2) La ultima pasada de marcas de siempre, de la que el modo «todas» saca la lista
+            #      del viejo para comparar (sin leer reglas_director).
+            'escaner2_pasada': [{'id': '00000000-0000-4000-8000-000000000001', 'proveedor': 'HEO', 'modo': 'marcas',
+                                 'estado': 'esperando_csv', 'marcas': ['Funko', 'Ultimate Guard'], 'ofertas': True,
+                                 'creada_en': '2026-09-25T05:48:00+00:00', 'run_id': 1}],
+            'escaner_chase_asin': [{'producto_heo': 'FK87245', 'nombre': 'Rob Lucci', 'ean_caja': '01108896988724512110000',
+                                    'asin': None, 'estado': 'disponible'}],
+            'escaner_memoria': [{'id': 1, 'proveedor': 'HEO', 'ean': '889698872454'}],
+            'escaner_detalle': [{'id': 1, 'ean': '889698872454', 'decision': 'COMPRAR'}],
             'reglas_director': [{'proveedor': 'HEO', 'activo': True, 'marcas': ['Funko', 'OFERTAS'], 'rank_maximo': 30000}],
             'escaner2_parametros': [{'proveedor': 'HEO', 'umbral_caidas_30d': 8, 'paises_filtro': ['ES', 'DE'],
                                      'paises_calculo': ['ES', 'IT', 'FR', 'DE']}],
@@ -265,25 +325,36 @@ def estado_inicial(e2, M, frenar=None):
     }
 
 
-def caso(nombre, frenar=None, crudo=None):
+SIEMBRA = {}
+
+
+def caso(nombre, frenar=None, crudo=None, modo=None, escena=None):
     e2, pro, M = _escena()
     tmp = tempfile.mkdtemp(prefix='e2pp_')
     ruta = os.path.join(tmp, 'estado.json')
+    inicial = estado_inicial(e2, M, frenar)
+    SIEMBRA[nombre] = {t: json.loads(json.dumps(inicial['tablas'][t])) for t in TABLAS_VIEJO}
     with open(ruta, 'w', encoding='utf-8') as fh:
-        json.dump(estado_inicial(e2, M, frenar), fh)
+        json.dump(inicial, fh)
     llave = {'SUPABASE_SERVICE_KEY': 'svc-de-mentira', 'HEO_USER': 'u', 'HEO_PASS': 'p', 'GITHUB_RUN_ID': '424242'}
     if crudo is not None:
         llave['E2_CRUDO'] = str(crudo)
+    if modo is not None:
+        llave['MODO_BARRIDO'] = modo
+    if escena is not None:
+        llave['E2_ESCENA'] = escena
     cod, log = correr(ruta, 'escaner2_heo_barrido.py', llave)
     bd = json.load(open(ruta, encoding='utf-8'))
-    pasada = bd['tablas']['escaner2_pasada'][0]
+    pasada = [p for p in bd['tablas']['escaner2_pasada'] if p.get('run_id') == 424242][0]
     # Fernando exporta del Visualizador y sube los dos CSV (el nombre NO dice el pais).
     carpeta = 'heo/%s/csv/' % pasada['id']
     bd['storage'].setdefault('escaner2', {})
     for nombre_fichero, pais, filas in (
             ('KeepaExport-2026-09-24-VisualizadorDeProductos.csv', 'es',
              [('B0ALFA0001', 1, '30', '22.00'), ('B0BETA0001', 2, '12', '22.00'), ('B0GAMA0001', 3, '4', '22.00'),
-              ('B0DELT0001', 4, '20', '22.00'), ('B0DELT0002', 4, '20', '21.00')]),
+              ('B0DELT0001', 4, '20', '22.00'), ('B0DELT0002', 4, '20', '21.00'),
+              # (B2) el Hasbro (EAN 7: solo entra en el modo «todas») y la figura comun de FK87245.
+              ('B0HASB0001', 7, '30', '22.00'), ('B0CAJA0001', '889698872454', '30', '30.00')]),
             ('KeepaExport-2026-09-24-VisualizadorDeProductos (1).csv', 'de',
              [('B0ALFA0001', 1, '12', '21.00'), ('B0GAMA0001', 3, '2', '21.00')])):
         bd['storage']['escaner2'][carpeta + '20260924-1200-' + nombre_fichero] = base64.b64encode(
@@ -298,6 +369,7 @@ def caso(nombre, frenar=None, crudo=None):
         # 🔑 Un tercer pais (IT): se CALCULA y se ve, pero no cuenta para «se vende» (filtro ES y DE).
         bd['storage']['escaner2'][carpeta + '20260924-1205-KeepaExport-italia.csv'] = base64.b64encode(
             csv_visualizador(e2, pro, M, 'it', [('B0ALFA0001', 1, '3', '25.00')])).decode()
+    bd.pop('programa', None)
     json.dump(bd, open(ruta, 'w', encoding='utf-8'), default=str)
     cod2, log2 = correr(ruta, 'escaner2_heo_cruce.py', {'SUPABASE_SERVICE_KEY': 'svc-de-mentira', 'PASADA': pasada['id'],
                                                         'GITHUB_RUN_ID': '434343'})
@@ -322,22 +394,21 @@ for _prog in ('escaner2_heo_barrido.py', 'escaner2_heo_cruce.py'):
 print('\n2 · [bueno] barrido → CSV de ES y DE → cruce')
 cod, log, cod2, log2, bd, pasada, M, e2 = caso('bueno')
 T = bd['tablas']
-p = T['escaner2_pasada'][0]
+p = [x for x in T['escaner2_pasada'] if x['id'] == pasada][0]
 eq('2 · el barrido sale en VERDE', cod, 0)
 eq('2 · la pasada queda esperando los CSV, con el run apuntado', (p['estado'], p['run_id']), ('esperando_csv', 424242))
 eq('2 · foto: los 5 Funko (el chase suelto y Hasbro, fuera)', (p['n_foto'], len(T['escaner2_foto'])), (5, 5))
-eq('2 · apartados: el Funko chase de la API y el chase suelto', sorted(a['motivo'] for a in T['escaner2_apartado']),
-   ['chase_funko', 'chase_suelto'])
+eq('2 · apartados: la caja con chase sin EAN posible, el chase suelto y (B2) la marca fuera',
+   sorted(a['motivo'] for a in T['escaner2_apartado']), ['chase_funko', 'chase_suelto', 'marca_fuera'])
+eq('2 · (B2) la pasada guarda su modo, y las marcas que leyó', (p['modo'], p['marcas'], p['ofertas']),
+   ('marcas', ['Funko'], True))
 eq('2 · los descartados sin GTIN se rescatan del log de descargar_heo', p['p_sin_gtin'], 3)
 eq('2 · 🔴 el catálogo CRUDO sale del log, y cuadra: crudo = previas + foto',
    (p['n_crudo'], sum(p['p_' + x] for x in e2.PUERTAS_PREVIAS) + p['n_foto']), (11, 11))
 _lista = base64.b64decode(bd['storage']['escaner2']['heo/%s/eans.txt' % pasada]).decode().split('\n')
 eq('2 · la lista para el Visualizador: un EAN por linea, en el bucket escaner2', (len(_lista), p['n_eans_lista'], p['n_tandas']),
    (5, 5, 1))
-eq('2 · ni una escritura en tablas del escaner viejo',
-   sorted(t for t in T if not t.startswith('escaner2_')), ['escaner_resultados', 'productos', 'reglas_director'])
-eq('2 · …y las tablas viejas siguen como estaban', (len(T['escaner_resultados']), len(T['productos']), len(T['reglas_director'])),
-   (1, 1, 1))
+eq('2 · ni una tabla nueva fuera de escaner2_', sorted(t for t in T if not t.startswith('escaner2_')), sorted(TABLAS_VIEJO))
 c = T['escaner2_cruce'][0]
 eq('2 · el cruce sale en VERDE', cod2, 0)
 eq('2 · …y queda LISTA, cuadrado', (c['estado'], c['cuadra'], c['motivo_fallo']), ('lista', True, None))
@@ -379,6 +450,8 @@ eq('2 · el log deja el CUADRE, cuadre o no', 'CUADRE [HEO]: crudo=11 | previas=
 eq('2 · 🔴 el cruce guarda el crudo y las previas: crudo 11 = previas 6 + puertas 5',
    (c['n_crudo'], c['n_previas'], sum(c['n_' + x] for x in 'abcdef')), (11, 6, 5))
 
+BDS = {'bueno': bd}
+
 print('\n3 · [frenado] la base se come las filas de una puerta → el cuadre lo caza')
 cod, log, cod2, log2, bd, pasada, M, e2 = caso('frenado', frenar=('escaner2_resultado_ean', 'b'))
 c = bd['tablas']['escaner2_cruce'][0]
@@ -387,16 +460,98 @@ eq('3 · 🔴 …y queda FALLIDA, sin cuadrar, con el motivo', (c['estado'], c['
    ('fallida', False, True))
 eq('3 · 🔴 …contando en la BASE: 5 entradas y 4 en las puertas', (c['n_entradas'], sum(c['n_' + x] for x in 'abcdef')), (5, 4))
 eq('3 · el log lo dice', 'NO CUADRA' in log2, True)
+BDS['frenado'] = bd
 
 print('\n4 · [crudo_de_mas] HEO dice un producto más de los que salen → la pasada FALLA')
 cod, log, cod2, log2, bd, pasada, M, e2 = caso('crudo_de_mas', crudo=12)
-p = bd['tablas']['escaner2_pasada'][0]
+BDS['crudo_de_mas'] = bd
+p = [x for x in bd['tablas']['escaner2_pasada'] if x['id'] == pasada][0]
 eq('4 · 🔴 el barrido sale en ROJO', cod, 1)
 eq('4 · 🔴 …y la pasada queda FALLIDA con el motivo', (p['estado'], 'NO CUADRA antes de la foto' in (p['motivo_fallo'] or '')),
    ('fallida', True))
 eq('4 · 🔴 …sin lista para Keepa: no se puede cruzar', (p.get('ruta_lista'), cod2), (None, 1))
 eq('4 · 🔴 …y con los recuentos GUARDADOS aunque no cuadre (sin ellos no se sabe dónde se descuadró)',
    (p.get('n_crudo'), p.get('p_sin_gtin'), p.get('p_chase_funko')), (12, 3, 1))
+
+print('\n6 · [todas] (B2) barrido «todas las marcas» → cruce')
+cod, log, cod2, log2, bd, pasada, M, e2 = caso('todas', modo='todas')
+BDS['todas'] = bd
+T = bd['tablas']
+p = [x for x in T['escaner2_pasada'] if x['id'] == pasada][0]
+eq('6 · el barrido sale en VERDE y la pasada dice su modo', (cod, p['estado'], p['modo']), (0, 'esperando_csv', 'todas'))
+eq('6 · 🔴 sin regla leída: ni marcas, ni ofertas, ni «regla activa»', (p['marcas'], p['ofertas'], p['regla_activa']),
+   (None, None, None))
+eq('6 · 🔴 el barrido NO toca reglas_director, ni para leer',
+   [o for o in bd['ops'] if o[2] == 'reglas_director'], [])
+eq('6 · 🔴 el Hasbro entra (no hay filtro de marca): foto 6 y marca fuera 0',
+   (p['n_foto'], p['p_marca_fuera'], sorted(f['marca'] for f in T['escaner2_foto']).count('Hasbro')), (6, 0, 1))
+eq('6 · 🔴 CUADRA: crudo 11 = previas 5 + foto 6',
+   (p['n_crudo'], sum(p['p_' + x] for x in e2.PUERTAS_PREVIAS), p['n_foto']), (11, 5, 6))
+c = T['escaner2_cruce'][0]
+eq('6 · el cruce sale en VERDE, LISTA y cuadrado', (cod2, c['estado'], c['cuadra']), (0, 'lista', True))
+_cmp = {r['ean']: r for r in T['escaner2_comparacion']}
+eq('6 · 🔴 el Hasbro COMPRAR que el viejo no mira → «diferencia de criterio: marca fuera de la lista del viejo»',
+   (_cmp[_ean(M, 7)]['categoria'], _cmp[_ean(M, 7)]['diferencia_criterio'], _cmp[_ean(M, 7)]['explicacion']),
+   ('solo_nuevo', True, 'Diferencia de criterio: marca fuera de la lista del viejo (Funko, Ultimate Guard y ofertas)'))
+_xl = [k for k in bd['storage']['escaner2'] if k.startswith('heo/%s/%s/Escaner2_HEO_' % (pasada, c['id']))]
+_wb = load_workbook(io.BytesIO(base64.b64decode(bd['storage']['escaner2'][_xl[0]])), read_only=True)
+_res = {r[0]: r[1] for r in _wb['Resumen'].iter_rows(values_only=True)}
+eq('6 · el Excel dice el modo y de dónde sale la lista del viejo',
+   (_res.get('Modo del barrido'), 'Funko, Ultimate Guard y ofertas' in (_res.get('Lista del viejo (para comparar)') or '')),
+   ('todas las marcas', True))
+
+print('\n7 · [cajas] (B2) cajas con chase REALES de HEO → cruce')
+cod, log, cod2, log2, bd, pasada, M, e2 = caso('cajas', escena='cajas')
+BDS['cajas'] = bd
+T = bd['tablas']
+p = [x for x in T['escaner2_pasada'] if x['id'] == pasada][0]
+eq('7 · el barrido sale en VERDE', (cod, p['estado']), (0, 'esperando_csv'))
+_caja = [f for f in T['escaner2_foto'] if f['producto_heo'] == 'FK87245']
+eq('7 · 🔴 FK87245 (disponible) entra con el EAN de su FIGURA, caja con chase de 6 a 60 ÷ 6',
+   [(f['ean_core'], f['es_caja'], f['es_chase'], f['uds_caja'], f['precio_catalogo'], f['precio_unidad'], f['origen_ean'])
+    for f in _caja], [('889698872454', True, True, 6, 60.0, 10.0, 'gs1_caja')])
+eq('7 · FK91391 (pack «w/CH», sin unidades) entra como figura suelta con su EAN',
+   [(f['ean_core'], f['es_caja'], f['origen_ean']) for f in T['escaner2_foto'] if f['producto_heo'] == 'FK91391'],
+   [('889698913911', False, None)])
+eq('7 · 🔴 FK13318 (caja agotada) y FK93057 (el apellido, agotado) → no disponibles; ninguna a «sin EAN»',
+   (p['p_no_disponible'], p['p_chase_funko'], {f['producto_heo'] for f in T['escaner2_foto']} & {'FK13318', 'FK93057'}),
+   (2, 0, set()))
+eq('7 · 🔴 CUADRA: crudo 14 = previas 7 + foto 7',
+   (p['n_crudo'], sum(p['p_' + x] for x in e2.PUERTAS_PREVIAS), p['n_foto']), (14, 7, 7))
+_lista = base64.b64decode(bd['storage']['escaner2']['heo/%s/eans.txt' % pasada]).decode().split('\n')
+eq('7 · a Keepa va el EAN de la figura, nunca el código de la caja',
+   ('889698872454' in _lista, any(x.startswith('0110889') for x in _lista)), (True, False))
+c = T['escaner2_cruce'][0]
+eq('7 · el cruce sale en VERDE, LISTA y cuadrado', (cod2, c['estado'], c['cuadra']), (0, 'lista', True))
+_rc = [r for r in T['escaner2_resultado_ean'] if r['foto_id'] == _caja[0]['id']][0]
+_pc = [r for r in T['escaner2_resultado_pais'] if r['foto_id'] == _caja[0]['id'] and r['pais'] == 'ES'][0]
+eq('7 · 🔴 se valora con el ASIN de la figura común y a 10 €/ud', (_rc['puerta'], _rc['asin'], _pc['pa']),
+   ('f', 'B0CAJA0001', 10.0))
+_cmp = {r['ean']: r for r in T['escaner2_comparacion']}
+eq('7 · 🔴 en la comparación: «diferencia de criterio: el viejo no valora cajas con chase de HEO»',
+   (_cmp[_caja[0]['ean_original']]['diferencia_criterio'], _cmp[_caja[0]['ean_original']]['explicacion']),
+   (True, 'Diferencia de criterio: el viejo no valora cajas con chase de HEO'))
+_xl = [k for k in bd['storage']['escaner2'] if k.startswith('heo/%s/%s/Escaner2_HEO_' % (pasada, c['id']))]
+_wb = load_workbook(io.BytesIO(base64.b64decode(bd['storage']['escaner2'][_xl[0]])), read_only=True)
+_filas = list(_wb['COMPRAR y VALORAR'].iter_rows(values_only=True))
+_i = {h: k for k, h in enumerate(_filas[0])}
+_fc = [f for f in _filas[1:] if f[0] == _caja[0]['ean_original']][0]
+eq('7 · 🔴 el Excel dice «caja con chase · 6 uds», el precio de la CAJA y el EAN de la figura',
+   (_fc[_i['Caja']], _fc[_i['Precio caja (€)']], _fc[_i['EAN de la figura']], _fc[_i['Origen del EAN']]),
+   ('caja con chase · 6 uds', 60.0, '889698872454', 'código GS1 de la caja'))
+_pp = list(_wb['Puertas previas'].iter_rows(values_only=True))
+eq('7 · (B2) la hoja «Puertas previas» lleva la marca fuera, con su EAN, nombre, marca y precio',
+   [(r[0], r[1], r[2], r[3]) for r in _pp[1:] if r[4] == 'Marca fuera de la lista'],
+   [(_ean(M, 7), 'Hasbro fuera', 'Hasbro', 5.0)])
+
+print('\n8 · [el viejo] (B2) ni una escritura en sus tablas, en ningún caso')
+for _n, _bd in BDS.items():
+    eq('8 · %s: ni insert, ni update, ni upsert, ni delete en %s' % (_n, ', '.join(TABLAS_VIEJO)),
+       [o for o in _bd['ops'] if o[2] in TABLAS_VIEJO and o[1] != 'select'], [])
+    eq('8 · %s: …y esas tablas acaban exactamente como empezaron' % _n,
+       {t: _bd['tablas'].get(t) for t in TABLAS_VIEJO}, SIEMBRA[_n])
+    eq('8 · %s: ni se leen reglas del chase ni la puente (escaner_chase_asin, escaner_memoria, escaner_detalle)' % _n,
+       [o for o in _bd['ops'] if o[2] in ('escaner_chase_asin', 'escaner_memoria', 'escaner_detalle')], [])
 
 print('\n5 · [rescate] el run muere a medias → SU fila queda fallida, las demás no se tocan')
 _ruta = os.path.join(_tmp, 'rescate.json')
