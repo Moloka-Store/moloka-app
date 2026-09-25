@@ -325,6 +325,12 @@ jobs:
       - name: 25 octies) test_escaner2_cajas_chase.py
         run: python -u test_escaner2_cajas_chase.py
 
+      # (B4, 25-sep-2026) El modo «marcas elegidas»: la seleccion se valida (JSON, sin comillas ni
+      # saltos de linea) y la marca casa EXACTA; el workflow no pega inputs en un `run:`; y el Excel
+      # del cruce lleva el formato del viejo, comparado con la huella de un Excel viejo de verdad.
+      - name: 25 nonies) test_escaner2_elegidas.py
+        run: python -u test_escaner2_elegidas.py
+
       - name: 26) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
@@ -370,6 +376,7 @@ jobs:
             test_escaner2_punta_a_punta.py
             test_escaner2_formula.py
             test_escaner2_cajas_chase.py
+            test_escaner2_elegidas.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).

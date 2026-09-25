@@ -2,15 +2,17 @@
 # -*- coding: utf-8 -*-
 """ESCANER 2 · EL BARRIDO DE HEO (pasos 1 y 2 del encargo B, 24-sep-2026) — EN SOMBRA.
 
-Lo lanzan los dos botones de la v2 (moloka-app-v2, Escaneo PRO · pestaña HEO: «Barrer HEO» y
-«Barrer HEO · todas las marcas») por el workflow escaner2-heo-barrido.yml, con el input `modo`
-(marcas | todas, encargo B2). Aqui viven las credenciales de HEO.
+Lo lanzan los botones de la v2 (moloka-app-v2, Escaneo PRO · pestaña HEO: «Barrer HEO»,
+«Barrer HEO · todas las marcas» y, desde el B4, «Barrer HEO · marcas elegidas») por el workflow
+escaner2-heo-barrido.yml, con el input `modo` (marcas | todas | elegidas) y, en el modo
+'elegidas', la lista de marcas (JSON) y la casilla de ofertas. Aqui viven las credenciales de HEO.
 
 QUE HACE, EN ORDEN:
   1. abre una pasada en `escaner2_pasada` (estado 'descargando') con el id del run;
   2. modo 'marcas': lee la regla HEO de `reglas_director` (SOLO LECTURA) y saca de
      director_heo_prep.py SU filtro (`_quiere`), sin ejecutar aquel fichero. Modo 'todas': ni
-     la lee; el filtro es solo «disponible»;
+     la lee; el filtro es solo «disponible». Modo 'elegidas' (B4): ni la lee; el filtro es
+     «disponible» y de una marca elegida (coincidencia EXACTA) o, con la casilla, en oferta;
   3. baja el catalogo con `descargar_heo.descargar_catalogo_heo(con_chase=True)`, la MISMA
      funcion que usa el director;
   4. construye la foto con `escaner2_motor.construir_foto` (reglas de EAN/chase/caja del
@@ -26,7 +28,7 @@ QUE HACE, EN ORDEN:
   6. cierra la pasada en 'esperando_csv' con sus cuentas, o en 'fallida' con el motivo.
 
 🔒 NO TOCA NADA DEL ESCANER VIEJO: ni `reglas_director` (se lee en el modo 'marcas'; en el
-   'todas', ni eso), ni `escaner_chase_asin` (el director la refresca con los Funko chase; aqui
+   'todas' y en el 'elegidas', ni eso), ni `escaner_chase_asin` (el director la refresca con los Funko chase; aqui
    las cajas se valoran en la foto, sin escribir ni leer esa tabla), ni `productos`, ni
    `escaner_memoria`, ni `escaner_resultados`, ni el buzon `informes/escaner_heo/`. Cero tokens
    de Keepa: esto no habla con Keepa ni con Amazon.
@@ -57,12 +59,24 @@ if not (os.environ.get('HEO_USER') and os.environ.get('HEO_PASS')):
 # 🔑 El modo lo elige Fernando en la pantalla (input del workflow). Vacio = 'marcas', el de siempre
 #    (un disparo sin input, como los de antes del B2, barre como antes). Otra cosa: no se corre.
 MODO = (os.environ.get('MODO_BARRIDO') or 'marcas').strip().lower()
-if MODO not in ('marcas', 'todas'):
-    abortar(f'modo de barrido desconocido: {MODO!r} (marcas | todas)')
-
-from supabase import create_client  # noqa: E402
+if MODO not in ('marcas', 'todas', 'elegidas'):
+    abortar(f'modo de barrido desconocido: {MODO!r} (marcas | todas | elegidas)')
 
 import escaner2_motor as e2  # noqa: E402
+
+# 🔴 (B4) La seleccion del modo 'elegidas' se valida AQUI, antes de abrir ningun cliente: si no
+#    vale (no es JSON, no es una lista de textos, lleva comillas o saltos de linea, pasa de los
+#    topes, o no trae ni una marca ni las ofertas), la pasada no arranca y el run dice por que.
+#    Llega por env (MARCAS_ELEGIDAS, OFERTAS_ELEGIDAS), nunca interpolada dentro de un `run:`.
+ELEGIDAS, OFERTAS_ELEGIDAS = None, None
+if MODO == 'elegidas':
+    try:
+        ELEGIDAS, OFERTAS_ELEGIDAS = e2.validar_seleccion(os.environ.get('MARCAS_ELEGIDAS'),
+                                                          os.environ.get('OFERTAS_ELEGIDAS'))
+    except e2.SeleccionInvalida as ex:
+        abortar(f'selección de marcas no válida: {ex}')
+
+from supabase import create_client  # noqa: E402
 
 BUCKET = 'escaner2'
 LOTE = 500
@@ -115,10 +129,13 @@ def _contar(tabla, **filtros):
 
 def main():
     pasada = str(uuid.uuid4())
-    sb.table('escaner2_pasada').insert({
-        'id': pasada, 'proveedor': e2.PROVEEDOR, 'estado': 'descargando', 'modo': MODO,
-        'run_id': int(RUN_ID) if (RUN_ID or '').isdigit() else None,
-    }).execute()
+    abrir = {'id': pasada, 'proveedor': e2.PROVEEDOR, 'estado': 'descargando', 'modo': MODO,
+             'run_id': int(RUN_ID) if (RUN_ID or '').isdigit() else None}
+    if MODO == 'elegidas':
+        # (B4) Lo elegido queda en la pasada desde que nace: la base no admite una pasada
+        #      'elegidas' sin su lista (check escaner2_pasada_elegidas_con_lista).
+        abrir.update(marcas=ELEGIDAS, ofertas=OFERTAS_ELEGIDAS)
+    sb.table('escaner2_pasada').insert(abrir).execute()
     print(f">>> Pasada {pasada} abierta (descargando) · modo {MODO}.", flush=True)
     try:
         cierre = barrer(pasada)
@@ -140,7 +157,11 @@ def barrer(pasada):
     # 1 · El filtro. Modo 'marcas': la regla HEO (solo lectura) y el filtro del director, el suyo.
     #     Modo 'todas': solo disponible, y `reglas_director` NI SE LEE (encargo B2).
     regla = None
-    if MODO == 'marcas':
+    if MODO == 'elegidas':
+        # (B4) Las marcas que Fernando marca en el selector de la v2, ya validadas al arrancar.
+        #      Coincidencia EXACTA y SIN LEER reglas_director.
+        quiere, info = e2.filtro_elegidas(ELEGIDAS, OFERTAS_ELEGIDAS)
+    elif MODO == 'marcas':
         res = sb.table('reglas_director').select('*').eq('proveedor', e2.PROVEEDOR).limit(1).execute()
         regla = (res.data or [None])[0]
         if not regla:
@@ -150,7 +171,11 @@ def barrer(pasada):
         quiere, info = e2.filtro_todas()
     M = e2.cargar_motor()
     tanda = e2.tanda_visualizador()
-    if regla is not None:
+    if MODO == 'elegidas':
+        print(f">>> Modo MARCAS ELEGIDAS: {len(ELEGIDAS)} marca(s) {ELEGIDAS[:12]}"
+              f"{' …' if len(ELEGIDAS) > 12 else ''} | ofertas de cualquier marca {OFERTAS_ELEGIDAS} | "
+              f"sin leer reglas_director | tanda del Visualizador {tanda}", flush=True)
+    elif regla is not None:
         print(f">>> Regla HEO (activa={regla.get('activo')}): marcas {info['marcas_reales']} | "
               f"ofertas {info['quiere_ofertas']} | tanda del Visualizador {tanda}", flush=True)
     else:
@@ -173,7 +198,7 @@ def barrer(pasada):
     # 3 · La foto, y el cuadre desde el catalogo crudo. Sin uno de los dos numeros del log no se
     #     puede afirmar que cuadra: la pasada falla diciendo cual falta (NULL no es cero).
     foto, apartados, cuentas = e2.construir_foto(filas, chase, quiere, M, n_crudo=n_crudo, n_sin_gtin=n_sin_gtin,
-                                                 n_declarado=n_declarado)
+                                                 n_declarado=n_declarado, modo=MODO)
     previas = cuentas['previas']
     print(f">>> CUADRE PREVIO [HEO]: catálogo crudo {n_crudo} = "
           + ' + '.join(f'{p} {previas[p]}' for p in e2.PUERTAS_PREVIAS)
@@ -183,7 +208,8 @@ def barrer(pasada):
         raise FalloPasada('NO CUADRA antes de la foto: ' + cuentas['motivo_previo'],
                           dict({'n_crudo': n_crudo}, **{'p_' + p: v for p, v in previas.items()}))
     if not foto:
-        raise RuntimeError('la foto sale vacía: nada de HEO pasa el filtro del director')
+        raise RuntimeError('la foto sale vacía: nada de HEO pasa el filtro '
+                           + ('de las marcas elegidas' if MODO == 'elegidas' else 'del director'))
 
     filas_foto = []
     for f in foto:
