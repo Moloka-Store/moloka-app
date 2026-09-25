@@ -1422,3 +1422,49 @@ class EleccionViejo:
 
 def cargar_eleccion_viejo(nombres, ruta=RUTA_MOTOR):
     return EleccionViejo(nombres, ruta)
+
+
+# ── (B5-bis) EL CORPUS DEL COTEJO NO DEPENDE DE LAS MARCAS ELEGIDAS ─────────────────────────
+# Las palabras «distintivas» se miden sobre un catalogo. Si fuera solo la FOTO, con marcas elegidas el
+# catalogo encoge y cambia que palabra distingue (en d053378c, «deck» y «case» dejan de serlo): la
+# eleccion dependeria de lo que Fernando marco. El corpus es el que tendria la pasada en modo «todas»:
+# la foto + lo apartado por MARCA (marca fuera / no elegida) que habria pasado las demas puertas previas.
+#   · estado no servible: la marca fuera se lista SOLO si esta «disponible», que es lo unico que HEO
+#     admite (PERFILES['HEO']['estados_ok']): la pasa siempre;
+#   · chase suelto y EAN de forma rara: las mismas funciones del viejo (`clasificar_chase`, `core_ean`);
+#   · caja con chase (lista `chase` de descargar_heo, con unidades en el nombre): el mismo camino que en
+#     `construir_foto` (`ean_de_la_figura`); si no sale EAN de la figura, iria a su puerta previa;
+#   · duplicado del proveedor: una por (EAN, chase), la MAS BARATA, contando tambien con la foto.
+def corpus_cotejo(foto, apartados, M):
+    """(nombres, n_de_fuera): los nombres del corpus del cotejo y cuantos vienen de fuera de la foto."""
+    perfil = M.PERFILES[PROVEEDOR]
+    mejor = {}                                       # clave → (precio, nombre, de_fuera)
+
+    def poner(clave, precio, nombre, de_fuera):
+        prev = mejor.get(clave)
+        if prev is None or (precio is not None and (prev[0] is None or precio < prev[0])):
+            mejor[clave] = (precio, nombre, de_fuera)
+    for f in foto:
+        poner((M.norm(f['ean_core']), bool(f.get('es_chase'))), f.get('precio_catalogo'), f.get('nombre') or '', False)
+    for a in apartados:
+        if a.get('motivo') != 'marca_fuera':
+            continue
+        if perfil.get('estados_ok') and 'disponible' not in perfil['estados_ok']:
+            continue
+        nombre, ean = a.get('nombre') or '', str(a.get('ean_original') or '').strip()
+        es_case, _es_caja6, descartar = M.clasificar_chase(nombre, ean)
+        core = M.core_ean(ean)
+        if (not core.isdigit()) or len(core) not in (12, 13):
+            # ¿Una caja con chase de la lista `chase`? Entonces el EAN es el de su figura.
+            if unidades_caja_chase(nombre) is None:
+                continue
+            figura, _origen, _aviso = ean_de_la_figura(ean, a.get('producto_heo'), M)
+            if figura is None:
+                continue
+            poner((M.norm(figura), True), a.get('precio_catalogo'), nombre, True)
+            continue
+        if descartar:
+            continue
+        poner((M.norm(core), bool(es_case)), a.get('precio_catalogo'), nombre, True)
+    nombres = [v[1] for v in mejor.values()]
+    return nombres, sum(1 for v in mejor.values() if v[2])

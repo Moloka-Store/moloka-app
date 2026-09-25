@@ -501,7 +501,9 @@ eq('2 · (B5) «Cotejo» lleva el veredicto del viejo SOLO donde se eligió entr
    sorted({(r[_ia['EAN']], r[_ia['Cotejo']]) for r in _an[1:] if r[_ia['Cotejo']]}), [(_ean(M, 4), '⚠ DUDOSO')])
 _puerta = {_foto_ean[r['foto_id']]: r['puerta'] for r in T['escaner2_resultado_ean']}
 eq('2 · (B5) Ambiguos: el DELTA con el ganador POR PUESTO (lo que escribe el viejo) y el EPSILON, que sigue en b, vacío',
-   [tuple(r) for r in list(_wb['Ambiguos'].iter_rows(values_only=True))[1:]], [(_ean(M, 4), 'B0DELT0001'), (_ean(M, 5), None)])
+   # (sin orden: las filas siguen el de la foto, que aquí sale de un id aleatorio)
+   sorted((tuple(r) for r in list(_wb['Ambiguos'].iter_rows(values_only=True))[1:]), key=str),
+   sorted([(_ean(M, 4), 'B0DELT0001'), (_ean(M, 5), None)], key=str))
 eq('2 · (B4) Descartados ← puerta a + apartados (no la marca fuera)',
    ([],
     sorted(r[0] for r in list(_wb['Descartados'].iter_rows(values_only=True))[1:])),
@@ -637,6 +639,9 @@ eq('9 · 🔴 CUADRA: crudo 11 = previas 6 + foto 5',
 eq('9 · 🔴 el modo «elegidas» NO toca reglas_director, ni para leer', [o for o in bd['ops'] if o[2] == 'reglas_director'], [])
 c = T['escaner2_cruce'][0]
 eq('9 · el cruce sale en VERDE, LISTA y cuadrado', (cod2, c['estado'], c['cuadra']), (0, 'lista', True))
+_linea = [x for x in log2.splitlines() if 'ELECCION DE FICHA' in x]
+eq('9 · (B5-bis) el log del cruce dice el corpus del cotejo y cuántos vienen de fuera de la foto (la foto 5 + el Hasbro no elegido)',
+   [('corpus del cotejo 6 nombres' in x, '1 de fuera de la foto' in x) for x in _linea], [(True, True)])
 _xl = [k for k in bd['storage']['escaner2'] if k.startswith('heo/%s/%s/Escaner2_HEO_' % (pasada, c['id']))]
 _wb = load_workbook(io.BytesIO(base64.b64decode(bd['storage']['escaner2'][_xl[0]])), read_only=True)
 eq('9 · 🔴 el Excel lleva las seis hojas del viejo delante, con las cabeceras de COLS en «Análisis»',

@@ -239,10 +239,17 @@ def cruzar(cruce, params, pasada):
     M.poner_catalogo_propio(productos)
 
     # ── 3 · Las puertas ───────────────────────────────────────────────────────────────
-    # (B5) Con dos o mas fichas, la regla del viejo (su cotejo de titulo, con las palabras que
-    #      distinguen calculadas sobre el catalogo de ESTA pasada) elige una entre las de ES.
-    eleccion = e2.cargar_eleccion_viejo([f['nombre'] or '' for f in foto])
-    print(f"ELECCION DE FICHA (regla del viejo): cotejo sobre {eleccion.n_nombres} nombres del catálogo.", flush=True)
+    # (B5) Con dos o mas fichas, la regla del viejo (su cotejo de titulo) elige una entre las de ES.
+    # (B5-bis) Las palabras que distinguen se miden sobre el catalogo que tendria la pasada en modo
+    #      «todas» (la foto + la marca fuera que habria pasado las demas puertas previas), para que la
+    #      eleccion NO dependa de las marcas elegidas.
+    apartados = _todas('escaner2_apartado', 'ean_original,nombre,marca,precio_catalogo,motivo,detalle,producto_heo',
+                       'id', pasada_id=PASADA)
+    corpus, de_fuera = e2.corpus_cotejo(foto, apartados, M)
+    eleccion = e2.cargar_eleccion_viejo(corpus)
+    print(f"ELECCION DE FICHA (regla del viejo): corpus del cotejo {len(corpus)} nombres ({eleccion.n_nombres} "
+          f"distintos), {de_fuera} de fuera de la foto (marca fuera/no elegida que habría pasado las demás "
+          f"puertas previas).", flush=True)
     resultados = []
     for f in foto:
         cands = {p: e2.candidatos(f, datos_por_pais[p]) for p in usados}
@@ -329,8 +336,7 @@ def cruzar(cruce, params, pasada):
             'n_entradas': n_entradas, 'n_bd': n_bd, 'cuadra': cuadra and not motivo_fallo,
             'n_crudo': n_crudo, 'previas': previas, 'modo': pasada.get('modo'), 'lista_viejo': lista_viejo,
             'marcas': pasada.get('marcas'), 'ofertas': pasada.get('ofertas'), 'motor': M, 'eleccion': eleccion,
-            'apartados': _todas('escaner2_apartado', 'ean_original,nombre,marca,precio_catalogo,motivo,detalle,producto_heo',
-                                'id', pasada_id=PASADA),
+            'apartados': apartados,
             'resumen': cmp_resumen, 'viejos': viejos_meta, 'avisos': avisos})
         sb.storage.from_(BUCKET).upload(ruta_excel, contenido, {
             'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

@@ -134,6 +134,88 @@ finally:
     os.unlink(_t.name)
 eq('(D) 🔴 si hay DOS keyrank en el fichero del viejo, no adivina: no arranca', 'UN def keyrank' in (_r or ''), True)
 
+print('\n(E) (B5-bis) el corpus del cotejo NO depende de las marcas elegidas')
+# Un MISMO catalogo, barrido en modo «todas» y en modo «elegidas» con solo Ultimate Guard. La escena
+# reproduce los recuentos REALES del corpus de la pasada ed95d086 (7.815 nombres; en cuantos sale cada
+# palabra de los 13 nombres): los 13 productos, y relleno con palabras inventadas hasta cuadrar cada
+# recuento. La mitad del relleno es de Ultimate Guard y la otra mitad de otras marcas. Y tres filas de
+# otra marca que las demas puertas previas echan en «todas» (forma rara, chase suelto, duplicado).
+M = e2.cargar_motor()
+TOK = EL._ns['_tok_cot']
+ABC = 'abcdefghijklmnopqrtuvwxyz'            # sin «s»: el cotejo quita la «s» final de los plurales
+
+
+def palabra(k):
+    w = 'zq'
+    for _ in range(4):
+        w += ABC[k % 25]
+        k //= 25
+    return w
+
+
+def ean13(n):
+    cuerpo = '84399%07d' % n
+    return cuerpo + M._chk13(cuerpo)
+
+
+def fila_heo(n, nombre, marca, precio=10.0, ean=None):
+    return {'productNumber': 'HEO%05d' % n, 'ean': ean or ean13(n), 'nombre': nombre, 'marca': marca,
+            'categoria': 'x', 'precio': precio, 'precio_base': precio, 'en_oferta': '', 'campana': '',
+            'estado': 'disponible', 'disponibilidad': 'GREEN', 'imagen': '', 'fin_de_vida': '', 'preorder': ''}
+
+
+filas_cat, cuenta, n = [], {}, 0
+for c in CASOS:
+    marca = 'Ultimate Guard' if c['nombre'].startswith('Ultimate Guard') else 'Funko'
+    filas_cat.append(fila_heo(0, c['nombre'], marca, ean=c['ean']))
+    for w in set(TOK(c['nombre'])):
+        cuenta[w] = cuenta.get(w, 0) + 1
+# Como en la realidad, un nombre de relleno lleva VARIAS de esas palabras: en la vuelta r van todas las que
+# todavía necesitan más de r apariciones (así cada una sale exactamente las que le faltan).
+falta = {w: df - cuenta.get(w, 0) for w, df in DATOS['idf']['df'].items()}
+k = 0
+for r in range(max(falta.values())):
+    n += 1
+    k += 1
+    palabras = [w if TOK(w) == [w] else w + 's' for w in sorted(falta) if falta[w] > r]
+    filas_cat.append(fila_heo(n, ' '.join(palabras + [palabra(k)]), 'Ultimate Guard' if n % 2 else 'Otra %d' % (n % 7)))
+while len({f['nombre'] for f in filas_cat}) < DATOS['idf']['n_nombres']:
+    n += 1
+    k += 1
+    filas_cat.append(fila_heo(n, '%s %s' % (palabra(k), palabra(k + 10 ** 6)), 'Ultimate Guard' if n % 2 else 'Otra %d' % (n % 7)))
+# Las que echan las demás puertas previas (y llevan «deck», para que se note si se cuelan en el corpus).
+_ug = [f for f in filas_cat if f['marca'] == 'Ultimate Guard' and f['productNumber'] != 'HEO00000'][0]
+RARAS = [fila_heo(900001, 'deck forma rara zqzzzz', 'Otra 1', ean='12345'),
+         fila_heo(900002, 'deck zqyyyy Chase', 'Otra 2'),
+         fila_heo(900003, 'deck duplicado zqxxxx', 'Otra 3', precio=99.0, ean=_ug['ean'])]
+eq('(E) la escena: el chase suelto lo es para el viejo (su `clasificar_chase`)', M.clasificar_chase(RARAS[1]['nombre'], RARAS[1]['ean'])[2], True)
+CATALOGO = filas_cat + RARAS
+
+
+def corpus_de(quiere, modo, solo_foto=False):
+    foto, apart, _c = e2.construir_foto(CATALOGO, [], quiere, M, modo=modo)
+    if solo_foto:
+        return e2.cargar_eleccion_viejo([f['nombre'] for f in foto]), len(foto), apart
+    nombres, _fuera = e2.corpus_cotejo(foto, apart, M)
+    return e2.cargar_eleccion_viejo(nombres), len(foto), apart
+
+
+EL_T, N_T, AP_T = corpus_de(e2.filtro_todas()[0], 'todas')
+EL_UG, N_UG, AP_UG = corpus_de(e2.filtro_elegidas(['Ultimate Guard'], False)[0], 'elegidas')
+eq('(E) la escena reproduce el corpus real en modo «todas»: 7.815 nombres, y los recuentos de las 49 palabras',
+   (EL_T.n_nombres, {w: EL_T._ns['_DF'].get(w, 0) for w in DATOS['idf']['df']}), (DATOS['idf']['n_nombres'], DATOS['idf']['df']))
+eq('(E) …y las tres raras las echan sus puertas (forma rara, chase suelto, duplicado)',
+   sorted(a['motivo'] for a in AP_T), ['chase_suelto', 'duplicado_proveedor', 'ean_forma_rara'])
+eq('(E) en modo «elegidas» (solo Ultimate Guard) la FOTO encoge, y la marca no elegida va aparte',
+   (N_UG < N_T / 2 + 20, sum(1 for a in AP_UG if a['motivo'] == 'marca_fuera') > 3000), (True, True))
+eq('(E) 🔴 pero el corpus del cotejo es el MISMO: mismos nombres y los mismos recuentos',
+   (EL_UG.n_nombres, dict(EL_UG._ns['_DF'])), (EL_T.n_nombres, dict(EL_T._ns['_DF'])))
+eq('(E) 🔴 …y la MISMA elección en los 13 casos, que es la del viejo',
+   [elige(EL_UG, c) for c in CASOS], [c['esperado'] for c in CASOS])
+EL_FOTO, _n, _a = corpus_de(e2.filtro_elegidas(['Ultimate Guard'], False)[0], 'elegidas', solo_foto=True)
+eq('(E) 🔴 si el corpus fuera solo la foto (lo del #313 antes del B5-bis), con solo UG cambiaría: otro número de nombres y «deck» con otro recuento',
+   (EL_FOTO.n_nombres != EL_T.n_nombres, EL_FOTO._ns['_DF'].get('deck') != EL_T._ns['_DF'].get('deck')), (True, True))
+
 print()
 if fallos:
     print('ROJO: %d comprobaciones fallan: %s' % (len(fallos), ', '.join(fallos)))
