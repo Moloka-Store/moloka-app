@@ -2,7 +2,7 @@
 """Banco del escaner 2 de HEO · EL MODO «MARCAS ELEGIDAS» (encargo B4, 25-sep-2026).
 
 SIN RED, SIN SECRETOS Y SIN BASE: se ejecuta el motor de verdad (escaner2_motor.py, con las piezas
-del escaner viejo leidas de su fichero) y se lee el workflow de verdad.
+del escaner viejo copiadas en escaner2_heredado_nube.py, B7) y se lee el workflow de verdad.
 
 QUE PRUEBA:
   (A) la seleccion que llega del workflow se valida: una lista JSON de textos, sin comillas dobles,
@@ -18,7 +18,7 @@ QUE PRUEBA:
   (F) el Excel con el formato del viejo (correccion del 5c, 25-sep-2026 11:58): la huella del Excel
       viejo de verdad tiene sus seis hojas; la comparacion se pone ROJA si cambia el orden, una
       cabecera, una regla del semaforo, un color, un ancho, la tabla, una formula, un enlace o la fila
-      congelada; y la Celda 9 del viejo se saca por dos anclas unicas y falla CERRADA.
+      congelada; y la Celda 9 (B7: la funcion `excel_del_viejo` de escaner2_heredado_nube.py) falla CERRADA.
 """
 import json
 import os
@@ -178,7 +178,7 @@ REF = json.load(open(os.path.join(AQUI, 'huella_excel_viejo_heo.json'), encoding
 HOJAS_VIEJO = ['Análisis', 'Descartados', 'Ambiguos', 'Sin_rank', 'Precio por lote', 'Chase_manual']
 eq('(F) la huella del Excel viejo de verdad: sus seis hojas, en su orden', [h['hoja'] for h in REF['hojas']], HOJAS_VIEJO)
 eq('(F) …y «Análisis» con las columnas de COLS del viejo, «ISD s/ Fee Log. (€)» y «Origen IVA» al final',
-   REF['hojas'][0]['cabecera'], list(e2.sacar_piezas(e2.RUTA_MOTOR, (), ('COLS',))['COLS']))
+   REF['hojas'][0]['cabecera'], e2.columnas_analisis())
 eq('(F) la huella contra sí misma: ni una diferencia', HU.diferencias(REF, REF), [])
 
 
@@ -207,42 +207,33 @@ with open(e2.RUTA_MOTOR, encoding='utf-8') as fh:
     _VIEJO = fh.read()
 
 
-def bloque_de(texto):
+def excel_con(texto):
+    """El Excel de una fila con una copia cambiada de escaner2_heredado_nube.py: None o el error."""
+    _F = [{'id': 'f1', 'ean_original': '8435500000014', 'ean_core': '8435500000014', 'nombre': 'x', 'marca': 'm',
+           'precio_unidad': 5.0, 'aviso_caja': None}]
+    _R = [{'foto_id': 'f1', 'puerta': 'f', 'motivo': 'f_comprar', 'detalle': 'x', 'asin': 'B0X', 'paises': {}}]
     with tempfile.NamedTemporaryFile('w', suffix='.py', delete=False, encoding='utf-8') as t:
         t.write(texto)
     try:
-        e2.sacar_bloque_excel(t.name)
+        e2.excel_como_el_viejo(_F, _R, [], M, ruta=t.name)
         return None
-    except e2.PiezaNoEncontrada as ex:
-        return str(ex)
+    except Exception as ex:
+        return '%s: %s' % (type(ex).__name__, ex)
     finally:
         os.unlink(t.name)
 
 
-_codigo, _necesita = e2.sacar_bloque_excel()
-eq('(F) la Celda 9 del viejo se saca por sus dos anclas, y pide lo que el escáner 2 le da',
-   sorted(_necesita - set(M._ns) - {'pct_comision_celda', 'en_bd_txt'}),
-   sorted(['registros', 'problematicos', 'no_encontrados', 'chase_sueltos', '_dups', 'ambiguos', 'sin_rank',
-           'chase_pendientes', 'cotejo_info', 'PROVEEDOR']))
-eq('(F) 🔴 sin el ancla final (`_sin_excel = …`), no arranca',
-   'UNA asignacion de nivel superior a _sin_excel' in (bloque_de(_VIEJO.replace('\n_sin_excel = ', '\n_sin_excel_x = ')) or ''), True)
-eq('(F) 🔴 con el ancla de inicio dos veces, no arranca',
-   'UNA asignacion de nivel superior a COLS' in (bloque_de(_VIEJO + '\nCOLS = []\n') or ''), True)
-_F = [{'id': 'f1', 'ean_original': '8435500000014', 'ean_core': '8435500000014', 'nombre': 'x', 'marca': 'm',
-       'precio_unidad': 5.0, 'aviso_caja': None}]
-_R = [{'foto_id': 'f1', 'puerta': 'f', 'motivo': 'f_comprar', 'detalle': 'x', 'asin': 'B0X', 'paises': {}}]
-try:
-    _mal = _VIEJO.replace('\n_sin_excel = ', '\nprint(NOMBRE_QUE_NADIE_DA)\n_sin_excel = ', 1)
-    with tempfile.NamedTemporaryFile('w', suffix='.py', delete=False, encoding='utf-8') as _t:
-        _t.write(_mal)
-    e2.excel_como_el_viejo(_F, _R, [], M, ruta=_t.name)
-    _r = None
-except e2.PiezaNoEncontrada as ex:
-    _r = str(ex)
-finally:
-    os.unlink(_t.name)
+eq('(F) (B7) la Celda 9 es la función `excel_del_viejo`, con los datos que el bloque leía como globales',
+   e2.DATOS_CELDA9, ('registros', 'problematicos', 'no_encontrados', 'chase_sueltos', '_dups', 'ambiguos', 'sin_rank',
+                     'chase_pendientes', 'cotejo_info', 'PROVEEDOR'))
+eq('(F) con la copia heredada sin tocar, el Excel sale', excel_con(_VIEJO), None)
+eq('(F) 🔴 sin la función `excel_del_viejo`, no arranca, y dice cuál falta',
+   'excel_del_viejo' in (excel_con(_VIEJO.replace('\ndef excel_del_viejo(', '\ndef excel_del_viejo_x(')) or ''), True)
+eq('(F) 🔴 con la función dos veces, no arranca (no se sabe cuál manda)',
+   'mas de una vez' in (excel_con(_VIEJO + '\ndef excel_del_viejo():\n    pass\n') or ''), True)
 eq('(F) 🔴 si la Celda 9 empieza a usar un nombre que el escáner 2 no le da, NO se adivina: revienta con su nombre',
-   'NOMBRE_QUE_NADIE_DA' in (_r or ''), True)
+   'NOMBRE_QUE_NADIE_DA' in (excel_con(_VIEJO.replace('\n    return wb\n', '\n    print(NOMBRE_QUE_NADIE_DA)\n    return wb\n', 1)) or ''),
+   True)
 
 print()
 if fallos:

@@ -2,8 +2,9 @@
 """Banco del escaner 2 de HEO · ELEGIR LA FICHA CUANDO UN EAN TIENE VARIAS (encargo B5, 25-sep-2026;
 B6 el mismo dia: el titulo se coteja en ES, IT, FR y DE).
 
-SIN RED, SIN SECRETOS Y SIN BASE. La regla es la del viejo, SACADA de su fichero
-(moloka_escaner_nube.py: `elegir_candidato`, su cotejo de titulo y `keyrank`) y ejecutada.
+SIN RED, SIN SECRETOS Y SIN BASE. La regla es la del viejo (moloka_escaner_nube.py: `elegir_candidato`,
+su cotejo de titulo y `keyrank`), copiada literalmente en escaner2_heredado_nube.py (B7), SACADA de alli
+y ejecutada. Las mutaciones de (D) se hacen sobre una copia de ESE fichero, que es el que usa el escaner 2.
 
 🔑 LOS 13 CASOS SON REALES (casos_b5_fichas.json, volcado por script, no tecleado): los EAN de la puerta
    b del cruce 37eaa138 que el viejo daba como COMPRAR o VALORAR, con sus fichas de ES (ASIN, titulo y

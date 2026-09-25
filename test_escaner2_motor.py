@@ -4,10 +4,11 @@
 SIN RED, SIN SECRETOS Y SIN BASE: se ejecuta la logica de verdad con datos de mentira.
 
 QUE PRUEBA:
-  (A) QUE LA FORMULA ES LA DEL VIEJO, NO UNA COPIA. Cada pieza que el escaner nuevo usa
-      (`calc_rentabilidad`, `decision_de`, las reglas de EAN/chase/caja, el IVA…) sale del
-      fichero `moloka_escaner_nube.py`, de la linea donde vive su `def`. Y si alguien la borra
-      o la duplica en el viejo, el nuevo NO arranca: se prueba contra una copia rota.
+  (A) QUE LA FORMULA ES LA DEL VIEJO, COPIADA LITERALMENTE (B7). Cada pieza que el escaner nuevo
+      usa (`calc_rentabilidad`, `decision_de`, las reglas de EAN/chase/caja, el IVA…) sale del
+      fichero heredado `escaner2_heredado_nube.py`, de la linea donde vive su `def` (que su texto es el
+      del viejo lo prueba test_escaner2_heredado.py). Y si alguien la borra o la duplica alli, el nuevo
+      NO arranca: se prueba contra una copia rota.
   (B) LA FORMULA, con los casos que el propio viejo se exige al arrancar (su caso canonico y el
       pedido frances 404-7912092-2024339), y los umbrales de la decision.
   (C) EL LECTOR DE CSV. No hay un CSV real del Visualizador en el repo (y uno de produccion no
@@ -16,7 +17,7 @@ QUE PRUEBA:
       medido en exports reales del 24-sep-2026 («15.01 %», «yes»/«no», EAN con ceros y varios
       separados por «, », «es»/«de» en minuscula, celdas vacias). El pais sale del dato.
   (D) PRECIO, COMISION Y TARIFA, COMO EL ESCANER PRO: se corre `escanear_pro` de verdad sobre
-      el mismo CSV y se coteja fila a fila.
+      el mismo CSV y se coteja fila a fila. (B7) Mientras el Pro exista: sin el, se salta y lo dice.
   (E) LA FOTO: filtro del director, chase Funko y chase suelto apartados, caja 5+1 a precio
       por unidad (÷6 leido del viejo), EAN raro fuera, duplicado a la mas barata, rescate GTIN.
   (F) LAS SEIS PUERTAS con sus motivos, una a una.
@@ -34,7 +35,7 @@ import tempfile
 from datetime import datetime, timezone
 
 import escaner2_motor as e2
-import moloka_escaner_pro as pro
+import escaner2_heredado_pro as pro      # (B7) el lector del Pro, copiado; el Pro de verdad solo en (D)
 
 fallos = []
 
@@ -57,7 +58,7 @@ M = e2.cargar_motor()
 COL_PAIS, COL_CAIDAS = e2.columnas_keepa()
 
 # ═══════════════════════════════════════════════════════════════════════════════
-print('(A) las piezas salen del fichero del escaner viejo')
+print('(A) las piezas salen del fichero heredado (la copia literal del escaner viejo)')
 _arbol = ast.parse(io.open(e2.RUTA_MOTOR, encoding='utf-8').read())
 _lineas = {n.name: n.lineno for n in _arbol.body if isinstance(n, ast.FunctionDef)}
 for _nombre in e2.DEFS_MOTOR:
@@ -76,7 +77,7 @@ try:
     _msg = 'arranco'
 except e2.PiezaNoEncontrada as ex:
     _msg = str(ex)
-eq('(A) 🔴 sin calc_rentabilidad en el viejo, el nuevo NO arranca (y dice cual falta)',
+eq('(A) 🔴 sin calc_rentabilidad en el fichero heredado, el nuevo NO arranca (y dice cual falta)',
    'calc_rentabilidad' in _msg and 'ya no tiene' in _msg, True)
 io.open(_roto, 'w', encoding='utf-8').write(_src + '\nALMACEN = 0.5\n')
 try:
@@ -86,7 +87,7 @@ except e2.PiezaNoEncontrada as ex:
     _msg = str(ex)
 eq('(A) 🔴 con ALMACEN asignado dos veces, NO arranca (no se sabe cual manda)',
    'ALMACEN' in _msg and 'mas de una vez' in _msg, True)
-eq('(A) la tanda del Visualizador se lee de descargar_heo.py', e2.tanda_visualizador(), 10000)
+eq('(A) la tanda del Visualizador se lee de la copia de descargar_heo.py', e2.tanda_visualizador(), 10000)
 eq('(A) las cabeceras que el Pro no lee, de TIPADAS del escaparate',
    (COL_PAIS, COL_CAIDAS), ('Localización', 'Clasificación de Ventas: Descensos en los últimos 30 días'))
 
@@ -268,7 +269,14 @@ with io.open(_cat, 'w', encoding='utf-8', newline='') as fh:
     _w.writerow(['ean', 'nombre', 'marca', 'precio', 'estado'])
     for _h in FILAS_HEO[:14]:
         _w.writerow([_h['ean'], _h['nombre'], _h['marca'], _h['precio'], _h['estado']])
-_res_pro = pro.escanear_pro('HEO', 'TODAS', _cat, {'ES': RUTA_ES}, rank_maximo=30000)
+# (B7) El Escaner Pro de VERDAD, solo mientras exista: el dia que se borre, este cotejo se salta y lo dice.
+try:
+    import moloka_escaner_pro as _pro_viejo
+except ModuleNotFoundError:
+    _pro_viejo = None
+    print('    (D) SALTADO: moloka_escaner_pro.py ya no está en el repo; el lector heredado lo cubre (C)')
+_res_pro = (_pro_viejo.escanear_pro('HEO', 'TODAS', _cat, {'ES': RUTA_ES}, rank_maximo=30000)
+            if _pro_viejo else {'registros': []})
 _n_cotejadas = 0
 for _reg in _res_pro['registros']:
     _dpro = _reg['paises'].get('ES') or {}
@@ -279,8 +287,9 @@ for _reg in _res_pro['registros']:
         print('XX (D) %s: nuevo %r / Pro %r' % (_reg['ean'], (_mio['precio_venta'], _mio['ref_pct'], _mio['fee_fba']),
                                                 (_dpro.get('precio'), _dpro.get('ref_pct'), _dpro.get('fee'))))
     _n_cotejadas += 1
-eq('(D) precio, comision y tarifa FBA identicos a los del Pro en las %d fichas que el Pro calcula' % _n_cotejadas,
-   _n_cotejadas >= 8 and not [f for f in fallos if f.startswith('(D)')], True)
+if _pro_viejo:
+    eq('(D) precio, comision y tarifa FBA identicos a los del Pro en las %d fichas que el Pro calcula' % _n_cotejadas,
+       _n_cotejadas >= 8 and not [f for f in fallos if f.startswith('(D)')], True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 print('\n(E) la foto: filtro del director, chase, caja, EAN raro, duplicado y GTIN')
@@ -435,7 +444,7 @@ eq('(G) 🔴 una puerta que no es de las seis → NO CUADRA', _rara['cuadra'], F
 
 # ═══════════════════════════════════════════════════════════════════════════════
 print('\n(H) la comparacion con el viejo')
-_cols_viejo = e2.sacar_piezas(e2.RUTA_MOTOR, (), ('COLS',))['COLS']
+_cols_viejo = e2.columnas_analisis()
 
 
 def excel_viejo(filas):

@@ -57,7 +57,8 @@ if not re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 from supabase import create_client  # noqa: E402
 
 import escaner2_motor as e2  # noqa: E402
-import moloka_escaner_pro as pro  # noqa: E402
+# (B7) El lector del CSV del Visualizador del Escaner Pro, copiado literalmente (ya no se importa el Pro).
+import escaner2_heredado_pro as pro  # noqa: E402
 from foto_comun import descargar_buzon, listar_buzon  # noqa: E402
 
 BUCKET = 'escaner2'
