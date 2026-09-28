@@ -309,8 +309,9 @@ TABLAS_VIEJO = ('reglas_director', 'escaner_chase_asin', 'escaner_memoria', 'esc
                 'productos')
 
 
-def estado_inicial(e2, M, frenar=None):
-    viejo = excel_viejo(e2, M, [(1, 'ES', 'COMPRAR'), (1, 'DE', 'COMPRAR'), (5, 'ES', 'COMPRAR'), (3, 'IT', 'VALORAR')])
+def estado_inicial(e2, M, frenar=None, viejo_extra=()):
+    viejo = excel_viejo(e2, M, [(1, 'ES', 'COMPRAR'), (1, 'DE', 'COMPRAR'), (5, 'ES', 'COMPRAR'), (3, 'IT', 'VALORAR')]
+                        + list(viejo_extra))
     return {
         'frenar': frenar,
         'tablas': {
@@ -339,11 +340,11 @@ def estado_inicial(e2, M, frenar=None):
 SIEMBRA = {}
 
 
-def caso(nombre, frenar=None, crudo=None, modo=None, escena=None, extra=None):
+def caso(nombre, frenar=None, crudo=None, modo=None, escena=None, extra=None, viejo_extra=()):
     e2, pro, M = _escena()
     tmp = tempfile.mkdtemp(prefix='e2pp_')
     ruta = os.path.join(tmp, 'estado.json')
-    inicial = estado_inicial(e2, M, frenar)
+    inicial = estado_inicial(e2, M, frenar, viejo_extra)
     SIEMBRA[nombre] = {t: json.loads(json.dumps(inicial['tablas'][t])) for t in TABLAS_VIEJO}
     with open(ruta, 'w', encoding='utf-8') as fh:
         json.dump(inicial, fh)
@@ -487,15 +488,26 @@ eq('2 · (B4) una fila por país (ES, IT, FR, DE) de cada producto que se vende 
    ([(r[_ia['EAN']], r[_ia['País']]) for r in _an[1:]], len(_def)),
    ([(_foto_ean[fid], pais) for fid in _def for pais in ('ES', 'IT', 'FR', 'DE')], 3))
 _fil_es = [r for r in _an[1:] if r[_ia['EAN']] == _ean(M, 1) and r[_ia['País']] == 'ES'][0]
+# (D, 28-sep-2026) Sin las cuatro columnas quitadas, las letras se corren: precio H (era J), comisión K, fee L,
+# almacén M y beneficio N (era R). La fórmula es la misma, por nombre de columna.
 eq('2 · (B4) el ALFA en ES: la decisión es la GUARDADA y el beneficio, la fórmula VIVA del viejo con su IVA de ficha (10 %)',
    (_fil_es[_ia['Decisión']], _fil_es[_ia['Beneficio (€)']], _fil_es[_ia['Margen']]),
-   (_es1['decision'], '=(J2/1.1)-E2-N2-O2-P2', '=R2/J2'))
+   (_es1['decision'], '=(H2/1.1)-E2-K2-L2-M2', '=N2/H2'))
+_caidas_bd = {(_foto_ean[r['foto_id']], r['pais']): r['caidas_30d'] for r in T['escaner2_resultado_pais']}
+eq('2 · (D) «Ventas» = las caídas de 30 días GUARDADAS de ese país (sin cálculo en un país, vacía)',
+   [r[_ia['Ventas']] for r in _an[1:]], [_caidas_bd.get((r[_ia['EAN']], r[_ia['País']])) for r in _an[1:]])
+eq('2 · (D) …y hay alguna con dato (no se compara vacío con vacío)', any(r[_ia['Ventas']] for r in _an[1:]), True)
+eq('2 · (D) «Canal BB»: el CSV dice «yes» en «Caja de Compra: Es FBA» → BB-FBA',
+   sorted({r[_ia['Canal BB']] for r in _an[1:] if r[_ia['Precio venta (€)']]}), ['BB-FBA'])
 eq('2 · (B4) «En mi BD» sale del catálogo propio con la función del viejo (el ALFA es nuestro: 3 en FBA)',
    _fil_es[_ia['En mi BD']], 'OK Alm:0 FBA:3')
 _fil_fr = [r for r in _an[1:] if r[_ia['EAN']] == _ean(M, 1) and r[_ia['País']] == 'FR'][0]
 eq('2 · (B4) sin CSV de FR, su fila dice «Sin datos» y no inventa números',
    (_fil_fr[_ia['Decisión']], _fil_fr[_ia['Margen']], _fil_fr[_ia['Precio venta (€)']]), ('Sin datos', None, None))
-_VACIAS = ('Vendidos/mes', 'Nº ofertas', 'Coincide', 'Promo activa', 'OcioStock')
+# (D) 'Vendidos/mes', 'Nº ofertas' y 'Promo activa' ya no están en la hoja (iban siempre vacías).
+_VACIAS = ('Coincide', 'OcioStock')
+eq('2 · (D) fuera de «Análisis»: los dos puestos, «Vendidos/mes», «Nº ofertas» y «Promo activa»',
+   [c for c in ('Rank actual', 'Rank 90d', 'Vendidos/mes', 'Nº ofertas', 'Promo activa') if c in _ia], [])
 eq('2 · (B4) las columnas que el escáner 2 no tiene van VACÍAS, con su cabecera',
    {c: [r[_ia[c]] for r in _an[1:] if r[_ia[c]] not in (None, '')] for c in _VACIAS}, {c: [] for c in _VACIAS})
 eq('2 · (B5) «Cotejo» lleva el veredicto del viejo SOLO donde se eligió entre varias fichas (el DELTA)',
@@ -515,10 +527,14 @@ eq('2 · (B4) Descartados ← puerta a + apartados (no la marca fuera)',
 eq('2 · (B4) Chase_manual ← la caja con chase sin EAN de la figura, con su precio de caja',
    [r[:5] for r in list(_wb['Chase_manual'].iter_rows(values_only=True))[1:]],
    [('Funko Pop Omega w/CH Surtido (6)', 'HEO9001', '9990000000011', 70.0, 11.67)])
+import escaner2_desvios as DV  # noqa: E402
 import escaner2_huella_excel as HU  # noqa: E402
-_REF = json.load(open(os.path.join(AQUI, 'huella_excel_viejo_heo.json'), encoding='utf-8'))
+# (D, 28-sep-2026) El Excel viejo de verdad, con «Análisis» sin las cuatro columnas que Fernando quitó y con
+# «Ventas» (escaner2_desvios.py): el resto de la huella —fórmulas por nombre de columna incluidas— sigue siendo la suya.
+_REF = HU.sin_columnas(json.load(open(os.path.join(AQUI, 'huella_excel_viejo_heo.json'), encoding='utf-8')),
+                       DV.ANALISIS_QUITADAS, DV.ANALISIS_RENOMBRADAS)
 _h2 = HU.huella(base64.b64decode(bd['storage']['escaner2'][_xl[0]]))
-eq('2 · 🔴 (B4) el FORMATO de las seis hojas es el del Excel viejo de verdad (huella_excel_viejo_heo.json)',
+eq('2 · 🔴 (B4) el FORMATO de las seis hojas es el del Excel viejo de verdad (huella_excel_viejo_heo.json, con el desvío D)',
    HU.diferencias(_REF, _h2, solo_hojas=HOJAS_VIEJO, vacias=('Sin_rank',)), [])
 eq('2 · (B4) …con Sin_rank vacía (ningún «sin dato» en esta escena), escrita como la escribe el viejo',
    list(next(_wb['Sin_rank'].iter_rows(values_only=True))), ['(vacio)'])
@@ -622,8 +638,10 @@ eq('7 · (B2) la hoja «Puertas previas» lleva la marca fuera, con su EAN, nomb
    [(_ean(M, 7), 'Hasbro fuera', 'Hasbro', 5.0)])
 
 print('\n9 · [elegidas] (B4) barrido «marcas elegidas», solo Funko → cruce')
+# (D) El viejo, además, da COMPRAR al Hasbro (EAN 7), que en esta pasada es «marca no elegida».
 cod, log, cod2, log2, bd, pasada, M, e2 = caso('elegidas', modo='elegidas',
-                                               extra={'MARCAS_ELEGIDAS': '["Funko"]', 'OFERTAS_ELEGIDAS': 'false'})
+                                               extra={'MARCAS_ELEGIDAS': '["Funko"]', 'OFERTAS_ELEGIDAS': 'false'},
+                                               viejo_extra=[(7, 'ES', 'COMPRAR')])
 BDS['elegidas'] = bd
 T = bd['tablas']
 p = [x for x in T['escaner2_pasada'] if x['id'] == pasada][0]
@@ -640,6 +658,12 @@ eq('9 · 🔴 CUADRA: crudo 11 = previas 6 + foto 5',
 eq('9 · 🔴 el modo «elegidas» NO toca reglas_director, ni para leer', [o for o in bd['ops'] if o[2] == 'reglas_director'], [])
 c = T['escaner2_cruce'][0]
 eq('9 · el cruce sale en VERDE, LISTA y cuadrado', (cod2, c['estado'], c['cuadra']), (0, 'lista', True))
+_h7 = [r for r in T['escaner2_comparacion'] if r['ean'] == _ean(M, 7)]
+eq('9 · 🔴 (D) el Hasbro que el viejo da COMPRAR y el nuevo no miró (no elegida) → DIFERENCIA DE CRITERIO, no «sin explicar»',
+   [(r['categoria'], r['diferencia_criterio'], r['explicacion']) for r in _h7],
+   [('solo_viejo', True, "Diferencia de criterio: el nuevo no miró esa marca en esta pasada (Marca 'Hasbro' no elegida)")])
+eq('9 · (D) …y el cruce lo cuenta en criterio: sin explicar = las filas «Sin explicar» de la comparación',
+   c['n_cmp_sin_explicar'], sum(1 for r in T['escaner2_comparacion'] if (r['explicacion'] or '').startswith('Sin explicar')))
 _linea = [x for x in log2.splitlines() if 'ELECCION DE FICHA' in x]
 eq('9 · (B5-bis) el log del cruce dice el corpus del cotejo y cuántos vienen de fuera de la foto (la foto 5 + el Hasbro no elegido)',
    [('corpus del cotejo 6 nombres' in x, '1 de fuera de la foto' in x) for x in _linea], [(True, True)])

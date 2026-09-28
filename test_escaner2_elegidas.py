@@ -177,8 +177,13 @@ import escaner2_huella_excel as HU  # noqa: E402
 REF = json.load(open(os.path.join(AQUI, 'huella_excel_viejo_heo.json'), encoding='utf-8'))
 HOJAS_VIEJO = ['Análisis', 'Descartados', 'Ambiguos', 'Sin_rank', 'Precio por lote', 'Chase_manual']
 eq('(F) la huella del Excel viejo de verdad: sus seis hojas, en su orden', [h['hoja'] for h in REF['hojas']], HOJAS_VIEJO)
-eq('(F) …y «Análisis» con las columnas de COLS del viejo, «ISD s/ Fee Log. (€)» y «Origen IVA» al final',
-   REF['hojas'][0]['cabecera'], e2.columnas_analisis())
+# (D, 28-sep-2026) Desde el encargo D, «Análisis» del escaner 2 es la del viejo SIN cuatro columnas y con «Ventas»
+# en lugar de «Rank actual» (escaner2_desvios.py): se compara con la huella del viejo transformada así.
+import escaner2_desvios as DV  # noqa: E402
+REF_D = HU.sin_columnas(REF, DV.ANALISIS_QUITADAS, DV.ANALISIS_RENOMBRADAS)
+eq('(F) …y «Análisis» del escáner 2 = COLS del viejo sin las cuatro quitadas y con «Ventas», «ISD s/ Fee Log. (€)» '
+   'y «Origen IVA» al final', REF_D['hojas'][0]['cabecera'], e2.columnas_analisis())
+eq('(F) (D) la huella del viejo sigue siendo la de sus 31 columnas (no se toca)', len(REF['hojas'][0]['cabecera']), 31)
 eq('(F) la huella contra sí misma: ni una diferencia', HU.diferencias(REF, REF), [])
 
 
@@ -202,6 +207,19 @@ for _nombre, _f in (
         ('el ASIN sin enlace', lambda h: h['hojas'][0]['columnas']['ASIN'].__setitem__('enlace', False)),
         ('la fila sin congelar', lambda h: h['hojas'][0].__setitem__('congelada', None))):
     eq('(F) 🔴 la comparación se pone roja con %s' % _nombre, bool(muta(_f)), True)
+
+# (D) La transformacion de la huella: las formulas del viejo, vueltas a apuntar a las MISMAS columnas por nombre.
+eq('(F) (D) el Beneficio del viejo (=(J/IVA)-E-N-O-P) queda =(H/IVA)-E-K-L-M: precio, PA, comisión, fee y almacén',
+   REF_D['hojas'][0]['columnas']['Beneficio (€)']['formula'], ['=(C[-6]R[0]/k)-C[-9]R[0]-C[-3]R[0]-C[-2]R[0]-C[-1]R[0]'])
+eq('(F) (D) …y el semáforo de «Decisión», de la U a la Q',
+   sorted({f for r in REF_D['hojas'][0]['formato_condicional'] for f in r['formula'] if 'COMPRAR' in f}),
+   ['ISNUMBER(SEARCH("COMPRAR",Qn))', 'ISNUMBER(SEARCH("NO COMPRAR",Qn))'])
+try:
+    HU.sin_columnas(REF, tuple(DV.ANALISIS_QUITADAS) + ('Precio venta (€)',), DV.ANALISIS_RENOMBRADAS)
+    _msg = 'pasó'
+except HU.ColumnaQuitada as ex:
+    _msg = str(ex)
+eq('(F) 🔴 (D) quitar una columna de la que tira una fórmula del viejo NO se adivina: lo dice', 'Precio venta' in _msg, True)
 
 with open(e2.RUTA_MOTOR, encoding='utf-8') as fh:
     _VIEJO = fh.read()

@@ -144,6 +144,81 @@ def diferencias(ref, otro, solo_hojas=None, ignorar_columnas=(), vacias=()):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# (D, 28-sep-2026) LA HUELLA DEL VIEJO, MENOS LAS COLUMNAS QUE FERNANDO HA QUITADO
+# ═══════════════════════════════════════════════════════════════════════════════
+# La hoja «Análisis» del escaner 2 ya no es la del viejo en cuatro columnas (escaner2_desvios.py). Para seguir
+# comparandola con el Excel viejo DE VERDAD, se transforma la huella del viejo: fuera esas columnas, la
+# renombrada con su nombre nuevo, y cada formula (en R1C1 relativo) y cada formato condicional (por letra)
+# vueltos a apuntar a la MISMA columna por nombre en su nueva posicion. 🔴 Si una formula o una regla del
+# viejo apuntaba a una columna quitada, no se adivina: ColumnaQuitada, con cual.
+class ColumnaQuitada(ValueError):
+    """Una formula o una regla de la hoja apunta a una columna que se quita."""
+
+
+def _letra(n):
+    s = ''
+    while n:
+        n, r = divmod(n - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
+def sin_columnas(ref, quitar, renombrar=None, hoja='Análisis'):
+    """Una COPIA de la huella `ref` con la hoja `hoja` sin las columnas `quitar` y con `renombrar` aplicado."""
+    import copy
+    renombrar = dict(renombrar or {})
+    salida = copy.deepcopy(ref)
+    h = next(x for x in salida['hojas'] if x['hoja'] == hoja)
+    viejo = list(h['cabecera'])
+    faltan = [c for c in list(quitar) + list(renombrar) if c not in viejo]
+    if faltan:
+        raise ValueError('la hoja %s no tiene %s' % (hoja, faltan))
+    nuevo_de = {c: renombrar.get(c, c) for c in viejo if c not in quitar}
+    nueva = [nuevo_de[c] for c in viejo if c in nuevo_de]
+    pos_v = {c: i for i, c in enumerate(viejo, 1)}
+    pos_n = {c: i for i, c in enumerate(nueva, 1)}
+
+    def destino(i_viejo, que):
+        c = viejo[i_viejo - 1]
+        if c not in nuevo_de:
+            raise ColumnaQuitada('%s apunta a «%s», que se quita' % (que, c))
+        return pos_n[nuevo_de[c]]
+
+    def formula_r1c1(f, col_v, que):
+        def sust(m):
+            return 'C[%d]' % (destino(col_v + int(m.group(1)), que) - pos_n[nuevo_de[viejo[col_v - 1]]])
+        return re.sub(r'C\[(-?\d+)\]', sust, f)
+
+    def formula_letras(f, que):
+        return re.sub(r'(?<![A-Za-z])([A-Z]{1,3})n(?![A-Za-z])',
+                      lambda m: _letra(destino(_col(m.group(1)), que)) + 'n', f)
+
+    h['cabecera'] = nueva
+    h['anchos'] = {nuevo_de.get(k, k): v for k, v in h['anchos'].items() if k not in quitar}
+    columnas = {}
+    for c, props in h['columnas'].items():
+        if c in quitar:
+            continue
+        props = dict(props, formula=sorted(formula_r1c1(f, pos_v[c], 'la fórmula de «%s»' % c) for f in props['formula']))
+        columnas[nuevo_de.get(c, c)] = props
+    h['columnas'] = columnas
+    for r in h['formato_condicional']:
+        for par in r['columnas']:
+            for k in (0, 1):
+                if par[k] in quitar:
+                    raise ColumnaQuitada('una regla de formato condicional abarca «%s», que se quita' % par[k])
+                par[k] = nuevo_de.get(par[k], par[k])
+        r['formula'] = [formula_letras(f, 'una regla de formato condicional') for f in r['formula']]
+    h['formato_condicional'] = sorted(h['formato_condicional'], key=lambda x: (str(x['columnas']), str(x['formula']),
+                                                                             str(x['operador'])))
+    for t in h['tablas']:
+        for par in t['columnas']:
+            for k in (0, 1):
+                par[k] = nuevo_de.get(par[k], par[k])
+    return salida
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # (B7, 25-sep-2026) CELDA A CELDA: dos libros IDENTICOS, no solo con la misma huella
 # ═══════════════════════════════════════════════════════════════════════════════
 # La huella de arriba mira el FORMATO por columna para poder compararse con un Excel real sin publicarlo.

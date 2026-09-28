@@ -8,6 +8,8 @@ SI se importa (`import escaner2_heredado_pro as pro`), como antes el Escaner Pro
 🔑 Del original solo se trae `csv` de su linea 9 (`import pandas as pd, csv`): es lo unico que usan
    estas cuatro piezas, y asi el escaner 2 no necesita pandas para leer un CSV.
 🔴 NO SE TOCA A MANO: si el Pro cambia, test_escaner2_heredado.py lo avisa y decide Fernando.
+🔑 Salvo el desvio DELIBERADO de escaner2_desvios.py (encargo D, 28-sep-2026): «yes» en «Caja de Compra:
+   Es FBA» cuenta como FBA. Lo aplica el generador al copiar; `leer_csv_visualizador` lo dice encima.
 """
 
 import csv  # ← moloka_escaner_pro.py, línea 9 (`import pandas as pd, csv`): solo `csv`
@@ -40,7 +42,8 @@ def _num_csv(x):
     except Exception: return None
 
 
-# ── ORIGEN: moloka_escaner_pro.py, líneas 312-353 · commit 2f9c06a · blob e60c13f819 · md5 d2fe5fe3aabffd884c929ccc1173cd96 ──
+# ── ORIGEN: moloka_escaner_pro.py, líneas 312-353 · commit 2f9c06a · blob e60c13f819 · md5 ca638050a07eabd5e3cd52e237e58911 ──
+# ── DESVÍO DELIBERADO del viejo (encargo D, Fernando 28-sep-2026): ver escaner2_desvios.py
 # ===== Lectura del CSV del Visualizador (indexado por CADA EAN; celdas multi-EAN) =====
 def leer_csv_visualizador(rutas):
     # Acepta UNA ruta (str) o VARIAS (list) -> las funde en un solo diccionario.
@@ -73,7 +76,7 @@ def leer_csv_visualizador(rutas):
         rec=dict(asin=(col(row,'asin').strip() or None),
                  rank=_num_csv(col(row,'rank')), rank90=_num_csv(col(row,'rank90')),
                  nuevo=_num_csv(col(row,'nuevo')), buybox=_num_csv(col(row,'buybox')),
-                 es_fba=(es_fba in ('true','verdadero','sí','si','1')),
+                 es_fba=(es_fba in ('true','verdadero','sí','si','1','yes')),  # 🔑 DESVÍO D: Keepa escribe «yes»/«no»
                  fba=_num_csv(col(row,'fba')), compct=_num_csv(col(row,'compct')),
                  nof=_num_csv(col(row,'nof')),
                  vendidos=(_num_csv(col(row,'vendidos')) or _num_csv(col(row,'vendidos2'))),

@@ -852,8 +852,8 @@ def decidir(fila_foto, cands_por_pais, caidas_por_pais, params, M, eleccion=None
 
     `cands_por_pais`: {pais: [fichas del CSV]}, los paises que se CALCULAN de los que se ha
     subido CSV. `params` (escaner2_parametros, Fernando 24-sep-2026), DOS listas distintas:
-      · 'paises_filtro'  (ES, DE): donde se mira si SE VENDE (> `umbral` caidas en 30 dias en
-        alguno de ellos);
+      · 'paises_filtro'  (los de la fila del proveedor; en HEO, ES/IT/FR/DE desde el encargo D,
+        28-sep-2026): donde se mira si SE VENDE (> `umbral` caidas en 30 dias en alguno de ellos);
       · 'paises_calculo' (ES, IT, FR, DE): donde se CALCULA la rentabilidad, si traen CSV. El
         mejor pais sale de TODOS los calculados, venda o no alli: cada pais lleva `vende_aqui`
         y la pantalla marca «no vende aquí», pero se ve (decide Fernando).
@@ -1086,11 +1086,14 @@ def comparar(viejo, nuevo, contexto, M):
     Solo entran los EAN que son COMPRAR o VALORAR en ALGUNO de los dos lados. Se rotula como
     DIFERENCIA DE CRITERIO lo que se explica por lo que el encargo nombra:
       · el viejo filtra por puesto ≤ rank_max en ES (actual o media de 90 dias) y el nuevo
-        por caidas de 30 dias en ES o DE;
+        por caidas de 30 dias en los paises del filtro (`paises_filtro`);
       · el viejo calcula ES/IT/FR/DE y el nuevo solo los paises configurados;
       · (B2) el viejo no valora cajas con chase de HEO: toda fila cuyo lado nuevo es una;
       · (B2) en el modo «todas», la marca que el viejo no mira: `contexto['marca_fuera_viejo']`,
-        una funcion (fila nueva → texto o None) con la lista del viejo; None si no aplica.
+        una funcion (fila nueva → texto o None) con la lista del viejo; None si no aplica;
+      · (D, 28-sep-2026) la marca que el NUEVO no miro en esta pasada: `contexto['marca_no_mirada']`,
+        {ean_norm: detalle} de lo apartado como `marca_fuera` («Marca 'X' no elegida»). El nuevo no lo
+        vio: no es un fallo, es lo que se eligio barrer.
     Todo lo demas queda como SIN EXPLICAR, con una nota de lo que dice cada lado."""
     # `paises_filtro`: donde el nuevo mira si se vende; `paises`: los que el nuevo CALCULO (con CSV).
     umbral, paises, rank_max = contexto['umbral'], list(contexto['paises']), contexto['rank_max']
@@ -1115,7 +1118,11 @@ def comparar(viejo, nuevo, contexto, M):
         if categoria != 'ambos' and n is not None and n.get('caja_chase_heo'):
             criterio.append('el viejo no valora cajas con chase de HEO')
         if categoria == 'solo_viejo':
-            if n is None:
+            no_mirada = (contexto.get('marca_no_mirada') or {}).get(k) if n is None else None
+            if no_mirada:
+                # (D) El nuevo no miro esa marca en esta pasada (no elegida, o fuera de la lista): criterio.
+                criterio.append('el nuevo no miró esa marca en esta pasada (%s)' % no_mirada)
+            elif n is None:
                 # No es criterio: es que HOY no esta en el catalogo filtrado (o se aparto antes).
                 notas.append(contexto['apartados'].get(k) or 'no está en el catálogo filtrado de esta pasada')
             elif n['puerta'] in ('a', 'b'):
@@ -1229,6 +1236,9 @@ def nuevo_por_ean(foto, resultados_por_foto, M):
 #    columnas, formulas vivas, anchos, formatos y semaforo; lo prueba test_escaner2_heredado.py celda a
 #    celda contra el bloque del viejo (mientras exista) y contra un libro de referencia guardado en el repo.
 # 🔑 Si la funcion empieza a pedir un dato que aqui no se le da, NO se adivina: Python revienta con su nombre.
+# 🔑 (D, 28-sep-2026) Excepcion consciente de Fernando, SOLO en «Análisis»: «Ventas» (caidas de 30 dias) en vez
+#    de los dos puestos, y fuera «Vendidos/mes», «Nº ofertas» y «Promo activa». Es un desvio de la copia
+#    (escaner2_desvios.py), aplicado por el generador; el resto de la Celda 9 sigue siendo la del viejo.
 PUERTAS_ANALISIS = ('d', 'e', 'f')
 # Los datos que la Celda 9 leia como globales, en el orden de los parametros de `excel_del_viejo`.
 DATOS_CELDA9 = ('registros', 'problematicos', 'no_encontrados', 'chase_sueltos', '_dups', 'ambiguos', 'sin_rank',
@@ -1250,10 +1260,13 @@ def columnas_analisis(ruta=RUTA_MOTOR):
 
 
 def _pais_viejo(c):
-    """Un pais calculado por el cruce, con las llaves con que la Celda 9 del viejo lo lee.
-    `vendidos` y `n_of` no los guarda el cruce: van vacios, no inventados."""
-    return {'rank_act': c.get('rank'), 'rank90': c.get('rank_90d'), 'vendidos': None, 'precio': c.get('precio_venta'),
-            'canal': c.get('canal'), 'n_of': None, 'ref_pct': c.get('ref_pct'), 'fee': c.get('fee_fba'),
+    """Un pais calculado por el cruce, con las llaves con que la Celda 9 lo lee.
+    (D, 28-sep-2026) `caidas_30d` es la columna «Ventas» (desvio de escaner2_desvios.py): las caidas de 30
+    dias de ESE pais, en entero como las guarda la base; 0 es 0 y sin dato, None (celda vacia). Los dos
+    puestos, «Vendidos/mes» y «Nº ofertas» ya no van en la hoja."""
+    caidas = c.get('caidas_30d')
+    return {'caidas_30d': None if caidas is None else int(round(caidas)), 'precio': c.get('precio_venta'),
+            'canal': c.get('canal'), 'ref_pct': c.get('ref_pct'), 'fee': c.get('fee_fba'),
             'iva': c.get('iva'), 'decision': c.get('decision'), 'margen': c.get('margen')}
 
 
