@@ -77,8 +77,8 @@ class _Consulta:
         self.op, self.payload = 'upsert', filas if isinstance(filas, list) else [filas]
         return self
 
-    def delete(self):
-        self.op = 'delete'
+    def delete(self, count=None, returning=None):
+        self.op, self.cuenta = 'delete', (count == 'exact')
         return self
 
     def insert(self, filas):
@@ -109,8 +109,14 @@ class _Consulta:
         # (B2) Cada operacion queda apuntada: quien la hizo, cual y sobre que tabla.
         self.bd.setdefault('ops', []).append([self.bd.get('programa'), self.op, self.tabla])
         filas = self.bd['tablas'].setdefault(self.tabla, [])
-        if self.op in ('upsert', 'delete'):
+        if self.op == 'upsert':
             return _Resp([])          # apuntada y sin efecto: el banco exige que no ocurra
+        if self.op == 'delete':
+            # (28-sep-2026) Con efecto y honrando el filtro: el cruce fallido borra SUS filas. En las
+            # tablas del viejo el caso 8 exige, por las operaciones apuntadas, que no ocurra.
+            quitar = [f for f in filas if all(str(f.get(k)) == str(v) for k, v in self.filtros)]
+            self.bd['tablas'][self.tabla] = [f for f in filas if f not in quitar]
+            return _Resp([], len(quitar) if self.cuenta else None)
         if self.op == 'insert':
             for f in self.payload:
                 if self.bd.get('frenar') and self.tabla == self.bd['frenar'][0] and f.get('puerta') == self.bd['frenar'][1]:
@@ -537,6 +543,11 @@ eq('3 · 🔴 …y queda FALLIDA, sin cuadrar, con el motivo', (c['estado'], c['
    ('fallida', False, True))
 eq('3 · 🔴 …contando en la BASE: 5 entradas y 4 en las puertas', (c['n_entradas'], sum(c['n_' + x] for x in 'abcdef')), (5, 4))
 eq('3 · el log lo dice', 'NO CUADRA' in log2, True)
+eq('3 · 🔴 (28-sep-2026) …y el cruce fallido se queda SIN sus filas: las 4 de EAN y las de país, borradas',
+   (len([r for r in bd['tablas']['escaner2_resultado_ean'] if r['cruce_id'] == c['id']]),
+    len([r for r in bd['tablas']['escaner2_resultado_pais'] if r['cruce_id'] == c['id']]),
+    [o[2] for o in bd['ops'] if o[1] == 'delete'], 'NO SE HAN PODIDO BORRAR' in (c['motivo_fallo'] or '')),
+   (0, 0, ['escaner2_resultado_pais', 'escaner2_resultado_ean'], False))
 BDS['frenado'] = bd
 
 print('\n4 · [crudo_de_mas] HEO dice un producto más de los que salen → la pasada FALLA')

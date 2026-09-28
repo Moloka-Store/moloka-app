@@ -15,6 +15,8 @@ QUE HACE, EN ORDEN:
   4. decide la PUERTA de cada EAN (escaner2_motor.decidir) con `calc_rentabilidad` del viejo;
   5. guarda cada EAN con su puerta y cada pais con su cuenta, y CUADRA CONTRA LA BASE:
      entradas (filas de la foto) = suma de puertas. Si no cuadra, el cruce queda 'fallida';
+     (28-sep-2026) un cruce que acaba 'fallida', por lo que sea, se queda SIN sus filas de
+     escaner2_resultado_ean y _pais: se borran las suyas antes de marcarlo;
   6. compara con el escaner viejo (ultimo Excel completo de HEO + novedades posteriores) y
      deja un Excel con todo en `escaner2/heo/<pasada>/<cruce>/`. (B2) Las cajas con chase de HEO
      son diferencia de criterio (el viejo no las valora) y, si la pasada es del modo «todas»,
@@ -86,6 +88,33 @@ def _en_lotes(tabla, filas):
         sb.table(tabla).insert(filas[i:i + LOTE]).execute()
 
 
+# Las tablas que el cruce escribe por tandas y que se borran si falla. En este orden: las de pais
+# apuntan a las de EAN (resultado_ean_id), asi que van primero.
+TABLAS_DEL_CRUCE = ('escaner2_resultado_pais', 'escaner2_resultado_ean')
+
+
+def _motivo_tras_limpiar(cruce, motivo):
+    """🔴 UN CRUCE FALLIDO NO DEJA FILAS (28-sep-2026). Las filas se guardan en tandas de LOTE y
+    cada tanda es su propia transaccion: si falla la segunda, la primera ya esta dentro. Aqui se
+    borran las de ESTE cruce (filtro cruce_id, nada mas) en las dos tablas, ANTES de marcarlo
+    'fallida'. Se borra aunque no se sepa si se escribio algo: una tanda puede haber entrado en la
+    base aunque la respuesta se perdiera. La base no deja borrar las de un cruce 'lista'.
+    Devuelve el motivo de siempre; si el borrado falla, con el aviso de que quedan filas."""
+    nota = ''
+    try:
+        for tabla in TABLAS_DEL_CRUCE:
+            n = sb.table(tabla).delete(count='exact', returning='minimal').eq('cruce_id', cruce).execute().count
+            print(f'>>> Cruce {cruce} fallido: borradas {n} filas suyas de {tabla}.', flush=True)
+    except Exception as ex:
+        try:
+            quedan = ', '.join(f'{t} {_contar(t, cruce_id=cruce)}' for t in TABLAS_DEL_CRUCE)
+        except Exception:
+            quedan = 'no se han podido contar'
+        nota = (f' · 🔴 NO SE HAN PODIDO BORRAR SUS FILAS (quedan: {quedan}): {type(ex).__name__}: {ex}')[:900]
+        print('!!! ' + nota, flush=True)
+    return (motivo or '')[:2000 - len(nota)] + nota
+
+
 def _contar(tabla, **filtros):
     q = sb.table(tabla).select('id', count='exact')
     for k, v in filtros.items():
@@ -135,12 +164,16 @@ def main():
           f"{', '.join(params['paises_calculo'])} que traigan CSV.", flush=True)
     try:
         cierre, rojo = cruzar(cruce, params, pasada)
+        if cierre['estado'] != 'lista':
+            # El que no cuadra tambien es un cruce fallido: sin sus filas, como los demas.
+            cierre['motivo_fallo'] = _motivo_tras_limpiar(cruce, cierre['motivo_fallo'])
         # 🔒 El cierre va DENTRO del try: si la base lo rechaza, el cruce queda 'fallida' con el
         #    motivo, no colgado en 'cruzando' para siempre.
         sb.table('escaner2_cruce').update(cierre).eq('id', cruce).execute()
     except Exception as ex:
         motivo = str(ex) if isinstance(ex, Fallo) else f'{type(ex).__name__}: {ex}'
-        sb.table('escaner2_cruce').update({'estado': 'fallida', 'motivo_fallo': motivo[:2000],
+        motivo = _motivo_tras_limpiar(cruce, motivo)
+        sb.table('escaner2_cruce').update({'estado': 'fallida', 'motivo_fallo': motivo,
                                            'terminado_en': _ahora().isoformat()}).eq('id', cruce).execute()
         abortar(f'cruce {cruce} fallido: {motivo}')
     if cierre['estado'] != 'lista':

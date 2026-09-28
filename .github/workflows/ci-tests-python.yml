@@ -347,6 +347,13 @@ jobs:
       - name: 25 duodecies) test_escaner2_heredado.py
         run: python -u test_escaner2_heredado.py
 
+      # (28-sep-2026) El cruce guarda sus filas en tandas de 500: si falla la segunda, la primera ya
+      # esta dentro. Un cruce que acaba 'fallida' borra las SUYAS (cruce_id) antes de marcarse, y si
+      # el borrado falla lo dice en el motivo. Corre el main de verdad con una base de mentira que
+      # rechaza la 2.a tanda, y otro cruce 'lista' al lado que no se toca. Sin red y sin secretos.
+      - name: 25 terdecies) test_escaner2_cruce_fallido.py
+        run: python -u test_escaner2_cruce_fallido.py
+
       - name: 26) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
@@ -396,6 +403,7 @@ jobs:
             test_escaner2_elegir_ficha.py
             test_escaner2_codigos14.py
             test_escaner2_heredado.py
+            test_escaner2_cruce_fallido.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).
