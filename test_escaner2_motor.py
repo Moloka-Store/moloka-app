@@ -232,6 +232,12 @@ _datos_es = pro.leer_csv_visualizador(RUTA_ES)
 eq('(C) el lector del Pro indexa por EAN sin ceros y guarda las fichas del EAN compartido',
    sorted(r['asin'] for r in _datos_es[M.norm(ean(10))]), ['B0FUND0100', 'B0FUND0200'])
 eq('(C) …y lee «15.01 %» como 15,01', _datos_es[M.norm(ean(1))][0]['compct'], 15.01)
+# (D, 28-sep-2026) El Visualizador escribe «yes»/«no» en «Caja de Compra: Es FBA» (medido en ced8f036): «yes» es FBA.
+_bb_no = pro.leer_csv_visualizador(escribir_csv(os.path.join(_tmp, 'bb_no.csv'),
+                                                [fila_csv('es', 'B0BBNO0001', ean(1), 'x', es_fba='no')]))
+eq('(C) (D) «yes» → BB-FBA y «no» → BB-FBM, con el MISMO precio (el de la caja)',
+   (e2.precio_de_venta(_datos_es[M.norm(ean(1))][0]), e2.precio_de_venta(_bb_no[M.norm(ean(1))][0])),
+   ((22.0, 'BB-FBA'), (20.0, 'BB-FBM')))
 
 _mezcla = escribir_csv(os.path.join(_tmp, 'mezcla.csv'), CSV_ES[:2] + CSV_DE[:1])
 try:
@@ -422,6 +428,20 @@ eq('(F) 🔴 los cuatro países, en el orden de los parámetros', list(_r4['pais
 eq('(F) 🔴 IT con 50 caídas NO hace que se venda: el filtro es solo ES y DE',
    e2.decidir(_alfa, {p: e2.candidatos(_alfa, _d4[p]) for p in ('IT', 'DE')},
               dict(_c4, IT={'B0ALFA0001': 50.0}), PARAMS, M)['puerta'], 'c')
+# (D, 28-sep-2026) Fernando: se vende = más de 8 caídas en CUALQUIERA de los cuatro. El motor lo lee del
+# parámetro: con el filtro en los cuatro, esas 50 de IT sí venden. Y la puerta y el mejor país siguen
+# saliendo de TODOS los calculados, se venda o no en cada uno (el ALFA de arriba, igual: f y DE).
+PARAMS_D = dict(PARAMS, paises_filtro=['ES', 'IT', 'FR', 'DE'])
+_it50 = e2.decidir(_alfa, {p: e2.candidatos(_alfa, _d4[p]) for p in ('IT', 'DE')},
+                   dict(_c4, IT={'B0ALFA0001': 50.0}), PARAMS_D, M)
+eq('(F) (D) con el filtro en los cuatro países, 50 caídas en IT SÍ venden (y ES no tiene CSV)',
+   (_it50['puerta'] in ('d', 'e', 'f'), _it50['paises']['IT']['vende_aqui']), (True, True))
+_r4d = e2.decidir(_alfa, {p: e2.candidatos(_alfa, _d4[p]) for p in _d4}, _c4, PARAMS_D, M)
+eq('(F) (D) …y el caso de Fernando no cambia con el filtro en cuatro: misma puerta, mismo mejor país, mismo detalle',
+   (_r4d['puerta'], _r4d['mejor'], _r4d['detalle']), (_r4['puerta'], _r4['mejor'], _r4['detalle']))
+_c5 = e2.decidir(FOTO[4], {p: e2.candidatos(FOTO[4], _datos[p]) for p in ('ES', 'DE')}, _caidas, PARAMS_D, M)
+eq('(F) (D) el texto de la c sale del parámetro: sin CSV de IT ni FR, lo dice', _c5['detalle'],
+   '≤ 8 caídas en ES y en DE (IT, FR: sin dato)')
 
 # ═══════════════════════════════════════════════════════════════════════════════
 print('\n(G) el cuadre: entradas = suma de puertas, y cada EAN por UNA sola')
@@ -473,6 +493,7 @@ _completo = excel_viejo([(ean(1), p, 'COMPRAR') for p in ('ES', 'IT', 'FR', 'DE'
                         + [(ean(7), 'ES', 'COMPRAR')]
                         + [(ean(6), 'ES', 'COMPRAR')]
                         + [(ean(14), 'ES', 'COMPRAR')]
+                        + [(ean(15), 'ES', 'COMPRAR')]          # (D) el Hasbro sin oferta: marca fuera en el nuevo
                         + [('9990000000011', 'ES', 'COMPRAR')])
 _novedad = excel_viejo([(ean(14), 'ES', 'NO COMPRAR')])
 _leido = e2.leer_excel_viejo(_completo, M)
@@ -496,8 +517,11 @@ _viejo = e2.fusionar_viejos([
 eq('(H) la novedad POSTERIOR manda sobre el completo', _viejo[M.norm(ean(14))]['decisiones'], {'ES': 'NO COMPRAR'})
 _nuevo = e2.nuevo_por_ean(FOTO, RES, M)
 _apart = {M.norm(M.core_ean(a['ean_original'])): 'apartado antes de la foto: ' + a['detalle'] for a in APARTADOS}
-CMP = {c['ean_norm']: c for c in e2.comparar(_viejo, _nuevo, {'umbral': 8, 'paises': ['ES', 'DE'], 'paises_filtro': ['ES', 'DE'], 'rank_max': 30000,
-                                                              'apartados': _apart, 'fecha_nuevo': None}, M)}
+# (D) Lo que el cruce saca de escaner2_apartado para la marca que el nuevo no miró (motivo marca_fuera).
+_no_mirada = {M.norm(M.core_ean(a['ean_original'])): a['detalle'] for a in APARTADOS if a['motivo'] == 'marca_fuera'}
+_CTX = {'umbral': 8, 'paises': ['ES', 'DE'], 'paises_filtro': ['ES', 'DE'], 'rank_max': 30000,
+        'apartados': _apart, 'fecha_nuevo': None}
+CMP = {c['ean_norm']: c for c in e2.comparar(_viejo, _nuevo, dict(_CTX, marca_no_mirada=_no_mirada), M)}
 
 
 def cmp(n):
@@ -519,6 +543,16 @@ eq('(H) el viejo no lo tiene y su puesto en ES SI entraba → SIN EXPLICAR', cmp
 _chase = CMP.get(M.norm('9990000000011'))
 eq('(H) el chase de la puente: solo en el viejo, SIN EXPLICAR, y dice que se aparto',
    (_chase['categoria'], _chase['diferencia_criterio'], 'apartado' in (_chase['explicacion'] or '')), ('solo_viejo', False, True))
+_hasbro = CMP[M.norm(ean(15))]
+eq('(H) (D) solo en el viejo y el nuevo NO MIRÓ esa marca en esta pasada → DIFERENCIA DE CRITERIO, y dice la marca',
+   (_hasbro['categoria'], _hasbro['diferencia_criterio'], _hasbro['explicacion']),
+   ('solo_viejo', True, "Diferencia de criterio: el nuevo no miró esa marca en esta pasada "
+                        "(Marca 'Hasbro' fuera de la lista del director)"))
+_sin_d = {c['ean_norm']: c for c in e2.comparar(_viejo, _nuevo, _CTX, M)}[M.norm(ean(15))]
+eq('(H) (D) …y sin esa lista (como antes del encargo D) quedaba SIN EXPLICAR',
+   (_sin_d['diferencia_criterio'], (_sin_d['explicacion'] or '')[:13]), (False, 'Sin explicar:'))
+eq('(H) (D) el chase de la puente (apartado por OTRO motivo) sigue sin explicar: solo la marca fuera es criterio',
+   CMP[M.norm('9990000000011')]['diferencia_criterio'], False)
 _rs = e2.resumen_comparacion(list(CMP.values()))
 eq('(H) el resumen cuadra: criterio + sin explicar = solo en uno de los dos',
    _rs['n_cmp_criterio'] + _rs['n_cmp_sin_explicar'], _rs['n_cmp_solo_viejo'] + _rs['n_cmp_solo_nuevo'])

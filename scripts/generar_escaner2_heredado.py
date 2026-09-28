@@ -12,12 +12,19 @@ lineas, commit, blob) y el md5 de su texto en una cabecera `# ── ORIGEN`. Na
 🔴 SOLO CUANDO FERNANDO DECIDE HEREDAR UN CAMBIO DEL VIEJO: test_escaner2_heredado.py avisa si el viejo
    cambia; regenerar con un commit nuevo es la forma de heredarlo, y el diff del PR ensena que cambia.
    Necesita la historia de git (no corre en un checkout de profundidad 1) y el viejo en ese commit.
+🔑 (encargo D, 28-sep-2026) Y CUANDO FERNANDO DECIDE QUE EL ESCANER 2 SE APARTE DEL VIEJO: el desvio se
+   escribe en escaner2_desvios.py (pares texto del viejo → texto nuevo) y este script lo aplica al texto del
+   viejo ANTES de copiar las piezas; la cabecera de cada pieza desviada lo dice. Nada se teclea en el heredado.
 """
 import ast, hashlib, subprocess, sys, os
 
 REPO = sys.argv[1]
 COMMIT = sys.argv[2]
 os.chdir(REPO)
+sys.path.insert(0, os.getcwd())
+import escaner2_desvios as desvios  # noqa: E402
+
+NOTA_DESVIO = 'DESVÍO DELIBERADO del viejo (encargo D, Fernando 28-sep-2026): ver escaner2_desvios.py'
 
 
 def fuente(fichero):
@@ -70,15 +77,18 @@ def superiores(texto):
     return ast.parse(texto).body
 
 
-def por_nombre(fichero, defs, nombres, anidadas=(), extra=None):
-    texto = fuente(fichero)
+def por_nombre(fichero, defs, nombres, anidadas=(), extra=None, heredado=None):
+    # (encargo D) Los desvios de escaner2_desvios.py, aplicados al texto del viejo antes de copiar nada.
+    texto = desvios.aplicar(fuente(fichero), heredado)
+    desviadas = desvios.piezas_desviadas(heredado)
     lineas = texto.split('\n')
     sha = blob(fichero)
     arbol = ast.parse(texto)
     salida, vistos = [], set()
     for n in arbol.body:
         if isinstance(n, ast.FunctionDef) and n.name in defs:
-            salida.append(pieza(fichero, texto, lineas, n, sha)); vistos.add(n.name)
+            salida.append(pieza(fichero, texto, lineas, n, sha, nota=NOTA_DESVIO if n.name in desviadas else None))
+            vistos.add(n.name)
         elif isinstance(n, ast.Assign) and set(nombres_asignados(n)) & set(nombres):
             salida.append(pieza(fichero, texto, lineas, n, sha)); vistos |= set(nombres_asignados(n)) & set(nombres)
     for nombre in anidadas:
@@ -150,11 +160,14 @@ def celda9(texto, lineas, sha):
            '# ──   3) `return wb` al final.\n'
            '# ── Todo lo demas (texto, formulas, formatos, anchos, semaforo, comentarios) es el del original.'
            % (l_ini + 1, l_fin, COMMIT[:7], sha[:10], md5_pieza(cuerpo_fn)))
+    if 'excel_del_viejo' in desvios.piezas_desviadas('escaner2_heredado_nube.py'):
+        cab += '\n# ── Salvo el ' + NOTA_DESVIO
     return [(cuerpo[ini].lineno, cab + '\n' + '\n'.join(cuerpo_fn) + '\n')]
 
 
 piezas, sha_nube = por_nombre('moloka_escaner_nube.py', DEFS_MOTOR + DEFS_EXCEL + DEFS_ELECCION,
-                              NOMBRES_MOTOR + NOMBRES_ELECCION, anidadas=('keyrank',), extra=celda9)
+                              NOMBRES_MOTOR + NOMBRES_ELECCION, anidadas=('keyrank',), extra=celda9,
+                              heredado='escaner2_heredado_nube.py')
 escribir('escaner2_heredado_nube.py',
          'ESCANER 2 · LO HEREDADO DE moloka_escaner_nube.py (el escaner viejo), COPIADO LITERALMENTE.\n\n'
          'Encargo B7 (25-sep-2026): el escaner 2 deja de leer el fichero del viejo. Cada pieza de aqui es el\n'
@@ -165,11 +178,14 @@ escribir('escaner2_heredado_nube.py',
          '🔑 No se importa: escaner2_motor.py saca las piezas por nombre (`sacar_piezas`) y las ejecuta en un\n'
          '   espacio de nombres propio, igual que antes hacia con el fichero del viejo.\n'
          '   Unicas diferencias con el original: `keyrank` va sin su sangria (en el viejo esta dentro de un\n'
-         '   `if`) y la Celda 9 es la funcion `excel_del_viejo` (ver su cabecera).\n' % (COMMIT[:7], sha_nube[:10]),
+         '   `if`) y la Celda 9 es la funcion `excel_del_viejo` (ver su cabecera).\n'
+         '🔑 Y los desvios DELIBERADOS de escaner2_desvios.py (encargo D, 28-sep-2026: la hoja «Análisis»), que\n'
+         '   el generador aplica al copiar; cada pieza desviada lo dice en su cabecera.\n' % (COMMIT[:7], sha_nube[:10]),
          piezas)
 
 # ───────────────────────── moloka_escaner_pro.py ─────────────────────────
-piezas, sha_pro = por_nombre('moloka_escaner_pro.py', ('norm', '_num_csv', 'leer_csv_visualizador'), ('CSV_COLS',))
+piezas, sha_pro = por_nombre('moloka_escaner_pro.py', ('norm', '_num_csv', 'leer_csv_visualizador'), ('CSV_COLS',),
+                             heredado='escaner2_heredado_pro.py')
 escribir('escaner2_heredado_pro.py',
          'ESCANER 2 · LO HEREDADO DEL ESCANER PRO (moloka_escaner_pro.py), COPIADO LITERALMENTE.\n\n'
          'Encargo B7 (25-sep-2026). El lector del CSV del Visualizador de Keepa: `CSV_COLS`, `norm`, `_num_csv`\n'
@@ -178,6 +194,8 @@ escribir('escaner2_heredado_pro.py',
          '🔑 Del original solo se trae `csv` de su linea 9 (`import pandas as pd, csv`): es lo unico que usan\n'
          '   estas cuatro piezas, y asi el escaner 2 no necesita pandas para leer un CSV.\n'
          '🔴 NO SE TOCA A MANO: si el Pro cambia, test_escaner2_heredado.py lo avisa y decide Fernando.\n'
+         '🔑 Salvo el desvio DELIBERADO de escaner2_desvios.py (encargo D, 28-sep-2026): «yes» en «Caja de Compra:\n'
+         '   Es FBA» cuenta como FBA. Lo aplica el generador al copiar; `leer_csv_visualizador` lo dice encima.\n'
          % (COMMIT[:7], sha_pro[:10]),
          piezas, cabecera_codigo='\nimport csv  # ← moloka_escaner_pro.py, línea 9 (`import pandas as pd, csv`): solo `csv`\n')
 

@@ -11,6 +11,8 @@ mismos comentarios, con su origen encima. Generado por script desde `git show`, 
    espacio de nombres propio, igual que antes hacia con el fichero del viejo.
    Unicas diferencias con el original: `keyrank` va sin su sangria (en el viejo esta dentro de un
    `if`) y la Celda 9 es la funcion `excel_del_viejo` (ver su cabecera).
+🔑 Y los desvios DELIBERADOS de escaner2_desvios.py (encargo D, 28-sep-2026: la hoja «Análisis»), que
+   el generador aplica al copiar; cada pieza desviada lo dice en su cabecera.
 """
 
 
@@ -588,12 +590,13 @@ def decision_de(margen):
     return 'NO COMPRAR'
 
 
-# ── ORIGEN: moloka_escaner_nube.py, líneas 1981-2245 · commit 2f9c06a · blob 21ec2016ef · md5 e41e3f07aed1c76a13850c0d1d4b6912 ──
+# ── ORIGEN: moloka_escaner_nube.py, líneas 1981-2245 · commit 2f9c06a · blob 21ec2016ef · md5 7c52f3443b00072323e75d26c61e2f5a ──
 # ── La «Celda 9» del viejo, hecha FUNCION (encargo B7). Lo UNICO que cambia respecto al original:
 # ──   1) esta linea `def` con sus parametros (los datos que el bloque leia como globales);
 # ──   2) cada linea del bloque lleva 4 espacios mas de sangria (las vacias siguen vacias);
 # ──   3) `return wb` al final.
 # ── Todo lo demas (texto, formulas, formatos, anchos, semaforo, comentarios) es el del original.
+# ── Salvo el DESVÍO DELIBERADO del viejo (encargo D, Fernando 28-sep-2026): ver escaner2_desvios.py
 def excel_del_viejo(registros, problematicos, no_encontrados, chase_sueltos, _dups, ambiguos, sin_rank, chase_pendientes, cotejo_info, PROVEEDOR):
     # ============================================================
     # Celda 9 - Excel final (1 fila por pais, formulas vivas, semaforo)
@@ -604,9 +607,9 @@ def excel_del_viejo(registros, problematicos, no_encontrados, chase_sueltos, _du
     from openpyxl.worksheet.table import Table, TableStyleInfo
     from openpyxl.formatting.rule import FormulaRule, CellIsRule
 
-    COLS = ['Nombre','EAN','ASIN','Marca','PA (€)','País','Rank actual','Rank 90d','Vendidos/mes',
-            'Precio venta (€)','Canal BB','Nº ofertas','% Comisión',
-            'Com. Amazon (€)','Fee Logística (€)','Almacén (€)','Promo activa',
+    COLS = ['Nombre','EAN','ASIN','Marca','PA (€)','País','Ventas',  # 🔑 DESVÍO D (Fernando, 28-sep-2026): escaner2_desvios.py
+            'Precio venta (€)','Canal BB','% Comisión',
+            'Com. Amazon (€)','Fee Logística (€)','Almacén (€)',
             'Beneficio (€)','ROI','Margen','Decisión','En mi BD','EAN ambiguo','Amazon (título)','Coincide',
             'Cotejo','Cotejo (detalle)','Coherencia caja','OcioStock',
             # 🔴 AL FINAL, Y NO POR COMODIDAD: hay consumidores que leen la hoja por LETRA de
@@ -651,14 +654,14 @@ def excel_del_viejo(registros, problematicos, no_encontrados, chase_sueltos, _du
                               and d.get('fee') is not None and item['_pa_efectivo'])
             ws.append([
                 item['nombre'], item['ean'], item['asin'], item['marca'], item['_pa_efectivo'], dom,
-                d['rank_act'] if d['rank_act'] and d['rank_act']>0 else None,
-                d['rank90'] if d['rank90'] and d['rank90']>0 else None,
-                d['vendidos'], d['precio'], d['canal'], d['n_of'], pct,
+                # 🔑 DESVÍO D: 'Ventas' = las caídas de 30 días de ESTE país, tal cual: 0 es 0 y sin dato, vacía.
+                d.get('caidas_30d'),
+                d['precio'], d['canal'], pct,
                 # com_amazon = precio x %Comision  +  ISD s/ Fee Log.  (el 2o sumando es 0 fuera
                 # de Francia). Exactamente lo que hace calc_rentabilidad con isd=ISD_PAIS[dom].
                 (f"={L['Precio venta (€)']}{r}*{L['% Comisión']}{r}"
                  f"+{L['ISD s/ Fee Log. (€)']}{r}") if pct is not None else None,
-                d['fee'], ALMACEN, None,
+                d['fee'], ALMACEN,
                 (f"=({L['Precio venta (€)']}{r}/{div})-{L['PA (€)']}{r}-{L['Com. Amazon (€)']}{r}"
                  f"-{L['Fee Logística (€)']}{r}-{L['Almacén (€)']}{r}") if hay_cuenta else None,
                 f"={L['Beneficio (€)']}{r}/{L['PA (€)']}{r}" if hay_cuenta else None,

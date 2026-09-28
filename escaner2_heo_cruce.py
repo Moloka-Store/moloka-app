@@ -422,17 +422,20 @@ def comparar_con_el_viejo(M, foto, resultados, params, fecha_datos, lista_viejo=
         raise RuntimeError('el Excel viejo no trae su rank_maximo en escaner_resultados')
     rank_max = int(rank_max)
     viejo = e2.fusionar_viejos(excels)
-    apartados = {}
+    apartados, no_mirada = {}, {}
     for a in _todas('escaner2_apartado', 'ean_original,motivo,detalle', 'id', pasada_id=PASADA):
         k = M.norm(M.core_ean(a['ean_original'] or ''))
         if k:
             apartados.setdefault(k, 'apartado antes de la foto: ' + (a['detalle'] or a['motivo']))
+            # (D, 28-sep-2026) La marca que el nuevo no miro en esta pasada: diferencia de criterio, no «sin explicar».
+            if a['motivo'] == 'marca_fuera':
+                no_mirada.setdefault(k, a['detalle'] or 'marca fuera')
     nuevo = e2.nuevo_por_ean(foto, {r['foto_id']: r for r in resultados}, M)
     fecha_nuevo = datetime.fromisoformat(str(fecha_datos).replace('Z', '+00:00')) if fecha_datos else _ahora()
     cmp = e2.comparar(viejo, nuevo, {'umbral': params['umbral'], 'paises': params['usados'],
                                       'paises_filtro': params['paises_filtro'],
                                       'rank_max': rank_max, 'apartados': apartados,
-                                      'fecha_nuevo': fecha_nuevo,
+                                      'marca_no_mirada': no_mirada, 'fecha_nuevo': fecha_nuevo,
                                       'marca_fuera_viejo': (e2.marca_fuera_del_viejo(lista_viejo['marcas'],
                                                                                      lista_viejo['ofertas'])
                                                             if lista_viejo else None)}, M)

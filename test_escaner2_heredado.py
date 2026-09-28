@@ -31,6 +31,11 @@ SIN RED, SIN SECRETOS Y SIN BASE. QUE PRUEBA:
       datos INVENTADOS (ni precios reales ni costes), se regenera y se compara celda a celda.
   (E) 🔴 LA COMPARACION MUERDE: con una formula de «Análisis» y un ancho de columna cambiados en una copia
       del fichero heredado, (C) y (D) se ponen rojas.
+  (F) (encargo D, 28-sep-2026) LOS DESVIOS DELIBERADOS (escaner2_desvios.py): (B) y (C) comparan con el viejo
+      CON los desvios aplicados, asi que siguen cazando cualquier otro cambio. Aqui se prueba el desvio en si:
+      la cabecera nueva de «Análisis», «Ventas» con 0 y con vacio, que TODAS las demas columnas dan lo mismo
+      que el viejo SIN desvio (las formulas evaluadas: Beneficio, ROI, Margen…), «yes» como FBA, y que un
+      desvio que ya no casa con el viejo, o que cambia las lineas, no se aplica.
 
 Para regenerar el libro de referencia (solo si Fernando decide cambiar el Excel):
     python test_escaner2_heredado.py --regenerar-referencia
@@ -45,6 +50,7 @@ import sys
 import tempfile
 from contextlib import redirect_stdout
 
+import escaner2_desvios as DV
 import escaner2_huella_excel as HU
 import escaner2_motor as e2
 
@@ -213,8 +219,13 @@ def bloque_celda9(texto_v):
 
 
 def paridad(heredado, viejo):
-    """[(pieza, diferencia)] de un fichero heredado frente a su viejo; [] si todo es igual."""
-    texto_h, texto_v = leer(heredado), leer(viejo)
+    """[(pieza, diferencia)] de un fichero heredado frente a su viejo; [] si todo es igual. (D) El viejo se
+    compara CON los desvios deliberados de escaner2_desvios.py aplicados; si uno ya no casa, se dice."""
+    texto_h = leer(heredado)
+    try:
+        texto_v = DV.aplicar(leer(viejo), heredado)
+    except DV.DesvioRoto as ex:
+        return 0, [('desvío', str(ex))]
     arbol_h, arbol_v = ast.parse(texto_h), ast.parse(texto_v)
     lin_h, lin_v = texto_h.split('\n'), texto_v.split('\n')
     difs, n_piezas = [], 0
@@ -366,9 +377,11 @@ CATALOGO_PRUEBA = [{'ean': '8400000000017', 'iva_pct': 0.10, 'stock_moloka': 3, 
                    {'ean': '8400000000024', 'iva_pct': None, 'stock_moloka': 0, 'stock_fba': 2}]
 
 
-def _pais(dec, precio, rank, margen, fee=3.1, ref=15.0, iva=0.21):
+def _pais(dec, precio, rank, margen, fee=3.1, ref=15.0, iva=0.21, caidas=12):
+    # Las llaves del viejo (rank_act, rank90, vendidos, n_of), para que su Celda 9 SIN desvio tambien escriba;
+    # y (D) `caidas_30d`, la columna «Ventas» de la copia.
     return {'rank_act': rank, 'rank90': (rank * 2 if rank else rank), 'vendidos': 40, 'precio': precio, 'canal': 'BB-FBA',
-            'n_of': 7, 'ref_pct': ref, 'fee': fee, 'iva': iva, 'decision': dec, 'margen': margen}
+            'n_of': 7, 'ref_pct': ref, 'fee': fee, 'iva': iva, 'decision': dec, 'margen': margen, 'caidas_30d': caidas}
 
 
 def datos_prueba(vacio=False):
@@ -379,8 +392,10 @@ def datos_prueba(vacio=False):
         {'nombre': 'Producto de prueba Alfa', 'ean': '8400000000017', 'asin': 'B0PRUEBA01', 'marca': 'Marca Uno',
          'core': '8400000000017', '_pa_efectivo': 4.0, 'ambiguo': False, 'titulo_amz': 'Titulo de prueba Alfa',
          'coincide': 'SI', 'coherencia_caja': None, 'url': '', 'volumen': None, '_margen_es': 0.2,
-         '_paises_calc': {'ES': _pais('COMPRAR', 19.99, 1200, 0.2, iva=0.10), 'IT': _pais('VALORAR', 17.5, 3000, 0.05, iva=0.22),
-                          'FR': _pais('NO COMPRAR', 12.0, 50000, -0.1, iva=0.20),
+         # (D) «Ventas»: 30 en ES, 0 en IT (un cero, NO una celda vacía) y sin dato en FR (vacía).
+         '_paises_calc': {'ES': _pais('COMPRAR', 19.99, 1200, 0.2, iva=0.10, caidas=30),
+                          'IT': _pais('VALORAR', 17.5, 3000, 0.05, iva=0.22, caidas=0),
+                          'FR': _pais('NO COMPRAR', 12.0, 50000, -0.1, iva=0.20, caidas=None),
                           'DE': _pais('Sin datos', None, None, None, fee=None, ref=None, iva=0.19)}},
         {'nombre': 'Producto de prueba Beta (caja x6)', 'ean': '8400000000024 C6', 'asin': 'B0PRUEBA02', 'marca': 'Marca Dos',
          'core': '8400000000024', '_pa_efectivo': 2.5, 'ambiguo': True, 'titulo_amz': 'Titulo de prueba Beta',
@@ -429,10 +444,11 @@ def libro_nuevo(datos, ruta=e2.RUTA_MOTOR):
     return _guardar(e2.escribir_celda9(copy.deepcopy(datos), M, ruta))
 
 
-def libro_viejo(datos, viejo='moloka_escaner_nube.py'):
+def libro_viejo(datos, viejo='moloka_escaner_nube.py', con_desvios=True):
     """El libro de la Celda 9 DEL VIEJO: su bloque, sacado de su fichero y ejecutado con sus piezas (como
-    lo hacia el escaner 2 hasta el B6). Solo mientras el viejo exista."""
-    texto = leer(viejo)
+    lo hacia el escaner 2 hasta el B6). Solo mientras el viejo exista. (D) `con_desvios`: con los desvios
+    deliberados de escaner2_desvios.py aplicados (lo que tiene que dar la copia) o el viejo tal cual."""
+    texto = DV.aplicar(leer(viejo), 'escaner2_heredado_nube.py') if con_desvios else leer(viejo)
     _lin, sentencias = bloque_celda9(texto)
     M_v = e2.cargar_motor(os.path.join(AQUI, viejo))
     M_v.poner_catalogo_propio(CATALOGO_PRUEBA)
@@ -492,11 +508,133 @@ try:
 finally:
     os.unlink(_t.name)
 _n, _d = HU.celda_a_celda(_ref, _ROTO, max_difs=1000)
+# (D, 28-sep-2026) El ROI estaba en la S; sin las cuatro columnas que se quitan de «Análisis», en la O. Se saca
+# de la cabecera y se fija a proposito: si otra columna se mueve, esto lo dice.
+from openpyxl.utils import get_column_letter  # noqa: E402
+_L_ROI = get_column_letter(e2.columnas_analisis().index('ROI') + 1)
+eq('(E) (D) el ROI, en la columna O de «Análisis» (era la S)', _L_ROI, 'O')
 eq('(E) 🔴 (D) contra la copia rota: rojo, y dice el ancho y la fórmula del ROI',
-   (bool(_d), any('anchos' in x and "'A'" in x for x in _d), any('Análisis · S' in x and '*' in x for x in _d)), (True, True, True))
+   (bool(_d), any('anchos' in x and "'A'" in x for x in _d), any('Análisis · %s' % _L_ROI in x and '*' in x for x in _d)),
+   (True, True, True))
 if os.path.exists(os.path.join(AQUI, 'moloka_escaner_nube.py')):
     _n, _d = HU.celda_a_celda(libro_viejo(datos_prueba()), _ROTO, max_difs=1000)
     eq('(E) 🔴 (C) contra la copia rota: rojo también', bool(_d), True)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+print('\n(F) los desvíos deliberados (encargo D, 28-sep-2026): «Ventas» en «Análisis» y «yes» como FBA')
+COLS_D = ['Nombre', 'EAN', 'ASIN', 'Marca', 'PA (€)', 'País', 'Ventas', 'Precio venta (€)', 'Canal BB', '% Comisión',
+          'Com. Amazon (€)', 'Fee Logística (€)', 'Almacén (€)', 'Beneficio (€)', 'ROI', 'Margen', 'Decisión', 'En mi BD',
+          'EAN ambiguo', 'Amazon (título)', 'Coincide', 'Cotejo', 'Cotejo (detalle)', 'Coherencia caja', 'OcioStock',
+          'ISD s/ Fee Log. (€)', 'Origen IVA']
+eq('(F) la cabecera de «Análisis», entera y en su orden (27 columnas; eran 31)', e2.columnas_analisis(), COLS_D)
+_v = load_workbook(io.BytesIO(_NUEVO))['Análisis']
+_cab = [c.value for c in _v[1]]
+_ventas = {(r[_cab.index('EAN')], r[_cab.index('País')]): r[_cab.index('Ventas')]
+           for r in _v.iter_rows(min_row=2, values_only=True)}
+eq('(F) «Ventas» del Alfa: ES 30 · IT 0 (un cero, no vacía) · FR vacía (sin dato) · DE 12',
+   [_ventas[('8400000000017', p)] for p in ('ES', 'IT', 'FR', 'DE')], [30, 0, None, 12])
+eq('(F) …y un país sin cálculo (el Beta no tiene IT) va vacío, no a cero', _ventas[('8400000000024 C6', 'IT')], None)
+
+
+def _valores(contenido):
+    """{(EAN, País): {columna: valor}} de «Análisis», con las FÓRMULAS EVALUADAS (solo usan celdas de su fila
+    y + - * / y paréntesis; una celda vacía cuenta 0, como en Excel)."""
+    ws = load_workbook(io.BytesIO(contenido))['Análisis']
+    cab = [c.value for c in ws[1]]
+
+    class _Texto(Exception):
+        """Una formula que tira de una celda con texto: en Excel, #¡VALOR!."""
+
+    def numero(x):
+        if x is None:
+            return 0.0
+        if isinstance(x, (int, float)):
+            return float(x)
+        raise _Texto()
+
+    def val(coord, prof=0):
+        v = ws[coord].value
+        if isinstance(v, str) and v.startswith('='):
+            assert prof < 10, coord
+            try:
+                expr = re.sub(r'\b([A-Z]{1,3}\d+)\b', lambda m: '(%r)' % numero(val(m.group(1), prof + 1)), v[1:])
+            except _Texto:
+                return '#VALOR!'
+            # 🔒 Solo aritmetica: numeros, + - * / y parentesis. Cualquier otra cosa (una funcion de Excel,
+            #    un nombre) no se evalua: revienta con la formula delante.
+            assert re.fullmatch(r'[0-9eE.+\-*/() ]+', expr), 'fórmula que no es aritmética: %r' % v
+            try:
+                return round(eval(expr, {'__builtins__': {}}), 9)
+            except ZeroDivisionError:
+                return '#DIV/0!'
+        return v
+    salida = {}
+    for r in range(2, ws.max_row + 1):
+        fila = {h: val('%s%d' % (get_column_letter(i), r)) for i, h in enumerate(cab, 1)}
+        salida[(fila['EAN'], fila['País'])] = fila
+    return salida, cab
+
+
+if os.path.exists(os.path.join(AQUI, 'moloka_escaner_nube.py')):
+    _puro, _cab_puro = _valores(libro_viejo(datos_prueba(), con_desvios=False))
+    _copia, _cab_copia = _valores(_NUEVO)
+    eq('(F) contra el viejo SIN desvío: fuera justo las cuatro columnas, y «Rank actual» pasa a «Ventas»',
+       ([c for c in _cab_puro if c not in _cab_copia], [c for c in _cab_copia if c not in _cab_puro]),
+       (['Rank actual'] + list(DV.ANALISIS_QUITADAS), ['Ventas']))
+    _comunes = [c for c in _cab_copia if c in _cab_puro]
+    _distintas = sorted({(k, c, _puro[k][c], _copia[k][c]) for k in _puro for c in _comunes if _puro[k][c] != _copia[k][c]},
+                        key=str)
+    print('    %d filas × %d columnas comunes comparadas con las fórmulas evaluadas' % (len(_puro), len(_comunes)))
+    for x in _distintas[:10]:
+        print('      ' + repr(x))
+    eq('(F) 🔴 las %d columnas comunes dan EXACTAMENTE lo mismo que el viejo sin desvío (Beneficio, ROI, Margen, '
+       'Com. Amazon, ISD… evaluadas)' % len(_comunes), (sorted(_puro) == sorted(_copia), _distintas), (True, []))
+    eq('(F) …y hay números de verdad en esas fórmulas (no se compara vacío con vacío)',
+       sum(1 for k in _copia for c in ('Beneficio (€)', 'ROI', 'Margen') if isinstance(_copia[k][c], float)) >= 12, True)
+else:
+    print('    (F) SALTADO el cotejo con el viejo sin desvío: moloka_escaner_nube.py ya no está')
+
+# El desvío muerde: si su texto de «antes» ya no está en el viejo, o está dos veces, o cambia las líneas.
+_TXV = _orig_leer('moloka_escaner_nube.py') if os.path.exists(os.path.join(AQUI, 'moloka_escaner_nube.py')) else None
+for _nombre, _cambio in (('el viejo ya no tiene el texto', lambda t: t.replace("'Rank 90d','Vendidos/mes'", "'Rank 90d', 'Vendidos/mes'")),
+                         ('el viejo lo tiene dos veces', lambda t: t + "\n# d['fee'], ALMACEN, None,\n            d['fee'], ALMACEN, None,\n")):
+    if _TXV is None:
+        break
+    try:
+        DV.aplicar(_cambio(_TXV), 'escaner2_heredado_nube.py')
+        _msg = 'se aplicó'
+    except DV.DesvioRoto as ex:
+        _msg = str(ex)
+    eq('(F) 🔴 %s → el desvío NO se aplica, y lo dice' % _nombre, 'aparece' in _msg, True)
+    eq('(F) 🔴 …y la paridad (B) lo cuenta como diferencia',
+       [p for p, _q in _paridad_con(_cambio)][:1], ['desvío'])
+_orig_desvios = copy.deepcopy(DV.DESVIOS)
+try:
+    _a, _d0 = DV.DESVIOS['escaner2_heredado_nube.py']['excel_del_viejo'][2]
+    DV.DESVIOS['escaner2_heredado_nube.py']['excel_del_viejo'][2] = (_a, _d0 + '            # una línea de más\n')
+    try:
+        DV.aplicar(_TXV or _a, 'escaner2_heredado_nube.py')
+        _msg = 'se aplicó'
+    except DV.DesvioRoto as ex:
+        _msg = str(ex)
+finally:
+    DV.DESVIOS.clear()
+    DV.DESVIOS.update(_orig_desvios)
+eq('(F) 🔴 un desvío que cambia el número de líneas no se aplica (las «líneas X-Y» del ORIGEN dejarían de ser del viejo)',
+   'numero de lineas' in _msg or 'aparece' in _msg, True)
+
+import escaner2_heredado_pro as PRO  # noqa: E402
+_csv = os.path.join(tempfile.mkdtemp(prefix='e2d_'), 'bb.csv')
+with io.open(_csv, 'w', encoding='utf-8-sig', newline='') as _fh:
+    _fh.write(','.join([PRO.CSV_COLS['ean'], PRO.CSV_COLS['asin'], PRO.CSV_COLS['buybox'], PRO.CSV_COLS['es_fba']]) + '\n')
+    for _i, _txt in enumerate(('yes', 'no', 'Yes', '', 'true')):
+        _fh.write('840000000010%d,B0BB00000%d,16.00,%s\n' % (_i, _i, _txt))
+_bb = PRO.leer_csv_visualizador(_csv)
+eq('(F) «Caja de Compra: Es FBA»: yes/Yes/true → FBA; no y vacío → no',
+   [_bb['840000000010%d' % i][0]['es_fba'] for i in range(5)], [True, False, True, False, True])
+eq('(F) …y el canal: BB-FBA con «yes», BB-FBM con «no»; el PRECIO es el de la caja en los dos',
+   [e2.precio_de_venta(_bb['840000000010%d' % i][0]) for i in (0, 1)], [(16.0, 'BB-FBA'), (16.0, 'BB-FBM')])
+os.unlink(_csv)
 
 print()
 if fallos:
