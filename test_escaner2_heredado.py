@@ -121,9 +121,12 @@ _PY = sorted(f for f in os.listdir(AQUI) if f.startswith('escaner2_') and f.ends
 _YML = sorted(os.path.join('.github', 'workflows', f) for f in os.listdir(os.path.join(AQUI, '.github', 'workflows'))
               if f.startswith('escaner2-') and f.endswith('.yml'))
 print('    miro %d ficheros .py (%s) y %d workflows' % (len(_PY), ', '.join(_PY), len(_YML)))
-eq('(A) hay qué mirar: los programas, el motor, la huella y los cinco heredados, y los dos workflows',
-   ({'escaner2_motor.py', 'escaner2_heo_barrido.py', 'escaner2_heo_cruce.py'} | {h for h, _v in HEREDADOS}) <= set(_PY)
-   and len(_YML) == 2, True)
+# (Encargo E, 29-sep-2026) Entran la pasada de disponibilidad, su modulo y su workflow: se miran igual.
+eq('(A) hay qué mirar: los programas, el motor, la huella y los cinco heredados, y los tres workflows',
+   ({'escaner2_motor.py', 'escaner2_heo_barrido.py', 'escaner2_heo_cruce.py', 'escaner2_heo_disponibilidad.py',
+     'escaner2_disponibilidad.py'} | {h for h, _v in HEREDADOS}) <= set(_PY)
+   and [os.path.basename(y) for y in _YML] == ['escaner2-heo-barrido.yml', 'escaner2-heo-cruce.yml',
+                                               'escaner2-heo-disponibilidad.yml'], True)
 _hallado = {f: lecturas_del_viejo(leer(f)) for f in _PY}
 _hallado.update({f: lecturas_yml(leer(f)) for f in _YML})
 eq('(A) 🔴 ninguno lee, importa o ejecuta el viejo', {f: v for f, v in _hallado.items() if v}, {})
