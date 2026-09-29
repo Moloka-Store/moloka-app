@@ -76,10 +76,10 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
 - 🔴 **Las credenciales NUNCA van en el código ni en un mensaje.** Viven en GitHub Secrets, Vercel
   y R2. Una llave que aparece en un chat está quemada y se regenera.
   **Introducir credenciales no es algo que hagas tú: se lo pides a Fernando.**
-- **Supabase es PRODUCCIÓN.** Desde una sesión: **solo lectura**. Toda escritura va por
-  rama → PR → auditoría de Cowork → fusión por Code → ensayo en staging → producción.
-- **Todo lo NUEVO nace CERRADO:** RLS activo y 0 políticas. Vistas `security_invoker`. Funciones
-  `IMMUTABLE`, sin `SECURITY DEFINER`.
+- **Supabase es PRODUCCIÓN.** Desde una sesión: **solo lectura**. Cómo llega un cambio a producción
+  y por qué staging no es testigo: `docs/reglas/escalera-de-migraciones.md`.
+- **Todo lo NUEVO nace CERRADO**; `SECURITY DEFINER` solo por uno de tres motivos y con candados:
+  ver `docs/reglas/seguridad-permisos.md`.
 - **La v1 tiene escritura anónima abierta** (deuda estructural). **No se toca a mitad de vuelo**:
   se cierra en la v2 con Auth + RPC. El problema no es la llave `publishable` (es pública por
   diseño): son las políticas.
