@@ -347,6 +347,14 @@ jobs:
       - name: 25 duodecies) test_escaner2_heredado.py
         run: python -u test_escaner2_heredado.py
 
+      # (Encargo E, tramo 3, pieza 1, 29-sep-2026) La foto de disponibilidad de HEO: todo lo que la
+      # descarga devuelve con codigo de barras (los sin GTIN solo se cuentan), todas las marcas y
+      # disponible o no, con las MISMAS reglas que el barrido (cotejado fila a fila con construir_foto);
+      # una descarga cortada no se aplica; y el programa, por estructura: solo toca disp_pasada y
+      # disp_lectura.
+      - name: 25 terdecies) test_escaner2_disponibilidad.py
+        run: python -u test_escaner2_disponibilidad.py
+
       - name: 26) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
@@ -396,6 +404,7 @@ jobs:
             test_escaner2_elegir_ficha.py
             test_escaner2_codigos14.py
             test_escaner2_heredado.py
+            test_escaner2_disponibilidad.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).
