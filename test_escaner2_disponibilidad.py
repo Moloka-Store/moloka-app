@@ -37,9 +37,9 @@ QUE PRUEBA:
   (J) SIN DATO NO ES AGOTADO (Fernando, 29-sep-2026): cada fila sale marcada si su numero no llego en
       `prices` o en `availabilities` (tambien las cajas con chase), con sus recuentos; y las listas
       crudas tienen que ser las que uso la descarga (su tamaño, el del log), o no se sube nada.
-  (K) CON LA DESCARGA HEREDADA DE VERDAD (solo su `_get`, la red, cambiado por paginas en memoria): el
-      envoltorio de `_paginar` coge las listas que usa `descargar_catalogo_heo`, las filas suben
-      marcadas y `_paginar` queda como estaba.
+  (K) CON LA DESCARGA HEREDADA DE VERDAD (solo su `_get`, la red, cambiado por paginas en memoria, y
+      un `requests` de mentira para importarla): el envoltorio de `_paginar` coge las listas que usa
+      `descargar_catalogo_heo`, las filas suben marcadas y `_paginar` queda como estaba.
 """
 import ast
 import os
@@ -494,10 +494,23 @@ eq('(I) 🔴 una CAÍDA ACEPTADA: aplicada, pero el run en ROJO y con su aviso',
 # dos, y R4 no trae GTIN.
 _env_heo = {k: os.environ.get(k) for k in ('HEO_USER', 'HEO_PASS')}
 _mod_antes = sys.modules.pop('escaner2_heredado_descarga', None)
+# 🔒 Sin red: la heredada importa `requests`; aquí se le da uno de mentira que no sabe salir a
+#    internet (y el CI de Python no lo tiene instalado). Su `_get` se cambia además por páginas en memoria.
+_req_antes = {k: sys.modules.get(k) for k in ('requests', 'requests.auth')}
+_req = types.ModuleType('requests')
+_req.get = lambda *a, **k: (_ for _ in ()).throw(RuntimeError('el banco no sale a la red'))
+_req.auth = types.ModuleType('requests.auth')
+_req.auth.HTTPBasicAuth = lambda usuario, clave: None
+sys.modules['requests'], sys.modules['requests.auth'] = _req, _req.auth
 os.environ.update(HEO_USER='u', HEO_PASS='p')
 try:
     import escaner2_heredado_descarga as hd_real
 finally:
+    for k, v in _req_antes.items():
+        if v is None:
+            sys.modules.pop(k, None)
+        else:
+            sys.modules[k] = v
     for k, v in _env_heo.items():
         if v is None:
             os.environ.pop(k, None)
