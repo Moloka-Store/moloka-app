@@ -4,15 +4,18 @@
 # Baja el catalogo de HEO (todas las marcas, sueltos y cajas, disponible o no; lo que no trae codigo
 # de barras solo se cuenta) y deja en la base lo que tiene HEO ahora (`disp_estado`) y lo que ha
 # cambiado desde la pasada anterior (`disp_cambio`). Sin Keepa y sin Amazon. Si uno de los tres
-# endpoints de HEO no llega entero, la pasada se cierra 'fallida' y no se aplica. Es la pieza de la
+# endpoints de HEO no llega entero (con una tolerancia de 10 por endpoint, porque el catalogo cambia
+# mientras se pagina), la pasada se cierra 'fallida' y no se aplica. Lo que llega sin dato de
+# disponibilidad o de precio sube marcado y la base le conserva lo de antes. Es la pieza de la
 # que saldran las novedades de Funko y, cuando Fernando lo decida, la fuente de «lo que tiene HEO»
 # para Reponer y el Trackeador.
 #
 # Vive aqui porque aqui estan las credenciales de HEO. Repo publico: no gasta minutos.
 #
 # 🔒 NO TOCA EL ESCANER VIEJO NI EL ESCANER 2: ni director-heo.yml, ni escaner_memoria, ni
-#    escaner2_*. Solo disp_pasada, disp_lectura y la funcion disp_aplicar_pasada (tablas de la
-#    migracion 20260929070300 de moloka-app-v2, que tiene que estar APLICADA antes del primer run).
+#    escaner2_*. Solo disp_pasada, disp_lectura y la funcion disp_aplicar_pasada, y lee su tolerancia
+#    en disp_parametros (tablas de las migraciones 20260929070300 y 20260929093000 de moloka-app-v2,
+#    que tienen que estar APLICADAS antes de que corra esta version).
 #
 # >>> SIN RELOJ, A PROPOSITO <<<  Se lanza a mano desde Actions. El reloj es cron-job.org (un
 #     `schedule:` de GitHub llega ~5 h tarde en esta cuenta, medido el 17-sep-2026) y lo encienden

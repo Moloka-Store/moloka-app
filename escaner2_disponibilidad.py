@@ -28,6 +28,16 @@ base, ni reloj.
 
 🔴 LA TRAMPA DEL PRECIO DE CAJA: van `precio_catalogo` (el de la caja entera) y `precio_unidad` (el de
    la caja entre sus unidades) SEPARADOS, con `uds_caja`. Quien lea no divide nada.
+
+🔴 SIN DATO NO ES AGOTADO (Fernando, 29-sep-2026, tras las primeras pasadas reales). El catalogo de HEO
+   cambia mientras se pagina (~4 min), y un producto puede llegar en `products` y NO en
+   `availabilities` (o no en `prices`). La descarga heredada le pone entonces «agotado» y sin precio
+   (`dispo.get(pn) or {}`), y desde la fila NO se distingue de un agotado de verdad (medido en la 1.ª
+   pasada: de 92 filas sin `disponibilidad`, 81 son cajas con chase —que nunca la llevan— y 11 son
+   productos sin precio ni disponibilidad). Por eso el programa se queda con la LISTA CRUDA de cada
+   endpoint al paso (envolviendo `_paginar` en tiempo de ejecucion; la heredada no se toca) y aqui
+   cada fila sale marcada: `sin_dato_disponibilidad` y `sin_dato_precio`. La base conserva lo de
+   antes para lo que ya estaba (migracion 20260929093000 de la v2).
 """
 import escaner2_motor as e2
 
@@ -79,13 +89,18 @@ def _core_valido(core):
     return core if (core.isdigit() and len(core) in (12, 13)) else None
 
 
-def construir_disponibilidad(filas_heo, chase_heo, M):
+def construir_disponibilidad(filas_heo, chase_heo, M, *, con_precio, con_disponibilidad):
     """Del catalogo de HEO (lo que devuelve `descargar_catalogo_heo(con_chase=True)`) a las filas de
     disp_lectura: UNA por producto, disponible o no, sin filtro de marca.
 
+    `con_precio` y `con_disponibilidad` son los numeros de HEO que SI llegaron en `prices` y en
+    `availabilities` (`listas_de_los_crudos`). Obligatorios: sin ellos no se distingue «sin dato» de
+    «agotado». Cada fila sale con `sin_dato_disponibilidad` / `sin_dato_precio`.
+
     Devuelve (filas, cuentas) con cuentas = {n_leidas, n_disponibles, n_agotados, n_devueltos,
-    por_regla}. Lanza LecturaInvalida si un producto no trae numero o sale dos veces: la llave es el
-    numero de HEO, y una lectura con la llave rota no se sube."""
+    n_sin_dato_disponibilidad, n_sin_dato_precio, por_regla}. Lanza LecturaInvalida si un producto no
+    trae numero o sale dos veces: la llave es el numero de HEO, y una lectura con la llave rota no se
+    sube."""
     perfil = M.PERFILES[e2.PROVEEDOR]
     filas = []
 
@@ -138,12 +153,20 @@ def construir_disponibilidad(filas_heo, chase_heo, M):
     if repetidos:
         raise LecturaInvalida('número(s) de HEO repetidos en la lectura: %s' % ', '.join(sorted(repetidos)[:10]))
 
+    # 🔑 Sin dato no es agotado: la marca sale de las listas crudas, por el numero de HEO (tambien las
+    #    cajas con chase, que la descarga cruza con la MISMA lista de disponibilidades).
+    for f in filas:
+        f['sin_dato_disponibilidad'] = f['producto_prov'] not in con_disponibilidad
+        f['sin_dato_precio'] = f['producto_prov'] not in con_precio
+
     n_disp = sum(1 for f in filas if f['disponible'])
     cuentas = {
         'n_leidas': len(filas),
         'n_disponibles': n_disp,
         'n_agotados': len(filas) - n_disp,
         'n_devueltos': len(filas_heo or []) + len(chase_todo),
+        'n_sin_dato_disponibilidad': sum(1 for f in filas if f['sin_dato_disponibilidad']),
+        'n_sin_dato_precio': sum(1 for f in filas if f['sin_dato_precio']),
         'por_regla': {r: sum(1 for f in filas if f['regla'] == r) for r in REGLAS},
     }
     if cuentas['n_leidas'] != cuentas['n_devueltos']:
@@ -182,21 +205,50 @@ ENDPOINTS = (('productos', 'n_declarado', 'n_crudo'),
              ('disponibilidades', 'n_declarado_disponibilidades', 'n_disponibilidades'))
 
 
-def descarga_cortada(rec):
+def descarga_cortada(rec, tolerancia):
     """🔴 Lo que falta para dar la descarga por ENTERA, o [] si esta entera.
 
     La descarga heredada (`_paginar`) deja de pedir paginas SIN ERROR si una no llega, y un producto
     sin su fila de disponibilidad sale AGOTADO (`dispo.get(pn) or {}`). Con las disponibilidades
     cortadas, la foto diria «agotado» a cientos de productos que no lo estan, con el crudo de
-    productos intacto: por eso se exige que LOS TRES endpoints lleguen enteros. Medido en 3 runs del
-    barrido (25 y 28-sep-2026): hoy llegan enteros (precios y disponibilidades 22.926–23.049, igual
-    a su totalElements)."""
+    productos intacto: por eso se exige que LOS TRES endpoints lleguen enteros.
+
+    «Entera» = |llegados − declarados| <= `tolerancia` en cada endpoint (`disp_parametros.
+    tolerancia_endpoint`; HEO: 10, Fernando, 29-sep-2026). El catalogo de HEO cambia mientras se
+    pagina: el 29-sep, dos pasadas seguidas llegaron con 2 precios de menos y con 1 producto de MAS,
+    sin perder ninguna pagina. Una pagina perdida son 500 (o lo que traiga la ultima)."""
     faltan = []
+    if not isinstance(tolerancia, int) or isinstance(tolerancia, bool) or tolerancia < 0:
+        return ['sin tolerancia: la base no da una tolerancia_endpoint válida (%r)' % (tolerancia,)]
     for nombre, declarado, llego in ENDPOINTS:
         if rec.get(declarado) is None or rec.get(llego) is None:
             faltan.append('%s: sin recuento en el log (declarado %s, llegados %s)' % (nombre, rec.get(declarado), rec.get(llego)))
-        elif rec[declarado] != rec[llego]:
-            faltan.append('%s: HEO declara %s y llegaron %s' % (nombre, rec[declarado], rec[llego]))
+        elif abs(rec[llego] - rec[declarado]) > tolerancia:
+            faltan.append('%s: HEO declara %s y llegaron %s (tolerancia %s)' % (nombre, rec[declarado], rec[llego], tolerancia))
     if rec.get('n_sin_gtin') is None:
         faltan.append('sin GTIN: sin recuento en el log')
     return faltan
+
+
+# Las listas crudas que hacen falta para distinguir «sin dato», con el recuento del log que las cuadra.
+CRUDOS = (('catalog/prices', 'n_precios'), ('catalog/availabilities', 'n_disponibilidades'))
+
+
+def listas_de_los_crudos(crudos, rec):
+    """De las listas crudas de `prices` y `availabilities` (lo que devolvio `_paginar`, cogido al paso)
+    a los dos conjuntos de numeros de HEO CON dato: (con_precio, con_disponibilidad).
+
+    🔴 Comprueba que son las MISMAS listas que uso la descarga: la heredada las junta en un dict por
+    `productNumber` y dice su tamaño en el log («Cruzando: … Q precios | R disponibilidades»). Si
+    falta una lista o su tamaño no es ese, LecturaInvalida: sin ellas no se distingue «sin dato» de
+    «agotado», y eso no se adivina."""
+    conjuntos = []
+    for endpoint, clave in CRUDOS:
+        if endpoint not in crudos:
+            raise LecturaInvalida('no se vio la lista cruda de %s: sin ella no se distingue «sin dato» de «agotado»' % endpoint)
+        crudos_pn = {x.get('productNumber') for x in crudos[endpoint] or []}
+        if len(crudos_pn) != rec.get(clave):
+            raise LecturaInvalida('la lista cruda de %s tiene %d números y la descarga dijo %s: no es la que usó'
+                                  % (endpoint, len(crudos_pn), rec.get(clave)))
+        conjuntos.append({_texto(pn) for pn in crudos_pn} - {None})
+    return tuple(conjuntos)
