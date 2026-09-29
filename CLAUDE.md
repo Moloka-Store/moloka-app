@@ -9,13 +9,13 @@ las ves tú solo — no están aquí a propósito.
 ## 0. QUIÉN USA ESTO
 
 **Elena usa esta app a diario para operar un almacén real.** Moloka Store S.L.U. vende en Amazon
-FBA Pan-EU (ES/IT/FR), Miravia y web propia. Si rompes la app, se para el almacén.
+FBA Pan-EU en seis mercados (ES/IT/FR/DE/NL/BE), Miravia y web propia. Si rompes la app, se para el almacén.
 
 - **`index.html` (v1) está CONGELADO.** Solo bugs críticos. Es un monolito y no se refactoriza.
   Si tu cambio lo toca, párate y pregunta.
 - **Cualquier cambio que roce la operativa de Elena se avisa ANTES de desplegar.**
-- **Fernando no es programador.** Es economista y contable. Explica en cristiano, con analogías
-  contables si ayudan. Él aprueba todos los PR.
+- **Fernando no es programador.** Es economista y contable. Explícaselo aterrizado, en lenguaje llano, con analogías
+  contables si ayudan. Él decide qué encargo se lanza; el PR lo audita Cowork y lo fusiona Code.
 
 ---
 
@@ -77,7 +77,7 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   y R2. Una llave que aparece en un chat está quemada y se regenera.
   **Introducir credenciales no es algo que hagas tú: se lo pides a Fernando.**
 - **Supabase es PRODUCCIÓN.** Desde una sesión: **solo lectura**. Toda escritura va por
-  rama → PR → Fernando aprueba → ensayo en staging → producción.
+  rama → PR → auditoría de Cowork → fusión por Code → ensayo en staging → producción.
 - **Todo lo NUEVO nace CERRADO:** RLS activo y 0 políticas. Vistas `security_invoker`. Funciones
   `IMMUTABLE`, sin `SECURITY DEFINER`.
 - **La v1 tiene escritura anónima abierta** (deuda estructural). **No se toca a mitad de vuelo**:
