@@ -34,3 +34,22 @@
   📌 La forma de saber si vuelve a tocar: **mirar el estado del destino antes de decidir**, no la
   fecha. Si lo que la migración necesita nació DESPUÉS del último volcado, restaurar borra el
   suelo sobre el que se iba a ensayar; en cualquier otro caso, se restaura.
+
+## La cadena de una migración, y por qué staging no es testigo (29-sep-2026)
+
+> **Añadido, no movido.** Sustituye en `CLAUDE.md` al tramo «Toda escritura va por rama → PR →
+> auditoría de Cowork → fusión por Code → ensayo en staging → producción», que allí queda como
+> remisión a este apartado. Aprobado por Fernando el 29-sep-2026.
+> ⚠️ El título de este fichero y lo de arriba (restaurar staging antes de ensayar) son anteriores,
+> chocan con este apartado y no se han tocado en este cambio.
+
+Toda escritura va por rama → PR → auditoría de Cowork → fusión por Code → la migración **no se ensaya
+en ningún Postgres del CI** → se aplica en producción con Fernando delante → los permisos se miden en producción después de aplicar (Seguridad 1-2 del cerebro). La base de pruebas (staging) no es testigo mientras no se rehaga: el 29-sep le faltaban 30 de las 59 migraciones desde el 19-sep y tenía registradas migraciones cuyos objetos no existen.
+
+- **Por qué no dice «se ensaya en el Postgres del CI»** (medido el 29-sep-2026): el único CI que corre
+  en un PR de la v1 es `.github/workflows/ci-tests-python.yml` (job `tests`), y no levanta ninguna
+  base. Las migraciones de la v1 viven en `migraciones/` (no hay `supabase/migrations/`) y solo llegan
+  a una base por `.github/workflows/aplicar-migracion.yml`, lanzado a mano (`workflow_dispatch`,
+  staging o producción, `ensayo` con rollback o `aplicar`).
+
+- Funciones que hoy incumplen algún candado (auditoría del 29-sep-2026): se arreglan una por PR cuando toque; lista en el parte 2026-09-29-1844 §C.
