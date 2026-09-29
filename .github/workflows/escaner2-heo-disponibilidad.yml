@@ -1,10 +1,12 @@
 # ============================================================
 # Moloka - Escaner 2 · DISPONIBILIDAD DE HEO (encargo E, tramo 3, pieza 1, 29-sep-2026)
 #
-# Baja el catalogo ENTERO de HEO (todas las marcas, sueltos y cajas, disponible o no) y deja en la
-# base lo que tiene HEO ahora (`disp_estado`) y lo que ha cambiado desde la pasada anterior
-# (`disp_cambio`). Sin Keepa y sin Amazon. Es la pieza de la que saldran las novedades de Funko y,
-# cuando Fernando lo decida, la fuente de «lo que tiene HEO» para Reponer y el Trackeador.
+# Baja el catalogo de HEO (todas las marcas, sueltos y cajas, disponible o no; lo que no trae codigo
+# de barras solo se cuenta) y deja en la base lo que tiene HEO ahora (`disp_estado`) y lo que ha
+# cambiado desde la pasada anterior (`disp_cambio`). Sin Keepa y sin Amazon. Si uno de los tres
+# endpoints de HEO no llega entero, la pasada se cierra 'fallida' y no se aplica. Es la pieza de la
+# que saldran las novedades de Funko y, cuando Fernando lo decida, la fuente de «lo que tiene HEO»
+# para Reponer y el Trackeador.
 #
 # Vive aqui porque aqui estan las credenciales de HEO. Repo publico: no gasta minutos.
 #
@@ -24,15 +26,21 @@ name: Moloka - Escaner 2 · Disponibilidad HEO
 on:
   workflow_dispatch:
 
-# 🔒 Una pasada de disponibilidad a la vez (la base tambien lo impide con un cerrojo). Grupo PROPIO:
-#    no espera ni hace esperar al barrido y al cruce de Escaneo PRO.
+# 🔒 EL MISMO GRUPO QUE EL BARRIDO Y EL CRUCE DE ESCANEO PRO (revision de Cowork, 29-sep-2026): no se
+#    baja HEO dos veces a la vez con las mismas credenciales. Sin cancelar lo que esta en curso.
+#    ⚠️ Lo que hace GitHub con un grupo, dicho para que no sorprenda: un run que llega mientras otro
+#    corre queda PENDIENTE, y en cada grupo solo hay UN pendiente; si llega otro, el pendiente anterior
+#    se CANCELA sin llegar a correr (no el que esta en curso). Ver el parte del 29-sep-2026.
 concurrency:
-  group: escaner2-heo-disponibilidad
+  group: escaner2-heo
   cancel-in-progress: false
 
 jobs:
   leer:
     runs-on: ubuntu-24.04
+    # Solo leer el repo: todo lo demas lo hace con la llave de servicio de Supabase.
+    permissions:
+      contents: read
     # La API de HEO son tres endpoints paginados de 500 en 500: el barrido tarda 5-6 min (medido).
     timeout-minutes: 30
     steps:

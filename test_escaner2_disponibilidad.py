@@ -3,12 +3,14 @@
 
 SIN RED, SIN SECRETOS Y SIN BASE: se ejecuta el modulo de verdad (escaner2_disponibilidad.py, sobre el
 motor del escaner 2 y sus piezas heredadas) con filas con la MISMA FORMA que devuelve
-`descargar_catalogo_heo(con_chase=True)`. Los codigos de las cajas con chase son reales (los del banco
-de las cajas, pasada 8ac9a9de); los precios son redondos: el repo es publico y el coste de HEO no se
-publica, y ninguna regla depende de cual sea.
+`descargar_catalogo_heo(con_chase=True)`, y el programa entero contra una base y un HEO de mentira.
+Los codigos de las cajas con chase son reales (los del banco de las cajas, pasada 8ac9a9de); TODOS los
+precios son inventados y redondos: el repo es publico y el coste de HEO no se publica, y ninguna regla
+depende de cual sea.
 
 QUE PRUEBA:
-  (A) TODO entra: todas las marcas, disponible y agotado, una fila por producto de HEO.
+  (A) Todo lo que devuelve la descarga entra: todas las marcas, disponible y agotado, una fila por
+      producto de HEO (los sin GTIN no llegan: la descarga heredada los quita y solo se cuentan).
   (B) LAS MISMAS REGLAS QUE EL BARRIDO: en lo disponible, cada fila de la foto del barrido (modo
       'todas') sale aqui IGUAL (EAN de cruce, caja, unidades, chase, precio de catalogo y por unidad);
       lo que el barrido aparta sale aqui con su regla; y lo que el barrido quita por duplicado, aqui
@@ -16,10 +18,17 @@ QUE PRUEBA:
   (C) La trampa del precio de caja: precio de catalogo y por unidad SEPARADOS, con las unidades.
   (D) El cuadre: leidas = disponibles + agotados = lo que devolvio descargar_heo.
   (E) Una lectura con la llave rota (sin numero o repetido) no se sube.
-  (F) Los recuentos del log: los tres numeros, y None (no cero) si falta uno.
+  (F) Los recuentos del log: los siete numeros (declarado y llegado de productos, precios y
+      disponibilidades, y sin GTIN), y None (no cero) si falta uno.
   (G) EL PROGRAMA, POR ESTRUCTURA: solo toca disp_pasada, disp_lectura y disp_aplicar_pasada; sin la
-      llave de servicio aborta antes de abrir ningun cliente; y el workflow no lleva reloj de GitHub
-      ni comparte grupo con el barrido.
+      llave de servicio aborta antes de abrir ningun cliente; y el workflow no lleva reloj de GitHub,
+      solo lee el repo y comparte grupo con el barrido y el cruce (no baja HEO dos veces a la vez).
+  (H) LA DESCARGA CORTADA (revision de Cowork, 29-sep-2026): la heredada deja de pedir paginas sin
+      error, y sin disponibilidades todo sale agotado. Si uno de los tres endpoints no llega entero,
+      se dice cual.
+  (I) EL PROGRAMA ENTERO, con una base y un HEO de mentira: con las disponibilidades cortadas, la
+      pasada queda 'fallida' con sus recuentos, sin subir ni una fila y SIN llamar a la funcion de la
+      base; con la descarga entera, sube lo leido, llama a la funcion y relee la pasada.
 """
 import ast
 import os
@@ -66,7 +75,7 @@ CHASE = [
     # Caja con chase, agotada: en la foto del barrido no esta; aqui SI, como agotada.
     {'producto_heo': 'FK86264', 'nombre': 'Sleepy Hollow POP! TV Vinyl Figuren Headless Horseman w/ Chase 9 cm Surtido (6)', 'ean_caja': '889698862646', 'marca': 'Funko', 'precio_caja': 60.0, 'estado': 'agotado', 'imagen': '', 'link_amazon': ''},
     # Sin unidades en el nombre: no es caja, va al flujo normal como figura suelta.
-    {'producto_heo': 'FK72611-01', 'nombre': 'Demon Slayer: Kimetsu no Yaiba POP! Animation Vinyl Figuren Susamaru w/Ch 9 cm', 'ean_caja': '889698726115', 'marca': 'Funko', 'precio_caja': 8.62, 'estado': 'disponible', 'imagen': '', 'link_amazon': ''},
+    {'producto_heo': 'FK72611-01', 'nombre': 'Demon Slayer: Kimetsu no Yaiba POP! Animation Vinyl Figuren Susamaru w/Ch 9 cm', 'ean_caja': '889698726115', 'marca': 'Funko', 'precio_caja': 9.0, 'estado': 'disponible', 'imagen': '', 'link_amazon': ''},
     # Caja con chase de la que no se puede sacar el EAN de la figura (ni GS1 ni EAN, y numero no FK).
     {'producto_heo': 'XX00001', 'nombre': 'Figura rara w/Chase Surtido (6)', 'ean_caja': 'ABC', 'marca': 'Funko', 'precio_caja': 30.0, 'estado': 'disponible', 'imagen': '', 'link_amazon': ''},
 ]
@@ -75,7 +84,7 @@ filas, cuentas = dp.construir_disponibilidad(FILAS, CHASE, M)
 por = {f['producto_prov']: f for f in filas}
 
 # ── (A) TODO ENTRA ───────────────────────────────────────────────────────────────────────
-eq('(A) una fila por producto de HEO, todas las marcas, disponible o no', sorted(por), sorted(
+eq('(A) una fila por producto que devuelve la descarga, todas las marcas, disponible o no', sorted(por), sorted(
     [f['productNumber'] for f in FILAS] + [c['producto_heo'] for c in CHASE]))
 eq('(A) lo agotado entra, marcado como no disponible', (por['FK67929']['disponible'], por['HAS0003']['disponible'],
                                                         por['FK86264']['disponible']), (False, False, False))
@@ -137,11 +146,30 @@ for nombre, filas_mal in (('repetido', FILAS + [dict(FILAS[0])]), ('sin número'
         eq('(E) un producto %s tumba la lectura' % nombre, True, True)
 
 # ── (F) LOS RECUENTOS DEL LOG ────────────────────────────────────────────────────────────
+# El log con la forma REAL (lineas copiadas del run 36110259067 del barrido, 25-sep-2026).
 LOG = ("  catalog/products: 23608 items | 48 paginas | pageSize 500\n"
-       ">>> Cruzando: 23608 productos | 23608 precios | 23608 disponibilidades\n"
-       ">>> Catalogo cruzado: 22452 filas con EAN (descartadas 1156 sin GTIN)\n")
-eq('(F) los tres números del log', dp.recuentos_del_log(LOG), {'n_declarado': 23608, 'n_crudo': 23608, 'n_sin_gtin': 1156})
-eq('(F) uno que falta es None, no cero', dp.recuentos_del_log(LOG.splitlines()[1])['n_sin_gtin'], None)
+       "  catalog/prices: 23049 items | 47 paginas | pageSize 500\n"
+       "  catalog/availabilities: 23049 items | 47 paginas | pageSize 500\n"
+       ">>> Cruzando: 23608 productos | 23049 precios | 23049 disponibilidades\n"
+       ">>> Catalogo cruzado: 22366 filas con EAN (descartadas 1156 sin GTIN)\n")
+eq('(F) los siete números del log', dp.recuentos_del_log(LOG),
+   {'n_declarado': 23608, 'n_crudo': 23608, 'n_declarado_precios': 23049, 'n_precios': 23049,
+    'n_declarado_disponibilidades': 23049, 'n_disponibilidades': 23049, 'n_sin_gtin': 1156})
+eq('(F) uno que falta es None, no cero', dp.recuentos_del_log(LOG.splitlines()[3])['n_sin_gtin'], None)
+
+# ── (H) LA DESCARGA CORTADA ──────────────────────────────────────────────────────────────
+entera = dp.recuentos_del_log(LOG)
+eq('(H) la descarga del run real está entera', dp.descarga_cortada(entera), [])
+cortada = dp.recuentos_del_log(LOG.replace('23049 disponibilidades', '22549 disponibilidades'))
+eq('(H) 🔴 con una página de disponibilidades menos, se dice (y es lo que dejaría 500 agotados falsos)',
+   dp.descarga_cortada(cortada), ['disponibilidades: HEO declara 23049 y llegaron 22549'])
+eq('(H) con los precios cortados, también',
+   dp.descarga_cortada(dp.recuentos_del_log(LOG.replace('23049 precios', '23000 precios'))),
+   ['precios: HEO declara 23049 y llegaron 23000'])
+sin_pag1 = dp.recuentos_del_log('\n'.join(l for l in LOG.splitlines() if 'catalog/availabilities' not in l))
+eq('(H) si la primera página de disponibilidades ni llegó (no hay totalElements), no se da por entera',
+   len(dp.descarga_cortada(sin_pag1)) == 1 and dp.descarga_cortada(sin_pag1)[0].startswith('disponibilidades: sin recuento'), True)
+eq('(H) sin el recuento de sin GTIN, tampoco', dp.descarga_cortada(dict(entera, n_sin_gtin=None)), ['sin GTIN: sin recuento en el log'])
 
 # ── (G) EL PROGRAMA Y EL WORKFLOW, POR ESTRUCTURA ────────────────────────────────────────
 AQUI = os.path.dirname(os.path.abspath(__file__))
@@ -170,14 +198,160 @@ with open(os.path.join(AQUI, '.github', 'workflows', 'escaner2-heo-disponibilida
 eq('(G) el workflow se lanza a mano', any(l.strip() == 'workflow_dispatch:' for l in lineas), True)
 eq('(G) y NO lleva reloj de GitHub (el reloj es cron-job.org, con Fernando delante)',
    any(l.strip().startswith('schedule:') for l in lineas), False)
-eq('(G) su grupo de concurrencia es el suyo, no el del barrido y el cruce',
-   [l.strip() for l in lineas if l.strip().startswith('group:')], ['group: escaner2-heo-disponibilidad'])
+eq('(G) comparte grupo con el barrido y el cruce (no baja HEO dos veces a la vez), sin cancelar lo que corre',
+   ([l.strip() for l in lineas if l.strip().startswith('group:')], [l.strip() for l in lineas if 'cancel-in-progress' in l]),
+   (['group: escaner2-heo'], ['cancel-in-progress: false']))
+for _wf in ('escaner2-heo-barrido.yml', 'escaner2-heo-cruce.yml'):
+    with open(os.path.join(AQUI, '.github', 'workflows', _wf), encoding='utf-8') as fh:
+        eq('(G) …y es de verdad el grupo de %s' % _wf,
+           [l.strip() for l in fh.read().splitlines() if l.strip().startswith('group:')], ['group: escaner2-heo'])
+i_perm = [i for i, l in enumerate(lineas) if l.strip() == 'permissions:']
+eq('(G) solo lee el repo: un bloque permissions con contents: read y nada más',
+   (len(i_perm), lineas[i_perm[0] + 1].strip() if i_perm else None,
+    lineas[i_perm[0] + 2].strip().startswith(('timeout-minutes:', 'steps:')) if i_perm else None),
+   (1, 'contents: read', True))
 eq('(G) corre este programa, y el rescate si falla',
    [l.strip() for l in lineas if l.strip().startswith('run: python')],
    ['run: python -u escaner2_heo_disponibilidad.py', 'run: python -u escaner2_heo_disponibilidad.py --rescate'])
+
+# ── (I) EL PROGRAMA ENTERO, CON UNA BASE Y UN HEO DE MENTIRA ────────────────────────────
+import importlib
+import io as _io
+import types
+from contextlib import redirect_stdout as _redirigir
+
+
+class _Consulta:
+    """Una consulta de supabase-py de mentira: apunta que se pidio y a que tabla."""
+
+    def __init__(self, base, tabla):
+        self.base, self.op = base, {'tabla': tabla}
+
+    def _accion(self, nombre, datos=None):
+        self.op.update(accion=nombre, datos=datos)
+        return self
+
+    def insert(self, datos):
+        return self._accion('insert', datos)
+
+    def update(self, datos):
+        return self._accion('update', datos)
+
+    def delete(self):
+        return self._accion('delete')
+
+    def select(self, *_a, **_k):
+        return self._accion('select')
+
+    def eq(self, *args):
+        self.op.setdefault('filtros', []).append(args)
+        return self
+
+    def execute(self):
+        self.base.ops.append(self.op)
+        datos = []
+        if self.op['tabla'] == 'disp_pasada' and self.op['accion'] == 'insert':
+            datos = [{'id': 'PASADA-1'}]
+        elif self.op['tabla'] == 'disp_pasada' and self.op['accion'] == 'select':
+            datos = [self.base.fila_final]
+        return types.SimpleNamespace(data=datos)
+
+
+class _BaseDeMentira:
+    def __init__(self):
+        self.ops = []
+        self.fila_final = dict({k: 0 for k in (
+            'primera', 'n_crudo', 'n_leidas', 'n_disponibles', 'n_agotados', 'n_entran', 'n_vuelven', 'n_salen',
+            'n_a_disponible', 'n_a_agotado', 'n_cambio_precio', 'n_ausentes', 'n_en_catalogo',
+            'n_disponibles_estado')}, estado='aplicada', motivo=None)
+
+    def table(self, nombre):
+        return _Consulta(self, nombre)
+
+    def rpc(self, nombre, params):
+        base = self
+
+        class _Llamada:
+            def execute(self):
+                base.ops.append({'tabla': 'rpc:' + nombre, 'accion': 'rpc', 'datos': params})
+                return types.SimpleNamespace(data={'estado': 'aplicada'})
+        return _Llamada()
+
+
+def correr_programa(disponibilidades_llegadas):
+    """El programa de verdad, importado con `supabase` y la descarga heredada cambiados por dobles."""
+    base = _BaseDeMentira()
+    falso_supabase = types.ModuleType('supabase')
+    falso_supabase.create_client = lambda url, llave: base
+    falsa_descarga = types.ModuleType('escaner2_heredado_descarga')
+    n = len(FILAS) + len(CHASE)
+
+    def descargar_catalogo_heo(con_chase=False):
+        print('  catalog/products: %d items | 1 paginas | pageSize 500' % (n + 1))
+        print('  catalog/prices: %d items | 1 paginas | pageSize 500' % n)
+        print('  catalog/availabilities: %d items | 1 paginas | pageSize 500' % n)
+        print('>>> Cruzando: %d productos | %d precios | %d disponibilidades' % (n + 1, n, disponibilidades_llegadas))
+        print('>>> Catalogo cruzado: %d filas con EAN (descartadas 1 sin GTIN)' % len(FILAS))
+        return [dict(f) for f in FILAS], [dict(c) for c in CHASE]
+    falsa_descarga.descargar_catalogo_heo = descargar_catalogo_heo
+
+    modulos = ('supabase', 'escaner2_heredado_descarga', 'escaner2_heo_disponibilidad')
+    guardado = {k: sys.modules.get(k) for k in modulos}
+    variables = ('SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'HEO_USER', 'HEO_PASS', 'GITHUB_RUN_ID')
+    entorno = {k: os.environ.get(k) for k in variables}
+    sys.modules['supabase'], sys.modules['escaner2_heredado_descarga'] = falso_supabase, falsa_descarga
+    sys.modules.pop('escaner2_heo_disponibilidad', None)
+    os.environ.update(SUPABASE_URL='https://ejemplo.invalid', SUPABASE_SERVICE_KEY='llave-de-mentira',
+                      HEO_USER='u', HEO_PASS='p', GITHUB_RUN_ID='123')
+    salida, codigo = _io.StringIO(), 0
+    try:
+        with _redirigir(salida):
+            prog = importlib.import_module('escaner2_heo_disponibilidad')
+            try:
+                prog.main()
+            except SystemExit as ex:
+                codigo = ex.code
+    finally:
+        for k, v in guardado.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
+        for k, v in entorno.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    return base.ops, codigo, salida.getvalue()
+
+
+def _de(ops, tabla, accion):
+    return [o for o in ops if o['tabla'] == tabla and o['accion'] == accion]
+
+
+N_TOTAL = len(FILAS) + len(CHASE)
+ops, codigo, _texto = correr_programa(disponibilidades_llegadas=N_TOTAL - 1)
+eq('(I) 🔴 con las disponibilidades cortadas, el run sale en ROJO', codigo, 1)
+eq('(I) …NO sube ni una fila a disp_lectura', _de(ops, 'disp_lectura', 'insert'), [])
+eq('(I) …y NO llama a la función de la base', [o for o in ops if o['tabla'].startswith('rpc:')], [])
+ultima = _de(ops, 'disp_pasada', 'update')[-1]['datos']
+eq('(I) …la pasada queda fallida y el motivo dice qué endpoint',
+   (ultima['estado'], 'disponibilidades: HEO declara 13 y llegaron 12' in ultima['motivo']), ('fallida', True))
+subidos = _de(ops, 'disp_pasada', 'update')[0]['datos']
+eq('(I) …con sus recuentos subidos antes (también una fallida los necesita)',
+   (subidos['n_declarado_disponibilidades'], subidos['n_disponibilidades'], subidos['n_declarado'], subidos['n_crudo']),
+   (13, 12, 14, 14))
+
+ops, codigo, _texto = correr_programa(disponibilidades_llegadas=N_TOTAL)
+eq('(I) con la descarga entera, termina bien', codigo, 0)
+eq('(I) …sube lo leído (13 filas)', sum(len(o['datos']) for o in _de(ops, 'disp_lectura', 'insert')), 13)
+eq('(I) …llama UNA vez a disp_aplicar_pasada con su pasada',
+   [o['datos'] for o in ops if o['tabla'].startswith('rpc:')], [{'p_pasada': 'PASADA-1'}])
+eq('(I) …y relee la pasada en la base', [o['accion'] for o in ops if o['tabla'] == 'disp_pasada'][-1], 'select')
 
 print()
 if fallos:
     print('ROJO: %d fallo(s): %s' % (len(fallos), '; '.join(fallos)))
     sys.exit(1)
-print('VERDE: la foto de disponibilidad guarda TODO HEO con las reglas del escáner 2, cuadra y no toca nada más.')
+print('VERDE: la foto de disponibilidad guarda todo lo que HEO da con código de barras, con las reglas del escáner 2; '
+      'una descarga cortada no se aplica; cuadra y no toca nada más.')

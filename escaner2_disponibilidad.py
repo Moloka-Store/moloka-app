@@ -1,14 +1,19 @@
 # -*- coding: utf-8 -*-
-"""ESCANER 2 · LA FOTO DE DISPONIBILIDAD DE HEO: el catalogo ENTERO, producto a producto (encargo E,
-tramo 3, pieza 1, 29-sep-2026). MODULO PURO: filas dentro, filas fuera. Ni red, ni base, ni reloj.
+"""ESCANER 2 · LA FOTO DE DISPONIBILIDAD DE HEO: todo lo que HEO devuelve con codigo de barras, producto a
+producto (encargo E, tramo 3, pieza 1, 29-sep-2026). MODULO PURO: filas dentro, filas fuera. Ni red, ni
+base, ni reloj.
 
 🔑 QUE ES Y POR QUE NO ES LA FOTO DEL BARRIDO. Fernando, 29-sep-2026: «Para saber que hay para
    reponer hay que tener el catalogo completo de lo disponible en HEO y otra cosa es que decidamos
    escanear novedades de Funko». La foto del barrido (`escaner2_motor.construir_foto`) se queda solo
    con lo disponible que pasa un filtro de marcas, porque es lo que se lleva al Visualizador. Esta
-   se queda con TODO lo que devuelve HEO, de todas las marcas y disponible o NO, para distinguir
-   «en catalogo, agotado» de «no esta en el catalogo»: una fila por producto de HEO
+   se queda con TODO lo que devuelve la descarga, de todas las marcas y disponible o NO, para
+   distinguir «en catalogo, agotado» de «no esta en el catalogo»: una fila por producto de HEO
    (`productNumber`, su llave), con la marca `disponible`.
+   🔴 CON UN MATIZ (revision de Cowork, 29-sep-2026): la descarga heredada quita los productos SIN
+   codigo de barras (GTIN) antes de devolverlos (~1.155 de ~23.500). Esos solo se CUENTAN
+   (`n_sin_gtin`): sin codigo de barras no casan con nuestro catalogo ni se venden en Amazon. No es
+   «el catalogo entero»: es todo lo que tiene GTIN.
 
 🔴 LAS REGLAS SON LAS DEL ESCANER 2, NO UNAS NUEVAS. Cada fila sale con las MISMAS piezas que la foto
    del barrido, sin copiarlas: `core_de_heo` (el EAN con el que se cruza), `clasificar_chase` del viejo
@@ -148,15 +153,50 @@ def construir_disponibilidad(filas_heo, chase_heo, M):
 
 
 def recuentos_del_log(texto):
-    """Los tres numeros que `descargar_catalogo_heo` solo dice en su log (y NO se toca): lo que HEO
-    declara (`totalElements`), lo que se bajo y lo que tiro por no traer GTIN. Los mismos patrones que
-    el barrido. Un numero que no aparece es None, no cero."""
+    """Los numeros que `descargar_catalogo_heo` solo dice en su log (y NO se toca), con los mismos nombres
+    que las columnas de disp_pasada. Un numero que no aparece es None, no cero.
+
+      · lo que HEO DECLARA de cada endpoint (`totalElements`, impreso en su primera pagina):
+        productos, precios y disponibilidades;
+      · lo que LLEGO de cada uno («Cruzando: P productos | Q precios | R disponibilidades»);
+      · lo que tiro por no traer GTIN."""
     import re
     def uno(patron):
         m = re.search(patron, texto or '')
         return int(m.group(1)) if m else None
+    cruce = re.search(r'Cruzando: (\d+) productos \| (\d+) precios \| (\d+) disponibilidades', texto or '')
     return {
         'n_declarado': uno(r'catalog/products: (\d+) items'),
-        'n_crudo': uno(r'Cruzando: (\d+) productos'),
+        'n_crudo': int(cruce.group(1)) if cruce else None,
+        'n_declarado_precios': uno(r'catalog/prices: (\d+) items'),
+        'n_precios': int(cruce.group(2)) if cruce else None,
+        'n_declarado_disponibilidades': uno(r'catalog/availabilities: (\d+) items'),
+        'n_disponibilidades': int(cruce.group(3)) if cruce else None,
         'n_sin_gtin': uno(r'descartadas (\d+) sin GTIN'),
     }
+
+
+# Cada endpoint, con el nombre de su recuento declarado y del que llego.
+ENDPOINTS = (('productos', 'n_declarado', 'n_crudo'),
+             ('precios', 'n_declarado_precios', 'n_precios'),
+             ('disponibilidades', 'n_declarado_disponibilidades', 'n_disponibilidades'))
+
+
+def descarga_cortada(rec):
+    """🔴 Lo que falta para dar la descarga por ENTERA, o [] si esta entera.
+
+    La descarga heredada (`_paginar`) deja de pedir paginas SIN ERROR si una no llega, y un producto
+    sin su fila de disponibilidad sale AGOTADO (`dispo.get(pn) or {}`). Con las disponibilidades
+    cortadas, la foto diria «agotado» a cientos de productos que no lo estan, con el crudo de
+    productos intacto: por eso se exige que LOS TRES endpoints lleguen enteros. Medido en 3 runs del
+    barrido (25 y 28-sep-2026): hoy llegan enteros (precios y disponibilidades 22.926–23.049, igual
+    a su totalElements)."""
+    faltan = []
+    for nombre, declarado, llego in ENDPOINTS:
+        if rec.get(declarado) is None or rec.get(llego) is None:
+            faltan.append('%s: sin recuento en el log (declarado %s, llegados %s)' % (nombre, rec.get(declarado), rec.get(llego)))
+        elif rec[declarado] != rec[llego]:
+            faltan.append('%s: HEO declara %s y llegaron %s' % (nombre, rec[declarado], rec[llego]))
+    if rec.get('n_sin_gtin') is None:
+        faltan.append('sin GTIN: sin recuento en el log')
+    return faltan

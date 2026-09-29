@@ -7,11 +7,15 @@ encienden Fernando y Cowork cuando esto este fusionado y la migracion de la v2 a
 
 QUE HACE, EN ORDEN:
   1. abre una pasada en `disp_pasada` (proveedor HEO, estado 'leyendo', con el id del run);
-  2. baja el catalogo ENTERO con `descargar_catalogo_heo(con_chase=True)`, la MISMA funcion que el
-     barrido y el director (copia literal en escaner2_heredado_descarga.py), y saca de su log lo que
-     HEO declara, lo que se bajo y lo que tiro sin GTIN;
-  3. convierte cada producto en una fila con las reglas del escaner 2
-     (`escaner2_disponibilidad.construir_disponibilidad`): TODAS las marcas, disponibles y NO;
+  2. baja el catalogo con `descargar_catalogo_heo(con_chase=True)`, la MISMA funcion que el barrido y
+     el director (copia literal en escaner2_heredado_descarga.py), y saca de su log, por endpoint, lo
+     que HEO declara y lo que llego, y lo que tiro sin GTIN. 🔴 SI UNO DE LOS TRES ENDPOINTS (productos,
+     precios, disponibilidades) NO LLEGO ENTERO, la pasada se cierra 'fallida' SIN llamar a la base:
+     la descarga corta en silencio, y sin disponibilidades todo saldria agotado (revision de Cowork,
+     29-sep-2026). La base lo vuelve a comprobar por su cuenta;
+  3. convierte cada producto CON codigo de barras en una fila con las reglas del escaner 2
+     (`escaner2_disponibilidad.construir_disponibilidad`): TODAS las marcas, disponibles y NO. Los sin
+     GTIN (~1.155) los quita la descarga heredada y solo se cuentan;
   4. sube las filas a `disp_lectura` en lotes y deja en la pasada sus recuentos;
   5. llama a `disp_aplicar_pasada`, la funcion de la base que, de una vez: pasa el blindaje
      anti-vaciado, apunta los cambios contra el estado de antes, marca lo que falta y cuadra. Si la
@@ -57,6 +61,10 @@ RUN_ID = os.environ.get('GITHUB_RUN_ID') or ''
 from supabase import create_client  # noqa: E402
 
 sb = create_client(os.environ['SUPABASE_URL'], _llave_svc)
+
+
+class DescargaCortada(RuntimeError):
+    """Uno de los tres endpoints de HEO no llego entero: la pasada no se aplica."""
 
 
 class _Eco(io.TextIOBase):
@@ -112,11 +120,18 @@ def main():
         with redirect_stdout(eco):
             filas_heo, chase = descargar_catalogo_heo(con_chase=True)
         rec = dp.recuentos_del_log(''.join(eco.trozos))
+        # Los recuentos, a la pasada en cuanto se saben: tambien una fallida los necesita.
+        sb.table('disp_pasada').update(rec).eq('id', pasada).execute()
+        cortada = dp.descarga_cortada(rec)
+        if cortada:
+            raise DescargaCortada('descarga cortada, no se aplica: ' + ' · '.join(cortada))
 
         # 2 · Las filas, con las reglas del escaner 2. Todas las marcas, disponibles y no.
         M = e2.cargar_motor()
         filas, cuentas = dp.construir_disponibilidad(filas_heo, chase, M)
-        print(f">>> HEO declara {rec['n_declarado']} · se bajaron {rec['n_crudo']} · sin GTIN {rec['n_sin_gtin']} · "
+        print(f">>> HEO declara {rec['n_declarado']} productos, {rec['n_declarado_precios']} precios y "
+              f"{rec['n_declarado_disponibilidades']} disponibilidades · llegaron {rec['n_crudo']}, {rec['n_precios']} y "
+              f"{rec['n_disponibilidades']} · sin GTIN {rec['n_sin_gtin']} · "
               f"leídas {cuentas['n_leidas']} (disponibles {cuentas['n_disponibles']}, agotados {cuentas['n_agotados']}) · "
               f"con regla del escáner 2 {cuentas['por_regla']}", flush=True)
 
@@ -124,7 +139,6 @@ def main():
         for i in range(0, len(filas), LOTE):
             sb.table('disp_lectura').insert([dict(f, pasada_id=pasada) for f in filas[i:i + LOTE]]).execute()
         (sb.table('disp_pasada').update({
-            'n_declarado': rec['n_declarado'], 'n_crudo': rec['n_crudo'], 'n_sin_gtin': rec['n_sin_gtin'],
             'n_leidas': cuentas['n_leidas'], 'n_disponibles': cuentas['n_disponibles'],
             'n_agotados': cuentas['n_agotados'],
         }).eq('id', pasada).execute())
