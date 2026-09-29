@@ -38,6 +38,14 @@ base, ni reloj.
    endpoint al paso (envolviendo `_paginar` en tiempo de ejecucion; la heredada no se toca) y aqui
    cada fila sale marcada: `sin_dato_disponibilidad` y `sin_dato_precio`. La base conserva lo de
    antes para lo que ya estaba (migracion 20260929093000 de la v2).
+
+🔴 REPETIDOS EN LA DESCARGA (remates, 29-sep-2026). HEO repite filas mientras se pagina (run
+   36548469929: 23.454 productos con 23.453 declarados). Un producto repetido se queda UNA vez si
+   todas sus copias son IDENTICAS en lo que se sube a disp_lectura, y se cuenta (`n_duplicados`); si
+   alguna difiere (o una copia trae codigo de barras y otra no), la lectura NO se sube
+   (LecturaInvalida). Igual en precios y disponibilidades (`n_duplicados_precios`,
+   `n_duplicados_disponibilidades`), comparando el registro entero: todo lo que trae se usa. Cuadre:
+   crudo = sin GTIN + leidas + repetidos, y la tolerancia se mide sobre los distintos.
 """
 import escaner2_motor as e2
 
@@ -89,7 +97,7 @@ def _core_valido(core):
     return core if (core.isdigit() and len(core) in (12, 13)) else None
 
 
-def construir_disponibilidad(filas_heo, chase_heo, M, *, con_precio, con_disponibilidad):
+def construir_disponibilidad(filas_heo, chase_heo, M, *, con_precio, con_disponibilidad, numeros_crudos):
     """Del catalogo de HEO (lo que devuelve `descargar_catalogo_heo(con_chase=True)`) a las filas de
     disp_lectura: UNA por producto, disponible o no, sin filtro de marca.
 
@@ -97,10 +105,15 @@ def construir_disponibilidad(filas_heo, chase_heo, M, *, con_precio, con_disponi
     `availabilities` (`listas_de_los_crudos`). Obligatorios: sin ellos no se distingue «sin dato» de
     «agotado». Cada fila sale con `sin_dato_disponibilidad` / `sin_dato_precio`.
 
+    `numeros_crudos` son los numeros de HEO del listado CRUDO de products, con sus repeticiones (lo que
+    devolvio `_paginar`). Obligatorio: con el se cuentan los repetidos y se sabe cuantas copias de cada
+    producto hay que ver.
+
     Devuelve (filas, cuentas) con cuentas = {n_leidas, n_disponibles, n_agotados, n_devueltos,
-    n_sin_dato_disponibilidad, n_sin_dato_precio, por_regla}. Lanza LecturaInvalida si un producto no
-    trae numero o sale dos veces: la llave es el numero de HEO, y una lectura con la llave rota no se
-    sube."""
+    n_duplicados_filas, n_duplicados_sin_gtin, n_sin_dato_disponibilidad, n_sin_dato_precio,
+    por_regla}. Las filas salen UNA por producto. Lanza LecturaInvalida si un producto no trae numero,
+    o si sale repetido con copias DISTINTAS (en lo que se sube, o una con codigo de barras y otra sin
+    el): la llave es el numero de HEO, y una lectura con la llave dudosa no se sube."""
     perfil = M.PERFILES[e2.PROVEEDOR]
     filas = []
 
@@ -145,13 +158,28 @@ def construir_disponibilidad(filas_heo, chase_heo, M, *, con_precio, con_disponi
     sin_numero = [f for f in filas if not f['producto_prov']]
     if sin_numero:
         raise LecturaInvalida('%d producto(s) sin número de HEO: la llave de la foto es ese número' % len(sin_numero))
-    vistos, repetidos = set(), set()
+    n_devueltos = len(filas_heo or []) + len(chase_todo)
+    if len(filas) != n_devueltos:
+        raise LecturaInvalida('descargar_heo devolvió %d productos y salen %d filas' % (n_devueltos, len(filas)))
+
+    # 🔑 Los repetidos: cada producto, tantas filas como copias trae el listado crudo; si son identicas
+    #    se queda una, y si no, no se sube nada. Lo que no tiene fila (sin GTIN) solo se cuenta.
+    copias = {}
+    for pn in numeros_crudos:
+        copias[_texto(pn)] = copias.get(_texto(pn), 0) + 1
+    por_numero = {}
     for f in filas:
-        if f['producto_prov'] in vistos:
-            repetidos.add(f['producto_prov'])
-        vistos.add(f['producto_prov'])
-    if repetidos:
-        raise LecturaInvalida('número(s) de HEO repetidos en la lectura: %s' % ', '.join(sorted(repetidos)[:10]))
+        por_numero.setdefault(f['producto_prov'], []).append(f)
+    distintos = sorted(pn for pn, fs in por_numero.items() if any(x != fs[0] for x in fs[1:]))
+    if distintos:
+        raise LecturaInvalida('número(s) de HEO repetidos con datos distintos: %s' % ', '.join(distintos[:10]))
+    mezclados = sorted(pn for pn, fs in por_numero.items() if copias.get(pn, 0) != len(fs))
+    if mezclados:
+        raise LecturaInvalida('número(s) de HEO con copias que no son iguales en el listado (una con código de barras y otra '
+                              'sin él, o que no está en el listado crudo): %s' % ', '.join(mezclados[:10]))
+    n_duplicados_filas = sum(len(fs) - 1 for fs in por_numero.values())
+    n_duplicados_sin_gtin = sum(n - 1 for pn, n in copias.items() if pn not in por_numero)
+    filas = [fs[0] for fs in por_numero.values()]
 
     # 🔑 Sin dato no es agotado: la marca sale de las listas crudas, por el numero de HEO (tambien las
     #    cajas con chase, que la descarga cruza con la MISMA lista de disponibilidades).
@@ -164,14 +192,16 @@ def construir_disponibilidad(filas_heo, chase_heo, M, *, con_precio, con_disponi
         'n_leidas': len(filas),
         'n_disponibles': n_disp,
         'n_agotados': len(filas) - n_disp,
-        'n_devueltos': len(filas_heo or []) + len(chase_todo),
+        'n_devueltos': n_devueltos,
+        'n_duplicados_filas': n_duplicados_filas,
+        'n_duplicados_sin_gtin': n_duplicados_sin_gtin,
         'n_sin_dato_disponibilidad': sum(1 for f in filas if f['sin_dato_disponibilidad']),
         'n_sin_dato_precio': sum(1 for f in filas if f['sin_dato_precio']),
         'por_regla': {r: sum(1 for f in filas if f['regla'] == r) for r in REGLAS},
     }
-    if cuentas['n_leidas'] != cuentas['n_devueltos']:
-        raise LecturaInvalida('descargar_heo devolvió %d productos y salen %d filas'
-                              % (cuentas['n_devueltos'], cuentas['n_leidas']))
+    if cuentas['n_leidas'] + n_duplicados_filas != n_devueltos:
+        raise LecturaInvalida('descargar_heo devolvió %d productos y salen %d filas más %d repetidas'
+                              % (n_devueltos, cuentas['n_leidas'], n_duplicados_filas))
     return filas, cuentas
 
 
@@ -216,18 +246,86 @@ def descarga_cortada(rec, tolerancia):
     «Entera» = |llegados − declarados| <= `tolerancia` en cada endpoint (`disp_parametros.
     tolerancia_endpoint`; HEO: 10, Fernando, 29-sep-2026). El catalogo de HEO cambia mientras se
     pagina: el 29-sep, dos pasadas seguidas llegaron con 2 precios de menos y con 1 producto de MAS,
-    sin perder ninguna pagina. Una pagina perdida son 500 (o lo que traiga la ultima)."""
+    sin perder ninguna pagina. Una pagina perdida son 500 (o lo que traiga la ultima).
+    🔑 Los productos se cuentan DISTINTOS: el crudo menos sus copias repetidas (`n_duplicados`, de
+    `duplicados_de_los_crudos`). Precios y disponibilidades ya llegan contados sin repetir (la
+    heredada los junta por numero)."""
     faltan = []
     if not isinstance(tolerancia, int) or isinstance(tolerancia, bool) or tolerancia < 0:
         return ['sin tolerancia: la base no da una tolerancia_endpoint válida (%r)' % (tolerancia,)]
     for nombre, declarado, llego in ENDPOINTS:
-        if rec.get(declarado) is None or rec.get(llego) is None:
+        llegados = rec.get(llego)
+        if nombre == 'productos' and llegados is not None:
+            if rec.get('n_duplicados') is None:
+                faltan.append('productos: sin recuento de repetidos')
+                continue
+            llegados -= rec['n_duplicados']
+        if rec.get(declarado) is None or llegados is None:
             faltan.append('%s: sin recuento en el log (declarado %s, llegados %s)' % (nombre, rec.get(declarado), rec.get(llego)))
-        elif abs(rec[llego] - rec[declarado]) > tolerancia:
-            faltan.append('%s: HEO declara %s y llegaron %s (tolerancia %s)' % (nombre, rec[declarado], rec[llego], tolerancia))
+        elif abs(llegados - rec[declarado]) > tolerancia:
+            faltan.append('%s: HEO declara %s y llegaron %s (tolerancia %s)' % (nombre, rec[declarado], llegados, tolerancia)
+                          + (' · repetidos aparte: %s' % rec['n_duplicados'] if nombre == 'productos' and rec['n_duplicados'] else ''))
     if rec.get('n_sin_gtin') is None:
         faltan.append('sin GTIN: sin recuento en el log')
     return faltan
+
+
+# Los tres listados crudos, con el nombre de su recuento de repetidos y si sus copias se comparan aqui
+# (products no: sus copias se comparan fila a fila, en lo que se sube; ver construir_disponibilidad).
+REPETIDOS = (('catalog/products', 'n_duplicados', False),
+             ('catalog/prices', 'n_duplicados_precios', True),
+             ('catalog/availabilities', 'n_duplicados_disponibilidades', True))
+
+
+def duplicados_de_los_crudos(crudos):
+    """Cuantas copias REPETIDAS de un mismo producto trae cada listado crudo (lo que devolvio
+    `_paginar`). Devuelve (conteos, problemas): conteos = {n_duplicados, n_duplicados_precios,
+    n_duplicados_disponibilidades} y problemas = lo que impide seguir.
+
+    🔴 En precios y disponibilidades, dos copias del mismo numero tienen que ser IDENTICAS (el registro
+    entero: todo lo que trae se usa, y la heredada se queda con la ultima sin avisar); si no, es un
+    problema y la lectura no se sube. Los conteos se devuelven igual, para que la pasada fallida los
+    guarde (revision de Cowork, 29-sep-2026). Sin un listado, LecturaInvalida."""
+    out, problemas = {}, []
+    for endpoint, clave, comparar in REPETIDOS:
+        if endpoint not in crudos:
+            raise LecturaInvalida('no se vio la lista cruda de %s: sin ella no se cuentan los repetidos' % endpoint)
+        vistos, n, distintos = {}, 0, []
+        for x in crudos[endpoint] or []:
+            pn = x.get('productNumber')
+            if pn in vistos:
+                n += 1
+                if comparar and x != vistos[pn]:
+                    distintos.append(str(pn))
+            else:
+                vistos[pn] = x
+        if distintos:
+            problemas.append('%s: número(s) de HEO repetidos con datos distintos: %s'
+                             % (endpoint, ', '.join(sorted(set(distintos))[:10])))
+        out[clave] = n
+    return out, problemas
+
+
+def sin_gtin_de_los_crudos(numeros_crudos, filas_heo, chase_heo):
+    """Los productos SIN GTIN, contados UNA vez, desde el listado crudo de products y lo que devolvio la
+    descarga: (unicos, copias). Un numero del listado sin ninguna fila es un sin GTIN (la heredada lo
+    tira); `copias` son todas sus apariciones, que es lo que cuenta el log («descartadas N sin
+    GTIN»), y `unicos`, los productos. Se sabe ANTES de construir nada, asi que la pasada guarda el
+    bueno desde el principio, tambien si acaba fallida (revision de Cowork, 29-sep-2026)."""
+    con_fila = {}
+    for f in filas_heo or []:
+        con_fila[_texto(f.get('productNumber'))] = con_fila.get(_texto(f.get('productNumber')), 0) + 1
+    for c in chase_heo or []:
+        con_fila[_texto(c.get('producto_heo'))] = con_fila.get(_texto(c.get('producto_heo')), 0) + 1
+    en_listado, sin_numero = {}, 0
+    for pn in numeros_crudos:
+        if _texto(pn) is None:
+            sin_numero += 1   # sin numero no se puede agrupar: cada uno cuenta como un producto
+        else:
+            en_listado[_texto(pn)] = en_listado.get(_texto(pn), 0) + 1
+    copias = sin_numero + sum(max(n - con_fila.get(pn, 0), 0) for pn, n in en_listado.items())
+    unicos = sin_numero + sum(1 for pn in en_listado if con_fila.get(pn, 0) == 0)
+    return unicos, copias
 
 
 # Las listas crudas que hacen falta para distinguir «sin dato», con el recuento del log que las cuadra.

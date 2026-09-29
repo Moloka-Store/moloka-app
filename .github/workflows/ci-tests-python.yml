@@ -353,8 +353,9 @@ jobs:
       # una descarga cortada no se aplica (con tolerancia de 10 por endpoint, decidida por Fernando el
       # 29-sep: el catalogo cambia mientras se pagina); lo que llega sin dato de disponibilidad o de
       # precio sube marcado («sin dato no es agotado»), probado tambien con la descarga heredada de
-      # verdad; una caida aceptada sale en rojo; y el programa, por estructura: solo toca disp_pasada y
-      # disp_lectura, y lee disp_parametros.
+      # verdad; una caida aceptada sale en rojo; los productos repetidos al paginar se quedan una vez si
+      # son identicos y tumban la lectura si no (remates, 29-sep); y el programa, por estructura: solo
+      # toca disp_pasada y disp_lectura, y lee disp_parametros.
       - name: 25 terdecies) test_escaner2_disponibilidad.py
         run: python -u test_escaner2_disponibilidad.py
 
