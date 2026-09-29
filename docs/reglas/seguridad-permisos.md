@@ -28,3 +28,16 @@
   migración, y se mide el ACL al terminar.**
 - **SP-API: jamás con credenciales de Moloka SL.** Decidido y cerrado. Las cuentas de Moloka
   (Elena) y Fernando (autónomo) están separadas a nivel de credenciales.
+
+## `SECURITY DEFINER`: con motivo y con candados (29-sep-2026)
+
+> **Añadido, no movido.** Sustituye en `CLAUDE.md` a «**Todo lo NUEVO nace CERRADO:** RLS activo y 0
+> políticas. Vistas `security_invoker`. Funciones `IMMUTABLE`, sin `SECURITY DEFINER`.» Es la
+> «Opción 1 — v1» del parte `2026-09-29-1844-auditoria-definer-y-staging.md` §C, aprobada por
+> Fernando el 29-sep-2026. Texto literal (el «Detalle» de la v2 vive hoy en
+> `docs/reglas/permisos-nace-cerrado.md` de `moloka-app-v2`):
+
+- **Todo lo NUEVO nace CERRADO:** RLS activo y 0 políticas. Vistas `security_invoker`. Funciones
+  `SECURITY INVOKER`; `SECURITY DEFINER` solo como puerta de escritura, lectura estrecha de una tabla
+  cerrada o función de una política, con `search_path = ''`, EXECUTE solo a quien la llama, nunca a
+  `anon`, y —si escribe— excluyendo al warmer y fallando cerrado. Detalle: `CLAUDE.md` de `moloka-app-v2`.
