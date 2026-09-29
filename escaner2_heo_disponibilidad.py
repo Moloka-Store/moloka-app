@@ -31,10 +31,16 @@ QUE HACE, EN ORDEN:
   6. relee la pasada en la base y la imprime: lo que vale es lo que hay alli, no lo que dice esto.
      🔴 Si la base la aplico como CAIDA ACEPTADA (la salida del freno del 90 %), el run sale en ROJO
      con un aviso: esta aplicada, pero alguien tiene que mirar si HEO ha caido de verdad.
+  7. 🆕 NOVEDADES DE FUNKO (encargo H, tramo 1, 29-sep-2026): con la pasada YA APLICADA, llama a
+     `nov_seleccionar_pasada` (migracion 20260929134500 de la v2), que aparta las novedades de Funko
+     y llena su cola. Es un PASO APARTE: si falla, la pasada sigue aplicada, el fallo se apunta en
+     `nov_pasada` ('fallida', con el motivo) y en el log, NO se reintenta, lo que venga despues se
+     ejecuta igual, y el run acaba en ROJO para que se vea. Sin Keepa ni Amazon.
 
 🔒 NO TOCA NADA DEL ESCANER VIEJO NI DEL ESCANER 2: ni `escaner_memoria`, ni `escaner_resultados`, ni
    `reglas_director`, ni `escaner2_*`, ni `productos`. Solo `disp_pasada`, `disp_lectura`, la funcion
-   `disp_aplicar_pasada` y, para LEER su tolerancia, `disp_parametros` (lo comprueba
+   `disp_aplicar_pasada` y, para LEER su tolerancia, `disp_parametros`; y, para las novedades, la
+   funcion `nov_seleccionar_pasada` y `nov_pasada` (solo para apuntar un fallo) (lo comprueba
    test_escaner2_disponibilidad.py sobre el propio fichero).
    Cero tokens de Keepa y cero llamadas a Amazon.
 🔒 LA LLAVE DE SERVICIO, O NO SE CORRE: escribe en tablas cerradas; sin ella aborta antes de nacer
@@ -137,6 +143,31 @@ def rescatar():
     print(f">>> RESCATE disp_pasada: {len(res.data or [])} pasada(s) de este run pasan de 'leyendo' a 'fallida'.")
 
 
+def seleccionar_novedades(pasada):
+    """NOVEDADES DE FUNKO (encargo H, tramo 1): con la pasada YA APLICADA, la base aparta las novedades de
+    Funko y llena su cola (`nov_seleccionar_pasada`, idempotente). 🔴 PASO APARTE E INDEPENDIENTE: no lanza
+    nunca. Si falla, la pasada SIGUE APLICADA (ya esta confirmada en la base), el fallo se apunta en
+    `nov_pasada` ('fallida', con su motivo; si la pasada ya tenia fila no se toca) y en el log, y NO se
+    reintenta: se rehace a mano llamando otra vez a la funcion con esa pasada. Devuelve True si salio bien."""
+    try:
+        res = sb.rpc('nov_seleccionar_pasada', {'p_pasada': pasada}).execute().data
+        print(f">>> NOVEDADES DE FUNKO: {res}", flush=True)
+        return True
+    except Exception as ex:
+        motivo = f'{type(ex).__name__}: {ex}'
+        print(f"NOVEDADES_NO_SELECCIONADAS: la pasada {pasada} sigue aplicada; la selección de novedades ha "
+              f"fallado y se apunta en nov_pasada: {motivo[:500]}", flush=True)
+        try:
+            (sb.table('nov_pasada')
+               .upsert({'pasada_id': pasada, 'proveedor': PROVEEDOR, 'estado': 'fallida', 'motivo': motivo[:1000]},
+                       on_conflict='pasada_id', ignore_duplicates=True)
+               .execute())
+        except Exception as ex2:
+            print(f"NOVEDADES_FALLO_SIN_APUNTAR: tampoco se ha podido apuntar en nov_pasada: "
+                  f"{type(ex2).__name__}: {str(ex2)[:500]}", flush=True)
+        return False
+
+
 def main():
     import escaner2_motor as e2
     import escaner2_disponibilidad as dp
@@ -232,11 +263,18 @@ def main():
         abortar(f"pasada {pasada} {fila['estado']}: {fila.get('motivo')} · la función dijo {resultado}")
     print(f">>> PASADA APLICADA: {fila['n_en_catalogo']} productos de HEO en el catálogo, "
           f"{fila['n_disponibles_estado']} disponibles.", flush=True)
+
+    # 7 · NOVEDADES DE FUNKO (encargo H): paso aparte con la pasada ya aplicada; no lanza nunca, y lo que
+    #     venga despues se ejecuta aunque falle. Si falla, el run acaba en rojo, pero AL FINAL.
+    novedades_ok = seleccionar_novedades(pasada)
+
     if fila.get('caida_aceptada'):
         # 🔴 Aplicada, pero NO es una pasada normal: el run en rojo para que se vea en Actions.
         print(f"CAIDA_ACEPTADA: la pasada {pasada} se ha aplicado como NUEVA REFERENCIA tras varios rechazos "
               f"estables por el freno del 90 %. Puede ser una caída real de HEO o un fallo estable de su API: "
               f"hay que mirarlo. {fila.get('motivo')}", flush=True)
+        sys.exit(1)
+    if not novedades_ok:
         sys.exit(1)
 
 
