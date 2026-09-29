@@ -347,9 +347,11 @@ jobs:
       - name: 25 duodecies) test_escaner2_heredado.py
         run: python -u test_escaner2_heredado.py
 
-      # (Encargo E, tramo 3, pieza 1, 29-sep-2026) La foto de disponibilidad de HEO: TODO el catalogo,
-      # todas las marcas y disponible o no, con las MISMAS reglas que el barrido (cotejado fila a fila
-      # con construir_foto); y el programa, por estructura: solo toca disp_pasada y disp_lectura.
+      # (Encargo E, tramo 3, pieza 1, 29-sep-2026) La foto de disponibilidad de HEO: todo lo que la
+      # descarga devuelve con codigo de barras (los sin GTIN solo se cuentan), todas las marcas y
+      # disponible o no, con las MISMAS reglas que el barrido (cotejado fila a fila con construir_foto);
+      # una descarga cortada no se aplica; y el programa, por estructura: solo toca disp_pasada y
+      # disp_lectura.
       - name: 25 terdecies) test_escaner2_disponibilidad.py
         run: python -u test_escaner2_disponibilidad.py
 
