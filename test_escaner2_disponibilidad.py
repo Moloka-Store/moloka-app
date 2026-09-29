@@ -42,6 +42,10 @@ QUE PRUEBA:
       disponibilidades, lo mismo comparando el registro entero; la tolerancia de productos se mide
       sobre los distintos; y el programa cuadra crudo = sin GTIN + leidas + repetidos, corrigiendo
       el sin GTIN del log (que cuenta las copias).
+  (M) NOVEDADES DE FUNKO (encargo H, tramo 1, 29-sep-2026): con la pasada aplicada y releida, UNA llamada a
+      nov_seleccionar_pasada; si falla, el run acaba en rojo pero la pasada no se toca, el fallo se apunta
+      en nov_pasada sin pisar nada, no se reintenta y lo que viene despues (la caida aceptada) se ejecuta;
+      con la pasada rechazada o la descarga cortada, no se llama.
   (K) CON LA DESCARGA HEREDADA DE VERDAD (solo su `_get`, la red, cambiado por paginas en memoria, y
       un `requests` de mentira para importarla): el envoltorio de `_paginar` coge las listas que usa
       `descargar_catalogo_heo`, las filas suben marcadas y `_paginar` queda como estaba.
@@ -327,19 +331,24 @@ for nodo in ast.walk(arbol):
     if isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Attribute) and nodo.func.attr in ('table', 'rpc') and nodo.args:
         a = nodo.args[0]
         (tablas if nodo.func.attr == 'table' else funciones).add(a.value if isinstance(a, ast.Constant) else '<no literal>')
-eq('(G) el programa solo toca disp_pasada y disp_lectura, y lee disp_parametros (ni escaner_memoria, ni escaner2_*, ni productos)',
-   sorted(tablas), ['disp_lectura', 'disp_parametros', 'disp_pasada'])
+eq('(G) el programa solo toca disp_pasada y disp_lectura, lee disp_parametros y apunta en nov_pasada (ni escaner_memoria, ni escaner2_*, ni productos)',
+   sorted(tablas), ['disp_lectura', 'disp_parametros', 'disp_pasada', 'nov_pasada'])
 acciones_parametros = {n.attr for n in ast.walk(arbol) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Call)
                        and isinstance(n.value.func, ast.Attribute) and n.value.func.attr == 'table'
                        and n.value.args and isinstance(n.value.args[0], ast.Constant) and n.value.args[0].value == 'disp_parametros'}
 eq('(G) …y a disp_parametros solo le hace select', acciones_parametros, {'select'})
+acciones_nov = {n.attr for n in ast.walk(arbol) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Call)
+                and isinstance(n.value.func, ast.Attribute) and n.value.func.attr == 'table'
+                and n.value.args and isinstance(n.value.args[0], ast.Constant) and n.value.args[0].value == 'nov_pasada'}
+eq('(G) …y en nov_pasada solo apunta un fallo (upsert que no pisa)', acciones_nov, {'upsert'})
 with open(os.path.join(AQUI, 'escaner2_heo_disponibilidad.py'), encoding='utf-8') as fh:
     _prog = fh.read()
 eq('(G) la heredada no se escribe: solo se envuelve su _paginar en memoria y se deja como estaba (y el programa no abre ficheros)',
    ("hd._paginar = _paginar_que_guarda" in _prog, "hd._paginar = paginar" in _prog,
     any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == 'open' for n in ast.walk(arbol))),
    (True, True, False))
-eq('(G) y solo llama a la función disp_aplicar_pasada', sorted(funciones), ['disp_aplicar_pasada'])
+eq('(G) y solo llama a las funciones disp_aplicar_pasada y nov_seleccionar_pasada', sorted(funciones),
+   ['disp_aplicar_pasada', 'nov_seleccionar_pasada'])
 env = {k: v for k, v in os.environ.items() if k not in ('SUPABASE_SERVICE_KEY', 'HEO_USER', 'HEO_PASS')}
 env['PYTHONIOENCODING'] = 'utf-8'
 r = subprocess.run([sys.executable, os.path.join(AQUI, 'escaner2_heo_disponibilidad.py')], capture_output=True, text=True,
@@ -397,6 +406,10 @@ class _Consulta:
     def delete(self):
         return self._accion('delete')
 
+    def upsert(self, datos, **opciones):
+        self.op['opciones'] = opciones
+        return self._accion('upsert', datos)
+
     def select(self, *_a, **_k):
         return self._accion('select', _a)
 
@@ -406,6 +419,8 @@ class _Consulta:
 
     def execute(self):
         self.base.ops.append(self.op)
+        if (self.op['tabla'], self.op['accion']) in self.base.fallan:
+            raise RuntimeError('la base de mentira falla en %s %s' % (self.op['tabla'], self.op['accion']))
         datos = []
         if self.op['tabla'] == 'disp_pasada' and self.op['accion'] == 'insert':
             datos = [{'id': 'PASADA-1'}]
@@ -426,6 +441,8 @@ class _BaseDeMentira:
             'n_sin_dato_precio', 'n_duplicados', 'n_sin_gtin', 'n_agotados_sin_dato', 'n_recuperan_dato')},
                                estado='aplicada', motivo=None, caida_aceptada=False)
         self.parametros = [{'tolerancia_endpoint': 10}]
+        # Lo que falla a propósito: ('rpc:<función>', 'rpc') o (tabla, acción).
+        self.fallan = set()
 
     def table(self, nombre):
         return _Consulta(self, nombre)
@@ -436,12 +453,15 @@ class _BaseDeMentira:
         class _Llamada:
             def execute(self):
                 base.ops.append({'tabla': 'rpc:' + nombre, 'accion': 'rpc', 'datos': params})
-                return types.SimpleNamespace(data={'estado': 'aplicada'})
+                if ('rpc:' + nombre, 'rpc') in base.fallan:
+                    raise RuntimeError('APIError de mentira en ' + nombre)
+                return types.SimpleNamespace(data={'estado': 'aplicada' if nombre == 'disp_aplicar_pasada' else 'hecha'})
         return _Llamada()
 
 
 def correr_programa(disponibilidades_declaradas=None, sin_dispo=(), sin_precio=(), parametros=None, caida=False,
-                    modulo_descarga=None, repetir=(), repetir_distinto=(), sin_gtin_copias=1, precio_repetido_distinto=()):
+                    modulo_descarga=None, repetir=(), repetir_distinto=(), sin_gtin_copias=1, precio_repetido_distinto=(),
+                    fallan=(), estado_final=None):
     """El programa de verdad, importado con `supabase` y la descarga heredada cambiados por dobles. La
     descarga de mentira hace como la de verdad: pide cada endpoint a SU `_paginar` (buscándolo en su
     módulo en cada llamada), junta por número y dice en el log lo declarado y lo llegado. Los de
@@ -455,6 +475,9 @@ def correr_programa(disponibilidades_declaradas=None, sin_dispo=(), sin_precio=(
         base.parametros = parametros
     if caida:
         base.fila_final.update(caida_aceptada=True, motivo='caída aceptada tras 3 rechazos estables (±2.0 %): …')
+    if estado_final:
+        base.fila_final.update(estado=estado_final, motivo='rechazada de mentira')
+    base.fallan = set(fallan)
     falso_supabase = types.ModuleType('supabase')
     falso_supabase.create_client = lambda url, llave: base
     falsa_descarga = types.ModuleType('escaner2_heredado_descarga')
@@ -557,8 +580,11 @@ eq('(I) …y el _paginar de la heredada queda como estaba', correr_programa.pagi
 ops, codigo, _texto = correr_programa()
 eq('(I) con la descarga entera, termina bien', codigo, 0)
 eq('(I) …sube lo leído (13 filas)', sum(len(o['datos']) for o in _de(ops, 'disp_lectura', 'insert')), 13)
-eq('(I) …llama UNA vez a disp_aplicar_pasada con su pasada',
-   [o['datos'] for o in ops if o['tabla'].startswith('rpc:')], [{'p_pasada': 'PASADA-1'}])
+eq('(I) …llama UNA vez a disp_aplicar_pasada con su pasada, y después UNA a nov_seleccionar_pasada',
+   [(o['tabla'], o['datos']) for o in ops if o['tabla'].startswith('rpc:')],
+   [('rpc:disp_aplicar_pasada', {'p_pasada': 'PASADA-1'}), ('rpc:nov_seleccionar_pasada', {'p_pasada': 'PASADA-1'})])
+eq('(M) …con la selección bien, no apunta nada en nov_pasada y el log la dice',
+   (_de(ops, 'nov_pasada', 'upsert'), '>>> NOVEDADES DE FUNKO:' in _texto), ([], True))
 eq('(I) …y relee la pasada en la base', [o['accion'] for o in ops if o['tabla'] == 'disp_pasada'][-1], 'select')
 eq('(I) …y el _paginar de la heredada queda como estaba', correr_programa.paginar_despues, True)
 
@@ -619,8 +645,45 @@ eq('(I) …y la pasada queda fallida diciendo por qué',
 
 ops, codigo, _texto = correr_programa(caida=True)
 eq('(I) 🔴 una CAÍDA ACEPTADA: aplicada, pero el run en ROJO y con su aviso',
-   (codigo, [o['datos'] for o in ops if o['tabla'].startswith('rpc:')], 'CAIDA_ACEPTADA: la pasada PASADA-1' in _texto,
+   (codigo, [o['datos'] for o in ops if o['tabla'] == 'rpc:disp_aplicar_pasada'], 'CAIDA_ACEPTADA: la pasada PASADA-1' in _texto,
     'PASADA APLICADA' in _texto), (1, [{'p_pasada': 'PASADA-1'}], True, True))
+
+# ── (M) LAS NOVEDADES DE FUNKO, UN PASO APARTE (encargo H, tramo 1) ─────────────────────────
+ops, codigo, _texto = correr_programa(fallan={('rpc:nov_seleccionar_pasada', 'rpc')})
+eq('(M) 🔴 si la selección de novedades FALLA: el run acaba en ROJO…', codigo, 1)
+eq('(M) …pero la pasada se aplicó y se releyó ANTES (la selección va después)',
+   ([o['tabla'] for o in ops if o['tabla'].startswith('rpc:') or (o['tabla'] == 'disp_pasada' and o['accion'] == 'select')],
+    'PASADA APLICADA' in _texto),
+   (['rpc:disp_aplicar_pasada', 'disp_pasada', 'rpc:nov_seleccionar_pasada'], True))
+eq('(M) …y la pasada NO se toca después: ni se cierra fallida ni se borra lo leído',
+   ([o['datos'] for o in _de(ops, 'disp_pasada', 'update') if o['datos'].get('estado') == 'fallida'], _de(ops, 'disp_lectura', 'delete')),
+   ([], []))
+eq('(M) …el fallo se apunta en nov_pasada, sin pisar una fila que ya hubiera, y en el log',
+   ([(o['datos']['pasada_id'], o['datos']['proveedor'], o['datos']['estado'], 'APIError de mentira' in o['datos']['motivo'], o['opciones'])
+     for o in _de(ops, 'nov_pasada', 'upsert')],
+    'NOVEDADES_NO_SELECCIONADAS: la pasada PASADA-1 sigue aplicada' in _texto),
+   ([('PASADA-1', 'HEO', 'fallida', True, {'on_conflict': 'pasada_id', 'ignore_duplicates': True})], True))
+eq('(M) …y no se reintenta: UNA llamada', len([o for o in ops if o['tabla'] == 'rpc:nov_seleccionar_pasada']), 1)
+
+ops, codigo, _texto = correr_programa(fallan={('rpc:nov_seleccionar_pasada', 'rpc'), ('nov_pasada', 'upsert')})
+eq('(M) 🔴 si ni siquiera se puede apuntar el fallo: rojo, dicho en el log, y sin excepción sin atrapar',
+   (codigo, 'NOVEDADES_FALLO_SIN_APUNTAR' in _texto, 'Traceback' in _texto), (1, True, False))
+
+ops, codigo, _texto = correr_programa(caida=True, fallan={('rpc:nov_seleccionar_pasada', 'rpc')})
+eq('(M) 🔴 lo que viene DESPUÉS se ejecuta aunque la selección falle (el aviso de la caída aceptada)',
+   (codigo, 'NOVEDADES_NO_SELECCIONADAS' in _texto, 'CAIDA_ACEPTADA: la pasada PASADA-1' in _texto), (1, True, True))
+
+ops, codigo, _texto = correr_programa(caida=True)
+eq('(M) con una caída aceptada, las novedades se seleccionan igual (la pasada está aplicada)',
+   [o['tabla'] for o in ops if o['tabla'].startswith('rpc:')], ['rpc:disp_aplicar_pasada', 'rpc:nov_seleccionar_pasada'])
+
+ops, codigo, _texto = correr_programa(estado_final='rechazada')
+eq('(M) 🔴 con la pasada RECHAZADA no se seleccionan novedades (rojo, y sin llamar a la función)',
+   (codigo, [o['tabla'] for o in ops if o['tabla'].startswith('rpc:')], _de(ops, 'nov_pasada', 'upsert')),
+   (1, ['rpc:disp_aplicar_pasada'], []))
+
+ops, codigo, _texto = correr_programa(disponibilidades_declaradas=N_TOTAL + 11)
+eq('(M) …ni con la descarga cortada (no se llega a aplicar)', [o for o in ops if o['tabla'].startswith('rpc:')], [])
 
 # ── (K) CON LA DESCARGA HEREDADA DE VERDAD ───────────────────────────────────────────────
 # Solo se cambia `_get` (la red) por páginas en memoria; `_paginar` y `descargar_catalogo_heo` son los
