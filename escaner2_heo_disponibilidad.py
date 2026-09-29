@@ -17,7 +17,9 @@ QUE HACE, EN ORDEN:
      🔑 mientras baja, se queda con la LISTA CRUDA de precios y de disponibilidades: envuelve
      `_paginar` de la heredada EN TIEMPO DE EJECUCION (el fichero no se toca) y la deja como estaba
      al terminar. Con ellas se sabe que producto llego SIN dato (Fernando, 29-sep-2026: «sin dato
-     no es agotado»);
+     no es agotado») y cuantas copias REPETIDAS trae cada listado (HEO repite filas mientras se
+     pagina): la tolerancia de productos se mide sobre los distintos, y un repetido con copias
+     distintas deja la pasada 'fallida' sin subir nada (remates, 29-sep-2026);
   3. convierte cada producto CON codigo de barras en una fila con las reglas del escaner 2
      (`escaner2_disponibilidad.construir_disponibilidad`): TODAS las marcas, disponibles y NO, cada una
      marcada si vino sin dato de disponibilidad o de precio. Los sin GTIN (~1.155) los quita la
@@ -156,7 +158,10 @@ def main():
         eco = _Eco(sys.stdout)
         filas_heo, chase, crudos = _descargar_con_crudos(hd, eco)
         rec = dp.recuentos_del_log(''.join(eco.trozos))
-        # Los recuentos, a la pasada en cuanto se saben: tambien una fallida los necesita.
+        # Los repetidos de cada listado (y si en precios o disponibilidades difieren, no se sigue).
+        rec.update(dp.duplicados_de_los_crudos(crudos))
+        # Los recuentos, a la pasada en cuanto se saben: tambien una fallida los necesita. (n_sin_gtin
+        # es aqui el del log, con las copias repetidas; se corrige al construir.)
         sb.table('disp_pasada').update(rec).eq('id', pasada).execute()
         cortada = dp.descarga_cortada(rec, tolerancia)
         if cortada:
@@ -166,11 +171,22 @@ def main():
         # 2 · Las filas, con las reglas del escaner 2. Todas las marcas, disponibles y no, y marcadas
         #     si vinieron sin dato.
         M = e2.cargar_motor()
-        filas, cuentas = dp.construir_disponibilidad(filas_heo, chase, M, con_precio=con_precio,
-                                                     con_disponibilidad=con_disponibilidad)
+        filas, cuentas = dp.construir_disponibilidad(
+            filas_heo, chase, M, con_precio=con_precio, con_disponibilidad=con_disponibilidad,
+            numeros_crudos=[x.get('productNumber') for x in crudos['catalog/products']])
+        # 🔑 El cuadre con repetidos: cada copia repetida o tiene fila (y se quedo una) o no tiene GTIN
+        #    (y el log la conto como sin GTIN). Sin GTIN, contado UNA vez por producto.
+        if cuentas['n_duplicados_filas'] + cuentas['n_duplicados_sin_gtin'] != rec['n_duplicados']:
+            raise dp.LecturaInvalida('repetidos: %s en el listado y %s con fila + %s sin GTIN'
+                                     % (rec['n_duplicados'], cuentas['n_duplicados_filas'], cuentas['n_duplicados_sin_gtin']))
+        n_sin_gtin = rec['n_sin_gtin'] - cuentas['n_duplicados_sin_gtin']
+        if rec['n_crudo'] != n_sin_gtin + cuentas['n_leidas'] + rec['n_duplicados']:
+            raise dp.LecturaInvalida('no cuadra: crudo %s ≠ sin GTIN %s + leídas %s + repetidos %s'
+                                     % (rec['n_crudo'], n_sin_gtin, cuentas['n_leidas'], rec['n_duplicados']))
         print(f">>> HEO declara {rec['n_declarado']} productos, {rec['n_declarado_precios']} precios y "
               f"{rec['n_declarado_disponibilidades']} disponibilidades · llegaron {rec['n_crudo']}, {rec['n_precios']} y "
-              f"{rec['n_disponibilidades']} (tolerancia {tolerancia}) · sin GTIN {rec['n_sin_gtin']} · "
+              f"{rec['n_disponibilidades']} (tolerancia {tolerancia}) · repetidos {rec['n_duplicados']}, "
+              f"{rec['n_duplicados_precios']} y {rec['n_duplicados_disponibilidades']} · sin GTIN {n_sin_gtin} · "
               f"leídas {cuentas['n_leidas']} (disponibles {cuentas['n_disponibles']}, agotados {cuentas['n_agotados']}) · "
               f"sin dato de disponibilidad {cuentas['n_sin_dato_disponibilidad']}, de precio {cuentas['n_sin_dato_precio']} · "
               f"con regla del escáner 2 {cuentas['por_regla']}", flush=True)
@@ -179,7 +195,7 @@ def main():
         for i in range(0, len(filas), LOTE):
             sb.table('disp_lectura').insert([dict(f, pasada_id=pasada) for f in filas[i:i + LOTE]]).execute()
         (sb.table('disp_pasada').update({
-            'n_leidas': cuentas['n_leidas'], 'n_disponibles': cuentas['n_disponibles'],
+            'n_sin_gtin': n_sin_gtin, 'n_leidas': cuentas['n_leidas'], 'n_disponibles': cuentas['n_disponibles'],
             'n_agotados': cuentas['n_agotados'], 'n_sin_dato_disponibilidad': cuentas['n_sin_dato_disponibilidad'],
             'n_sin_dato_precio': cuentas['n_sin_dato_precio'],
         }).eq('id', pasada).execute())
@@ -194,10 +210,11 @@ def main():
     # 5 · Lo que vale es lo que hay en la base.
     fila = sb.table('disp_pasada').select('*').eq('id', pasada).execute().data[0]
     print(">>> EN LA BASE: " + ' · '.join(f'{k} {fila.get(k)}' for k in (
-        'estado', 'primera', 'caida_aceptada', 'n_crudo', 'dif_productos', 'dif_precios', 'dif_disponibilidades',
-        'n_leidas', 'n_disponibles', 'n_agotados', 'n_sin_dato_disponibilidad', 'n_sin_dato_precio',
-        'n_entran', 'n_vuelven', 'n_salen', 'n_a_disponible', 'n_a_agotado', 'n_cambio_precio', 'n_ausentes',
-        'n_en_catalogo', 'n_disponibles_estado')), flush=True)
+        'estado', 'primera', 'caida_aceptada', 'n_crudo', 'n_duplicados', 'dif_productos', 'dif_precios',
+        'dif_disponibilidades', 'n_sin_gtin', 'n_leidas', 'n_disponibles', 'n_agotados', 'n_sin_dato_disponibilidad',
+        'n_sin_dato_precio', 'n_entran', 'n_vuelven', 'n_salen', 'n_a_disponible', 'n_a_agotado',
+        'n_agotados_sin_dato', 'n_recuperan_dato', 'n_cambio_precio', 'n_ausentes', 'n_en_catalogo',
+        'n_disponibles_estado')), flush=True)
     if fila['estado'] != 'aplicada':
         abortar(f"pasada {pasada} {fila['estado']}: {fila.get('motivo')} · la función dijo {resultado}")
     print(f">>> PASADA APLICADA: {fila['n_en_catalogo']} productos de HEO en el catálogo, "
