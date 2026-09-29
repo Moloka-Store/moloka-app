@@ -297,18 +297,26 @@ except TypeError:
 CRUDOS_L = {'catalog/products': [{'productNumber': 'A'}, {'productNumber': 'B'}, {'productNumber': 'A'}, {'productNumber': 'A'}],
             'catalog/prices': [{'productNumber': 'A', 'p': 1}, {'productNumber': 'A', 'p': 1}],
             'catalog/availabilities': [{'productNumber': 'A', 'd': 'GREEN'}, {'productNumber': 'B'}]}
-eq('(L) los repetidos de cada listado crudo', dp.duplicados_de_los_crudos(CRUDOS_L),
-   {'n_duplicados': 2, 'n_duplicados_precios': 1, 'n_duplicados_disponibilidades': 0})
-for nombre, crudos_mal in (
-        ('un precio repetido con otro importe', dict(CRUDOS_L, **{'catalog/prices': [{'productNumber': 'A', 'p': 1}, {'productNumber': 'A', 'p': 2}]})),
-        ('una disponibilidad repetida con otro estado', dict(CRUDOS_L, **{'catalog/availabilities': [
-            {'productNumber': 'A', 'd': 'GREEN'}, {'productNumber': 'A', 'd': 'RED'}]})),
-        ('sin el listado de products', {k: v for k, v in CRUDOS_L.items() if k != 'catalog/products'})):
-    try:
-        dp.duplicados_de_los_crudos(crudos_mal)
-        eq('(L) %s: no se sigue' % nombre, 'pasó', 'LecturaInvalida')
-    except dp.LecturaInvalida:
-        eq('(L) %s: no se sigue' % nombre, True, True)
+eq('(L) los repetidos de cada listado crudo, sin problemas', dp.duplicados_de_los_crudos(CRUDOS_L),
+   ({'n_duplicados': 2, 'n_duplicados_precios': 1, 'n_duplicados_disponibilidades': 0}, []))
+eq('(L) un precio repetido con otro importe: es un problema, y los conteos se devuelven igual (la fallida los guarda)',
+   dp.duplicados_de_los_crudos(dict(CRUDOS_L, **{'catalog/prices': [{'productNumber': 'A', 'p': 1}, {'productNumber': 'A', 'p': 2}]})),
+   ({'n_duplicados': 2, 'n_duplicados_precios': 1, 'n_duplicados_disponibilidades': 0},
+    ['catalog/prices: número(s) de HEO repetidos con datos distintos: A']))
+eq('(L) una disponibilidad repetida con otro estado: igual',
+   dp.duplicados_de_los_crudos(dict(CRUDOS_L, **{'catalog/availabilities': [
+       {'productNumber': 'A', 'd': 'GREEN'}, {'productNumber': 'A', 'd': 'RED'}]}))[1],
+   ['catalog/availabilities: número(s) de HEO repetidos con datos distintos: A'])
+try:
+    dp.duplicados_de_los_crudos({k: v for k, v in CRUDOS_L.items() if k != 'catalog/products'})
+    eq('(L) sin el listado de products: no se sigue', 'pasó', 'LecturaInvalida')
+except dp.LecturaInvalida:
+    eq('(L) sin el listado de products: no se sigue', True, True)
+# El sin GTIN, contado una vez desde el listado crudo: A y B con fila; S sin fila 3 veces; T sin fila 1 vez.
+eq('(L) sin GTIN desde el listado crudo: 2 productos (S y T), 4 copias (lo que cuenta el log)',
+   dp.sin_gtin_de_los_crudos(['A', 'S', 'B', 'S', 'T', 'S', 'A'], [{'productNumber': 'A'}, {'productNumber': 'A'}],
+                             [{'producto_heo': 'B'}]), (2, 4))
+eq('(L) …y en el catálogo de prueba: el sin GTIN, 1 y 1', dp.sin_gtin_de_los_crudos(NUMEROS, FILAS, CHASE), (1, 1))
 
 # ── (G) EL PROGRAMA Y EL WORKFLOW, POR ESTRUCTURA ────────────────────────────────────────
 AQUI = os.path.dirname(os.path.abspath(__file__))
@@ -563,9 +571,9 @@ lectura = [f for o in _de(ops, 'disp_lectura', 'insert') for f in o['datos']]
 eq('(I) …las filas suben marcadas: sin disponibilidad FK67928 y la caja FK87245; sin precio HAS0002',
    (sorted(f['producto_prov'] for f in lectura if f['sin_dato_disponibilidad']),
     sorted(f['producto_prov'] for f in lectura if f['sin_dato_precio'])), (['FK67928', 'FK87245'], ['HAS0002']))
-cuentas_subidas = [o['datos'] for o in _de(ops, 'disp_pasada', 'update') if 'n_leidas' in o['datos']][0]
+cuentas_subidas = next((o['datos'] for o in _de(ops, 'disp_pasada', 'update') if 'n_leidas' in o['datos']), {})
 eq('(I) …y la pasada con sus recuentos de sin dato',
-   (cuentas_subidas['n_sin_dato_disponibilidad'], cuentas_subidas['n_sin_dato_precio'], cuentas_subidas['n_leidas']), (2, 1, 13))
+   (cuentas_subidas.get('n_sin_dato_disponibilidad'), cuentas_subidas.get('n_sin_dato_precio'), cuentas_subidas.get('n_leidas')), (2, 1, 13))
 eq('(I) …el log lo dice', 'sin dato de disponibilidad 2, de precio 1' in _texto, True)
 
 # 🔑 REPETIDOS en el programa entero: FK67928 y la caja FK87245 dos veces (idénticas) y el sin GTIN
@@ -577,20 +585,30 @@ primeros = _de(ops, 'disp_pasada', 'update')[0]['datos']
 eq('(I) …la pasada lleva sus repetidos y el crudo con ellos: 18 = 1 sin GTIN + 13 leídas + 4 repetidos',
    (primeros['n_duplicados'], primeros['n_duplicados_precios'], primeros['n_duplicados_disponibilidades'], primeros['n_crudo'],
     primeros['n_declarado']), (4, 0, 0, 18, 14))
-cuentas_subidas = [o['datos'] for o in _de(ops, 'disp_pasada', 'update') if 'n_leidas' in o['datos']][0]
-eq('(I) …y el sin GTIN, contado UNA vez (el log contó sus 3 copias)', (cuentas_subidas['n_sin_gtin'], cuentas_subidas['n_leidas']), (1, 13))
+eq('(I) …y el sin GTIN, contado UNA vez desde el PRIMER guardado (el log contó sus 3 copias)', primeros['n_sin_gtin'], 1)
+eq('(I) …y ningún guardado posterior lo cambia', [o['datos']['n_sin_gtin'] for o in _de(ops, 'disp_pasada', 'update')
+                                                   if 'n_sin_gtin' in o['datos']], [1])
 
-ops, codigo, _texto = correr_programa(repetir_distinto=('FK67928',))
+ops, codigo, _texto = correr_programa(repetir_distinto=('FK67928',), sin_gtin_copias=3)
 eq('(I) 🔴 un repetido con copias DISTINTAS: rojo, sin subir nada ni llamar a la función',
    (codigo, _de(ops, 'disp_lectura', 'insert'), [o for o in ops if o['tabla'].startswith('rpc:')]), (1, [], []))
 eq('(I) …y la pasada fallida lo dice', ('repetidos con datos distintos: FK67928' in _de(ops, 'disp_pasada', 'update')[-1]['datos'].get('motivo', ''),
                                         _de(ops, 'disp_pasada', 'update')[-1]['datos'].get('estado')), (True, 'fallida'))
+eq('(I) …y la fallida guarda sus recuentos con el sin GTIN ya contado una vez (el log contó 3 copias)',
+   {k: _de(ops, 'disp_pasada', 'update')[0]['datos'].get(k) for k in ('n_crudo', 'n_duplicados', 'n_sin_gtin')},
+   {'n_crudo': 17, 'n_duplicados': 3, 'n_sin_gtin': 1})
 
 ops, codigo, _texto = correr_programa(precio_repetido_distinto=('HAS0002',))
 eq('(I) 🔴 un precio repetido con otro importe: rojo, sin subir nada ni llamar a la función',
    (codigo, _de(ops, 'disp_lectura', 'insert'), [o for o in ops if o['tabla'].startswith('rpc:')],
     'catalog/prices: número(s) de HEO repetidos con datos distintos: HAS0002' in _de(ops, 'disp_pasada', 'update')[-1]['datos'].get('motivo', '')),
    (1, [], [], True))
+eq('(I) …y la fallida guarda ANTES sus recuentos crudos y sus repetidos (1 de precios)',
+   {k: _de(ops, 'disp_pasada', 'update')[0]['datos'].get(k) for k in
+    ('n_declarado', 'n_crudo', 'n_precios', 'n_disponibilidades', 'n_sin_gtin', 'n_duplicados', 'n_duplicados_precios',
+     'n_duplicados_disponibilidades')},
+   {'n_declarado': 14, 'n_crudo': 14, 'n_precios': 13, 'n_disponibilidades': 13, 'n_sin_gtin': 1, 'n_duplicados': 0,
+    'n_duplicados_precios': 1, 'n_duplicados_disponibilidades': 0})
 
 ops, codigo, _texto = correr_programa(parametros=[])
 eq('(I) 🔴 sin tolerancia en la base: rojo, sin bajar nada de HEO ni subir nada',
@@ -695,13 +713,13 @@ finally:
     hd_real._get = _get_de_verdad
 lectura = {f['producto_prov']: f for o in _de(ops, 'disp_lectura', 'insert') for f in o['datos']}
 recs = _de(ops, 'disp_pasada', 'update')[0]['datos']
-cuentas_subidas = [o['datos'] for o in _de(ops, 'disp_pasada', 'update') if 'n_leidas' in o['datos']][0]
+cuentas_subidas = next((o['datos'] for o in _de(ops, 'disp_pasada', 'update') if 'n_leidas' in o['datos']), {})
 eq('(K) con repetidos en la heredada de verdad: termina bien y sube R1, R2 y R3 una vez',
    (codigo, sorted(lectura), sum(len(o['datos']) for o in _de(ops, 'disp_lectura', 'insert'))), (0, ['R1', 'R2', 'R3'], 3))
 eq('(K) …crudo 6 con 2 repetidos, 1 de precios; declarados 4 (distintos)',
    (recs['n_crudo'], recs['n_duplicados'], recs['n_duplicados_precios'], recs['n_declarado']), (6, 2, 1, 4))
-eq('(K) …el log contó 2 sin GTIN (las copias de R4) y se sube 1: 6 = 1 + 3 + 2',
-   (recs['n_sin_gtin'], cuentas_subidas['n_sin_gtin'], cuentas_subidas['n_leidas']), (2, 1, 3))
+eq('(K) …el log contó 2 sin GTIN (las copias de R4) y se guarda 1 desde el principio: 6 = 1 + 3 + 2',
+   ('descartadas 2 sin GTIN' in _texto, recs['n_sin_gtin'], cuentas_subidas.get('n_leidas')), (True, 1, 3))
 
 # (K) y con R2 repetido con OTRO nombre en la heredada de verdad → fallida, sin subir nada.
 PAGINAS['catalog/products'] = PAGINAS['catalog/products'] + [_prod('R2', 'Figura dos (otra)', 'Hasbro', '5010993999991')]

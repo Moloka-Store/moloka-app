@@ -158,11 +158,24 @@ def main():
         eco = _Eco(sys.stdout)
         filas_heo, chase, crudos = _descargar_con_crudos(hd, eco)
         rec = dp.recuentos_del_log(''.join(eco.trozos))
-        # Los repetidos de cada listado (y si en precios o disponibilidades difieren, no se sigue).
-        rec.update(dp.duplicados_de_los_crudos(crudos))
-        # Los recuentos, a la pasada en cuanto se saben: tambien una fallida los necesita. (n_sin_gtin
-        # es aqui el del log, con las copias repetidas; se corrige al construir.)
+        # Los repetidos de cada listado y el sin GTIN contado UNA vez (el log cuenta cada copia), antes
+        # de guardar nada: la pasada lleva los buenos también si acaba fallida (revisión de Cowork).
+        problemas = []
+        try:
+            conteos, problemas = dp.duplicados_de_los_crudos(crudos)
+            rec.update(conteos)
+            if rec.get('n_sin_gtin') is not None:
+                unicos, copias = dp.sin_gtin_de_los_crudos(
+                    [x.get('productNumber') for x in crudos['catalog/products']], filas_heo, chase)
+                if copias != rec['n_sin_gtin']:
+                    problemas.append('sin GTIN: el log cuenta %s y el listado crudo %s' % (rec['n_sin_gtin'], copias))
+                rec['n_sin_gtin'] = unicos
+        except dp.LecturaInvalida as ex:
+            problemas = problemas + [str(ex)]
+        # Los recuentos, a la pasada en cuanto se saben: también una fallida los necesita.
         sb.table('disp_pasada').update(rec).eq('id', pasada).execute()
+        if problemas:
+            raise dp.LecturaInvalida(' · '.join(problemas))
         cortada = dp.descarga_cortada(rec, tolerancia)
         if cortada:
             raise DescargaCortada('descarga cortada, no se aplica: ' + ' · '.join(cortada))
@@ -179,7 +192,7 @@ def main():
         if cuentas['n_duplicados_filas'] + cuentas['n_duplicados_sin_gtin'] != rec['n_duplicados']:
             raise dp.LecturaInvalida('repetidos: %s en el listado y %s con fila + %s sin GTIN'
                                      % (rec['n_duplicados'], cuentas['n_duplicados_filas'], cuentas['n_duplicados_sin_gtin']))
-        n_sin_gtin = rec['n_sin_gtin'] - cuentas['n_duplicados_sin_gtin']
+        n_sin_gtin = rec['n_sin_gtin']
         if rec['n_crudo'] != n_sin_gtin + cuentas['n_leidas'] + rec['n_duplicados']:
             raise dp.LecturaInvalida('no cuadra: crudo %s ≠ sin GTIN %s + leídas %s + repetidos %s'
                                      % (rec['n_crudo'], n_sin_gtin, cuentas['n_leidas'], rec['n_duplicados']))
@@ -195,7 +208,7 @@ def main():
         for i in range(0, len(filas), LOTE):
             sb.table('disp_lectura').insert([dict(f, pasada_id=pasada) for f in filas[i:i + LOTE]]).execute()
         (sb.table('disp_pasada').update({
-            'n_sin_gtin': n_sin_gtin, 'n_leidas': cuentas['n_leidas'], 'n_disponibles': cuentas['n_disponibles'],
+            'n_leidas': cuentas['n_leidas'], 'n_disponibles': cuentas['n_disponibles'],
             'n_agotados': cuentas['n_agotados'], 'n_sin_dato_disponibilidad': cuentas['n_sin_dato_disponibilidad'],
             'n_sin_dato_precio': cuentas['n_sin_dato_precio'],
         }).eq('id', pasada).execute())

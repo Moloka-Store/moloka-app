@@ -279,12 +279,14 @@ REPETIDOS = (('catalog/products', 'n_duplicados', False),
 
 def duplicados_de_los_crudos(crudos):
     """Cuantas copias REPETIDAS de un mismo producto trae cada listado crudo (lo que devolvio
-    `_paginar`): {n_duplicados, n_duplicados_precios, n_duplicados_disponibilidades}.
+    `_paginar`). Devuelve (conteos, problemas): conteos = {n_duplicados, n_duplicados_precios,
+    n_duplicados_disponibilidades} y problemas = lo que impide seguir.
 
     🔴 En precios y disponibilidades, dos copias del mismo numero tienen que ser IDENTICAS (el registro
-    entero: todo lo que trae se usa, y la heredada se queda con la ultima sin avisar); si no, la
-    lectura no se sube (LecturaInvalida). Sin el listado, tampoco."""
-    out = {}
+    entero: todo lo que trae se usa, y la heredada se queda con la ultima sin avisar); si no, es un
+    problema y la lectura no se sube. Los conteos se devuelven igual, para que la pasada fallida los
+    guarde (revision de Cowork, 29-sep-2026). Sin un listado, LecturaInvalida."""
+    out, problemas = {}, []
     for endpoint, clave, comparar in REPETIDOS:
         if endpoint not in crudos:
             raise LecturaInvalida('no se vio la lista cruda de %s: sin ella no se cuentan los repetidos' % endpoint)
@@ -298,10 +300,32 @@ def duplicados_de_los_crudos(crudos):
             else:
                 vistos[pn] = x
         if distintos:
-            raise LecturaInvalida('%s: número(s) de HEO repetidos con datos distintos: %s'
-                                  % (endpoint, ', '.join(sorted(set(distintos))[:10])))
+            problemas.append('%s: número(s) de HEO repetidos con datos distintos: %s'
+                             % (endpoint, ', '.join(sorted(set(distintos))[:10])))
         out[clave] = n
-    return out
+    return out, problemas
+
+
+def sin_gtin_de_los_crudos(numeros_crudos, filas_heo, chase_heo):
+    """Los productos SIN GTIN, contados UNA vez, desde el listado crudo de products y lo que devolvio la
+    descarga: (unicos, copias). Un numero del listado sin ninguna fila es un sin GTIN (la heredada lo
+    tira); `copias` son todas sus apariciones, que es lo que cuenta el log («descartadas N sin
+    GTIN»), y `unicos`, los productos. Se sabe ANTES de construir nada, asi que la pasada guarda el
+    bueno desde el principio, tambien si acaba fallida (revision de Cowork, 29-sep-2026)."""
+    con_fila = {}
+    for f in filas_heo or []:
+        con_fila[_texto(f.get('productNumber'))] = con_fila.get(_texto(f.get('productNumber')), 0) + 1
+    for c in chase_heo or []:
+        con_fila[_texto(c.get('producto_heo'))] = con_fila.get(_texto(c.get('producto_heo')), 0) + 1
+    en_listado, sin_numero = {}, 0
+    for pn in numeros_crudos:
+        if _texto(pn) is None:
+            sin_numero += 1   # sin numero no se puede agrupar: cada uno cuenta como un producto
+        else:
+            en_listado[_texto(pn)] = en_listado.get(_texto(pn), 0) + 1
+    copias = sin_numero + sum(max(n - con_fila.get(pn, 0), 0) for pn, n in en_listado.items())
+    unicos = sin_numero + sum(1 for pn in en_listado if con_fila.get(pn, 0) == 0)
+    return unicos, copias
 
 
 # Las listas crudas que hacen falta para distinguir «sin dato», con el recuento del log que las cuadra.
