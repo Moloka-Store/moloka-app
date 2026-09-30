@@ -1,0 +1,237 @@
+name: Moloka - Centinela de DESPLIEGUE de la v2 (con reloj)
+
+# ============================================================================
+# 🔑 POR QUE ESTA AQUI Y NO EN `moloka-app-v2`  (encargo B, 30-sep-2026)
+#
+#   El repo de la v2 es PRIVADO: cada minuto de Actions cuenta contra el cupo. Su
+#   centinela corria en cada push a main y se quedaba esperando hasta 15 min al deploy
+#   de Vercel con `sleep 20`: se cobraba la espera. Este repo es PUBLICO: sus minutos no
+#   se cobran. Por eso el vigilante de la v2 vive aqui y mira desde fuera.
+#
+# 🔴 LA REGLA QUE SIGUE VIGILANDO:  UN MERGE A `main` NO ES UN DESPLIEGUE.
+#   El 11-ago-2026 produccion estuvo 5,5 horas sirviendo codigo viejo en los dos repos: el
+#   tope de deployments de Vercel (Hobby, 100/dia, cupo de CUENTA) rechazo los intentos, y
+#   un deploy rechazado no se encola, no se reintenta y no avisa.
+#
+# QUE CAMBIA RESPECTO AL DE LA v2, y por que:
+#   · Antes ESPERABA al deploy tras cada merge. Tendra RELOJ (hoy apagado, ver abajo): cada hora, de 06 a 22
+#     hora de Madrid, de lunes a sabado (y a mano cuando se quiera). No espera: mira, y si
+#     el commit es demasiado nuevo para juzgarlo, lo dice y lo vuelve a mirar en la
+#     siguiente vuelta.
+#   · La LOGICA es la misma de antes: el ultimo commit de `main` de la v2 contra los
+#     deployments de Production que Vercel registra en GitHub, y el ultimo ESTADO de ese
+#     deployment (no basta con que exista). Falla CERRADO, y distingue «no esta
+#     desplegado» de «no he podido comprobarlo» (NULL confesor).
+#
+# 🔴 ESTADO A 30-SEP-2026: **SIN RELOJ TODAVIA**, porque falta la credencial.
+#   El `GH_PAT` que ya existe en este repo NO llega a `moloka-app-v2`: medido en la
+#   autoprueba del PR, `gh api repos/Moloka-Store/moloka-app-v2/commits/main` con ese PAT
+#   responde `404 Not Found` (un repo privado al que el token no da acceso responde 404).
+#   No se ha creado ni copiado ninguna credencial (encargo B).
+#
+# 🔒 QUE HACE FALTA (lo crea Fernando, no una sesion de Code): un secreto de este repo
+#   llamado **`GH_PAT_V2_LECTURA`**, con un token *fine-grained* de la cuenta Moloka-Store:
+#     · Repository access: SOLO `Moloka-Store/moloka-app-v2`
+#     · Permissions (todas de LECTURA): **Deployments: Read** y **Contents: Read**
+#       (`Metadata: Read` viene incluido). Nada mas: ni Actions, ni Secrets, ni escritura.
+#     · Caducidad: la que Fernando quiera, pero con aviso: al caducar, el centinela sale ROJO
+#       con «NO SE HA PODIDO COMPROBAR: 401», nunca verde.
+#   NO se ensancha el `GH_PAT` que ya hay: ese dispara workflows y tiene mas poder del que
+#   un vigilante necesita. Y NO hace falta ninguna llave de Vercel: los deployments se leen
+#   de GitHub, igual que hacia el centinela de la v2.
+#
+# 🟢 PARA ENCENDER EL RELOJ, cuando el secreto exista: (1) lanzarlo a mano desde Actions
+#   con el HEAD de main -> tiene que salir VERDE; (2) lanzarlo con el SHA de una rama sin
+#   desplegar -> tiene que salir ROJO; (3) descomentar el bloque `schedule:` de abajo; (4) solo
+#   entonces se retira `centinela-despliegue.yml` de `moloka-app-v2`.
+#
+# 🔒 ESTE REPO ES PUBLICO Y SUS LOGS TAMBIEN. Aqui NO se imprime ni un mensaje de commit,
+#   ni un autor, ni una ruta de la v2: solo los 8 primeros caracteres del SHA, ids de
+#   deployment y horas. Si se anade un paso, que mantenga esa regla.
+#
+# ⚠️ LO QUE NO CUBRE, dicho para que nadie lo suponga:
+#   · No prueba que la app funcione ni que sirva lo de `main`: prueba que Vercel dio por
+#     bueno un deployment de ESE commit. Cubre «no salio»; no cubre «salio y esta roto».
+#   · GitHub NO cuenta un deployment «READY pero STAGED» (construido y sin promover a
+#     produccion): para distinguirlo hace falta la API de Vercel, que necesita un token de
+#     Vercel que este repo no tiene. Ver el parte del encargo B.
+#   · Un `cron` de Actions puede llegar tarde (medido: a veces horas) o saltarse una vuelta
+#     si GitHub esta cargado. Si Actions esta caido, esto no corre.
+#   · Un repo publico sin actividad durante 60 dias deja de disparar los `schedule`; aqui
+#     no pasa mientras haya commits, y se reactiva a mano desde la pestana Actions.
+# ============================================================================
+on:
+  # 🔴 RELOJ APAGADO (comentado) hasta que exista `GH_PAT_V2_LECTURA`: ver la cabecera. Con
+  #    el reloj encendido y sin secreto saldria una alarma roja falsa CADA HORA.
+  # schedule:
+  #   # 🕒 UTC. Madrid es UTC+2 hasta el 25-oct-2026 y UTC+1 despues: 04-21 UTC cubre
+  #   #    06-22 Madrid en los dos husos, y el paso «Ventana» de abajo recorta a la hora de
+  #   #    Madrid de verdad (06-22, lunes a sabado). Las vueltas de fuera salen en verde y
+  #   #    sin trabajo: no se cobran aqui.
+  #   - cron: '7 4-21 * * 1-6'
+  workflow_dispatch:
+    inputs:
+      sha_a_comprobar:
+        # 🔒 Existe para HACER SALTAR la guarda a proposito: con un SHA de la v2 que NO
+        #    este desplegado tiene que ponerse ROJA; con el HEAD de main, callada. Las dos
+        #    direcciones, que son dos. Un centinela que solo se ha visto en verde no se ha
+        #    probado, se ha ejecutado.
+        description: 'SHA (de moloka-app-v2) a comprobar. Vacio = el ultimo commit de main. Uno viejo o inexistente hace saltar la guarda.'
+        type: string
+        required: false
+        default: ''
+      gracia_minutos:
+        description: 'Minutos de margen desde que existe el commit antes de darlo por NO desplegado'
+        type: string
+        required: false
+        default: '20'
+  # 🧪 AUTOPRUEBA: se ejecuta tambien en un PR que toque ESTE fichero, para ver el
+  #    workflow verde ANTES de fusionarlo. Es gratis (repo publico) y solo lee.
+  pull_request:
+    paths:
+      - '.github/workflows/centinela-despliegue-v2.yml'
+
+concurrency:
+  group: centinela-despliegue-v2
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  vigilar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Ventana (06-22 hora de Madrid, lunes a sabado)
+        id: ventana
+        env:
+          EVENTO: ${{ github.event_name }}
+        run: |
+          set -uo pipefail
+          H=$(TZ=Europe/Madrid date +%H); D=$(TZ=Europe/Madrid date +%u)
+          echo "Ahora en Madrid: $(TZ=Europe/Madrid date '+%Y-%m-%d %H:%M') (dia de la semana $D)"
+          if [ "$EVENTO" = "schedule" ]; then
+            if [ "$((10#$H))" -lt 6 ] || [ "$((10#$H))" -gt 22 ] || [ "$D" = "7" ]; then
+              echo "::notice::Fuera de la ventana de vigilancia (06-22 Madrid, lunes a sabado). No se mira nada esta vuelta."
+              echo "dentro=no" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+          fi
+          echo "dentro=si" >> "$GITHUB_OUTPUT"
+
+      - name: ¿El ultimo commit de main de la v2 esta en Production?
+        if: steps.ventana.outputs.dentro == 'si'
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_V2_LECTURA }}
+          EVENTO: ${{ github.event_name }}
+          ENTRADA: ${{ inputs.sha_a_comprobar }}
+          GRACIA: ${{ inputs.gracia_minutos || '20' }}
+          REPO: Moloka-Store/moloka-app-v2
+        run: |
+          # 🔒 SIN `-e` a proposito: un centinela FALLA CERRADO. Con `set -e` un hipo de la
+          #    API mataria el paso con un error confuso; sin el, el veredicto sale de las
+          #    variables y el paso termina ROJO con el motivo correcto.
+          set -uo pipefail
+          FALLOS_API=0
+          if [ -z "${GH_TOKEN:-}" ]; then
+            if [ "${EVENTO:-}" = "pull_request" ]; then
+              # 🟠 SOLO LA AUTOPRUEBA DE UN PR, y solo mientras el secreto no exista. Sale verde
+              #    pero NO HA COMPROBADO NADA, y lo dice en alto: es un aviso, no un visto bueno.
+              #    Con `schedule` o `workflow_dispatch` la falta del secreto es ROJO.
+              echo "::warning::AUTOPRUEBA SIN EJECUTAR: falta el secreto GH_PAT_V2_LECTURA. Este verde NO ha comprobado nada."
+              echo "## 🟠 AUTOPRUEBA SIN EJECUTAR: falta el secreto \`GH_PAT_V2_LECTURA\`. Este verde no ha comprobado nada." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "::error::NO SE HA PODIDO COMPROBAR: falta el secreto GH_PAT_V2_LECTURA en este repo."
+            exit 1
+          fi
+
+          # 1) El commit que se vigila: el pedido a mano o el ultimo de main. SOLO sha y hora.
+          if [ -n "$ENTRADA" ]; then
+            REF="$ENTRADA"
+            echo "::notice::Ejecucion MANUAL con un SHA dado a mano. Si no esta desplegado, esta guarda DEBE ponerse roja: es su prueba."
+          else
+            REF="main"
+          fi
+          if ! LINEA=$(gh api "repos/$REPO/commits/$REF" --jq '[.sha, .commit.committer.date] | @tsv' 2>"$RUNNER_TEMP/gh_err.txt"); then
+            # Solo la PRIMERA linea del error de gh (p. ej. «gh: Not Found (HTTP 404)»): sin cuerpo, sin cabeceras.
+            MOTIVO=$(head -n1 "$RUNNER_TEMP/gh_err.txt" | cut -c1-160)
+            echo "::error::NO SE HA PODIDO COMPROBAR: no se pudo leer el commit '${REF:0:8}' de la v2 (¿el PAT no llega a ese repo, o el SHA no existe?). Respuesta: $MOTIVO"
+            {
+              echo "## 🟠 NO SE HA PODIDO COMPROBAR"
+              echo ""
+              echo "No se pudo leer el commit \`${REF:0:8}\` de la v2. Esto **no dice** que produccion este mal:"
+              echo "dice que no se ha podido mirar (permiso del \`GH_PAT_V2_LECTURA\`, o un SHA que no existe)."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          SHA=$(echo "$LINEA" | cut -f1); FECHA=$(echo "$LINEA" | cut -f2)
+          EDAD=$(( ( $(date +%s) - $(date -d "$FECHA" +%s) ) / 60 ))
+          echo "Vigilando ${SHA:0:8} (commit de hace $EDAD min; margen $GRACIA min)"
+
+          # 2) Sus deployments de Production, mirados POR SHA (no «los ultimos 20»).
+          if ! ID=$(gh api "repos/$REPO/deployments?environment=Production&sha=$SHA&per_page=10" --jq '.[0].id // empty' 2>/dev/null); then
+            FALLOS_API=$((FALLOS_API + 1)); ID=""
+            echo "  ⚠️ la API de GitHub no respondio (fallo $FALLOS_API)"
+          fi
+          EST="sin_deployment"
+          if [ -n "$ID" ]; then
+            # 🔒 Existir no basta: un deployment puede quedarse en `error`. Se mira su ULTIMO estado.
+            if ! EST=$(gh api "repos/$REPO/deployments/$ID/statuses?per_page=1" --jq '.[0].state // "sin_estado"' 2>/dev/null); then
+              FALLOS_API=$((FALLOS_API + 1)); EST=sin_estado
+              echo "  ⚠️ no se pudo leer el estado del deployment (fallo $FALLOS_API)"
+            fi
+            echo "  deployment $ID -> estado=$EST"
+          else
+            echo "  (ningun deployment de Production para ${SHA:0:8})"
+          fi
+          ULT=$(gh api "repos/$REPO/deployments?environment=Production&per_page=1" --jq 'if length > 0 then "\(.[0].sha[0:8]) del \(.[0].created_at)" else "(ninguno)" end' 2>/dev/null || echo "(no se pudo leer)")
+
+          resumen () {  # $1 titulo · $2 una linea de explicacion
+            {
+              echo "## $1"; echo ""
+              echo "| | |"; echo "|---|---|"
+              echo "| commit de la v2 | \`${SHA:0:8}\` (hace $EDAD min) |"
+              echo "| deployment de Production | ${ID:-ninguno} · estado \`$EST\` |"
+              echo "| ultimo deployment de Production | $ULT |"
+              echo ""; echo "$2"
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          case "$EST" in
+            success)
+              echo "::notice::Desplegado: ${SHA:0:8} esta en Production (deployment $ID)."
+              resumen "✅ Production sirve el ultimo commit de main de la v2" "⚠️ Esto prueba que el deploy **salio**, no que la app funcione ni que este promovido: comprobar lo segundo exige entrar con sesion."
+              exit 0 ;;
+            inactive)
+              echo "::notice::El deployment $ID de ${SHA:0:8} fue SUSTITUIDO por uno posterior: main ya se movio. Se mira en la proxima vuelta."
+              resumen "✅ Sustituido por un deployment posterior" "El commit vigilado ya no es el ultimo de \`main\`; lo que vale es el siguiente, que se mira en la proxima vuelta."
+              exit 0 ;;
+            error|failure)
+              echo "::error::El deployment $ID de ${SHA:0:8} termino en '$EST'. Produccion NO tiene este commit."
+              resumen "🔴 El build ha FALLADO" $'### 🔁 Antes de tocar nada: ¿es el de la fuente Manrope?\n`Module not found: @vercel/turbopack-next/internal/font/google/font` es un fallo **transitorio de infraestructura ajena**. **Si es ese: no se toca nada, se relanza** el deployment desde Vercel.\n\n🔴 Cambiar codigo para «arreglar» un fallo de infra ajena es como se meten los bugs de verdad. Se mira el log del build en Vercel ANTES de editar nada.'
+              exit 1 ;;
+          esac
+
+          # Aqui: sin deployment, o en cola / construyendo / sin estado.
+          if [ "$EDAD" -lt "$GRACIA" ]; then
+            echo "::notice::${SHA:0:8} tiene solo $EDAD min (margen $GRACIA) y su deployment esta en '$EST': demasiado pronto para juzgarlo. Se vuelve a mirar en la proxima vuelta."
+            resumen "⏳ Demasiado pronto para juzgarlo" "El commit es de hace $EDAD min y el margen es de $GRACIA. **Esto no es un visto bueno**: si en la proxima vuelta sigue igual, sale rojo."
+            exit 0
+          fi
+
+          # 🔴 Si la API fallo alguna vez, NO se puede afirmar que no este desplegado.
+          if [ "$FALLOS_API" -gt 0 ]; then
+            echo "::error::NO SE HA PODIDO COMPROBAR si ${SHA:0:8} esta desplegado: la API de GitHub fallo $FALLOS_API veces."
+            resumen "🟠 NO SE HA PODIDO COMPROBAR" $'🔴 **Esto NO dice que el commit no este desplegado. Dice que no se ha podido mirar.** Sale rojo porque un vigilante falla cerrado.\n\nComprobarlo a mano:\n```\ngh api "repos/Moloka-Store/moloka-app-v2/deployments?environment=Production&per_page=1" --jq \'.[0].sha\'\n```'
+            exit 1
+          fi
+
+          if [ "$EST" = "sin_deployment" ]; then
+            echo "::error::PRODUCCION NO TIENE ESTE COMMIT. Han pasado $EDAD min desde el commit ${SHA:0:8} y no hay deployment de Production.";
+            resumen "🔴 El merge NO ha llegado a produccion" $'**Un merge a `main` no es un despliegue.** El 11-ago-2026 esto costo 5,5 horas de produccion sirviendo codigo viejo.\n\n### Que mirar, por orden\n1. **Cupo de Vercel**: el tope es de la CUENTA (100/dia en Hobby), no del proyecto: un deploy de *cualquiera* de los dos repos lo consume. Un deploy rechazado por cupo no se encola, no se reintenta y no avisa.\n2. **El build no ha arrancado** (nada en el panel de Vercel para ese commit).\n3. Si hay que forzarlo: *Create Deployment* sobre `main` desde Vercel. ⚠️ NO con `vercel --prod`: sube la copia LOCAL y rompe la trazabilidad del commit.\n\n### 🔎 Y antes de desplegar a mano, MIRA SI YA ESTA\nEl 12-ago-2026 se estuvo a punto de gastar cupo redesplegando un commit que llevaba 45 minutos en produccion.'
+          else
+            echo "::error::El deployment $ID de ${SHA:0:8} lleva $EDAD min en '$EST': atascado. Produccion NO tiene este commit."
+            resumen "🔴 Deployment atascado" "El deployment existe pero lleva $EDAD min sin llegar a \`success\`. Mirar el panel de Vercel: build colgado o rechazado."
+          fi
+          exit 1
