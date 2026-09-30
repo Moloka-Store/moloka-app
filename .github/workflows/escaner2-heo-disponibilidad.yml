@@ -15,9 +15,13 @@
 # 🆕 NOVEDADES DE FUNKO (encargos H y I, 29-sep-2026): tras aplicar la pasada, dos pasos aparte en el mismo
 #    programa: la seleccion de las novedades (tramo 1) y su VALORACION (tramo 2: la cuenta de lo que el cartero
 #    de la v2 ya trajo de Amazon, y Keepa para la cola, con KEEPA_API_KEY, la misma llave que el director viejo;
-#    reserva de 20 tokens, cache de 72 h / 7 dias y el Escaneo PRO de 14 dias). Con el interruptor de la base
-#    apagado (nov_parametros.valorar), cero llamadas a Keepa. Si falla, la pasada sigue aplicada y el run sale
-#    en rojo al final. Ninguna llave para disparar nada de la v2: el cartero lo despierta su propio reloj.
+#    reserva de 20 tokens; cache y Escaneo PRO con UNA ventana de 15 dias, solo para las ventas: encargo V). Con
+#    el interruptor de la base apagado (nov_parametros.valorar), cero llamadas a Keepa. Si falla, la pasada sigue
+#    aplicada y el run sale en rojo al final. Ninguna llave para disparar nada de la v2: el cartero lo despierta
+#    su propio reloj.
+# 🆕 EL EXCEL DE NOVEDADES (encargo V, 30-sep-2026): si entre las novedades valoradas en la pasada hay al menos
+#    un COMPRAR, el Excel del escaner nuevo al bucket escaner2 y su fila en nov_excel (la biblioteca de la v2).
+#    Las cuentas que llegan entre pasadas las hace escaner2-heo-novedades-cuentas.yml, a y 27.
 #
 # Vive aqui porque aqui estan las credenciales de HEO. Repo publico: no gasta minutos.
 #
@@ -65,8 +69,9 @@ jobs:
           python-version: '3.11'
 
       - name: Instalar dependencias
-        # Las mismas versiones FIJADAS que el barrido (requests: API de HEO · supabase: base).
-        run: pip install supabase==2.31.0 requests==2.34.2
+        # Las mismas versiones FIJADAS que el barrido (requests: API de HEO · supabase: base · openpyxl: el Excel de
+        # novedades, encargo V; la misma version que el cruce del escaner 2).
+        run: pip install supabase==2.31.0 requests==2.34.2 openpyxl==3.1.5
 
       - name: Leer HEO y aplicar la pasada
         # El tope va en el PASO (25 min), no solo en el job (30): si se agota, el rescate corre.

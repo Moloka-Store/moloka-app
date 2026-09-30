@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""ESCANER 2 · NOVEDADES DE FUNKO, TRAMO 2: VALORARLAS (encargo I, 29-sep-2026).
+"""ESCANER 2 · NOVEDADES DE FUNKO, TRAMO 2: VALORARLAS (encargo I, 29-sep-2026; encargo V, 30-sep-2026).
 
 Lo llama el programa de la foto de HEO (escaner2_heo_disponibilidad.py) en cada pasada, DESPUES de aplicar la
 pasada y de seleccionar sus novedades (tramo 1), como PASO APARTE: si algo de aqui falla, la pasada y la
@@ -9,16 +9,21 @@ seleccion siguen aplicadas, el fallo queda apuntado (nov_pasada.valoracion_*) y 
 QUE HACE, EN ORDEN:
   0. EL INTERRUPTOR (nov_parametros.valorar). Apagado: ni una llamada a Keepa, ni una cuenta; solo se cierra la
      valoracion de la pasada como 'apagada' (con la foto de todas las novedades por estado, que cuenta la base).
-  1. LA CUENTA de las novedades «lista» (el cartero de novedades ya les dejo precio y tarifa de Amazon, a y 20):
+  1. LA CUENTA de las novedades «lista» (el cartero de novedades, cada hora, ya les dejo precio y tarifa de Amazon
+     de cada pais, o el pais marcado «no se vende aqui» o «Amazon no ha dado la tarifa»; encargo V):
      con el MISMO codigo con el que el Escaneo PRO decide COMPRAR / VALORAR (escaner2_motor: `_decidir_con_asin`,
      que llama a `calcular_pais` -> `calc_rentabilidad` y `decision_de` del viejo). Las tarifas previstas (API o
      Keepa) se restan TAL CUAL, sin dividir entre 1,21 (Identidad 9). pa = el precio por unidad de HEO.
+     🔴 (encargo V) Precio, tarifa y comision, SOLO de Amazon: la tarifa de Keepa ya no entra ni de respaldo; el pais
+     sin ella sale «Sin datos» (ni un numero inventado).
   2. KEEPA, recorriendo `nov_cola` en su orden (bajadas por % primero; luego nuevo y vuelve; al final las subidas
      que quedaron dentro). Por cada novedad y pais (ES, IT, FR, DE), el dato de ventas sale de, por este orden:
-       · la CACHE (nov_keepa): una respuesta de Keepa de menos de 72 h (nuevo o vuelve) o de 7 dias (cambio de
-         precio) -> «keepa_cache», 0 tokens;
-       · el ESCANEO PRO de menos de 14 dias (un cruce 'lista' con los cuatro paises, y ese EAN con ficha): su
+       · la CACHE (nov_keepa): una respuesta de Keepa de menos de 15 dias -> «keepa_cache», 0 tokens;
+       · el ESCANEO PRO de menos de 15 dias (un cruce 'lista' con los cuatro paises, y ese EAN con ficha): su
          dato de ventas -> «escaneo_pro», 0 tokens (si es mas reciente que la cache, manda el);
+         🔑 (encargo V) UNA SOLA VENTANA, de 15 dias, para las dos (Fernando: «es un dato medio estable»): la base
+         obliga a que keepa_horas_nuevo, keepa_dias_precio y escaneo_pro_dias sean la misma. De lo guardado solo se
+         usan las VENTAS (caidas, puestos): ni la tarifa ni la comision.
        · KEEPA: una peticion por EAN y pais (`/product`, `code`, `stats=90`, sin historial ni caja de compra).
          🔴 Se lee el saldo ANTES de pedir y cada peticion exige saldo - reserva (20) >= el tope de una peticion
          (3): la reserva no se cruza y nunca se entra en negativo. Lo que no cabe espera a la pasada siguiente
@@ -27,15 +32,30 @@ QUE HACE, EN ORDEN:
      viejo para elegir ficha si un EAN tiene varias): no esta en Amazon o sin dato -> SIN HISTORIAL; no se vende
      -> NO SE VENDE; varias fichas sin poder elegir -> Sin datos; se vende -> a esperar a Amazon (el cartero).
      🔴 (encargo T, 30-sep-2026) ANTES de las puertas, la ficha de un pais cuyo titulo no es de la marca (Funko: sin
-     «Funko» ni «Pop») se aparta: ese pais cuenta como sin dato y el motivo dice «ficha dudosa: <titulo>».
-  3. EL CIERRE: nov_cerrar_valoracion con el flujo del paso (lo cuadra la base) y los tokens gastados.
+     «Funko» ni «Pop» como PALABRA, encargo V) se aparta: ese pais cuenta como sin dato y el motivo dice «ficha
+     dudosa: <titulo>».
+     🔑 (encargo V) LAS NUESTRAS van por el mismo camino, con SU ficha: la cola trae sus ASIN (productos.asin, que la
+     base guarda en nov_novedad.asins_nuestros); de la cache y del Escaneo PRO solo valen esas fichas, y a Keepa se
+     le pregunta por ASIN, no por EAN. Nunca se adivina el ASIN de una nuestra por su EAN.
+  3. EL EXCEL (encargo V): con las novedades valoradas en ESTA ejecucion, si al menos una sale COMPRAR, el Excel del
+     escaner nuevo de HEO (escaner2_motor.excel_como_el_viejo, con la columna «Ventas») y detras una hoja
+     «Novedades» con lo que dijo Amazon de cada pais. Al bucket escaner2 (heo/novedades/<dia>/) y a nov_excel, que
+     es lo que lee la biblioteca de escaneos de la v2. Sin COMPRAR, no se deja nada.
+  4. EL CIERRE: nov_cerrar_valoracion con el flujo del paso (lo cuadra la base) y los tokens gastados.
 
-🔑 LA TARIFA DE KEEPA (fbaFees.pickAndPackFee) viene en el mismo objeto de producto que las caidas, sin pedir nada
-   mas (Product.java de Keepa: `fbaFees` es un campo del producto; solo `buybox`, `offers` o `rating` cuestan de mas,
-   y no se piden). Si no la trae, NULL (nunca 0). Queda de RESPALDO por si Amazon no da la del pais.
-🔒 LOS «NUESTROS» NUNCA GASTAN KEEPA NI AMAZON: no estan en nov_cola ni en nov_espera_amazon (la base).
+LAS CUENTAS SUELTAS (encargo V): `solo_cuentas` hace el paso 1 y el Excel, sin Keepa y sin HEO. La llama
+escaner2_heo_novedades_cuentas.py (workflow escaner2-heo-novedades-cuentas.yml, a y 27), para que una novedad a la que
+el cartero da precio y tarifa se valore en minutos y no en la pasada siguiente.
+
+🔑 LA TARIFA DE KEEPA (fbaFees.pickAndPackFee) viene en el mismo objeto de producto que las caidas y se guarda en la
+   pelicula (nov_keepa), pero desde el encargo V NO SE USA: ni en la cuenta ni de respaldo (nov_guardar_keepa rechaza
+   una fila que la traiga). Keepa solo decide si se vende.
+🔒 NI escaner_resultados NI el buzon `informes`: el Excel de novedades vive en el bucket escaner2 y en nov_excel.
 🔒 LA LLAVE DE KEEPA no se imprime nunca: los mensajes de error se limpian de ella.
 """
+import io
+import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -49,6 +69,12 @@ URL_KEEPA = 'https://api.keepa.com'
 # La serie del puesto de ventas (SALES) en `stats.current` / `stats.avg90`, como el director (IDX_RANK = 3).
 IDX_RANK = 3
 LOTE_IN = 100
+# El Excel de novedades (encargo V): el bucket del escaner 2 y su carpeta, que la biblioteca de la v2 firma por la fila
+# de nov_excel (lib/escaner2/build.ts: esRutaDelBucket exige «heo/»).
+BUCKET_EXCEL = 'escaner2'
+CARPETA_EXCEL = 'heo/novedades'
+# Lo que se lee de una novedad «lista» (la cuenta y la hoja «Novedades» del Excel).
+COLUMNAS_NOVEDAD = 'id,producto_prov,ean_norm,nombre,motivo,precio_antes,precio_ahora,cambio_pct,es_chase,es_caja,uds_caja,nuestro'
 
 
 def _ahora():
@@ -129,8 +155,11 @@ class Keepa:
             raise KeepaFalla('la respuesta de /token no trae tokensLeft')
         return self.saldo
 
-    def productos(self, pais, codigos):
-        cuerpo = self._get('/product', {'domain': DOMINIO_KEEPA[pais], 'code': ','.join(codigos), 'stats': 90,
+    def productos(self, pais, codigos, por='code'):
+        """Los productos de unos codigos (EAN/UPC, `por='code'`) o de unos ASIN (`por='asin'`: las nuestras)."""
+        if por not in ('code', 'asin'):
+            raise ValueError('por: code o asin')
+        cuerpo = self._get('/product', {'domain': DOMINIO_KEEPA[pais], por: ','.join(codigos), 'stats': 90,
                                         'history': 0})
         self.peticiones += 1
         self.tokens += int(cuerpo.get('tokensConsumed') or 0)
@@ -165,17 +194,22 @@ def ficha_de_keepa(p):
 # 🔴 LA FICHA TIENE QUE SER DE LA MARCA (encargo T, 30-sep-2026). FK93061 (NFL Saquon Barkley): en IT, Keepa cruzo su
 #    EAN con B08HH6GYRP, un casco de moto que lleva ese EAN en Amazon, y la novedad salio «NO SE VENDE» con las
 #    caidas del casco. Antes de usar la ficha de un pais, su titulo tiene que llevar alguna de estas palabras (sin
-#    distinguir mayusculas, como texto dentro del titulo); si no, ese pais cuenta como SIN DATO y el motivo lo dice.
+#    distinguir mayusculas); si no, ese pais cuenta como SIN DATO y el motivo lo dice.
+#    🔑 (encargo V) Como PALABRA ENTERA, no como texto dentro: «Popcorn» o «Lollipop» ya no pasan; «Pop!», «POP
+#    Vinyl» o «Funko's» si. Medido el 30-sep-2026 sobre las fichas de nov_keepa (78) y del ultimo Escaneo PRO (4.877):
+#    ninguna cambia de lado.
 #    El Escaneo PRO no tiene una comprobacion asi que reutilizar: su «Coincide» (moloka_escaner_nube._coincide_titulo)
 #    compara con el NOMBRE del proveedor y solo marca, y el cotejo del viejo (`cotejar`) solo elige entre dos o mas
 #    fichas; una sola ficha pasa sin mirar su titulo.
 PALABRAS_DE_LA_MARCA = ('funko', 'pop')
 
 
+_RE_MARCA = re.compile(r'\b(?:%s)\b' % '|'.join(PALABRAS_DE_LA_MARCA), re.I)
+
+
 def ficha_de_la_marca(titulo):
-    """True si el titulo de la ficha es de un producto de la marca (Funko: lleva «Funko» o «Pop»). Puro."""
-    t = str(titulo or '').lower()
-    return any(p in t for p in PALABRAS_DE_LA_MARCA)
+    """True si el titulo de la ficha es de un producto de la marca (Funko: lleva «Funko» o «Pop» como palabra). Puro."""
+    return bool(_RE_MARCA.search(str(titulo or '')))
 
 
 def apartar_fichas_dudosas(fichas_por_pais):
@@ -192,9 +226,10 @@ def apartar_fichas_dudosas(fichas_por_pais):
 
 def rec_de_ficha(f):
     """Una ficha (de Keepa o del Escaneo PRO) con la forma de una fila del CSV del Visualizador, que es la que leen
-    las puertas del Escaneo PRO. SIN precio: el precio lo pone Amazon (el cartero), no Keepa."""
+    las puertas del Escaneo PRO. SIN precio, SIN comision y SIN tarifa (encargo V): de lo guardado solo valen las
+    VENTAS; el precio, la tarifa y la comision los pone Amazon (el cartero)."""
     return {'asin': f.get('asin'), 'titulo': f.get('titulo') or '', 'rank': f.get('rank'), 'rank90': f.get('rank_90d'),
-            'buybox': None, 'es_fba': False, 'nuevo': None, 'compct': f.get('ref_pct'), 'fba': f.get('fee_fba')}
+            'buybox': None, 'es_fba': False, 'nuevo': None, 'compct': None, 'fba': None}
 
 
 def rec_de_fila(fila):
@@ -353,7 +388,7 @@ def escaneo_pro_reciente(sb, claves, desde):
             elegido[k] = (fecha, r)
     if not elegido:
         return {}
-    paises = _en_trozos(sb, 'escaner2_resultado_pais', 'resultado_ean_id,pais,asin,titulo,caidas_30d,rank,rank_90d,ref_pct,fee_fba',
+    paises = _en_trozos(sb, 'escaner2_resultado_pais', 'resultado_ean_id,pais,asin,titulo,caidas_30d,rank,rank_90d',
                         'resultado_ean_id', 'resultado_ean_id', [r['id'] for _f, r in elegido.values()])
     por_res = {}
     for p in paises:
@@ -363,12 +398,16 @@ def escaneo_pro_reciente(sb, claves, desde):
         fichas = {pais: [] for pais in PAISES}
         for p in por_res.get(r['id'], []):
             if p['pais'] in fichas:
+                # Del Escaneo PRO, SOLO las ventas (encargo V): su tarifa y su comision no se leen.
                 fichas[p['pais']].append({'asin': p['asin'], 'titulo': p.get('titulo') or '', 'rank': p.get('rank'),
-                                          'rank_90d': p.get('rank_90d'), 'caidas_30d': p.get('caidas_30d'),
-                                          'fee_fba': p.get('fee_fba') if (p.get('fee_fba') or 0) > 0 else None,
-                                          'ref_pct': p.get('ref_pct')})
+                                          'rank_90d': p.get('rank_90d'), 'caidas_30d': p.get('caidas_30d')})
         salida[k] = {'fecha': fecha, 'fichas': fichas}
     return salida
+
+
+def solo_suyas(fichas, asins):
+    """(encargo V) De unas fichas (de la cache o del Escaneo PRO), SOLO las de nuestra ficha (sus ASIN). Puro."""
+    return [f for f in (fichas or []) if f.get('asin') in asins]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -391,15 +430,16 @@ def _filas_de_ventas(r, origen, fecha):
         filas.append({'pais': pais, 'asin': c['asin'], 'titulo': c.get('titulo') or None,
                       'caidas_30d': _entero(c.get('caidas_30d')), 'rank': _entero(c.get('rank')),
                       'rank_90d': _entero(c.get('rank_90d')), 'vende_aqui': bool(c.get('vende_aqui')),
-                      'ventas_origen': origen[pais], 'ventas_de': fecha[pais].isoformat(),
-                      'ref_pct': c.get('ref_pct'), 'fee_fba': c.get('fee_fba') if (c.get('fee_fba') or 0) > 0 else None})
+                      'ventas_origen': origen[pais], 'ventas_de': fecha[pais].isoformat()})
+    # 🔴 Sin 'fee_fba' ni 'ref_pct' (encargo V): la base las rechaza (KEEPA_SIN_TARIFA).
     return filas
 
 
-def cuentas(sb, M, params, imprimir=print):
-    """LA CUENTA de las novedades «lista». Devuelve (hechas, fallos, listas, avisos)."""
-    listas = _todas(sb, 'nov_novedad', 'id,producto_prov,ean_norm,nombre,precio_ahora,es_chase', 'creada_en',
-                    [('eq', 'proveedor', PROVEEDOR), ('eq', 'estado', 'lista'), ('eq', 'nuestro', False)])
+def cuentas(sb, M, params, imprimir=print, valoradas=None):
+    """LA CUENTA de las novedades «lista» (tambien las nuestras, encargo V). Devuelve (hechas, fallos, listas, avisos)
+    y, si se le da `valoradas` (una lista), le anade cada una que ha contado, para el Excel."""
+    listas = _todas(sb, 'nov_novedad', COLUMNAS_NOVEDAD, 'creada_en',
+                    [('eq', 'proveedor', PROVEEDOR), ('eq', 'estado', 'lista')])
     if not listas:
         return 0, 0, 0, []
     productos = _todas(sb, 'productos', 'ean,asin,iva_pct', 'id', [('eq', 'activo', True)])
@@ -433,6 +473,10 @@ def cuentas(sb, M, params, imprimir=print):
             sb.rpc('nov_guardar_cuenta', {'p_novedad': n['id'], 'p_decision': decision, 'p_mejor_pais': mejor,
                                           'p_motivo': '%s: %s' % (r['motivo'], r['detalle']), 'p_paises': paises}).execute()
             hechas += 1
+            if valoradas is not None:
+                valoradas.append({'nov': n, 'foto': foto, 'r': r, 'decision': decision, 'mejor': mejor, 'M': M,
+                                  'amazon': {f['pais']: (f.get('amazon_estado'), f.get('error_amazon')) for f in suyas},
+                                  'motivo': '%s: %s' % (r['motivo'], r['detalle'])})
             imprimir('    cuenta %s (%s): %s%s' % (n['ean_norm'], asin, decision, (' en %s' % mejor) if mejor else ''), flush=True)
         except Exception as ex:
             fallos += 1
@@ -440,7 +484,7 @@ def cuentas(sb, M, params, imprimir=print):
     return hechas, fallos, len(listas), avisos
 
 
-def valorar_pasada(sb, pasada, keepa_llave=None, http=None, dormir=time.sleep, ahora=_ahora, imprimir=print):
+def valorar_pasada(sb, pasada, keepa_llave=None, http=None, dormir=time.sleep, ahora=_ahora, imprimir=print, run_id=None):
     """EL PASO DE VALORACION de una pasada. NUNCA LANZA. Devuelve (ok, resumen): ok=False -> el run en rojo al final."""
     avisos, datos = [], {'estado': 'hecha'}
     try:
@@ -449,7 +493,13 @@ def valorar_pasada(sb, pasada, keepa_llave=None, http=None, dormir=time.sleep, a
             # 🔴 APAGADO: ni Keepa, ni cuentas. Solo se cierra (la base cuenta y cuadra la foto de las novedades).
             datos = {'estado': 'apagada'}
         else:
-            _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, imprimir)
+            valoradas = []
+            _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, imprimir, valoradas)
+            # 🔑 (encargo V) EL EXCEL, con lo valorado en esta pasada, si hay un COMPRAR. Un fallo aqui es un aviso (rojo
+            #    al final), no tumba la valoracion.
+            aviso = excel_de_novedades(sb, valoradas, 'pasada', pasada, run_id, ahora, imprimir)
+            if aviso:
+                avisos.append(aviso)
     except Exception as ex:
         datos = {'estado': 'fallida'}
         avisos.append('la valoración no terminó: %s: %s' % (type(ex).__name__, str(ex)[:500]))
@@ -472,9 +522,10 @@ def valorar_pasada(sb, pasada, keepa_llave=None, http=None, dormir=time.sleep, a
     return ok, res
 
 
-def _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, imprimir):
+def _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, imprimir, valoradas=None):
     """El paso con el interruptor encendido: la cuenta de las «lista» y Keepa para la cola. Deja en `datos` el flujo y
-    los tokens, y en `avisos` lo que haya fallado sin tumbar el paso (Keepa caído, una cuenta, una novedad)."""
+    los tokens, en `avisos` lo que haya fallado sin tumbar el paso (Keepa caído, una cuenta, una novedad) y en
+    `valoradas` (encargo V) cada novedad valorada en esta pasada, para el Excel."""
     params = leer_params_escaner2(sb)
     M = e2.cargar_motor()
     reserva, tope = int(par['keepa_reserva']), int(par['keepa_tope_peticion'])
@@ -483,7 +534,7 @@ def _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, i
 
     # ── 1 · LA CUENTA de las «lista» (el cartero ya dejó precio y tarifa) ──
     try:
-        hechas, fallos_cuenta, n_listas, av = cuentas(sb, M, params, imprimir)
+        hechas, fallos_cuenta, n_listas, av = cuentas(sb, M, params, imprimir, valoradas)
     except Exception as ex:
         hechas, fallos_cuenta, n_listas, av = 0, 0, 0, ['las cuentas no se pudieron hacer: %s: %s' % (type(ex).__name__, str(ex)[:300])]
         datos['estado'] = 'fallida'
@@ -491,8 +542,8 @@ def _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, i
     datos.update(v_listas=n_listas, v_cuentas=hechas, v_cuenta_fallo=fallos_cuenta)
 
     # ── 2 · KEEPA, en el orden de la cola ──
-    cola = _todas(sb, 'nov_cola', 'puesto,id,producto_prov,ean_norm,nombre,motivo,precio_ahora,es_chase,estado',
-                  'puesto', [('eq', 'proveedor', PROVEEDOR)])
+    cola = _todas(sb, 'nov_cola', 'puesto,id,producto_prov,ean_norm,nombre,motivo,precio_ahora,precio_antes,cambio_pct,'
+                  'es_chase,es_caja,uds_caja,estado,nuestro,asins_nuestros', 'puesto', [('eq', 'proveedor', PROVEEDOR)])
     t['v_en_cola'] = len(cola)
     keepa = Keepa(keepa_llave, http=http, dormir=dormir)
     keepa_caido = None
@@ -508,17 +559,31 @@ def _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, i
         for n in cola:
             foto = fila_foto(n, estados.get(n['producto_prov']), M)
             desde = momento - ventana(n)
+            # 🔑 (encargo V) Una nuestra: solo SUS fichas (productos.asin), y a Keepa se le pregunta por ASIN.
+            suyos = list(n.get('asins_nuestros') or []) if n.get('nuestro') else None
             fichas, origen, fecha, faltan = {}, {}, {}, []
             for p in PAISES:
                 c = cache.get((n['ean_norm'], p))
-                if c and _fecha(c['consultada_en']) >= desde:
-                    fichas[p], origen[p], fecha[p] = list(c['fichas']), 'keepa_cache', _fecha(c['consultada_en'])
+                utiles = solo_suyas(c['fichas'], suyos) if (c and suyos is not None) else (list(c['fichas']) if c else None)
+                if c and _fecha(c['consultada_en']) >= desde and (suyos is None or utiles):
+                    fichas[p], origen[p], fecha[p] = utiles, 'keepa_cache', _fecha(c['consultada_en'])
                 else:
                     faltan.append(p)
             ep = pro.get((n['ean_norm'], bool(n['es_chase'])))
+            if ep and suyos is not None:
+                # Del Escaneo PRO de una nuestra, solo los paises donde esta SU ficha; los demas se preguntan por ASIN.
+                ep = {'fecha': ep['fecha'], 'fichas': {p: solo_suyas(v, suyos) for p, v in ep['fichas'].items()}}
+                if not any(ep['fichas'].values()):
+                    ep = None
             # El Escaneo PRO, si la cache no está entera o si es más reciente que ella.
             if ep and (faltan or ep['fecha'] > min(fecha.values())):
-                fichas, origen, fecha, faltan = dict(ep['fichas']), {p: 'escaneo_pro' for p in PAISES}, {p: ep['fecha'] for p in PAISES}, []
+                if suyos is None:
+                    fichas, origen, fecha, faltan = dict(ep['fichas']), {p: 'escaneo_pro' for p in PAISES}, {p: ep['fecha'] for p in PAISES}, []
+                else:
+                    for p in PAISES:
+                        if ep['fichas'].get(p):
+                            fichas[p], origen[p], fecha[p] = ep['fichas'][p], 'escaneo_pro', ep['fecha']
+                    faltan = [p for p in PAISES if p not in fichas]
             preguntadas = []
             espera = None
             for p in faltan:
@@ -534,7 +599,8 @@ def _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, i
                         espera = ('saldo', 'sin saldo de Keepa: quedaban %d tokens, reserva %d y una petición puede costar %d'
                                   % (keepa.saldo, reserva, tope))
                         break
-                    prods = keepa.productos(p, foto['codigos_keepa'])
+                    prods = (keepa.productos(p, suyos, por='asin') if suyos is not None
+                             else keepa.productos(p, foto['codigos_keepa']))
                 except KeepaFalla as ex:
                     keepa_caido = str(ex)
                     espera = ('fallo', 'Keepa falló: %s' % keepa_caido)
@@ -542,12 +608,13 @@ def _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, i
                 fichas_p = []
                 for prod in prods:
                     f = ficha_de_keepa(prod)
-                    if f['asin'] and all(f['asin'] != x['asin'] for x in fichas_p):
+                    if f['asin'] and all(f['asin'] != x['asin'] for x in fichas_p) and (suyos is None or f['asin'] in suyos):
                         fichas_p.append(f)
                 keepa.fichas += len(fichas_p)
                 keepa.con_tarifa += sum(1 for f in fichas_p if f['fee_fba'] is not None)
                 sb.table('nov_keepa').insert({'proveedor': PROVEEDOR, 'pasada_id': pasada, 'ean_norm': n['ean_norm'], 'pais': p,
-                                              'codigos': foto['codigos_keepa'], 'fichas': fichas_p}).execute()
+                                              'codigos': suyos if suyos is not None else foto['codigos_keepa'],
+                                              'fichas': fichas_p}).execute()
                 fichas[p], origen[p], fecha[p] = fichas_p, 'keepa', ahora()
                 preguntadas.append(p)
                 if keepa.saldo is not None and keepa.saldo < reserva:
@@ -562,8 +629,9 @@ def _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, i
                 t['v_espera_saldo' if espera[0] == 'saldo' else 'v_espera_fallo'] += 1
                 continue
             try:
-                # 🔴 Encargo T: la ficha que no es de la marca no se usa; ese pais, sin dato, y el motivo lo dice.
-                fichas, dudosas = apartar_fichas_dudosas(fichas)
+                # 🔴 Encargo T: la ficha que no es de la marca no se usa; ese pais, sin dato, y el motivo lo dice. Una
+                #    nuestra no pasa por aqui: su ficha es la nuestra (productos.asin), no una adivinada por EAN.
+                fichas, dudosas = apartar_fichas_dudosas(fichas) if suyos is None else (fichas, {})
                 destino, decision, r = _decidir_ventas(n, foto, fichas, params, M, eleccion)
                 filas = _filas_de_ventas(r, origen, fecha) if r.get('asin') and r['puerta'] != 'b' else []
                 fuentes = sorted(set(origen.values()))
@@ -577,6 +645,9 @@ def _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, i
                 t['v_espera_fallo'] += 1
                 continue
             t['v_keepa' if preguntadas else 'v_escaneo_pro' if 'escaneo_pro' in fuentes else 'v_keepa_cache'] += 1
+            if destino == 'valorada' and valoradas is not None:
+                valoradas.append({'nov': n, 'foto': foto, 'r': r, 'decision': decision, 'mejor': None, 'M': M,
+                                  'amazon': {}, 'motivo': motivo[:2000]})
             if destino == 'espera_amazon':
                 t['v_a_amazon'] += 1
             elif r['puerta'] == 'b':
@@ -595,3 +666,135 @@ def _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, i
     datos.setdefault('keepa_reserva_cruzada', False)
     if datos['keepa_reserva_cruzada']:
         avisos.append('🔴 la reserva de %d tokens se ha cruzado: quedan %s' % (reserva, keepa.saldo))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 5 · EL EXCEL DE NOVEDADES Y LAS CUENTAS SUELTAS (encargo V, 30-sep-2026)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Fernando: el Excel en la biblioteca de escaneos «tal cual hacia el escaner viejo», y «cuando salga al menos uno
+# para comprar». Es EXACTAMENTE el del escaner nuevo de HEO: las seis hojas del viejo escritas por su codigo
+# (escaner2_motor.excel_como_el_viejo, con la columna «Ventas» de la excepcion del 28-sep), con las novedades valoradas
+# en ESA ejecucion; y detras, como el escaner 2 pone las suyas, una hoja «Novedades» con lo que el Excel del viejo no
+# tiene donde poner: el motivo de la novedad, los dos precios y lo que dijo Amazon de cada pais («no se vende aqui»,
+# «Amazon no ha dado la tarifa»…).
+# 🔒 Donde vive: el bucket escaner2 (heo/novedades/<dia>/) y una fila en nov_excel, que es lo que lee la biblioteca de
+#    la v2 (lib/escaner2/query.ts: cargarNovedadesBiblioteca). NUNCA escaner_resultados ni el buzon `informes`: esa
+#    tabla la leen como «Excel del escaner viejo» el cruce del escaner 2, la espera de BEMS y el centinela.
+XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+QUE_DIJO_AMAZON = {'dato': 'dato de Amazon', 'sin_ofertas': 'sin ofertas en Amazon', 'no_se_vende': 'no se vende aquí',
+                   'no_dado': 'Amazon no ha dado la tarifa', 'pendiente': 'pendiente de Amazon'}
+_ORDEN_DECISION = {'COMPRAR': 0, 'VALORAR': 1, 'NO COMPRAR': 2, 'NO SE VENDE': 3, 'SIN HISTORIAL': 4, 'Sin datos': 5}
+
+
+def _madrid(d):
+    from zoneinfo import ZoneInfo
+    return d.astimezone(ZoneInfo('Europe/Madrid'))
+
+
+def ruta_del_excel(momento):
+    """heo/novedades/<AAAA-MM-DD>/Novedades_HEO_Funko_<AAAA-MM-DD_HHMM>.xlsx, en hora de Madrid. Puro."""
+    m = _madrid(momento)
+    return '%s/%s/Novedades_HEO_Funko_%s.xlsx' % (CARPETA_EXCEL, m.strftime('%Y-%m-%d'), m.strftime('%Y-%m-%d_%H%M'))
+
+
+def datos_del_excel(valoradas):
+    """(foto, resultados) con la forma que lee escaner2_motor.excel_como_el_viejo: una fila de foto por novedad (su EAN
+    de cruce, su nombre y su precio por unidad de HEO) y el resultado de sus puertas. Puro."""
+    foto, resultados = [], []
+    for v in valoradas:
+        n, f = v['nov'], v['foto']
+        foto.append({'id': n['id'], 'ean_original': f['ean_core'], 'ean_core': f['ean_core'],
+                     'nombre': f.get('nombre') or n.get('nombre') or '', 'marca': 'Funko',
+                     'precio_unidad': f['precio_unidad'], 'aviso_caja': None})
+        resultados.append(dict(v['r'], foto_id=n['id']))
+    return foto, resultados
+
+
+def texto_amazon(v, pais):
+    """Lo que dijo Amazon de un pais, para la hoja «Novedades». Puro."""
+    if not v['amazon']:
+        return 'no se pidió (sin Amazon: %s)' % v['decision']
+    if pais not in v['amazon']:
+        return '— (sin ficha en ese país)'
+    estado, error = v['amazon'][pais]
+    texto = QUE_DIJO_AMAZON.get(estado, estado or '—')
+    return texto if estado == 'dato' or not error else '%s (%s)' % (texto, error)
+
+
+def hoja_novedades(wb, valoradas):
+    """La hoja «Novedades», detras de las del viejo: una fila por novedad, las COMPRAR primero."""
+    from openpyxl.styles import Font
+    ws = wb.create_sheet('Novedades')
+    ws.append(['EAN', 'Nombre', 'Novedad', 'Precio antes (ud)', 'Precio ahora (ud)', 'Cambio %', 'Nuestra', 'Decisión',
+               'Mejor país'] + ['Amazon ' + p for p in PAISES] + ['Por qué'])
+    for c in ws[1]:
+        c.font = Font(bold=True)
+    for v in sorted(valoradas, key=lambda x: (_ORDEN_DECISION.get(x['decision'], 9), str(x['nov'].get('nombre') or ''))):
+        n = v['nov']
+        ws.append([v['foto']['ean_core'], n.get('nombre') or v['foto'].get('nombre'), n.get('motivo'), n.get('precio_antes'),
+                   n.get('precio_ahora'), n.get('cambio_pct'), 'sí' if n.get('nuestro') else '', v['decision'], v['mejor']]
+                  + [texto_amazon(v, p) for p in PAISES] + [v['motivo']])
+    for letra, ancho in {'A': 16, 'B': 48, 'C': 12, 'H': 14, 'J': 28, 'K': 28, 'L': 28, 'M': 28, 'N': 70}.items():
+        ws.column_dimensions[letra].width = ancho
+    ws.freeze_panes = 'A2'
+    return ws
+
+
+def excel_de_novedades(sb, valoradas, origen, pasada, run_id=None, ahora=_ahora, imprimir=print):
+    """EL EXCEL de las novedades valoradas en esta ejecucion, si al menos una sale COMPRAR: al bucket escaner2 y a
+    nov_excel. Devuelve None (hecho, o no tocaba) o el aviso de por que no se pudo. NUNCA LANZA."""
+    comprar = [v for v in valoradas if v['decision'] == 'COMPRAR']
+    if not comprar:
+        imprimir('    EXCEL DE NOVEDADES: ninguna COMPRAR entre las %d valoradas en esta ejecución: no se deja Excel'
+                 % len(valoradas), flush=True)
+        return None
+    try:
+        foto, resultados = datos_del_excel(valoradas)
+        wb = e2.excel_como_el_viejo(foto, resultados, [], comprar[0]['M'])
+        hoja_novedades(wb, valoradas)
+        buf = io.BytesIO()
+        wb.save(buf)
+        ruta = ruta_del_excel(ahora())
+        run_id = run_id or os.environ.get('GITHUB_RUN_ID')
+        sb.storage.from_(BUCKET_EXCEL).upload(ruta, buf.getvalue(), {'content-type': XLSX, 'upsert': 'true'})
+        sb.table('nov_excel').insert({
+            'proveedor': PROVEEDOR, 'origen': origen, 'pasada_id': pasada if origen == 'pasada' else None,
+            'run_id': int(run_id) if run_id else None, 'ruta_excel': ruta, 'n_novedades': len(valoradas),
+            'n_comprar': len(comprar), 'n_valorar': sum(1 for v in valoradas if v['decision'] == 'VALORAR'),
+            'novedades': [v['nov']['id'] for v in valoradas]}).execute()
+        imprimir('>>> EXCEL DE NOVEDADES: %s (%d valoradas, %d COMPRAR) · en la biblioteca de escaneos'
+                 % (ruta, len(valoradas), len(comprar)), flush=True)
+        return None
+    except Exception as ex:
+        return 'el Excel de novedades no se pudo dejar: %s: %s' % (type(ex).__name__, str(ex)[:300])
+
+
+def solo_cuentas(sb, run_id=None, ahora=_ahora, imprimir=print):
+    """LAS CUENTAS SUELTAS (workflow escaner2-heo-novedades-cuentas.yml, a y 27): la cuenta de las «lista» y su Excel.
+    Sin Keepa, sin HEO y sin tocar nov_pasada (la pasada en punto siguiente cuadra la foto de todas las novedades).
+    NUNCA LANZA. Devuelve (ok, resumen): ok=False -> el run en rojo."""
+    avisos, res = [], {'estado': 'hecha'}
+    try:
+        par = leer_parametros(sb)
+        if par.get('valorar') is not True:
+            imprimir('>>> CUENTAS DE NOVEDADES: el interruptor está APAGADO (nov_parametros.valorar): no se cuenta nada',
+                     flush=True)
+            return True, {'estado': 'apagada'}
+        params = leer_params_escaner2(sb)
+        M = e2.cargar_motor()
+        valoradas = []
+        hechas, fallos, n_listas, av = cuentas(sb, M, params, imprimir, valoradas)
+        avisos += av
+        aviso = excel_de_novedades(sb, valoradas, 'cuentas', None, run_id, ahora, imprimir)
+        if aviso:
+            avisos.append(aviso)
+        res.update(listas=n_listas, cuentas=hechas, fallos=fallos,
+                   comprar=sum(1 for v in valoradas if v['decision'] == 'COMPRAR'),
+                   valorar=sum(1 for v in valoradas if v['decision'] == 'VALORAR'))
+    except Exception as ex:
+        res = {'estado': 'fallida'}
+        avisos.append('las cuentas no terminaron: %s: %s' % (type(ex).__name__, str(ex)[:500]))
+    imprimir('>>> CUENTAS DE NOVEDADES: %s' % (res,), flush=True)
+    for a in avisos:
+        imprimir('    AVISO: %s' % a, flush=True)
+    return res['estado'] == 'hecha' and not avisos, dict(res, avisos=avisos)

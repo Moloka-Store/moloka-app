@@ -1,0 +1,56 @@
+# ============================================================
+# Moloka - Escaner 2 · NOVEDADES DE HEO: LAS CUENTAS DE Y 27 (encargo V, 30-sep-2026)
+#
+# Solo la cuenta de las novedades de Funko que ya estan «lista» (el cartero de novedades de la v2, a su
+# hora, les dio precio y tarifa de Amazon) y su Excel en la biblioteca de escaneos si alguna sale COMPRAR
+# (escaner2_heo_novedades_cuentas.py -> escaner2_novedades.solo_cuentas). SIN Keepa, SIN bajar HEO y sin
+# tocar nov_pasada: la pasada en punto (escaner2-heo-disponibilidad.yml) sigue haciendo las cuentas al
+# empezar. Con el interruptor de la base apagado (nov_parametros.valorar), no hace nada y sale verde.
+#
+# Vive aqui porque aqui esta el codigo de la cuenta (escaner2_motor). Repo publico: no gasta minutos.
+#
+# >>> SIN RELOJ, A PROPOSITO <<<  Se lanza a mano desde Actions. El reloj es cron-job.org, a y 27, y lo
+#     crean Fernando y Cowork (no este PR). La tarea: POST
+#     https://api.github.com/repos/Moloka-Store/moloka-app/actions/workflows/escaner2-heo-novedades-cuentas.yml/dispatches
+#     con cuerpo {"ref":"main"} y las mismas cabeceras que ya usan los directores.
+# ============================================================
+name: Moloka - Escaner 2 · Novedades HEO · cuentas
+
+on:
+  workflow_dispatch:
+
+# 🔒 EL MISMO GRUPO QUE LA FOTO DE HEO, EL BARRIDO Y EL CRUCE, sin cancelar lo que esta en curso: una
+#    cuenta suelta no corre a la vez que la pasada en punto (las dos cuentan las «lista»). Si la pasada
+#    tarda, esta queda PENDIENTE y corre al acabar; y en el grupo solo hay UN pendiente: si llega otro,
+#    el pendiente anterior se cancela sin llegar a correr (no el que esta en curso).
+concurrency:
+  group: escaner2-heo
+  cancel-in-progress: false
+
+jobs:
+  cuentas:
+    runs-on: ubuntu-24.04
+    # Solo leer el repo: lo demas lo hace con la llave de servicio de Supabase.
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        # Las mismas versiones FIJADAS que la foto de HEO (supabase: base), mas openpyxl para el Excel.
+        run: pip install supabase==2.31.0 openpyxl==3.1.5
+
+      - name: Contar las novedades listas y dejar su Excel
+        timeout-minutes: 8
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_heo_novedades_cuentas.py
