@@ -359,6 +359,14 @@ jobs:
       - name: 25 terdecies) test_escaner2_disponibilidad.py
         run: python -u test_escaner2_disponibilidad.py
 
+      # (Encargo I, tramo 2, 29-sep-2026) La valoracion de las novedades de Funko (escaner2_novedades.py): el
+      # interruptor apagado no llama a Keepa; la reserva de 20 tokens no se cruza (saldo 0 y saldo justo); el
+      # orden de la cola; la cache de 72 h / 7 dias y el Escaneo PRO de 14 dias; los nuestros sin llamadas;
+      # Keepa caido; las puertas del Escaneo PRO con el dato de Keepa; la cuenta al centimo; y el modulo por
+      # estructura. Los casos REALES del Escaneo PRO (con el coste de HEO) no viven aqui: los coteja el CI de la v2.
+      - name: 25 quaterdecies) test_escaner2_novedades.py
+        run: python -u test_escaner2_novedades.py
+
       - name: 26) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
@@ -409,6 +417,7 @@ jobs:
             test_escaner2_codigos14.py
             test_escaner2_heredado.py
             test_escaner2_disponibilidad.py
+            test_escaner2_novedades.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).

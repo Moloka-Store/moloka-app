@@ -46,6 +46,10 @@ QUE PRUEBA:
       nov_seleccionar_pasada; si falla, el run acaba en rojo pero la pasada no se toca, el fallo se apunta
       en nov_pasada sin pisar nada, no se reintenta y lo que viene despues (la caida aceptada) se ejecuta;
       con la pasada rechazada o la descarga cortada, no se llama.
+  (N) VALORAR LAS NOVEDADES Y EL VIGIA DE LA MARCA (encargo I, tramo 2, 29-sep-2026): detras de la seleccion, UNA
+      llamada al paso de valoracion (escaner2_novedades; con el interruptor apagado solo cierra, sin Keepa); si
+      falla, rojo AL FINAL con la pasada y la seleccion intactas; y si la seleccion cuenta marcas parecidas a
+      'Funko', rojo al final con MARCA_PARECIDA, despues de haberlo aplicado todo.
   (K) CON LA DESCARGA HEREDADA DE VERDAD (solo su `_get`, la red, cambiado por paginas en memoria, y
       un `requests` de mentira para importarla): el envoltorio de `_paginar` coge las listas que usa
       `descargar_catalogo_heo`, las filas suben marcadas y `_paginar` queda como estaba.
@@ -428,6 +432,8 @@ class _Consulta:
             datos = [self.base.fila_final]
         elif self.op['tabla'] == 'disp_parametros' and self.op['accion'] == 'select':
             datos = self.base.parametros
+        elif self.op['tabla'] == 'nov_parametros' and self.op['accion'] == 'select':
+            datos = self.base.nov_parametros
         return types.SimpleNamespace(data=datos)
 
 
@@ -441,6 +447,9 @@ class _BaseDeMentira:
             'n_sin_dato_precio', 'n_duplicados', 'n_sin_gtin', 'n_agotados_sin_dato', 'n_recuperan_dato')},
                                estado='aplicada', motivo=None, caida_aceptada=False)
         self.parametros = [{'tolerancia_endpoint': 10}]
+        # (N) El interruptor de la valoración, APAGADO (como nace), y el vigía de la marca a 0.
+        self.nov_parametros = [{'proveedor': 'HEO', 'valorar': False}]
+        self.marca_parecida = 0
         # Lo que falla a propósito: ('rpc:<función>', 'rpc') o (tabla, acción).
         self.fallan = set()
 
@@ -455,13 +464,18 @@ class _BaseDeMentira:
                 base.ops.append({'tabla': 'rpc:' + nombre, 'accion': 'rpc', 'datos': params})
                 if ('rpc:' + nombre, 'rpc') in base.fallan:
                     raise RuntimeError('APIError de mentira en ' + nombre)
+                if nombre == 'nov_seleccionar_pasada':
+                    return types.SimpleNamespace(data={'estado': 'hecha', 'marca_parecida': base.marca_parecida})
+                if nombre == 'nov_cerrar_valoracion':
+                    return types.SimpleNamespace(data={'estado': 'apagada' if params['p_datos'].get('estado') == 'apagada'
+                                                       else params['p_datos'].get('estado')})
                 return types.SimpleNamespace(data={'estado': 'aplicada' if nombre == 'disp_aplicar_pasada' else 'hecha'})
         return _Llamada()
 
 
 def correr_programa(disponibilidades_declaradas=None, sin_dispo=(), sin_precio=(), parametros=None, caida=False,
                     modulo_descarga=None, repetir=(), repetir_distinto=(), sin_gtin_copias=1, precio_repetido_distinto=(),
-                    fallan=(), estado_final=None):
+                    fallan=(), estado_final=None, marca_parecida=0):
     """El programa de verdad, importado con `supabase` y la descarga heredada cambiados por dobles. La
     descarga de mentira hace como la de verdad: pide cada endpoint a SU `_paginar` (buscándolo en su
     módulo en cada llamada), junta por número y dice en el log lo declarado y lo llegado. Los de
@@ -478,6 +492,7 @@ def correr_programa(disponibilidades_declaradas=None, sin_dispo=(), sin_precio=(
     if estado_final:
         base.fila_final.update(estado=estado_final, motivo='rechazada de mentira')
     base.fallan = set(fallan)
+    base.marca_parecida = marca_parecida
     falso_supabase = types.ModuleType('supabase')
     falso_supabase.create_client = lambda url, llave: base
     falsa_descarga = types.ModuleType('escaner2_heredado_descarga')
@@ -580,9 +595,11 @@ eq('(I) …y el _paginar de la heredada queda como estaba', correr_programa.pagi
 ops, codigo, _texto = correr_programa()
 eq('(I) con la descarga entera, termina bien', codigo, 0)
 eq('(I) …sube lo leído (13 filas)', sum(len(o['datos']) for o in _de(ops, 'disp_lectura', 'insert')), 13)
-eq('(I) …llama UNA vez a disp_aplicar_pasada con su pasada, y después UNA a nov_seleccionar_pasada',
+eq('(I) …llama UNA vez a disp_aplicar_pasada con su pasada, después UNA a nov_seleccionar_pasada y, con la valoración '
+   'APAGADA, solo la cierra (N)',
    [(o['tabla'], o['datos']) for o in ops if o['tabla'].startswith('rpc:')],
-   [('rpc:disp_aplicar_pasada', {'p_pasada': 'PASADA-1'}), ('rpc:nov_seleccionar_pasada', {'p_pasada': 'PASADA-1'})])
+   [('rpc:disp_aplicar_pasada', {'p_pasada': 'PASADA-1'}), ('rpc:nov_seleccionar_pasada', {'p_pasada': 'PASADA-1'}),
+    ('rpc:nov_cerrar_valoracion', {'p_pasada': 'PASADA-1', 'p_datos': {'estado': 'apagada'}})])
 eq('(M) …con la selección bien, no apunta nada en nov_pasada y el log la dice',
    (_de(ops, 'nov_pasada', 'upsert'), '>>> NOVEDADES DE FUNKO:' in _texto), ([], True))
 eq('(I) …y relee la pasada en la base', [o['accion'] for o in ops if o['tabla'] == 'disp_pasada'][-1], 'select')
@@ -654,7 +671,7 @@ eq('(M) 🔴 si la selección de novedades FALLA: el run acaba en ROJO…', codi
 eq('(M) …pero la pasada se aplicó y se releyó ANTES (la selección va después)',
    ([o['tabla'] for o in ops if o['tabla'].startswith('rpc:') or (o['tabla'] == 'disp_pasada' and o['accion'] == 'select')],
     'PASADA APLICADA' in _texto),
-   (['rpc:disp_aplicar_pasada', 'disp_pasada', 'rpc:nov_seleccionar_pasada'], True))
+   (['rpc:disp_aplicar_pasada', 'disp_pasada', 'rpc:nov_seleccionar_pasada', 'rpc:nov_cerrar_valoracion'], True))
 eq('(M) …y la pasada NO se toca después: ni se cierra fallida ni se borra lo leído',
    ([o['datos'] for o in _de(ops, 'disp_pasada', 'update') if o['datos'].get('estado') == 'fallida'], _de(ops, 'disp_lectura', 'delete')),
    ([], []))
@@ -674,8 +691,9 @@ eq('(M) 🔴 lo que viene DESPUÉS se ejecuta aunque la selección falle (el avi
    (codigo, 'NOVEDADES_NO_SELECCIONADAS' in _texto, 'CAIDA_ACEPTADA: la pasada PASADA-1' in _texto), (1, True, True))
 
 ops, codigo, _texto = correr_programa(caida=True)
-eq('(M) con una caída aceptada, las novedades se seleccionan igual (la pasada está aplicada)',
-   [o['tabla'] for o in ops if o['tabla'].startswith('rpc:')], ['rpc:disp_aplicar_pasada', 'rpc:nov_seleccionar_pasada'])
+eq('(M) con una caída aceptada, las novedades se seleccionan y se valoran igual (la pasada está aplicada)',
+   [o['tabla'] for o in ops if o['tabla'].startswith('rpc:')],
+   ['rpc:disp_aplicar_pasada', 'rpc:nov_seleccionar_pasada', 'rpc:nov_cerrar_valoracion'])
 
 ops, codigo, _texto = correr_programa(estado_final='rechazada')
 eq('(M) 🔴 con la pasada RECHAZADA no se seleccionan novedades (rojo, y sin llamar a la función)',
@@ -684,6 +702,38 @@ eq('(M) 🔴 con la pasada RECHAZADA no se seleccionan novedades (rojo, y sin ll
 
 ops, codigo, _texto = correr_programa(disponibilidades_declaradas=N_TOTAL + 11)
 eq('(M) …ni con la descarga cortada (no se llega a aplicar)', [o for o in ops if o['tabla'].startswith('rpc:')], [])
+
+# ── (N) VALORAR LAS NOVEDADES Y EL VIGÍA DE LA MARCA (encargo I, tramo 2) ──────────────────────
+ops, codigo, _texto = correr_programa()
+eq('(N) con la valoración APAGADA: lee el interruptor, cierra la valoración como apagada y termina bien (verde)',
+   (codigo, [o['datos'] for o in _de(ops, 'nov_parametros', 'select')], '>>> VALORACION DE NOVEDADES: APAGADA' in _texto),
+   (0, [('*',)], True))
+ops, codigo, _texto = correr_programa(fallan={('rpc:nov_cerrar_valoracion', 'rpc')})
+eq('(N) 🔴 si la valoración FALLA: rojo al final, con la pasada aplicada y las novedades seleccionadas ANTES',
+   (codigo, [o['tabla'] for o in ops if o['tabla'].startswith('rpc:')], 'NOVEDADES_NO_VALORADAS: la pasada PASADA-1 sigue aplicada' in _texto),
+   (1, ['rpc:disp_aplicar_pasada', 'rpc:nov_seleccionar_pasada', 'rpc:nov_cerrar_valoracion'], True))
+eq('(N) …y la pasada NO se toca después: ni se cierra fallida ni se borra lo leído, ni sale un traceback',
+   ([o['datos'] for o in _de(ops, 'disp_pasada', 'update') if o['datos'].get('estado') == 'fallida'], _de(ops, 'disp_lectura', 'delete'),
+    'Traceback' in _texto), ([], [], False))
+ops, codigo, _texto = correr_programa(fallan={('rpc:nov_seleccionar_pasada', 'rpc')})
+eq('(N) si la SELECCIÓN falla, la valoración corre igual (la cola de antes sigue ahí) y el run acaba en rojo',
+   (codigo, [o['tabla'] for o in ops if o['tabla'].startswith('rpc:')]),
+   (1, ['rpc:disp_aplicar_pasada', 'rpc:nov_seleccionar_pasada', 'rpc:nov_cerrar_valoracion']))
+ops, codigo, _texto = correr_programa(marca_parecida=2)
+eq('(N) 🔴 EL VIGÍA: con 2 productos de marca parecida a Funko, rojo AL FINAL, con el motivo en el log…',
+   (codigo, 'MARCA_PARECIDA: 2 producto(s) de HEO' in _texto), (1, True))
+eq('(N) …y DESPUÉS de haberlo aplicado todo: la pasada, la selección y la valoración',
+   ([o['tabla'] for o in ops if o['tabla'].startswith('rpc:')], 'PASADA APLICADA' in _texto,
+    _texto.index('>>> VALORACION DE NOVEDADES') < _texto.index('MARCA_PARECIDA')),
+   (['rpc:disp_aplicar_pasada', 'rpc:nov_seleccionar_pasada', 'rpc:nov_cerrar_valoracion'], True, True))
+ops, codigo, _texto = correr_programa(caida=True, marca_parecida=1)
+eq('(N) …y no se come otro aviso: con la caída aceptada, salen los dos',
+   (codigo, 'CAIDA_ACEPTADA' in _texto, 'MARCA_PARECIDA: 1' in _texto), (1, True, True))
+with open(os.path.join(AQUI, '.github', 'workflows', 'escaner2-heo-disponibilidad.yml'), encoding='utf-8') as fh:
+    _lineas_wf = [l for l in fh.read().splitlines() if not l.lstrip().startswith('#')]
+eq('(N) el workflow le da la llave de Keepa al paso de la pasada (la misma que el director: KEEPA_API_KEY), y ninguna para disparar la v2',
+   ([l.strip() for l in _lineas_wf if 'KEEPA_API_KEY' in l], any('GH_TOKEN' in l or 'dispatches' in l for l in _lineas_wf)),
+   (['KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}'], False))
 
 # ── (K) CON LA DESCARGA HEREDADA DE VERDAD ───────────────────────────────────────────────
 # Solo se cambia `_get` (la red) por páginas en memoria; `_paginar` y `descargar_catalogo_heo` son los

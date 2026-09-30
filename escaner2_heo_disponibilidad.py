@@ -36,13 +36,20 @@ QUE HACE, EN ORDEN:
      y llena su cola. Es un PASO APARTE: si falla, la pasada sigue aplicada, el fallo se apunta en
      `nov_pasada` ('fallida', con el motivo) y en el log, NO se reintenta, lo que venga despues se
      ejecuta igual, y el run acaba en ROJO para que se vea. Sin Keepa ni Amazon.
+  8. 🆕 VALORAR LAS NOVEDADES (encargo I, tramo 2, 29-sep-2026): otro PASO APARTE, detras de la seleccion
+     (escaner2_novedades.valorar_pasada): con el interruptor de la base encendido (nov_parametros.valorar), la
+     cuenta de las novedades a las que el cartero ya dio precio y tarifa de Amazon (con el codigo del Escaneo PRO)
+     y Keepa para la cola (saldo leido antes, reserva de 20, cache de 72 h / 7 dias y el Escaneo PRO de 14 dias).
+     Apagado: cero llamadas a Keepa. Si falla, la pasada y la seleccion siguen aplicadas, el fallo queda en
+     nov_pasada.valoracion_* y el run acaba en ROJO al final. Y el VIGIA DE LA MARCA: si la seleccion cuenta
+     productos con una marca parecida a 'Funko' y distinta (HEO ha cambiado la grafia), rojo al final.
 
 🔒 NO TOCA NADA DEL ESCANER VIEJO NI DEL ESCANER 2: ni `escaner_memoria`, ni `escaner_resultados`, ni
    `reglas_director`, ni `escaner2_*`, ni `productos`. Solo `disp_pasada`, `disp_lectura`, la funcion
    `disp_aplicar_pasada` y, para LEER su tolerancia, `disp_parametros`; y, para las novedades, la
    funcion `nov_seleccionar_pasada` y `nov_pasada` (solo para apuntar un fallo) (lo comprueba
-   test_escaner2_disponibilidad.py sobre el propio fichero).
-   Cero tokens de Keepa y cero llamadas a Amazon.
+   test_escaner2_disponibilidad.py sobre el propio fichero). Lo que toca la valoracion (paso 8) vive en
+   escaner2_novedades.py y lo censa test_escaner2_novedades.py. Cero llamadas a Amazon: Amazon es del cartero.
 🔒 LA LLAVE DE SERVICIO, O NO SE CORRE: escribe en tablas cerradas; sin ella aborta antes de nacer
    ningun cliente de red.
 
@@ -148,11 +155,12 @@ def seleccionar_novedades(pasada):
     Funko y llena su cola (`nov_seleccionar_pasada`, idempotente). 🔴 PASO APARTE E INDEPENDIENTE: no lanza
     nunca. Si falla, la pasada SIGUE APLICADA (ya esta confirmada en la base), el fallo se apunta en
     `nov_pasada` ('fallida', con su motivo; si la pasada ya tenia fila no se toca) y en el log, y NO se
-    reintenta: se rehace a mano llamando otra vez a la funcion con esa pasada. Devuelve True si salio bien."""
+    reintenta: se rehace a mano llamando otra vez a la funcion con esa pasada. Devuelve (ok, lo que devolvio la
+    base), y lo segundo None si fallo."""
     try:
         res = sb.rpc('nov_seleccionar_pasada', {'p_pasada': pasada}).execute().data
         print(f">>> NOVEDADES DE FUNKO: {res}", flush=True)
-        return True
+        return True, res
     except Exception as ex:
         motivo = f'{type(ex).__name__}: {ex}'
         print(f"NOVEDADES_NO_SELECCIONADAS: la pasada {pasada} sigue aplicada; la selección de novedades ha "
@@ -165,6 +173,23 @@ def seleccionar_novedades(pasada):
         except Exception as ex2:
             print(f"NOVEDADES_FALLO_SIN_APUNTAR: tampoco se ha podido apuntar en nov_pasada: "
                   f"{type(ex2).__name__}: {str(ex2)[:500]}", flush=True)
+        return False, None
+
+
+def valorar_novedades(pasada):
+    """VALORAR LAS NOVEDADES (encargo I, tramo 2): Keepa y la cuenta, en escaner2_novedades.py. 🔴 PASO APARTE: no
+    lanza nunca (ni si el modulo no importa), la pasada y la seleccion ya estan aplicadas, y el fallo queda apuntado
+    en nov_pasada.valoracion_*. Con el interruptor apagado, cero llamadas a Keepa. Devuelve True si salio bien."""
+    try:
+        import escaner2_novedades as nv
+        ok, _res = nv.valorar_pasada(sb, pasada, keepa_llave=os.environ.get('KEEPA_API_KEY'))
+        if not ok:
+            print(f"NOVEDADES_NO_VALORADAS: la pasada {pasada} sigue aplicada y sus novedades seleccionadas; la valoración "
+                  f"no ha salido bien y queda apuntada en nov_pasada (valoracion_estado y valoracion_motivo).", flush=True)
+        return ok
+    except Exception as ex:
+        print(f"NOVEDADES_NO_VALORADAS: la pasada {pasada} sigue aplicada; la valoración ha fallado antes de poder "
+              f"apuntarse: {type(ex).__name__}: {str(ex)[:500]}", flush=True)
         return False
 
 
@@ -266,15 +291,28 @@ def main():
 
     # 7 · NOVEDADES DE FUNKO (encargo H): paso aparte con la pasada ya aplicada; no lanza nunca, y lo que
     #     venga despues se ejecuta aunque falle. Si falla, el run acaba en rojo, pero AL FINAL.
-    novedades_ok = seleccionar_novedades(pasada)
+    novedades_ok, seleccion = seleccionar_novedades(pasada)
+    # 8 · VALORAR (encargo I): otro paso aparte, detrás; tampoco lanza. Si falla, rojo AL FINAL.
+    valoracion_ok = valorar_novedades(pasada)
+    # 🔴 EL VIGÍA DE LA MARCA (encargo I, paso 0 d): lo cuenta la base en cada selección.
+    marca_parecida = (seleccion or {}).get('marca_parecida') or 0
 
+    rojo = False
     if fila.get('caida_aceptada'):
         # 🔴 Aplicada, pero NO es una pasada normal: el run en rojo para que se vea en Actions.
         print(f"CAIDA_ACEPTADA: la pasada {pasada} se ha aplicado como NUEVA REFERENCIA tras varios rechazos "
               f"estables por el freno del 90 %. Puede ser una caída real de HEO o un fallo estable de su API: "
               f"hay que mirarlo. {fila.get('motivo')}", flush=True)
-        sys.exit(1)
-    if not novedades_ok:
+        rojo = True
+    if marca_parecida > 0:
+        print(f"MARCA_PARECIDA: {marca_parecida} producto(s) de HEO tienen una marca que se parece a la de las novedades "
+              f"y no es ella (marca ilike '%funko%' y distinta de 'Funko'). Si HEO ha cambiado la grafía, las novedades de "
+              f"Funko se quedarían a cero en silencio: hay que mirarlo (nov_pasada.n_marca_parecida de la pasada {pasada}). "
+              f"Todo lo demás de la pasada está aplicado.", flush=True)
+        rojo = True
+    if not novedades_ok or not valoracion_ok:
+        rojo = True
+    if rojo:
         sys.exit(1)
 
 

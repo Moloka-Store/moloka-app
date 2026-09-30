@@ -12,6 +12,13 @@
 # que saldran las novedades de Funko y, cuando Fernando lo decida, la fuente de «lo que tiene HEO»
 # para Reponer y el Trackeador.
 #
+# 🆕 NOVEDADES DE FUNKO (encargos H y I, 29-sep-2026): tras aplicar la pasada, dos pasos aparte en el mismo
+#    programa: la seleccion de las novedades (tramo 1) y su VALORACION (tramo 2: la cuenta de lo que el cartero
+#    de la v2 ya trajo de Amazon, y Keepa para la cola, con KEEPA_API_KEY, la misma llave que el director viejo;
+#    reserva de 20 tokens, cache de 72 h / 7 dias y el Escaneo PRO de 14 dias). Con el interruptor de la base
+#    apagado (nov_parametros.valorar), cero llamadas a Keepa. Si falla, la pasada sigue aplicada y el run sale
+#    en rojo al final. Ninguna llave para disparar nada de la v2: el cartero lo despierta su propio reloj.
+#
 # Vive aqui porque aqui estan las credenciales de HEO. Repo publico: no gasta minutos.
 #
 # 🔒 NO TOCA EL ESCANER VIEJO NI EL ESCANER 2: ni director-heo.yml, ni escaner_memoria, ni
@@ -69,6 +76,8 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           HEO_USER:             ${{ secrets.HEO_USER }}
           HEO_PASS:             ${{ secrets.HEO_PASS }}
+          # 🔑 La de Keepa, solo para valorar las novedades (encargo I). Con el interruptor apagado no se usa.
+          KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}
           PYTHONIOENCODING:     utf-8
         run: python -u escaner2_heo_disponibilidad.py
 
