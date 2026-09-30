@@ -16,7 +16,11 @@ CASOS:
   3. [frenado]    la base ACEPTA el insert de las puertas y se come las de la puerta b (lo que
                   haria una politica que frena: 200 y cero filas) → el cruce CUENTA en la base,
                   ve que no cuadra y queda 'fallida' en ROJO. Es el cuadre del encargo en vivo.
-  6. [todas]      (B2) barrido «todas las marcas»: sin leer reglas_director, sin filtro de marca,
+  4. (30-sep-2026) La tolerancia de la descarga (`disp_parametros.tolerancia_endpoint`, aqui 1):
+     [dentro_de_tolerancia] HEO declara 12 y se bajan 11 → CUADRA y sale la lista;
+     [fuera_de_tolerancia] declara 13 → 'fallida' con el motivo y los recuentos guardados;
+     [sin_tolerancia] sin fila de HEO → 'fallida' «sin tolerancia» y sin pedir nada a HEO.
+  6. [todas]     (B2) barrido «todas las marcas»: sin leer reglas_director, sin filtro de marca,
                   cuadra; y la marca que el viejo no mira sale como diferencia de criterio.
   7. [cajas]      (B2) cajas con chase REALES de HEO: la disponible entra con el EAN de su figura
                   y a precio de caja ÷ 6; la agotada y la suelta del apellido, como toca; cuadra.
@@ -309,12 +313,16 @@ TABLAS_VIEJO = ('reglas_director', 'escaner_chase_asin', 'escaner_memoria', 'esc
                 'productos')
 
 
-def estado_inicial(e2, M, frenar=None, viejo_extra=()):
+def estado_inicial(e2, M, frenar=None, viejo_extra=(), tolerancia=100):
     viejo = excel_viejo(e2, M, [(1, 'ES', 'COMPRAR'), (1, 'DE', 'COMPRAR'), (5, 'ES', 'COMPRAR'), (3, 'IT', 'VALORAR')]
                         + list(viejo_extra))
     return {
         'frenar': frenar,
         'tablas': {
+            # (30-sep-2026) La tolerancia de la descarga, la de la foto horaria; el barrido solo la LEE.
+            #      Sin fila (tolerancia None), el barrido no tiene tolerancia.
+            'disp_parametros': ([{'proveedor': 'HEO', 'tolerancia_endpoint': tolerancia}]
+                                if tolerancia is not None else []),
             # (B2) La ultima pasada de marcas de siempre, de la que el modo «todas» saca la lista
             #      del viejo para comparar (sin leer reglas_director).
             'escaner2_pasada': [{'id': '00000000-0000-4000-8000-000000000001', 'proveedor': 'HEO', 'modo': 'marcas',
@@ -340,11 +348,11 @@ def estado_inicial(e2, M, frenar=None, viejo_extra=()):
 SIEMBRA = {}
 
 
-def caso(nombre, frenar=None, crudo=None, modo=None, escena=None, extra=None, viejo_extra=()):
+def caso(nombre, frenar=None, crudo=None, modo=None, escena=None, extra=None, viejo_extra=(), tolerancia=100):
     e2, pro, M = _escena()
     tmp = tempfile.mkdtemp(prefix='e2pp_')
     ruta = os.path.join(tmp, 'estado.json')
-    inicial = estado_inicial(e2, M, frenar, viejo_extra)
+    inicial = estado_inicial(e2, M, frenar, viejo_extra, tolerancia)
     SIEMBRA[nombre] = {t: json.loads(json.dumps(inicial['tablas'][t])) for t in TABLAS_VIEJO}
     with open(ruta, 'w', encoding='utf-8') as fh:
         json.dump(inicial, fh)
@@ -424,7 +432,10 @@ eq('2 · 🔴 el catálogo CRUDO sale del log, y cuadra: crudo = previas + foto'
 _lista = base64.b64decode(bd['storage']['escaner2']['heo/%s/eans.txt' % pasada]).decode().split('\n')
 eq('2 · la lista para el Visualizador: un EAN por linea, en el bucket escaner2', (len(_lista), p['n_eans_lista'], p['n_tandas']),
    (5, 5, 1))
-eq('2 · ni una tabla nueva fuera de escaner2_', sorted(t for t in T if not t.startswith('escaner2_')), sorted(TABLAS_VIEJO))
+eq('2 · ni una tabla nueva fuera de escaner2_', sorted(t for t in T if not t.startswith('escaner2_')),
+   sorted(TABLAS_VIEJO + ('disp_parametros',)))
+eq('2 · (30-sep) el log del cuadre previo dice SIEMPRE la diferencia y la tolerancia',
+   'HEO declara 11 y se bajaron 11 · diferencia 0 (tolerancia 100)' in log, True)
 c = T['escaner2_cruce'][0]
 eq('2 · el cruce sale en VERDE', cod2, 0)
 eq('2 · …y queda LISTA, cuadrado', (c['estado'], c['cuadra'], c['motivo_fallo']), ('lista', True, None))
@@ -555,16 +566,45 @@ eq('3 · 🔴 …contando en la BASE: 5 entradas y 4 en las puertas', (c['n_entr
 eq('3 · el log lo dice', 'NO CUADRA' in log2, True)
 BDS['frenado'] = bd
 
-print('\n4 · [crudo_de_mas] HEO dice un producto más de los que salen → la pasada FALLA')
-cod, log, cod2, log2, bd, pasada, M, e2 = caso('crudo_de_mas', crudo=12)
-BDS['crudo_de_mas'] = bd
+# (30-sep-2026) El catalogo de HEO cambia mientras se pagina: lo bajado y lo declarado pueden
+#     separarse hasta la tolerancia de disp_parametros. Aqui la tolerancia es 1 (no la de produccion)
+#     para que un 100 escrito en el codigo saliera ROJO.
+print('\n4 · [dentro_de_tolerancia] HEO declara uno más de los que se bajan, tolerancia 1 → CUADRA')
+cod, log, cod2, log2, bd, pasada, M, e2 = caso('dentro_de_tolerancia', tolerancia=1, extra={'E2_DECLARADO': '12'})
+BDS['dentro_de_tolerancia'] = bd
 p = [x for x in bd['tablas']['escaner2_pasada'] if x['id'] == pasada][0]
-eq('4 · 🔴 el barrido sale en ROJO', cod, 1)
-eq('4 · 🔴 …y la pasada queda FALLIDA con el motivo', (p['estado'], 'NO CUADRA antes de la foto' in (p['motivo_fallo'] or '')),
+eq('4 · 🔴 el barrido sale en VERDE y la pasada queda esperando los CSV', (cod, p['estado'], p.get('motivo_fallo')),
+   (0, 'esperando_csv', None))
+eq('4 · 🔴 …con su lista para Keepa, y el cruce sale en VERDE',
+   (p['ruta_lista'], 'heo/%s/eans.txt' % pasada in bd['storage']['escaner2'], cod2), ('heo/%s/eans.txt' % pasada, True, 0))
+eq('4 · 🔴 …y las otras dos comprobaciones, EXACTAS: crudo 11 = previas + foto',
+   (p['n_crudo'], sum(p['p_' + x] for x in e2.PUERTAS_PREVIAS) + p['n_foto']), (11, 11))
+eq('4 · el log dice la diferencia y la tolerancia', 'HEO declara 12 y se bajaron 11 · diferencia 1 (tolerancia 1)' in log,
+   True)
+
+print('\n4b · [fuera_de_tolerancia] diferencia = tolerancia + 1 → la pasada FALLA')
+cod, log, cod2, log2, bd, pasada, M, e2 = caso('fuera_de_tolerancia', tolerancia=1, extra={'E2_DECLARADO': '13'})
+BDS['fuera_de_tolerancia'] = bd
+p = [x for x in bd['tablas']['escaner2_pasada'] if x['id'] == pasada][0]
+eq('4b · 🔴 el barrido sale en ROJO', cod, 1)
+eq('4b · 🔴 …y la pasada queda FALLIDA con el motivo: declarado, bajado y tolerancia',
+   (p['estado'], 'NO CUADRA antes de la foto: HEO dice que tiene 13 productos y se bajaron 11 (diferencia 2, '
+                 'tolerancia 1): la descarga se cortó' in (p['motivo_fallo'] or '')),
    ('fallida', True))
-eq('4 · 🔴 …sin lista para Keepa: no se puede cruzar', (p.get('ruta_lista'), cod2), (None, 1))
-eq('4 · 🔴 …y con los recuentos GUARDADOS aunque no cuadre (sin ellos no se sabe dónde se descuadró)',
-   (p.get('n_crudo'), p.get('p_sin_gtin'), p.get('p_chase_funko')), (12, 3, 1))
+eq('4b · 🔴 …sin lista para Keepa: no se puede cruzar', (p.get('ruta_lista'), cod2), (None, 1))
+eq('4b · 🔴 …y con los recuentos GUARDADOS aunque no cuadre (sin ellos no se sabe dónde se descuadró)',
+   (p.get('n_crudo'), p.get('p_sin_gtin'), p.get('p_chase_funko')), (11, 3, 1))
+
+print('\n4c · [sin_tolerancia] disp_parametros sin fila de HEO → la pasada FALLA sin bajar nada')
+cod, log, cod2, log2, bd, pasada, M, e2 = caso('sin_tolerancia', tolerancia=None)
+BDS['sin_tolerancia'] = bd
+p = [x for x in bd['tablas']['escaner2_pasada'] if x['id'] == pasada][0]
+eq('4c · 🔴 el barrido sale en ROJO y la pasada queda FALLIDA «sin tolerancia»',
+   (cod, p['estado'], (p.get('motivo_fallo') or '').startswith('RuntimeError: sin tolerancia: disp_parametros no da una '
+                                                           'tolerancia_endpoint válida para HEO (None)')),
+   (1, 'fallida', True))
+eq('4c · 🔴 …sin haber pedido nada a HEO, ni foto, ni lista', ('catalog/products' in log, bd['tablas'].get('escaner2_foto'),
+                                                              p.get('ruta_lista')), (False, None, None))
 
 print('\n6 · [todas] (B2) barrido «todas las marcas» → cruce')
 cod, log, cod2, log2, bd, pasada, M, e2 = caso('todas', modo='todas')
@@ -711,6 +751,8 @@ for _n, _bd in BDS.items():
        [o for o in _bd['ops'] if o[2] in TABLAS_VIEJO and o[1] != 'select'], [])
     eq('8 · %s: …y esas tablas acaban exactamente como empezaron' % _n,
        {t: _bd['tablas'].get(t) for t in TABLAS_VIEJO}, SIEMBRA[_n])
+    eq('8 · %s: (30-sep) disp_parametros, la de la foto horaria, solo se LEE' % _n,
+       [o for o in _bd['ops'] if o[2] == 'disp_parametros' and o[1] != 'select'], [])
     eq('8 · %s: ni se leen reglas del chase ni la puente (escaner_chase_asin, escaner_memoria, escaner_detalle)' % _n,
        [o for o in _bd['ops'] if o[2] in ('escaner_chase_asin', 'escaner_memoria', 'escaner_detalle')], [])
     # (B4) Y el buzon del viejo: los Excel del escaner 2 NO van a `informes/resultados/` (sus Excel los

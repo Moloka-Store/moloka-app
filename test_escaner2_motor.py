@@ -303,7 +303,7 @@ QUIERE, _info = e2.cargar_filtro_director(REGLA)
 eq('(E) el filtro sale de director_heo_prep.py con las marcas de la regla',
    (_info['marcas_reales'], _info['quiere_ofertas']), (['Funko', 'Ultimate Guard'], True))
 # El catalogo CRUDO de la escena: las 20 filas con GTIN + el Funko chase + 3 sin GTIN = 24.
-FOTO, APARTADOS, CUENTAS = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=24, n_sin_gtin=3, n_declarado=24)
+FOTO, APARTADOS, CUENTAS = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=24, n_sin_gtin=3, n_declarado=24, tolerancia=0)
 _por_ean = {f['ean_original']: f for f in FOTO}
 eq('(E) en la foto: los 13 de la escena + la oferta de Hasbro, sin el agotado ni el de otra marca',
    sorted(f['producto_heo'] for f in FOTO),
@@ -326,23 +326,46 @@ eq('(E) las puertas previas son las de la migración, en su orden',
                               'chase_suelto', 'ean_forma_rara', 'duplicado_proveedor'])
 # Una caja con chase AGOTADA tambien se cuenta: desde el B2, como «no disponible» (antes, Funko chase).
 _chase2 = CHASE_HEO + [dict(CHASE_HEO[0], producto_heo='HEO9002', estado='agotado')]
-_, _, _c2 = e2.construir_foto(FILAS_HEO, _chase2, QUIERE, M, n_crudo=25, n_sin_gtin=3, n_declarado=25)
+_, _, _c2 = e2.construir_foto(FILAS_HEO, _chase2, QUIERE, M, n_crudo=25, n_sin_gtin=3, n_declarado=25, tolerancia=0)
 eq('(E) 🔴 la caja con chase que no pasa el filtro también se cuenta: agotada → no disponible (B2)',
    (_c2['previas']['chase_funko'], _c2['previas']['no_disponible'], _c2['cuadra_previo']), (1, 2, True))
 # Los rojos: el cuadre previo no puede salir verde por las malas.
-_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=24, n_sin_gtin=None, n_declarado=24)
+_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=24, n_sin_gtin=None, n_declarado=24, tolerancia=0)
 eq('(E) 🔴 sin el recuento de sin GTIN (log ilegible) → NO cuadra, y dice cuál falta',
    (_r['cuadra_previo'], _r['motivo_previo']), (False, 'sin recuento de: sin_gtin'))
-_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=None, n_sin_gtin=3, n_declarado=24)
+_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=None, n_sin_gtin=3, n_declarado=24, tolerancia=0)
 eq('(E) 🔴 sin el crudo → NO cuadra', (_r['cuadra_previo'], _r['motivo_previo']), (False, 'sin recuento de: crudo'))
-_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=25, n_sin_gtin=3, n_declarado=25)
+_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=25, n_sin_gtin=3, n_declarado=25, tolerancia=0)
 eq('(E) 🔴 HEO dio uno más de los que salen de descargar_heo → NO cuadra', _r['cuadra_previo'], False)
-_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=24, n_sin_gtin=3, n_declarado=None)
+_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=24, n_sin_gtin=3, n_declarado=None, tolerancia=0)
 eq('(E) 🔴 sin el total que DECLARA HEO → NO cuadra (no se puede saber si la descarga vino entera)',
    (_r['cuadra_previo'], _r['motivo_previo']), (False, 'sin recuento de: total que declara HEO'))
-_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=24, n_sin_gtin=3, n_declarado=30)
+_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=24, n_sin_gtin=3, n_declarado=30, tolerancia=0)
 eq('(E) 🔴 HEO dice 30 y se bajaron 24 (una página falló en silencio) → NO cuadra',
-   (_r['cuadra_previo'], _r['motivo_previo']), (False, 'HEO dice que tiene 30 productos y se bajaron 24: la descarga se cortó'))
+   (_r['cuadra_previo'], _r['motivo_previo']),
+   (False, 'HEO dice que tiene 30 productos y se bajaron 24 (diferencia 6, tolerancia 0): la descarga se cortó'))
+# (30-sep-2026) La tolerancia de disp_parametros: HEO cambia mientras se pagina. Hasta ella, en los dos sentidos,
+#     cuadra; una más, no. Las otras dos comprobaciones siguen EXACTAS (arriba, con n_declarado igual al crudo).
+for _decl, _tol, _cuadra in ((30, 6, True), (18, 6, True), (31, 6, False), (17, 6, False), (25, 1, True), (23, 1, True)):
+    _, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=24, n_sin_gtin=3, n_declarado=_decl,
+                                 tolerancia=_tol)
+    eq('(E) 🔴 HEO declara %d, se bajan 24, tolerancia %d → %s' % (_decl, _tol, 'cuadra' if _cuadra else 'NO cuadra'),
+       _r['cuadra_previo'], _cuadra)
+_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=24, n_sin_gtin=3, n_declarado=17, tolerancia=6)
+eq('(E) 🔴 …el motivo dice declarado, bajado, diferencia y tolerancia, también si se baja de MÁS', _r['motivo_previo'],
+   'HEO dice que tiene 17 productos y se bajaron 24 (diferencia -7, tolerancia 6): la descarga se cortó')
+for _mala in (None, -1, True, '10', 10.0):
+    _, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=24, n_sin_gtin=3, n_declarado=24,
+                                 tolerancia=_mala)
+    eq('(E) 🔴 sin tolerancia válida (%r) → NO cuadra, sin valor por defecto' % (_mala,),
+       (_r['cuadra_previo'], _r['motivo_previo']),
+       (False, 'sin tolerancia: no hay una tolerancia_endpoint válida (%r)' % (_mala,)))
+_, _, _r = e2.construir_foto(FILAS_HEO, CHASE_HEO, QUIERE, M, n_crudo=25, n_sin_gtin=3, n_declarado=25, tolerancia=100)
+eq('(E) 🔴 con tolerancia 100, lo devuelto + sin GTIN sigue exigiéndose EXACTO', _r['motivo_previo'],
+   'HEO dio 25 productos y descargar_heo devolvió 21 + 3 sin GTIN')
+_r = e2.cuadre_previo(dict(CUENTAS, n_foto=13, tolerancia=100))
+eq('(E) 🔴 …y crudo = previas + foto, también EXACTO con tolerancia 100', _r['motivo_previo'],
+   'catálogo crudo 24 ≠ puertas previas 10 + foto 13')
 _r = e2.cuadre_previo(dict(CUENTAS, n_foto=13))
 eq('(E) 🔴 un producto que se pierde entre las previas y la foto → NO cuadra',
    (_r['cuadra_previo'], _r['motivo_previo']), (False, 'catálogo crudo 24 ≠ puertas previas 10 + foto 13'))

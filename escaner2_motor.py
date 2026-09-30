@@ -492,13 +492,14 @@ def _fila_de_chase(c):
 
 
 def construir_foto(filas_heo, chase_heo, quiere, M, n_crudo=None, n_sin_gtin=None, n_declarado=None,
-                   modo='marcas'):
+                   modo='marcas', tolerancia=None):
     """Del catalogo CRUDO de HEO a la foto de la pasada, sin perder a nadie por el camino.
 
     `filas_heo, chase_heo` es lo que devuelve `descargar_catalogo_heo(con_chase=True)`;
     `n_crudo` (productos que se bajaron de HEO), `n_sin_gtin` (los que descargar_heo tira por no
     tener GTIN) y `n_declarado` (los que HEO DICE que tiene, `totalElements` de la API) salen de
-    su log, porque esa funcion no los devuelve y NO se toca.
+    su log, porque esa funcion no los devuelve y NO se toca. `tolerancia` es cuanto pueden
+    separarse lo bajado y lo declarado (`disp_parametros.tolerancia_endpoint`); sin ella no cuadra.
 
     Devuelve (foto, apartados, cuentas). Cada producto crudo sale por UNA puerta previa
     (PUERTAS_PREVIAS) o entra en la foto, en el MISMO orden que el viejo para el perfil HEO:
@@ -653,7 +654,7 @@ def construir_foto(filas_heo, chase_heo, quiere, M, n_crudo=None, n_sin_gtin=Non
         previas[m] = sum(1 for a in apartados if a['motivo'] == m)
     previas['sin_gtin'] = n_sin_gtin
     cuentas = {'n_crudo': n_crudo, 'n_declarado': n_declarado, 'n_foto': len(foto), 'previas': previas,
-               'n_devueltos': len(filas_heo) + len(chase_todo)}
+               'n_devueltos': len(filas_heo) + len(chase_todo), 'tolerancia': tolerancia}
     cuentas.update(cuadre_previo(cuentas))
     return foto, apartados, cuentas
 
@@ -662,7 +663,9 @@ def cuadre_previo(cuentas):
     """🔴 El cuadre de ANTES de las puertas, desde el catalogo CRUDO: crudo = previas + foto.
     Un recuento que falta (None) NO es un cero: sin el no se puede afirmar que cuadra.
     Tambien se exige que lo que descargar_heo DEVOLVIO mas lo que tiro sin GTIN sea el crudo:
-    es la prueba de que los dos numeros sacados de su log son los buenos."""
+    es la prueba de que los dos numeros sacados de su log son los buenos.
+    Solo la primera comprobacion (lo bajado contra lo que HEO declara) admite `tolerancia`; las
+    otras dos son EXACTAS."""
     previas = cuentas['previas']
     faltan = [p for p in PUERTAS_PREVIAS if previas.get(p) is None]
     if cuentas.get('n_crudo') is None:
@@ -672,14 +675,24 @@ def cuadre_previo(cuentas):
     if faltan:
         return {'n_previas': None, 'cuadra_previo': False,
                 'motivo_previo': 'sin recuento de: ' + ', '.join(faltan)}
+    # 🔴 La tolerancia es la de la base (`disp_parametros.tolerancia_endpoint`, la misma que la foto
+    #    horaria), sin valor por defecto: sin ella no se puede decir si la descarga vino entera.
+    tolerancia = cuentas.get('tolerancia')
+    if not isinstance(tolerancia, int) or isinstance(tolerancia, bool) or tolerancia < 0:
+        return {'n_previas': None, 'cuadra_previo': False,
+                'motivo_previo': 'sin tolerancia: no hay una tolerancia_endpoint válida (%r)' % (tolerancia,)}
     n_previas = sum(previas[p] for p in PUERTAS_PREVIAS)
     # 🔴 El catalogo «tal como llega de HEO» es el que HEO DICE que tiene, no lo que se bajo:
     #    `_paginar` de descargar_heo se para EN SILENCIO si una pagina falla cinco veces, y sin
-    #    esto el cuadre diria CUADRA sobre un catalogo recortado.
-    if cuentas['n_crudo'] != cuentas['n_declarado']:
+    #    esto el cuadre diria CUADRA sobre un catalogo recortado. (30-sep-2026) Con margen: el
+    #    catalogo de HEO cambia mientras se pagina (23375 declarados y 23374 bajados, sin perder
+    #    ninguna pagina), y una pagina perdida son 500.
+    if abs(cuentas['n_crudo'] - cuentas['n_declarado']) > tolerancia:
         return {'n_previas': n_previas, 'cuadra_previo': False,
-                'motivo_previo': 'HEO dice que tiene %d productos y se bajaron %d: la descarga se cortó'
-                                 % (cuentas['n_declarado'], cuentas['n_crudo'])}
+                'motivo_previo': 'HEO dice que tiene %d productos y se bajaron %d (diferencia %d, tolerancia %d): '
+                                 'la descarga se cortó'
+                                 % (cuentas['n_declarado'], cuentas['n_crudo'],
+                                    cuentas['n_declarado'] - cuentas['n_crudo'], tolerancia)}
     if cuentas['n_devueltos'] + previas['sin_gtin'] != cuentas['n_crudo']:
         return {'n_previas': n_previas, 'cuadra_previo': False,
                 'motivo_previo': 'HEO dio %d productos y descargar_heo devolvió %d + %d sin GTIN'

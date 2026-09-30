@@ -128,7 +128,7 @@ def heo(n, marca, oferta='', estado='disponible'):
 FILAS = [heo(1, 'CID'), heo(2, 'Cidadela Toys'), heo(3, 'Cidadela Toys', oferta='SI'), heo(4, 'Funko'),
          heo(5, 'CID', estado='agotado')]
 Q, INFO = e2.filtro_elegidas(['CID'], False)
-FOTO, APART, C = e2.construir_foto(FILAS, [], Q, M, n_crudo=6, n_sin_gtin=1, n_declarado=6, modo='elegidas')
+FOTO, APART, C = e2.construir_foto(FILAS, [], Q, M, n_crudo=6, n_sin_gtin=1, n_declarado=6, tolerancia=0, modo='elegidas')
 eq('(D) 🔴 la foto solo trae CID', [f['marca'] for f in FOTO], ['CID'])
 eq('(D) 🔴 el resto de lo disponible va a la marca fuera, «no elegida», con su oferta apuntada',
    [(a['marca'], a['detalle'], a['en_oferta']) for a in APART if a['motivo'] == 'marca_fuera'],
@@ -137,7 +137,7 @@ eq('(D) 🔴 el resto de lo disponible va a la marca fuera, «no elegida», con 
 eq('(D) 🔴 CUADRA: crudo 6 = sin GTIN 1 + no disponible 1 + marca no elegida 3 + foto 1',
    (C['previas']['sin_gtin'], C['previas']['no_disponible'], C['previas']['marca_fuera'], C['n_foto'], C['cuadra_previo']),
    (1, 1, 3, 1, True))
-_, APART_M, _ = e2.construir_foto(FILAS, [], Q, M, n_crudo=6, n_sin_gtin=1, n_declarado=6)
+_, APART_M, _ = e2.construir_foto(FILAS, [], Q, M, n_crudo=6, n_sin_gtin=1, n_declarado=6, tolerancia=0)
 eq('(D) en el modo de siempre el detalle sigue diciendo «fuera de la lista del director»',
    {a['detalle'] for a in APART_M if a['motivo'] == 'marca_fuera'},
    {"Marca 'Cidadela Toys' fuera de la lista del director", "Marca 'Funko' fuera de la lista del director"})
