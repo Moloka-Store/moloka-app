@@ -14,7 +14,7 @@ name: Moloka - Centinela de DESPLIEGUE de la v2 (con reloj)
 #   un deploy rechazado no se encola, no se reintenta y no avisa.
 #
 # QUE CAMBIA RESPECTO AL DE LA v2, y por que:
-#   · Antes ESPERABA al deploy tras cada merge. Ahora tiene RELOJ: cada hora, de 06 a 22
+#   · Antes ESPERABA al deploy tras cada merge. Tendra RELOJ (hoy apagado, ver abajo): cada hora, de 06 a 22
 #     hora de Madrid, de lunes a sabado (y a mano cuando se quiera). No espera: mira, y si
 #     el commit es demasiado nuevo para juzgarlo, lo dice y lo vuelve a mirar en la
 #     siguiente vuelta.
@@ -23,11 +23,27 @@ name: Moloka - Centinela de DESPLIEGUE de la v2 (con reloj)
 #     deployment (no basta con que exista). Falla CERRADO, y distingue «no esta
 #     desplegado» de «no he podido comprobarlo» (NULL confesor).
 #
-# 🔒 CREDENCIAL: `secrets.GH_PAT` (la que ya existe en este repo), que aqui solo LEE la v2.
-#   Necesita leer «Deployments» y «Contents» de `Moloka-Store/moloka-app-v2`. NO usa
-#   ninguna llave de Vercel: los deployments los lee de GitHub, igual que el de la v2.
-#   Si el PAT no llega a ese repo, el workflow sale rojo con «NO SE HA PODIDO COMPROBAR»
-#   (nunca verde).
+# 🔴 ESTADO A 30-SEP-2026: **SIN RELOJ TODAVIA**, porque falta la credencial.
+#   El `GH_PAT` que ya existe en este repo NO llega a `moloka-app-v2`: medido en la
+#   autoprueba del PR, `gh api repos/Moloka-Store/moloka-app-v2/commits/main` con ese PAT
+#   responde `404 Not Found` (un repo privado al que el token no da acceso responde 404).
+#   No se ha creado ni copiado ninguna credencial (encargo B).
+#
+# 🔒 QUE HACE FALTA (lo crea Fernando, no una sesion de Code): un secreto de este repo
+#   llamado **`GH_PAT_V2_LECTURA`**, con un token *fine-grained* de la cuenta Moloka-Store:
+#     · Repository access: SOLO `Moloka-Store/moloka-app-v2`
+#     · Permissions (todas de LECTURA): **Deployments: Read** y **Contents: Read**
+#       (`Metadata: Read` viene incluido). Nada mas: ni Actions, ni Secrets, ni escritura.
+#     · Caducidad: la que Fernando quiera, pero con aviso: al caducar, el centinela sale ROJO
+#       con «NO SE HA PODIDO COMPROBAR: 401», nunca verde.
+#   NO se ensancha el `GH_PAT` que ya hay: ese dispara workflows y tiene mas poder del que
+#   un vigilante necesita. Y NO hace falta ninguna llave de Vercel: los deployments se leen
+#   de GitHub, igual que hacia el centinela de la v2.
+#
+# 🟢 PARA ENCENDER EL RELOJ, cuando el secreto exista: (1) lanzarlo a mano desde Actions
+#   con el HEAD de main -> tiene que salir VERDE; (2) lanzarlo con el SHA de una rama sin
+#   desplegar -> tiene que salir ROJO; (3) descomentar el bloque `schedule:` de abajo; (4) solo
+#   entonces se retira `centinela-despliegue.yml` de `moloka-app-v2`.
 #
 # 🔒 ESTE REPO ES PUBLICO Y SUS LOGS TAMBIEN. Aqui NO se imprime ni un mensaje de commit,
 #   ni un autor, ni una ruta de la v2: solo los 8 primeros caracteres del SHA, ids de
@@ -45,12 +61,14 @@ name: Moloka - Centinela de DESPLIEGUE de la v2 (con reloj)
 #     no pasa mientras haya commits, y se reactiva a mano desde la pestana Actions.
 # ============================================================================
 on:
-  schedule:
-    # 🕒 UTC. Madrid es UTC+2 hasta el 25-oct-2026 y UTC+1 despues: 04-21 UTC cubre
-    #    06-22 Madrid en los dos husos, y el paso «Ventana» de abajo recorta a la hora de
-    #    Madrid de verdad (06-22, lunes a sabado). Las vueltas de fuera salen en verde y
-    #    sin trabajo: no se cobran aqui.
-    - cron: '7 4-21 * * 1-6'
+  # 🔴 RELOJ APAGADO (comentado) hasta que exista `GH_PAT_V2_LECTURA`: ver la cabecera. Con
+  #    el reloj encendido y sin secreto saldria una alarma roja falsa CADA HORA.
+  # schedule:
+  #   # 🕒 UTC. Madrid es UTC+2 hasta el 25-oct-2026 y UTC+1 despues: 04-21 UTC cubre
+  #   #    06-22 Madrid en los dos husos, y el paso «Ventana» de abajo recorta a la hora de
+  #   #    Madrid de verdad (06-22, lunes a sabado). Las vueltas de fuera salen en verde y
+  #   #    sin trabajo: no se cobran aqui.
+  #   - cron: '7 4-21 * * 1-6'
   workflow_dispatch:
     inputs:
       sha_a_comprobar:
@@ -104,7 +122,8 @@ jobs:
       - name: ¿El ultimo commit de main de la v2 esta en Production?
         if: steps.ventana.outputs.dentro == 'si'
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ secrets.GH_PAT_V2_LECTURA }}
+          EVENTO: ${{ github.event_name }}
           ENTRADA: ${{ inputs.sha_a_comprobar }}
           GRACIA: ${{ inputs.gracia_minutos || '20' }}
           REPO: Moloka-Store/moloka-app-v2
@@ -115,7 +134,15 @@ jobs:
           set -uo pipefail
           FALLOS_API=0
           if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::error::NO SE HA PODIDO COMPROBAR: falta el secreto GH_PAT en este repo."
+            if [ "${EVENTO:-}" = "pull_request" ]; then
+              # 🟠 SOLO LA AUTOPRUEBA DE UN PR, y solo mientras el secreto no exista. Sale verde
+              #    pero NO HA COMPROBADO NADA, y lo dice en alto: es un aviso, no un visto bueno.
+              #    Con `schedule` o `workflow_dispatch` la falta del secreto es ROJO.
+              echo "::warning::AUTOPRUEBA SIN EJECUTAR: falta el secreto GH_PAT_V2_LECTURA. Este verde NO ha comprobado nada."
+              echo "## 🟠 AUTOPRUEBA SIN EJECUTAR: falta el secreto \`GH_PAT_V2_LECTURA\`. Este verde no ha comprobado nada." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "::error::NO SE HA PODIDO COMPROBAR: falta el secreto GH_PAT_V2_LECTURA en este repo."
             exit 1
           fi
 
@@ -134,7 +161,7 @@ jobs:
               echo "## 🟠 NO SE HA PODIDO COMPROBAR"
               echo ""
               echo "No se pudo leer el commit \`${REF:0:8}\` de la v2. Esto **no dice** que produccion este mal:"
-              echo "dice que no se ha podido mirar (permiso del \`GH_PAT\`, o un SHA que no existe)."
+              echo "dice que no se ha podido mirar (permiso del \`GH_PAT_V2_LECTURA\`, o un SHA que no existe)."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
