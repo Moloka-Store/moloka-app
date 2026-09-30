@@ -74,6 +74,14 @@ PRODUCTOS = [
      'stock_moloka': 0, 'stock_fba': 0},
 ]
 EAN_PROPIO = {'0889698498883', '8412345678905'}
+# (encargo E, 30-sep-2026) La ultima foto de inventario_fba, con la fecha de HOY (mas de dos dias seria «foto
+# vieja»). Gizmo: su `stock_fba` dice 7 y Amazon tiene 15 + 3 disponibles y 2 en camino: «En mi BD» dice 18.
+import en_mi_bd  # noqa: E402
+HOY_FOTO = en_mi_bd.hoy_madrid().isoformat()
+FOTO_FBA = [{'sku': 'GIZMO-1', 'asin': 'B0GIZMO', 'available': 15, 'fc_transfer': 3, 'inbound_shipped': 2,
+             'inbound_receiving': 0, 'fecha_foto': HOY_FOTO}]
+EN_MI_BD_ES = {'0889698498883': 'OK Alm:3 FBA:18 +2 en camino (foto %s)' % HOY_FOTO,
+               '8412345678905': 'OK Alm:1 FBA: —'}          # sin ASIN: raya, nunca 0
 EAN_NO_PROPIO = {'0889698851909'}
 # 🔴 SI FALTA UN PAIS AQUI, ESTE BANCO NO SE PONE ROJO: SE CUELGA. El doble
 #    levanta KeyError, el reintento de Keepa se lo traga y espera 5+15+40+90 s
@@ -198,6 +206,9 @@ def hijo(caso, destino):
                 if caso == 'vacio':
                     return _Resp([])
                 return _Resp(PRODUCTOS)
+            if self.tabla == 'inventario_fba':
+                # El doble no filtra: la primera consulta (la fecha) y la de las filas reciben la foto entera.
+                return _Resp(FOTO_FBA if caso == 'normal' else [])
             return _Resp([{'id': 1}] if self.tabla == 'escaner_resultados' else [])
 
     class _Cliente:
@@ -469,6 +480,14 @@ if _ok['xlsx'] == 1 and os.path.exists(_dest):
     _fila_chai = [_f for _f in range(2, ws.max_row + 1)
                   if str(col(_f, 'EAN')) == '8412345678905' and col(_f, 'País') == 'ES']
     eq('(C) [normal] la fila del 10% esta en el Excel', len(_fila_chai), 1)
+    # (encargo E, 30-sep-2026) «En mi BD», en el .xlsx REAL: almacen de la ficha y FBA de la foto de inventario_fba
+    #   (no el `stock_fba` 7 de la ficha), con su fecha; la ficha sin ASIN, raya.
+    _en_bd = {str(col(_f, 'EAN')): col(_f, 'En mi BD') for _f in range(2, ws.max_row + 1) if col(_f, 'País') == 'ES'}
+    eq('(C) [normal] 🔴 (E) «En mi BD» sale de la foto de inventario_fba, con su fecha',
+       {e: _en_bd.get(e) for e in sorted(EN_MI_BD_ES)}, EN_MI_BD_ES)
+    eq('(C) [normal] (E) y el que no es nuestro la deja vacia', _en_bd.get('0889698851909'), None)
+    eq('(C) [normal] (E) el log dice que foto se ha usado',
+       'FOTO_FBA: fecha=%s | filas=1 | asins=1 | edad=0 días' % HOY_FOTO in _ok['salida'], True)
     if _fila_chai:
         _ben = str(col(_fila_chai[0], 'Beneficio (€)') or '')
         eq('(C) [normal] 🔴 la formula de la fila del 10% divide por 1.1, no por 1.21',

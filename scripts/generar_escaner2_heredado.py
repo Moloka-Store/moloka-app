@@ -126,7 +126,9 @@ NOMBRES_MOTOR = ('PAISES', 'IVA_DEFAULT_ES', 'IVA_IT', 'IVA_FR', 'IVA_DE', 'ALMA
                  'COM_DIGITALES', 'UNIDADES_CASE_TCG', 'ISD_PAIS', 'SIN_ISD_HISTORICO',
                  '_RE_SUFIJO', '_RE_CAJA6', '_RE_CHASE_NOM', '_RE_CON_CHASE',
                  'UMBRAL_CAJA_VS_SUELTA', 'ORIGEN_IVA_FICHA', 'ORIGEN_IVA_ASUMIDO', 'PERFILES')
-DEFS_EXCEL = ('pct_comision_celda', 'en_bd_txt')
+# (encargo E, 30-sep-2026) `en_bd_txt` YA NO se hereda: el del viejo leia `productos.stock_fba`, que esta congelado.
+# El escaner 2 escribe «En mi BD» con la funcion compartida de en_mi_bd.py (`Motor.en_bd_txt`, inyectada en la Celda 9).
+DEFS_EXCEL = ('pct_comision_celda',)
 DEFS_ELECCION = ('_tok_cot', 'construir_idf', '_idf', '_distintivo', 'cotejar', 'elegir_candidato')
 NOMBRES_ELECCION = ('UMBRAL_COTEJO',)
 PARAMS_EXCEL = ('registros', 'problematicos', 'no_encontrados', 'chase_sueltos', '_dups', 'ambiguos', 'sin_rank',

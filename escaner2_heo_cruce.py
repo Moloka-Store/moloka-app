@@ -57,6 +57,7 @@ if not re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 from supabase import create_client  # noqa: E402
 
 import escaner2_motor as e2  # noqa: E402
+import en_mi_bd  # noqa: E402
 # (B7) El lector del CSV del Visualizador del Escaner Pro, copiado literalmente (ya no se importa el Pro).
 import escaner2_heredado_pro as pro  # noqa: E402
 from foto_comun import descargar_buzon, listar_buzon  # noqa: E402
@@ -230,7 +231,7 @@ def cruzar(cruce, params, pasada):
                   pasada_id=PASADA)
     if not foto:
         raise Fallo('la pasada no tiene foto')
-    productos = _todas('productos', 'ean,asin,iva_pct,stock_moloka,stock_fba', 'id', activo=True)
+    productos = _todas('productos', 'ean,asin,iva_pct,stock_moloka,es_chase', 'id', activo=True)
     con_iva = sum(1 for p in productos if p.get('iva_pct') not in (None, ''))
     print(f"CATALOGO_PROPIO: filas={len(productos)} | con_iva={con_iva}", flush=True)
     if not productos:
@@ -238,6 +239,9 @@ def cruzar(cruce, params, pasada):
         # todo el IVA de ES saldria asumido y nadie lo notaria.
         raise Fallo('productos devolvió 0 filas con activo=true: el IVA de la ficha no se puede leer')
     M.poner_catalogo_propio(productos)
+    # (encargo E, 30-sep-2026) «En mi BD»: el FBA de la ultima foto de inventario_fba (en_mi_bd.py), no el
+    # `productos.stock_fba` congelado. No tumba el cruce: sin foto, o vieja, la columna y el log lo dicen.
+    M.poner_foto_fba(en_mi_bd.leer_foto_fba(sb, imprimir=lambda linea: print(linea, flush=True)))
 
     # ── 3 · Las puertas ───────────────────────────────────────────────────────────────
     # (B5) Con dos o mas fichas, la regla del viejo (su cotejo de titulo) elige una entre las de ES.

@@ -12,6 +12,7 @@ from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.formatting.rule import FormulaRule, CellIsRule
+import en_mi_bd   # (encargo E, 30-sep-2026) «En mi BD»: la MISMA funcion que el escaner de tokens y el escaner 2
 
 # ===== Constantes (identicas al escaner) =====
 IVA = {'ES': 0.21, 'IT': 0.22, 'FR': 0.20}
@@ -399,7 +400,7 @@ def _score_titulo(nombre_prov, titulo_amz):
     return len(a & b) if (a and b) else 0
 
 # ===== Motor Pro =====
-def escanear_pro(prov, marca, ruta_excel, paises, rank_maximo=30000, sup=None):
+def escanear_pro(prov, marca, ruta_excel, paises, rank_maximo=30000, sup=None, foto_fba=None):
     filas, problematicos = leer_proveedor(prov, marca, ruta_excel)
     csvs={p:leer_csv_visualizador(ruta) for p,ruta in paises.items()}
     dom_base='ES' if 'ES' in csvs else list(csvs)[0]   # el rank filtra por el pais base
@@ -453,7 +454,9 @@ def escanear_pro(prov, marca, ruta_excel, paises, rank_maximo=30000, sup=None):
         enbd=''
         if sup:
             s=sup.get(norm(f['core']))
-            if s: enbd=f"OK Alm:{s.get('stock_moloka',0)} FBA:{s.get('stock_fba',0)}"
+            # (encargo E) FBA de la ultima foto de inventario_fba (`foto_fba`, en_mi_bd.leer_foto_fba), no de
+            # productos.stock_fba, que esta congelado. Sin foto, la columna dice «FBA: sin foto».
+            if s: enbd=en_mi_bd.texto_en_mi_bd(s, foto_fba)
         registros.append({'nombre':f['nombre'],'ean':f['ean_in'],'asin':base['asin'],'marca':marca,
                           'pa':pa,'volumen':f['volumen'],'ambiguo':(nvar and nvar>0),'nvar':nvar,
                           'en_bd':enbd,'paises':paises_calc,

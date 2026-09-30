@@ -1421,7 +1421,7 @@ _rows_cat = []
 try:
     _d = 0
     while True:
-        res = sb.table('productos').select('ean,asin,iva_pct,stock_moloka,stock_fba').eq('activo',True).range(_d, _d+999).execute()
+        res = sb.table('productos').select('ean,asin,iva_pct,stock_moloka,es_chase').eq('activo',True).range(_d, _d+999).execute()
         if not res.data: break
         _rows_cat.extend(res.data)
         if len(res.data) < 1000: break
@@ -1431,6 +1431,11 @@ except Exception as ex:
 for p in _rows_cat:
     if p.get('ean'): sup[norm(p['ean'])] = p
 print(f"Supabase: {len(sup)} EANs propios")
+# 🔑 (encargo E, 30-sep-2026) El FBA de «En mi BD» sale de la ULTIMA foto de inventario_fba, sumada por
+#    ASIN, y no de `productos.stock_fba`, que esta congelado. La funcion es la MISMA para el Pro y el
+#    escaner 2: en_mi_bd.py. No aborta nunca: sin foto, o con una foto vieja, la columna lo dice.
+import en_mi_bd
+FOTO_FBA = en_mi_bd.leer_foto_fba(sb)
 
 def _sup(core):
     for v in [norm(core), core, '0'+core]:
@@ -1465,7 +1470,7 @@ def es_propio(core): return _sup(core) is not None
 def en_bd_txt(core):
     s = _sup(core)
     if not s: return ''
-    return f"OK Alm:{s.get('stock_moloka',0)} FBA:{s.get('stock_fba',0)}"
+    return en_mi_bd.texto_en_mi_bd(s, FOTO_FBA)
 
 # 🔴 LAS TRES CIFRAS AL LOG, SALGA O NO EL ABORTO. Sin ellas, "se leyo el
 # catalogo propio" no es comprobable en el log de un run pasado: el AVISO viejo

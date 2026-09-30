@@ -52,6 +52,7 @@ from contextlib import redirect_stdout
 
 import escaner2_desvios as DV
 import escaner2_huella_excel as HU
+import en_mi_bd
 import escaner2_motor as e2
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
@@ -377,8 +378,13 @@ eq('(B) …y una línea en blanco de más entre piezas no es tocar una pieza',
 # fila no echa la cuenta), enlace de OcioStock, «Coincide» NO, «AMBIGUO», caja INCOHERENTE, precio por lote
 # (con uno incoherente), las cuatro listas de Descartados, Ambiguos, Sin_rank y Chase_manual.
 # ═══════════════════════════════════════════════════════════════════════════════
-CATALOGO_PRUEBA = [{'ean': '8400000000017', 'iva_pct': 0.10, 'stock_moloka': 3, 'stock_fba': 5},
-                   {'ean': '8400000000024', 'iva_pct': None, 'stock_moloka': 0, 'stock_fba': 2}]
+# (encargo E, 30-sep-2026) «En mi BD» ya no sale de `stock_fba` (que aqui se deja a proposito DISTINTO de la foto)
+#   sino de la foto de inventario_fba: Alfa tiene 16 + 2 disponibles y 4 en camino; Beta no esta en la foto.
+CATALOGO_PRUEBA = [{'ean': '8400000000017', 'asin': 'B0PRUEBA01', 'iva_pct': 0.10, 'stock_moloka': 3, 'stock_fba': 5},
+                   {'ean': '8400000000024', 'asin': 'B0PRUEBA02', 'iva_pct': None, 'stock_moloka': 0, 'stock_fba': 2}]
+FOTO_PRUEBA = en_mi_bd.foto_de_filas(
+    [{'sku': 'SKU-A', 'asin': 'B0PRUEBA01', 'available': 16, 'fc_transfer': 2, 'inbound_shipped': 3, 'inbound_receiving': 1}],
+    '2026-09-30', hoy=__import__('datetime').date(2026, 9, 30))
 
 
 def _pais(dec, precio, rank, margen, fee=3.1, ref=15.0, iva=0.21, caidas=12):
@@ -442,6 +448,7 @@ def _guardar(wb):
 
 M = e2.cargar_motor()
 M.poner_catalogo_propio(CATALOGO_PRUEBA)
+M.poner_foto_fba(FOTO_PRUEBA)
 
 
 def libro_nuevo(datos, ruta=e2.RUTA_MOTOR):
@@ -456,6 +463,7 @@ def libro_viejo(datos, viejo='moloka_escaner_nube.py', con_desvios=True):
     _lin, sentencias = bloque_celda9(texto)
     M_v = e2.cargar_motor(os.path.join(AQUI, viejo))
     M_v.poner_catalogo_propio(CATALOGO_PRUEBA)
+    M_v.poner_foto_fba(FOTO_PRUEBA)   # (encargo E) el `en_bd_txt` del viejo lee `en_mi_bd` y `FOTO_FBA` como globales
     ns = e2.sacar_piezas(os.path.join(AQUI, viejo), ('pct_comision_celda', 'en_bd_txt'), (), base=M_v._ns)
     ns.update(copy.deepcopy(datos))
     with redirect_stdout(io.StringIO()):

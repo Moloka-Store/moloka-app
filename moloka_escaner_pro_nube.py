@@ -25,6 +25,7 @@ from supabase import create_client
 
 # Motor validado (mismo repo). No re-implementamos formulas: se reutilizan tal cual.
 from moloka_escaner_pro import (leer_proveedor, escanear_pro, escribir_excel, norm, PERFILES)
+import en_mi_bd
 
 def abortar(motivo):
     """Un run que NO escanea no es verde: sale en ROJO y con una linea grepable.
@@ -102,7 +103,7 @@ def leer_productos_propios():
     try:
         d = 0
         while True:
-            res = sb.table('productos').select('ean,stock_moloka,stock_fba').eq('activo', True).range(d, d+999).execute()
+            res = sb.table('productos').select('ean,asin,stock_moloka,es_chase').eq('activo', True).range(d, d+999).execute()
             if not res.data: break
             filas.extend(res.data)
             if len(res.data) < 1000: break
@@ -170,7 +171,9 @@ def main():
 
     # 1) Escaneo (motor validado) + productos propios para "En mi BD"
     sup = leer_productos_propios()
-    res = escanear_pro(prov, marca, excel_path, paises, rank_maximo=rank_max, sup=sup)
+    # (encargo E, 30-sep-2026) El FBA de «En mi BD», de la ultima foto de inventario_fba (no aborta nunca).
+    foto_fba = en_mi_bd.leer_foto_fba(sb)
+    res = escanear_pro(prov, marca, excel_path, paises, rank_maximo=rank_max, sup=sup, foto_fba=foto_fba)
     filas = res['filas']
 
     # 2) Memoria: estado de cada fila + agotados

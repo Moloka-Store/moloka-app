@@ -567,13 +567,6 @@ def origen_iva_fila(dom, iva, core):
 def es_propio(core): return _sup(core) is not None
 
 
-# ── ORIGEN: moloka_escaner_nube.py, líneas 1465-1468 · commit 2f9c06a · blob 21ec2016ef · md5 5d2f78f0a69058de55c90e6b393ad448 ──
-def en_bd_txt(core):
-    s = _sup(core)
-    if not s: return ''
-    return f"OK Alm:{s.get('stock_moloka',0)} FBA:{s.get('stock_fba',0)}"
-
-
 # ── ORIGEN: moloka_escaner_nube.py, líneas 1617-1617 · commit 2f9c06a · blob 21ec2016ef · md5 4b708d33bb7eda285751d1193994db38 ──
 # ── (anidada en el original: aquí va sin su sangría de 4 espacios, nada más)
 def keyrank(c): return c['r_90'] if c['r_90'] and c['r_90']>0 else 10**12
