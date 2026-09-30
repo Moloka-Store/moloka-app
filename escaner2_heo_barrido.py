@@ -13,8 +13,11 @@ QUE HACE, EN ORDEN:
      director (`_quiere`), copiado literalmente en escaner2_heredado_director.py (B7). Modo 'todas': ni
      la lee; el filtro es solo «disponible». Modo 'elegidas' (B4): ni la lee; el filtro es
      «disponible» y de una marca elegida (coincidencia EXACTA) o, con la casilla, en oferta;
-  3. baja el catalogo con `descargar_catalogo_heo(con_chase=True)`, la MISMA funcion que usa el
-     director, copiada literalmente de descargar_heo.py en escaner2_heredado_descarga.py (B7);
+  3. lee la tolerancia de la descarga en `disp_parametros` (SOLO LECTURA; la misma que la foto
+     horaria; sin ella, no se baja nada) y baja el catalogo con `descargar_catalogo_heo(con_chase=True)`,
+     la MISMA funcion que usa el director, copiada literalmente de descargar_heo.py en
+     escaner2_heredado_descarga.py (B7). Lo bajado puede separarse de lo que HEO declara hasta esa
+     tolerancia (30-sep-2026): el catalogo cambia mientras se pagina;
   4. construye la foto con `escaner2_motor.construir_foto` (reglas de EAN/chase/caja del
      escaner viejo, copiadas en escaner2_heredado_nube.py) y la guarda en `escaner2_foto`. 🔴 EL CUADRE EMPIEZA
      EN EL CATALOGO CRUDO (Fernando, 24-sep-2026): cada producto que devuelve HEO sale por una
@@ -182,6 +185,15 @@ def barrer(pasada):
         print(f">>> Modo TODAS LAS MARCAS: solo lo disponible, sin leer reglas_director | "
               f"tanda del Visualizador {tanda}", flush=True)
 
+    # 1 bis · (30-sep-2026) La tolerancia de la descarga, la de la base: la MISMA que usa la foto
+    #     horaria (escaner2_heo_disponibilidad.py). Sin ella no se baja nada: no hay valor por defecto.
+    par = (sb.table('disp_parametros').select('tolerancia_endpoint').eq('proveedor', e2.PROVEEDOR).execute().data
+           or [{}])
+    tolerancia = par[0].get('tolerancia_endpoint')
+    if not isinstance(tolerancia, int) or isinstance(tolerancia, bool) or tolerancia < 0:
+        raise RuntimeError(f'sin tolerancia: disp_parametros no da una tolerancia_endpoint válida para '
+                           f'{e2.PROVEEDOR} ({tolerancia!r}); no se baja nada')
+
     # 2 · El catalogo, con la MISMA funcion que el director (import tardio: lee HEO_USER al cargar).
     #     (B7) Su copia literal, escaner2_heredado_descarga.py: el escaner 2 ya no importa descargar_heo.py.
     from escaner2_heredado_descarga import descargar_catalogo_heo
@@ -199,8 +211,11 @@ def barrer(pasada):
     # 3 · La foto, y el cuadre desde el catalogo crudo. Sin uno de los dos numeros del log no se
     #     puede afirmar que cuadra: la pasada falla diciendo cual falta (NULL no es cero).
     foto, apartados, cuentas = e2.construir_foto(filas, chase, quiere, M, n_crudo=n_crudo, n_sin_gtin=n_sin_gtin,
-                                                 n_declarado=n_declarado, modo=MODO)
+                                                 n_declarado=n_declarado, modo=MODO, tolerancia=tolerancia)
     previas = cuentas['previas']
+    diferencia = (n_declarado - n_crudo) if (n_declarado is not None and n_crudo is not None) else None
+    print(f">>> CUADRE PREVIO [HEO]: HEO declara {n_declarado} y se bajaron {n_crudo} · diferencia {diferencia} "
+          f"(tolerancia {tolerancia})", flush=True)
     print(f">>> CUADRE PREVIO [HEO]: catálogo crudo {n_crudo} = "
           + ' + '.join(f'{p} {previas[p]}' for p in e2.PUERTAS_PREVIAS)
           + f" + foto {cuentas['n_foto']} → {'CUADRA' if cuentas['cuadra_previo'] else 'NO CUADRA'}", flush=True)

@@ -99,7 +99,7 @@ def fila_heo(f, precio=10.0, marca=None):
 print('\n(C) la foto con los 184 códigos reales (modo «todas»)')
 QUIERE = e2.filtro_todas()[0]
 FOTO, APART, CUENTAS = e2.construir_foto([fila_heo(f) for f in CODIGOS], [], QUIERE, M, n_crudo=184, n_sin_gtin=0,
-                                         n_declarado=184, modo='todas')
+                                         n_declarado=184, tolerancia=0, modo='todas')
 _motivos = Counter(a['motivo'] for a in APART)
 eq('(C) 🔴 «forma rara» baja de 184 a 133: los 121 de caja y los 12 de 8 cifras, ninguno de los 51',
    (_motivos['ean_forma_rara'], sorted({forma(a['ean_original']) for a in APART if a['motivo'] == 'ean_forma_rara'})),
@@ -126,7 +126,7 @@ _uno = CERO[0]
 _trece = dict(_uno, producto_heo='HEO13', ean_original=_uno['ean_original'][1:])
 for barato, precios in (('el de 14', (8.0, 10.0)), ('el de 13', (10.0, 8.0))):
     foto, apart, cu = e2.construir_foto([fila_heo(_uno, precios[0]), fila_heo(_trece, precios[1])], [], QUIERE, M,
-                                        n_crudo=2, n_sin_gtin=0, n_declarado=2, modo='todas')
+                                        n_crudo=2, n_sin_gtin=0, n_declarado=2, tolerancia=0, modo='todas')
     queda = _uno['ean_original'] if barato == 'el de 14' else _trece['ean_original']
     va = _trece['ean_original'] if barato == 'el de 14' else _uno['ean_original']
     eq('(D) %s más barato (precios redondos): se queda él, y el otro va a duplicado del proveedor' % barato,
@@ -152,7 +152,7 @@ eq('(E) 🔴 en el Excel, «Descartados» lleva 133 filas por forma rara (eran 1
 
 print('\n(F) el corpus del cotejo, con la marca no elegida')
 _foto_el, _ap_el, _ = e2.construir_foto([fila_heo(f) for f in CODIGOS], [], e2.filtro_elegidas(['Nadie'], False)[0], M,
-                                        n_crudo=184, n_sin_gtin=0, n_declarado=184, modo='elegidas')
+                                        n_crudo=184, n_sin_gtin=0, n_declarado=184, tolerancia=0, modo='elegidas')
 _nombres, _fuera = e2.corpus_cotejo(_foto_el, _ap_el, M)
 eq('(F) con ninguna marca elegida la foto queda vacía, y el corpus es el de «todas»: los mismos nombres',
    (len(_foto_el), sorted(_nombres)), (0, sorted(f['nombre'] for f in FOTO)))
@@ -179,7 +179,7 @@ def motor_con(sustituir, por):
 
 def forma_rara_con(mod):
     _f, ap, _c = mod.construir_foto([fila_heo(f) for f in CODIGOS], [], mod.filtro_todas()[0], M, n_crudo=184, n_sin_gtin=0,
-                                    n_declarado=184, modo='todas')
+                                    n_declarado=184, tolerancia=0, modo='todas')
     return sum(1 for a in ap if a['motivo'] == 'ean_forma_rara'), len(_f)
 
 

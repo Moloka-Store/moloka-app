@@ -132,7 +132,7 @@ CRUDO = len(FILAS) + len(CHASE) + SIN_GTIN            # 5 + 11 + 2 = 18
 
 print('\n(C) la foto en el modo de siempre (marcas)')
 QUIERE, _info = e2.cargar_filtro_director(REGLA)
-FOTO, APART, CUENTAS = e2.construir_foto(FILAS, CHASE, QUIERE, M, n_crudo=CRUDO, n_sin_gtin=SIN_GTIN, n_declarado=CRUDO)
+FOTO, APART, CUENTAS = e2.construir_foto(FILAS, CHASE, QUIERE, M, n_crudo=CRUDO, n_sin_gtin=SIN_GTIN, n_declarado=CRUDO, tolerancia=0)
 _pf = {f['producto_heo']: f for f in FOTO}
 eq('(C) en la foto: 3 de HEO + 6 cajas disponibles + 2 figuras sueltas que el regex tomó por chase',
    sorted(_pf), sorted(['HEO0001', 'HEO0004', 'HEO0005', 'FK87245', 'FK86264', 'FK88859', 'FK93894', 'FK86643',
@@ -178,7 +178,7 @@ print('\n(D) la foto en el modo TODAS LAS MARCAS')
 Q2, INFO2 = e2.filtro_todas()
 eq('(D) el filtro no trae marcas ni ofertas (no se ha leído ninguna regla)', (INFO2['marcas_reales'], INFO2['quiere_ofertas']),
    (None, None))
-FOTO2, APART2, C2 = e2.construir_foto(FILAS, CHASE, Q2, M, n_crudo=CRUDO, n_sin_gtin=SIN_GTIN, n_declarado=CRUDO)
+FOTO2, APART2, C2 = e2.construir_foto(FILAS, CHASE, Q2, M, n_crudo=CRUDO, n_sin_gtin=SIN_GTIN, n_declarado=CRUDO, tolerancia=0)
 eq('(D) 🔴 la marca de fuera entra (Hasbro), y lo agotado sigue fuera',
    ('HEO0002' in {f['producto_heo'] for f in FOTO2}, 'HEO0003' in {f['producto_heo'] for f in FOTO2}), (True, False))
 eq('(D) 🔴 CUADRA: crudo 18 = previas 6 (sin marca fuera) + foto 12',
