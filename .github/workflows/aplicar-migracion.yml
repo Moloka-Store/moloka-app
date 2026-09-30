@@ -44,6 +44,18 @@ name: Moloka - Aplicar MIGRACION
 #   descubrirlo a mitad. Si algun dia hace falta una asi, se para y se decide; lo que
 #   NO se hace es quitar el --single-transaction.
 #
+# 🔴 DESDE EL 30-sep-2026 NO HAY STAGING (encargo A: Fernando la jubila). La cadena
+#   de una migracion es: rama → PR → auditoria de Cowork → fusion → CI (Postgres
+#   propio en la v2) → aqui, en PRODUCCION, con Fernando delante: primero
+#   `modo=ensayo` (corre de verdad contra la base y se DESHACE), luego `aplicar` →
+#   verificacion SQL en produccion. Por eso el entorno por defecto es produccion
+#   y lo que protege por defecto es el modo ensayo.
+#   ⚠️ Los fixtures `_PRUEBA*` (cerrojo 6) solo se podian lanzar contra staging:
+#   desde hoy no tienen base donde correr. El cerrojo se queda: sigue siendo
+#   verdad que JAMAS van a produccion.
+#
+# HISTORIA (vale hasta el 30-sep-2026: habia staging). Se conserva como registro.
+#
 # 🔴 ANTES DE ENSAYAR EN STAGING, SE RESTAURA STAGING. Regla de la casa desde el
 #   9-ago-2026, y no es burocracia: es lo que hace que la escalera signifique algo.
 #   Se lanza `restaurar-staging.yml` y se espera a que salga en VERDE.
@@ -76,8 +88,9 @@ on:
       entorno:
         description: 'Base de datos destino'
         type: choice
-        options: [staging, produccion]
-        default: staging
+        # 🔴 30-sep-2026 (encargo A): staging se jubilo. Solo queda produccion; lo que no escribe es el modo ensayo (rollback).
+        options: [produccion]
+        default: produccion
       fichero:
         description: 'Nombre EXACTO del .sql dentro de migraciones/ (p.ej. 2026-08-07_demanda_asin_contador.sql). Tiene que existir en main.'
         type: string
@@ -244,17 +257,15 @@ jobs:
       - name: 5) Cerrojo - entorno vs base de datos
         env:
           ENTORNO: ${{ inputs.entorno }}
-          DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
           if [ -z "$DB_URL" ]; then
-            echo "::error::Falta el secret de la base para entorno='$ENTORNO' (SUPABASE_DB_URL o STAGING_DB_URL)."
+            echo "::error::Falta el secret de la base para entorno='$ENTORNO' (SUPABASE_DB_URL)."
             exit 1
           fi
-          # Mismo cerrojo que restaurar-staging.yml: la referencia de produccion es
+          # La referencia de produccion es
           # publica (esta en la URL del proyecto), no es una credencial.
           case "$ENTORNO:$DB_URL" in
-            staging:*ogfbjjdxcltzpygzuyla*)
-              echo "::error::Has pedido STAGING pero la URL es la de PRODUCCION. Me niego."; exit 1;;
             produccion:*ogfbjjdxcltzpygzuyla*)
               echo "Cerrojo OK: produccion confirmada.";;
             produccion:*)
@@ -431,7 +442,7 @@ jobs:
           FICHERO: ${{ inputs.fichero }}
           ENTORNO: ${{ inputs.entorno }}
           MODO: ${{ inputs.modo }}
-          DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
           RUTA="migraciones/$FICHERO"
           # lock_timeout corto: criterio DDL de la casa. Si Elena tiene la tabla
