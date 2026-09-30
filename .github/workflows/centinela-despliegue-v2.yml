@@ -126,8 +126,10 @@ jobs:
           else
             REF="main"
           fi
-          if ! LINEA=$(gh api "repos/$REPO/commits/$REF" --jq '[.sha, .commit.committer.date] | @tsv' 2>/dev/null); then
-            echo "::error::NO SE HA PODIDO COMPROBAR: no se pudo leer el commit '${REF:0:8}' de la v2 (¿el PAT no llega a ese repo, o el SHA no existe?)."
+          if ! LINEA=$(gh api "repos/$REPO/commits/$REF" --jq '[.sha, .commit.committer.date] | @tsv' 2>"$RUNNER_TEMP/gh_err.txt"); then
+            # Solo la PRIMERA linea del error de gh (p. ej. «gh: Not Found (HTTP 404)»): sin cuerpo, sin cabeceras.
+            MOTIVO=$(head -n1 "$RUNNER_TEMP/gh_err.txt" | cut -c1-160)
+            echo "::error::NO SE HA PODIDO COMPROBAR: no se pudo leer el commit '${REF:0:8}' de la v2 (¿el PAT no llega a ese repo, o el SHA no existe?). Respuesta: $MOTIVO"
             {
               echo "## 🟠 NO SE HA PODIDO COMPROBAR"
               echo ""
