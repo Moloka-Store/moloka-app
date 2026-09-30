@@ -414,6 +414,56 @@ ok, res, txt = correr(b, KeepaFalso())
 eq('(I) 🔴 sin poder leer el catálogo propio (el IVA de la ficha), la cuenta NO se hace a ciegas: valoración fallida',
    (b.llamadas('nov_guardar_cuenta'), cierre(b)['estado'], ok), ([], 'fallida', False))
 
+# (I) FK76102 (encargo T): con la caja bien puesta en la foto (expositor de 12), la base deja en precio_ahora el precio
+#     POR UNIDAD (la caja ÷ 12; nov_novedad.precio_ahora: «quien lea no divide nada»), y la cuenta lo compara con la ficha
+#     de UNA unidad («1 of 12»). Precios inventados: 60 el expositor → 5 la unidad; la ficha, a 10.
+VALS_EXPO = [{'novedad_id': 'nov-7', 'pais': p, 'asin': 'B0UNIDAD12', 'titulo': 'Funko Mystery Mini: Spongebob 25th Anniversary - 1 of 12',
+              'caidas_30d': 20, 'rank': 3000, 'rank_90d': 6000, 'precio_venta': 10.0, 'canal': 'BB-FBA', 'ref_pct': 15.0,
+              'fee_fba': 3.0, 'decision': 'Sin datos'} for p in ('ES', 'IT', 'FR', 'DE')]
+expo = dict(novedad(7, estado='lista', precio=60.0 / 12, ean='889698761024'), producto_prov='FK76102', es_caja=True, uds_caja=12,
+            nombre='SpongeBob SquarePants Mystery Minis Minifiguras 5 cm Expositor 25th Anniversary (12)')
+b = Base(novedades=[expo], valoraciones=VALS_EXPO)
+ok, res, txt = correr(b, KeepaFalso())
+c = b.llamadas('nov_guardar_cuenta')[0]
+es = next(p for p in c['p_paises'] if p['pais'] == 'ES')
+# A mano: 10/1,21 − 5 − (10 × 15 % + 3 % de eso) − 3,00 − 0,15 = 8,264463 − 5 − 1,545 − 3 − 0,15 = −1,430537.
+eq('(I) FK76102: la cuenta compara la UNIDAD de la caja (5 = 60 ÷ 12) con la ficha de una unidad, no el expositor entero',
+   (es['pa'], round(es['beneficio'], 4)), (5.0, -1.4305))
+
+
+# ── (L) LA FICHA TIENE QUE SER DE LA MARCA (encargo T, 30-sep-2026: FK93061 y el casco B08HH6GYRP) ─────────
+CASCO = ('Mezzo Retro Fronte Aperto Uomini e Le Donne Helmet DOT Certificato Motociclo di Harley Casco Cavaliere Militare '
+         'Aviator Visiera Casco Mezzo con Visiera Occhiali, 55-62CM')
+eq('(L) el título es de la marca si lleva «Funko» o «Pop», sin distinguir mayúsculas; el casco, no; sin título, tampoco',
+   [nv.ficha_de_la_marca(t) for t in ('Funko Mystery Mini: Spongebob 25th Anniversary - 1 of 12', 'NFL Figura POP! Vinyl : Eagles',
+                                      'FUNKO pocket', CASCO, '', None)],
+   [True, True, True, False, False, False])
+nov93061 = dict(novedad(1, 'nuevo', ean='889698930611'), producto_prov='FK93061',
+                nombre='NFL Figura POP! Vinyl : Eagles- Saquon Barkley 9 cm')
+b = Base(novedades=[nov93061])
+k = KeepaFalso(productos={('IT', '889698930611'): [prod('B08HH6GYRP', caidas=0, fee=None, titulo=CASCO)]})
+ok, res, txt = correr(b, k)
+g = b.llamadas('nov_guardar_keepa')[0]
+eq('(L) 🔴 FK93061: el casco de IT no se usa; los cuatro países quedan sin dato y NO sale «NO SE VENDE» (sale SIN HISTORIAL)',
+   (g['p_destino'], g['p_decision'], g['p_filas']), ('valorada', 'SIN HISTORIAL', []))
+eq('(L) …y el motivo dice qué ficha se apartó y por qué',
+   ('IT sin dato (ficha dudosa: Mezzo Retro Fronte Aperto' in g['p_motivo'], 'c_pocas_caidas' in g['p_motivo']), (True, False))
+eq('(L) …la respuesta de Keepa queda igual en la caché (la película no se toca; se aparta al usarla)',
+   [f['asin'] for x in b.tablas['nov_keepa'] for f in x['fichas']], ['B08HH6GYRP'])
+b = Base(novedades=[nov93061])
+k = KeepaFalso(productos={('ES', '889698930611'): [prod('B0FUNKO930', caidas=20, titulo='Funko Pop! NFL: Eagles - Saquon Barkley')],
+                          ('IT', '889698930611'): [prod('B08HH6GYRP', caidas=0, fee=None, titulo=CASCO)]})
+ok, res, txt = correr(b, k)
+g = b.llamadas('nov_guardar_keepa')[0]
+eq('(L) con la ficha buena en ES y el casco en IT: NO son «varias fichas»; sigue con la de ES, e IT sin dato',
+   (g['p_destino'], sorted((f['pais'], f['asin']) for f in g['p_filas']), 'IT sin dato (ficha dudosa' in g['p_motivo']),
+   ('espera_amazon', [('ES', 'B0FUNKO930')], True))
+b = Base(novedades=[novedad(1)], keepa_cache=cache('889698100002', 1, fichas=[nv.ficha_de_keepa(prod('B08HH6GYRP', caidas=30, titulo=CASCO))]))
+k = KeepaFalso(productos=PRODS)
+ok, res, txt = correr(b, k)
+eq('(L) también con el dato de la caché: la ficha dudosa no se usa, aunque venda (30 caídas)',
+   (b.llamadas('nov_guardar_keepa')[0]['p_decision'], len(k.de_producto())), ('SIN HISTORIAL', 0))
+
 
 # ── (J) LA CUENTA COINCIDE CON LA DEL ESCANEO PRO ────────────────────────────────────────
 def cotejar(fila):

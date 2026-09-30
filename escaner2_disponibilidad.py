@@ -47,11 +47,33 @@ base, ni reloj.
    `n_duplicados_disponibilidades`), comparando el registro entero: todo lo que trae se usa. Cuadre:
    crudo = sin GTIN + leidas + repetidos, y la tolerancia se mide sobre los distintos.
 """
+import re
+
 import escaner2_motor as e2
 
 # Las reglas del escaner 2 que apartan un producto de las novedades y de la reposicion. Los mismos
 # valores que admite el check de disp_lectura.regla (migracion 20260929070300 de la v2).
 REGLAS = ('chase_suelto', 'ean_forma_rara', 'caja_chase_sin_figura')
+
+
+# 🔴 EL EXPOSITOR ES UNA CAJA (encargo T, 30-sep-2026; PENDIENTE DEL VISTO BUENO DE FERNANDO por su efecto en
+#    Reponer). HEO da el precio del expositor ENTERO y dice cuantas unidades lleva al final del nombre:
+#    «SpongeBob … Mystery Minis … Expositor 25th Anniversary (12)», «… Blind Box Display (6)», «… Surtido (24)».
+#    `clasificar_chase` (heredada) solo reconoce la caja por el sufijo del EAN (C6, C12…) o por «5+1», asi que el
+#    expositor salia SUELTO con el precio de las 12 como precio por unidad, y la cuenta de novedades lo comparaba con
+#    una ficha de Amazon de UNA unidad (FK76102). Regla: el nombre dice expositor / display / surtido / assortment y
+#    TERMINA en «(N)» con N >= 2 → caja de N. Sin esa palabra, «(N)» NO basta: «Pack de Dados (7)», «Sleeves (100)» o
+#    «Set de 4 Pósteres (4)» son UNA cosa que se vende entera.
+#    Solo en esta foto: la del barrido (Escaneo PRO) conserva la regla heredada, y el banco dice donde difieren.
+_RE_EXPOSITOR = re.compile(r'\b(?:expositora?|exspositor|display|surtido|assortment|asst\.?)(?:\b|\s).*\(\s*(\d+)\s*\)\s*$',
+                           re.I)
+
+
+def unidades_expositor(nombre):
+    """Las unidades de un expositor de HEO segun su nombre (N de «… Expositor … (N)», N >= 2), o None. Puro."""
+    m = _RE_EXPOSITOR.search(str(nombre or ''))
+    n = int(m.group(1)) if m else 0
+    return n if n >= 2 else None
 
 
 class LecturaInvalida(ValueError):
@@ -146,6 +168,9 @@ def construir_disponibilidad(filas_heo, chase_heo, M, *, con_precio, con_disponi
         core = _core_valido(e2.core_de_heo(ean_in, M))
         regla = 'chase_suelto' if descartar else ('ean_forma_rara' if core is None else None)
         uds = (M.partir_ean(ean_in)[2] or M.UNIDADES_CASE_TCG) if es_caja6 else None
+        # 🔴 Encargo T: el expositor (lo que la regla heredada no ve como caja), caja de N.
+        if not es_caja6 and not descartar and unidades_expositor(nombre):
+            es_caja6, uds = True, unidades_expositor(nombre)
         filas.append(_fila(
             producto=_texto(f.get('productNumber')), disponible=f.get(perfil['col_estado']) == 'disponible',
             ean_in=ean_in, core=core, nombre=nombre, marca=f.get(perfil['col_marca']) or '',
