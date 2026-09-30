@@ -176,13 +176,15 @@ def seleccionar_novedades(pasada):
         return False, None
 
 
-def valorar_novedades(pasada):
+def valorar_novedades(pasada, seleccion=None):
     """VALORAR LAS NOVEDADES (encargo I, tramo 2): Keepa y la cuenta, en escaner2_novedades.py. 🔴 PASO APARTE: no
     lanza nunca (ni si el modulo no importa), la pasada y la seleccion ya estan aplicadas, y el fallo queda apuntado
     en nov_pasada.valoracion_*. Con el interruptor apagado, cero llamadas a Keepa. Devuelve True si salio bien."""
     try:
         import escaner2_novedades as nv
-        ok, _res = nv.valorar_pasada(sb, pasada, keepa_llave=os.environ.get('KEEPA_API_KEY'))
+        # (Encargo V) Las que entran a valorar (novedades − subidas fuera): más de 100 es una AVALANCHA.
+        ok, _res = nv.valorar_pasada(sb, pasada, keepa_llave=os.environ.get('KEEPA_API_KEY'),
+                                     novedades_pasada=nv.novedades_a_valorar(seleccion))
         if not ok:
             print(f"NOVEDADES_NO_VALORADAS: la pasada {pasada} sigue aplicada y sus novedades seleccionadas; la valoración "
                   f"no ha salido bien y queda apuntada en nov_pasada (valoracion_estado y valoracion_motivo).", flush=True)
@@ -293,7 +295,7 @@ def main():
     #     venga despues se ejecuta aunque falle. Si falla, el run acaba en rojo, pero AL FINAL.
     novedades_ok, seleccion = seleccionar_novedades(pasada)
     # 8 · VALORAR (encargo I): otro paso aparte, detrás; tampoco lanza. Si falla, rojo AL FINAL.
-    valoracion_ok = valorar_novedades(pasada)
+    valoracion_ok = valorar_novedades(pasada, seleccion)
     # 🔴 EL VIGÍA DE LA MARCA (encargo I, paso 0 d): lo cuenta la base en cada selección.
     marca_parecida = (seleccion or {}).get('marca_parecida') or 0
 

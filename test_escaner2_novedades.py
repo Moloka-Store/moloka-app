@@ -14,18 +14,30 @@ QUE PRUEBA:
       que no cabe espera Keepa; y si una respuesta la cruza, se dice y el paso sale en rojo.
   (D) EL ORDEN DE LA COLA: con saldo para cinco peticiones, las cuatro de la primera (una bajada) y la primera de
       la segunda; y los paises en su orden (ES, IT, FR, DE).
-  (E) LA CACHE: 72 h para lo nuevo y lo que vuelve, 7 dias para un cambio de precio (dentro, 0 tokens; fuera, se
-      pregunta); y el ESCANEO PRO de 14 dias (dentro, 0 tokens y «escaneo_pro»; fuera, se pregunta).
-  (F) LOS NUESTROS NO GASTAN: no estan en la cola (la vista de la base), y sin cola no se toca Keepa.
+  (E) LA CACHE y el ESCANEO PRO, con UNA ventana de 15 dias (encargo V): dentro, 0 tokens; fuera, se pregunta. Y
+      de lo guardado solo las VENTAS: ni la tarifa ni la comision.
+  (F) LAS NUESTRAS VAN POR EL MISMO CAMINO (encargo V), con SU ficha: de la cache y del Escaneo PRO solo sus ASIN, a
+      Keepa se le pregunta por ASIN, y la ficha no pasa por la guarda de la marca.
   (G) KEEPA CAIDO: la pasada no se toca; lo que faltaba espera Keepa, el fallo se apunta y el paso sale en rojo;
       la llave no sale en ningun mensaje.
-  (H) LAS PUERTAS DEL ESCANEO PRO con el dato de Keepa: se vende -> espera Amazon (con sus filas de ventas y la
-      tarifa de Keepa de respaldo, o NULL); no se vende -> NO SE VENDE; sin ficha -> SIN HISTORIAL; varias fichas
+  (H) LAS PUERTAS DEL ESCANEO PRO con el dato de Keepa: se vende -> espera Amazon (con sus filas de ventas, SIN la
+      tarifa ni la comision de Keepa: encargo V); no se vende -> NO SE VENDE; sin ficha -> SIN HISTORIAL; varias fichas
       sin poder elegir -> Sin datos. Y EL CUADRE del flujo que se manda a la base.
   (I) LA CUENTA de una novedad «lista», al centimo, con la formula del Escaneo PRO (numeros escritos a mano).
   (J) LA CUENTA COINCIDE CON LA DEL ESCANEO PRO: filas fabricadas (siempre) y, si NOV_CASOS_REALES apunta a un JSON
       con filas REALES de escaner2_resultado_pais (el CI de la v2, que es privado, lo hace), al menos 5 al centimo.
-  (K) EL MODULO, POR ESTRUCTURA: que tablas lee, que escribe (solo inserta en nov_keepa) y a que funciones llama.
+  (K) EL MODULO, POR ESTRUCTURA: que tablas lee, que escribe (solo inserta en nov_keepa y nov_excel) y a que funciones
+      llama; y ni escaner_resultados ni el buzon `informes`.
+  (X) EL EXCEL (encargo V): con un COMPRAR entre lo valorado en la ejecucion, el Excel del escaner nuevo (las hojas del
+      viejo + «Novedades», con el origen de cada pais) al bucket escaner2 y su fila en nov_excel; sin COMPRAR, nada; si
+      no se puede subir, rojo. Y LAS CUENTAS SUELTAS (y 40): la cuenta, el Excel y el Telegram, sin las ventas de
+      Keepa, sin tocar nov_pasada, y nada con el interruptor apagado.
+  (R) EL RESPALDO DE KEEPA (añadido 2): los paises en que Amazon fallo se piden a Keepa en ese momento (por ASIN, con
+      buybox, 3 tokens; nunca la cache); la comision sobre el precio de Amazon; el ESCALON DE 20 €: precio base de Keepa
+      y precio de venta del mismo lado, o «pendiente: cambia de escalon»; sin precio base, cruce.
+  (T) EL TELEGRAM (añadido 3), con el formato del viejo: con COMPRAR, sin COMPRAR (no se manda), avalancha, incompleto;
+      sin claves no manda y no falla; si Telegram falla, la corrida sigue; la llave no sale.
+  (A) LA AVALANCHA: mas de 100 novedades en la pasada → el Excel se abre con el aviso arriba, y el Telegram lo dice.
 """
 import ast
 import json
@@ -61,6 +73,7 @@ def iso(d):
 class _Q:
     def __init__(self, base, tabla):
         self.base, self.tabla, self.filtros, self.orden, self.desde, self.hasta, self.tope, self.fila = base, tabla, [], None, None, None, None, None
+        self.accion = 'select'
 
     def select(self, *_a, **_k):
         self.accion = 'select'
@@ -125,11 +138,11 @@ class _Q:
 class Base:
     def __init__(self, valorar=True, novedades=(), keepa_cache=(), cruces=(), fotos=(), res_ean=(), res_pais=(),
                  valoraciones=(), productos=None, fallan=()):
-        self.ops, self.rpcs, self.fallan = [], [], set(fallan)
+        self.ops, self.rpcs, self.fallan, self.subidos = [], [], set(fallan), []
         self.reloj = lambda: AHORA
         self.tablas = {
             'nov_parametros': [{'proveedor': 'HEO', 'marca': 'Funko', 'valorar': valorar, 'keepa_reserva': 20,
-                                'keepa_tope_peticion': 3, 'keepa_horas_nuevo': 72, 'keepa_dias_precio': 7, 'escaneo_pro_dias': 14}],
+                                'keepa_tope_peticion': 3, 'keepa_horas_nuevo': 360, 'keepa_dias_precio': 15, 'escaneo_pro_dias': 15}],
             'escaner2_parametros': [{'proveedor': 'HEO', 'umbral_caidas_30d': 8, 'paises_filtro': ['ES', 'IT', 'FR', 'DE'],
                                      'paises_calculo': ['ES', 'IT', 'FR', 'DE']}],
             'nov_novedad': [dict(n) for n in novedades],
@@ -145,14 +158,34 @@ class Base:
 
     def leer(self, tabla):
         if tabla == 'nov_cola':
-            # 🔑 Como la vista de la base: pendientes y esperando Keepa, NUNCA las nuestras, en su orden.
-            vivas = [n for n in self.tablas['nov_novedad'] if n['estado'] in ('pendiente', 'espera_keepa') and not n['nuestro']]
+            # 🔑 Como la vista de la base (encargo V): pendientes y esperando Keepa, las nuestras también si traen sus fichas.
+            vivas = [n for n in self.tablas['nov_novedad'] if n['estado'] in ('pendiente', 'espera_keepa')
+                     and (not n['nuestro'] or n.get('asins_nuestros'))]
             vivas.sort(key=lambda n: (n['prioridad'], n.get('cambio_pct') if n['prioridad'] == 1 else 0, n['creada_en'], n['id']))
             return [dict(n, puesto=i + 1) for i, n in enumerate(vivas)]
         return self.tablas.get(tabla, [])
 
     def table(self, nombre):
         return _Q(self, nombre)
+
+    @property
+    def storage(self):
+        base = self
+
+        class _Cubo:
+            def __init__(self, cubo):
+                self.cubo = cubo
+
+            def upload(self, ruta, contenido, opciones):
+                if 'storage' in base.fallan:
+                    raise RuntimeError('StorageException de mentira: 429 too_many_connections')
+                base.subidos.append((self.cubo, ruta, contenido, opciones))
+                return {'Key': ruta}
+
+        class _Storage:
+            def from_(self, cubo):
+                return _Cubo(cubo)
+        return _Storage()
 
     def rpc(self, nombre, params):
         import types
@@ -165,6 +198,11 @@ class Base:
                     raise RuntimeError('APIError de mentira en %s' % nombre)
                 if nombre == 'nov_guardar_keepa':
                     n = next(x for x in base.tablas['nov_novedad'] if x['id'] == params['p_novedad'])
+                    # 🔴 Como la base (encargo V): la tarifa y la comisión de Keepa ya no entran; y una nuestra, con SU ficha.
+                    if any('fee_fba' in f or 'ref_pct' in f for f in params['p_filas'] or []):
+                        raise RuntimeError('KEEPA_SIN_TARIFA de mentira')
+                    if n['nuestro'] and any(f['asin'] not in n['asins_nuestros'] for f in params['p_filas'] or []):
+                        raise RuntimeError('FICHA_NO_NUESTRA de mentira')
                     n['estado'] = params['p_destino']
                     for f in params['p_filas'] or []:
                         base.tablas['nov_valoracion'].append(dict(f, novedad_id=n['id']))
@@ -180,11 +218,14 @@ class Base:
         return [p for n, p in self.rpcs if n == nombre]
 
 
-def novedad(i, motivo='baja_precio', ean='889698100002', nuestro=False, estado='pendiente', precio=8.0, creada=None, es_chase=False):
+def novedad(i, motivo='baja_precio', ean='889698100002', nuestro=False, estado='pendiente', precio=8.0, creada=None, es_chase=False,
+            asins=None):
     pri = 1 if motivo == 'baja_precio' else 3 if motivo == 'sube_precio' else 2
     return {'id': 'nov-%d' % i, 'proveedor': 'HEO', 'producto_prov': 'FK%05d' % i, 'ean_norm': ean, 'nombre': 'Funko Pop! Figura %d' % i,
             'motivo': motivo, 'prioridad': pri, 'cambio_pct': -20.0 + i if pri == 1 else None, 'precio_ahora': precio,
-            'es_chase': es_chase, 'nuestro': nuestro, 'estado': estado, 'creada_en': iso(creada or AHORA - timedelta(minutes=10 - i))}
+            'precio_antes': precio * 1.25 if pri == 1 else None,
+            'es_chase': es_chase, 'nuestro': nuestro, 'asins_nuestros': asins, 'estado': estado,
+            'creada_en': iso(creada or AHORA - timedelta(minutes=10 - i))}
 
 
 def prod(asin, caidas=12, fee=350, ref=15.0, rank=5000, rank90=6000, titulo='Funko Pop! Figura'):
@@ -203,7 +244,8 @@ class KeepaFalso:
         self.llamadas = []
 
     def __call__(self, url, params, timeout):
-        self.llamadas.append((url.rsplit('/', 1)[-1], DOM.get(params.get('domain')), params.get('code')))
+        self.llamadas.append((url.rsplit('/', 1)[-1], DOM.get(params.get('domain')),
+                              params.get('code') or (('asin:' + params['asin'] + ('+bb' if params.get('buybox') else '')) if params.get('asin') else None)))
         if params.get('key') != LLAVE:
             return 401, {'error': {'message': 'bad key'}}
         if self.caido:
@@ -212,9 +254,14 @@ class KeepaFalso:
             return 200, {'tokensLeft': self.saldo, 'refillRate': 5}
         pais = DOM[params['domain']]
         ps = []
-        for code in params['code'].split(','):
-            ps += self.productos.get((pais, code), self.productos.get((None, code), []))
-        coste = len(ps) + self.coste_extra
+        if params.get('asin'):
+            # Por ASIN (las nuestras): el producto de ese ASIN, venga de donde venga en la lista de mentira.
+            for a in params['asin'].split(','):
+                ps += [x for (pp, _c), v in self.productos.items() if pp in (pais, None) for x in v if x['asin'] == a][:1]
+        else:
+            for code in params['code'].split(','):
+                ps += self.productos.get((pais, code), self.productos.get((None, code), []))
+        coste = len(ps) * (3 if params.get('buybox') else 1) + self.coste_extra
         self.saldo -= coste
         return 200, {'products': ps, 'tokensLeft': self.saldo, 'tokensConsumed': coste}
 
@@ -222,10 +269,21 @@ class KeepaFalso:
         return [(d, c) for q, d, c in self.llamadas if q == 'product']
 
 
-def correr(base, keepa=None, llave=LLAVE):
+TELEGRAM = []
+
+
+def post_falso(url, data, timeout):
+    import types
+    TELEGRAM.append((url, data))
+    return types.SimpleNamespace(status_code=200)
+
+
+def correr(base, keepa=None, llave=LLAVE, novedades_pasada=None, env=None):
     salida = []
     ok, res = nv.valorar_pasada(base, 'PASADA-1', keepa_llave=llave, http=keepa or KeepaFalso(), dormir=lambda s: None,
-                                ahora=lambda: AHORA, imprimir=lambda *a, **k: salida.append(' '.join(str(x) for x in a)))
+                                ahora=lambda: AHORA, imprimir=lambda *a, **k: salida.append(' '.join(str(x) for x in a)),
+                                run_id='36700000001', novedades_pasada=novedades_pasada, env=env if env is not None else {},
+                                post=post_falso)
     return ok, res, '\n'.join(salida)
 
 
@@ -301,23 +359,23 @@ def cache(ean, horas, fichas=None):
              'consultada_en': iso(AHORA - timedelta(hours=horas))} for p in nv.PAISES]
 
 
-b = Base(novedades=[novedad(2, 'nuevo', ean='889698100019')], keepa_cache=cache('889698100019', 48))
+b = Base(novedades=[novedad(2, 'nuevo', ean='889698100019')], keepa_cache=cache('889698100019', 14 * 24))
 k = KeepaFalso(productos=PRODS)
 ok, res, txt = correr(b, k)
-eq('(E) «nuevo» con Keepa de hace 48 h (< 72 h): 0 llamadas a Keepa, y el dato es de la caché',
+eq('(E) «nuevo» con Keepa de hace 14 días (< 15, la ventana única): 0 llamadas a Keepa, y el dato es de la caché',
    (k.llamadas, cierre(b)['v_keepa_cache'], {v['ventas_origen'] for v in b.tablas['nov_valoracion']}), ([], 1, {'keepa_cache'}))
-b = Base(novedades=[novedad(2, 'nuevo', ean='889698100019')], keepa_cache=cache('889698100019', 80))
+b = Base(novedades=[novedad(2, 'nuevo', ean='889698100019')], keepa_cache=cache('889698100019', 16 * 24))
 k = KeepaFalso(productos=PRODS)
 ok, res, txt = correr(b, k)
-eq('(E) «nuevo» con Keepa de hace 80 h (> 72 h): se pregunta a Keepa (4 países)', len(k.de_producto()), 4)
-b = Base(novedades=[novedad(1)], keepa_cache=cache('889698100002', 5 * 24))
+eq('(E) «nuevo» con Keepa de hace 16 días (> 15): se pregunta a Keepa (4 países)', len(k.de_producto()), 4)
+b = Base(novedades=[novedad(1)], keepa_cache=cache('889698100002', 14 * 24))
 k = KeepaFalso(productos=PRODS)
 ok, res, txt = correr(b, k)
-eq('(E) una BAJADA con Keepa de hace 5 días (< 7 días): 0 llamadas', (k.llamadas, cierre(b)['v_keepa_cache']), ([], 1))
-b = Base(novedades=[novedad(1)], keepa_cache=cache('889698100002', 8 * 24))
+eq('(E) una BAJADA con Keepa de hace 14 días: la MISMA ventana, 0 llamadas', (k.llamadas, cierre(b)['v_keepa_cache']), ([], 1))
+b = Base(novedades=[novedad(1)], keepa_cache=cache('889698100002', 16 * 24))
 k = KeepaFalso(productos=PRODS)
 ok, res, txt = correr(b, k)
-eq('(E) una BAJADA con Keepa de hace 8 días (> 7 días): se pregunta', len(k.de_producto()), 4)
+eq('(E) una BAJADA con Keepa de hace 16 días (> 15): se pregunta', len(k.de_producto()), 4)
 
 
 def escaneo_pro(dias, puerta='d', paises_usados=('ES', 'IT', 'FR', 'DE')):
@@ -333,24 +391,48 @@ def escaneo_pro(dias, puerta='d', paises_usados=('ES', 'IT', 'FR', 'DE')):
 b = Base(novedades=[novedad(1)], **escaneo_pro(10))
 k = KeepaFalso(productos=PRODS)
 ok, res, txt = correr(b, k)
-eq('(E) una bajada de un Funko con Escaneo PRO de hace 10 días (< 14): 0 llamadas a Keepa, dato «escaneo_pro»',
-   (k.llamadas, cierre(b)['v_escaneo_pro'], sorted((v['pais'], v['ventas_origen'], v['fee_fba']) for v in b.tablas['nov_valoracion'])),
-   ([], 1, [('DE', 'escaneo_pro', 3.51), ('ES', 'escaneo_pro', 3.51)]))
+eq('(E) una bajada de un Funko con Escaneo PRO de hace 10 días (< 15): 0 llamadas a Keepa, dato «escaneo_pro», y SIN su tarifa ni su comisión',
+   (k.llamadas, cierre(b)['v_escaneo_pro'], sorted((v['pais'], v['ventas_origen'], v['caidas_30d'], 'fee_fba' in v or 'ref_pct' in v)
+                                                   for v in b.tablas['nov_valoracion'])),
+   ([], 1, [('DE', 'escaneo_pro', 2, False), ('ES', 'escaneo_pro', 11, False)]))
 eq('(E) …se vende (11 caídas en ES > 8): a Amazon, con la ficha del Escaneo PRO', [n['estado'] for n in b.tablas['nov_novedad']], ['espera_amazon'])
-b = Base(novedades=[novedad(1)], **escaneo_pro(15))
+b = Base(novedades=[novedad(1)], **escaneo_pro(16))
 k = KeepaFalso(productos=PRODS)
 ok, res, txt = correr(b, k)
-eq('(E) con Escaneo PRO de hace 15 días (> 14): se pregunta a Keepa', len(k.de_producto()), 4)
+eq('(E) con Escaneo PRO de hace 16 días (> 15): se pregunta a Keepa', len(k.de_producto()), 4)
 b = Base(novedades=[novedad(1)], **escaneo_pro(10, paises_usados=('ES', 'DE')))
 k = KeepaFalso(productos=PRODS)
 ok, res, txt = correr(b, k)
 eq('(E) un Escaneo PRO sin los cuatro países no vale como dato entero: se pregunta', len(k.de_producto()), 4)
 
-# ── (F) LOS NUESTROS NO GASTAN ──────────────────────────────────────────────────────────
+# ── (F) LAS NUESTRAS, POR EL MISMO CAMINO, CON SU FICHA (encargo V) ─────────────────────
 b = Base(novedades=[novedad(1, nuestro=True)])
 k = KeepaFalso(productos=PRODS)
 ok, res, txt = correr(b, k)
-eq('(F) una novedad nuestra: no está en la cola, y Keepa ni se toca (ni el saldo)', (k.llamadas, cierre(b)['v_en_cola'], ok), ([], 0, True))
+eq('(F) una nuestra de ANTES (sin sus fichas): no está en la cola, y Keepa ni se toca', (k.llamadas, cierre(b)['v_en_cola'], ok), ([], 0, True))
+PRODS_N = {(None, '889698100002'): [prod('B0OTRAFICH', caidas=30), prod('B0NUESTRO1', caidas=20, titulo='Figura de vinilo Harry Potter')]}
+b = Base(novedades=[novedad(1, nuestro=True, asins=['B0NUESTRO1'])])
+k = KeepaFalso(productos=PRODS_N)
+ok, res, txt = correr(b, k)
+g = b.llamadas('nov_guardar_keepa')[0]
+eq('(F) 🔑 una nuestra con su ficha: a Keepa por SU ASIN (no por el EAN), en los cuatro países',
+   k.de_producto(), [('ES', 'asin:B0NUESTRO1'), ('IT', 'asin:B0NUESTRO1'), ('FR', 'asin:B0NUESTRO1'), ('DE', 'asin:B0NUESTRO1')])
+eq('(F) …se vende con SU ficha (aunque el título no diga «Funko»: la ficha es la nuestra), y va a Amazon',
+   (g['p_destino'], sorted({f['asin'] for f in g['p_filas']}), 'ficha dudosa' in g['p_motivo'], ok), ('espera_amazon', ['B0NUESTRO1'], False, True))
+eq('(F) …y la caché apunta que se preguntó por ASIN', sorted({tuple(x['codigos']) for x in b.tablas['nov_keepa']}), [('B0NUESTRO1',)])
+b = Base(novedades=[novedad(1, nuestro=True, asins=['B0NUESTRO1'])],
+         keepa_cache=cache('889698100002', 24, fichas=[nv.ficha_de_keepa(prod('B0OTRAFICH', caidas=30))]))
+k = KeepaFalso(productos=PRODS_N)
+ok, res, txt = correr(b, k)
+eq('(F) 🔴 la caché de su EAN con OTRA ficha no le vale: se pregunta por su ASIN (nunca el ASIN adivinado por EAN)',
+   (len(k.de_producto()), sorted({f['asin'] for f in b.llamadas('nov_guardar_keepa')[0]['p_filas']})), (4, ['B0NUESTRO1']))
+b = Base(novedades=[novedad(1, nuestro=True, asins=['B0NUESTRO1'])],
+         keepa_cache=cache('889698100002', 24, fichas=[nv.ficha_de_keepa(prod('B0OTRAFICH', caidas=30)),
+                                                     nv.ficha_de_keepa(prod('B0NUESTRO1', caidas=12))]))
+k = KeepaFalso(productos=PRODS_N)
+ok, res, txt = correr(b, k)
+eq('(F) …y si la caché trae SU ficha (entre otras), vale, solo esa, y 0 tokens',
+   (k.llamadas, sorted({f['asin'] for f in b.llamadas('nov_guardar_keepa')[0]['p_filas']}), cierre(b)['v_keepa_cache']), ([], ['B0NUESTRO1'], 1))
 
 # ── (G) KEEPA CAÍDO ─────────────────────────────────────────────────────────────────────
 b = Base(novedades=[novedad(1), novedad(2, 'nuevo', ean='889698100019')])
@@ -381,10 +463,10 @@ dest = {p['p_novedad']: (p['p_destino'], p['p_decision']) for p in b.llamadas('n
 eq('(H) se vende → espera Amazon; no se vende → NO SE VENDE; varias fichas sin ninguna en ES → Sin datos; sin ficha → SIN HISTORIAL',
    dest, {'nov-1': ('espera_amazon', None), 'nov-2': ('valorada', 'NO SE VENDE'), 'nov-3': ('valorada', 'Sin datos'),
           'nov-4': ('valorada', 'SIN HISTORIAL')})
-filas1 = sorted((v['pais'], v['asin'], v['caidas_30d'], v['vende_aqui'], v['fee_fba'], v['ventas_origen'])
+filas1 = sorted((v['pais'], v['asin'], v['caidas_30d'], v['vende_aqui'], v.get('fee_fba'), v['ventas_origen'])
                 for v in b.tablas['nov_valoracion'] if v['novedad_id'] == 'nov-1')
-eq('(H) la que va a Amazon lleva el dato de ventas de cada país donde está su ficha, con la tarifa de Keepa (FR sin ella: NULL, nunca 0)',
-   filas1, [('ES', 'B0SEVENDE1', 20, True, 3.5, 'keepa'), ('FR', 'B0SEVENDE1', 4, False, None, 'keepa')])
+eq('(H) la que va a Amazon lleva el dato de ventas de cada país donde está su ficha, SIN la tarifa de Keepa (encargo V)',
+   filas1, [('ES', 'B0SEVENDE1', 20, True, None, 'keepa'), ('FR', 'B0SEVENDE1', 4, False, None, 'keepa')])
 eq('(H) las «varias fichas» y «sin historial» no dejan filas', [v['novedad_id'] for v in b.tablas['nov_valoracion'] if v['novedad_id'] in ('nov-3', 'nov-4')], [])
 d = cierre(b)
 eq('(H) el flujo que va a la base: 4 en la cola, 4 con Keepa nuevo; 1 no se vende, 1 sin historial, 1 varias fichas, 1 a Amazon; y CUADRA',
@@ -438,6 +520,10 @@ eq('(L) el título es de la marca si lleva «Funko» o «Pop», sin distinguir m
    [nv.ficha_de_la_marca(t) for t in ('Funko Mystery Mini: Spongebob 25th Anniversary - 1 of 12', 'NFL Figura POP! Vinyl : Eagles',
                                       'FUNKO pocket', CASCO, '', None)],
    [True, True, True, False, False, False])
+eq('(L) 🔑 (encargo V) como PALABRA entera: «Popcorn», «Lollipop» o «Funkology» NO; «Pop!», «POP-Vinyl», «Funko\'s» y «(Pop)» sí',
+   [nv.ficha_de_la_marca(t) for t in ('Popcorn machine 1200W', 'Lollipop chupa chups x50', 'Funkology Vol. 2',
+                                      'Pop! Heroes', 'POP-Vinyl Batman', "Funko's Pocket Pop", 'Figura (Pop) Marvel')],
+   [False, False, False, True, True, True, True])
 nov93061 = dict(novedad(1, 'nuevo', ean='889698930611'), producto_prov='FK93061',
                 nombre='NFL Figura POP! Vinyl : Eagles- Saquon Barkley 9 cm')
 b = Base(novedades=[nov93061])
@@ -509,6 +595,258 @@ else:
     print('-- (J) casos reales: no en este entorno (el repo es público y el coste de HEO no se publica); los coteja el CI de la '
           'v2 (privado) con NOV_CASOS_REALES')
 
+# ── (X) EL EXCEL DE NOVEDADES Y LAS CUENTAS SUELTAS (encargo V) ────────────────────────────
+import io as _io
+from openpyxl import load_workbook
+
+VALS_COMPRA = [
+    {'novedad_id': 'nov-9', 'pais': 'ES', 'asin': 'B0LISTA001', 'titulo': 'Funko Pop! Figura', 'caidas_30d': 12, 'rank': 5000,
+     'rank_90d': 6000, 'precio_venta': 30.0, 'canal': 'BB-FBA', 'ref_pct': 15.0, 'fee_fba': 3.6, 'decision': 'Sin datos',
+     'amazon_estado': 'dato', 'error_amazon': None},
+    {'novedad_id': 'nov-9', 'pais': 'DE', 'asin': 'B0LISTA001', 'titulo': 'Funko Pop! Figur', 'caidas_30d': 9, 'rank': 7000,
+     'rank_90d': 8000, 'precio_venta': 31.0, 'canal': 'BB-FBM', 'ref_pct': None, 'fee_fba': None, 'decision': 'Sin datos',
+     'amazon_estado': 'no_dado', 'error_amazon': 'tarifas: ServerError · InternalError'},
+    {'novedad_id': 'nov-9', 'pais': 'FR', 'asin': 'B0LISTA001', 'titulo': 'Funko Pop! Figurine', 'caidas_30d': 2, 'rank': 90000,
+     'rank_90d': 90000, 'precio_venta': None, 'canal': None, 'ref_pct': None, 'fee_fba': None, 'decision': 'Sin datos',
+     'amazon_estado': 'no_se_vende', 'error_amazon': 'ofertas: HTTP 404 · NotFound: Item not found'}]
+b = Base(novedades=[novedad(9, estado='lista')], valoraciones=VALS_COMPRA)
+ok, res, txt = correr(b, KeepaFalso())
+c = b.llamadas('nov_guardar_cuenta')[0]
+eq('(X) la novedad sale COMPRAR en ES (30 € de Amazon, su tarifa y su comisión); DE sin la tarifa y FR «no se vende aquí»: Sin datos',
+   (c['p_decision'], c['p_mejor_pais'], sorted((p['pais'], p['decision']) for p in c['p_paises'])),
+   ('COMPRAR', 'ES', [('DE', 'Sin datos'), ('ES', 'COMPRAR'), ('FR', 'Sin datos')]))
+eq('(X) 🔑 con un COMPRAR: UN Excel al bucket escaner2, en heo/novedades/<día>/, con el nombre de la hora de Madrid (20:05)',
+   [(cubo, ruta, op['content-type']) for cubo, ruta, _c, op in b.subidos],
+   [('escaner2', 'heo/novedades/2026-09-29/Novedades_HEO_Funko_2026-09-29_2005.xlsx', nv.XLSX)])
+fila_x = b.tablas['nov_excel'][0]
+eq('(X) …y su fila en nov_excel (lo que lee la biblioteca de la v2): de la pasada, con el run, 1 valorada, 1 COMPRAR',
+   (fila_x['origen'], fila_x['pasada_id'], fila_x['run_id'], fila_x['ruta_excel'], fila_x['n_novedades'], fila_x['n_comprar'],
+    fila_x['n_valorar'], fila_x['novedades'], ok),
+   ('pasada', 'PASADA-1', 36700000001, 'heo/novedades/2026-09-29/Novedades_HEO_Funko_2026-09-29_2005.xlsx', 1, 1, 0, ['nov-9'], True))
+wb = load_workbook(_io.BytesIO(b.subidos[0][2]))
+analisis = [list(r) for r in wb['Análisis'].iter_rows(values_only=True)]
+eq('(X) es el Excel del escáner nuevo: las hojas del viejo delante (Análisis con la columna «Ventas» del 28-sep) y «Novedades» al final',
+   (wb.sheetnames[0], wb.sheetnames[-1], 'Ventas' in analisis[0], any('889698100002' in str(x) for r in analisis[1:] for x in r)),
+   ('Análisis', 'Novedades', True, True))
+hoja = [list(r) for r in wb['Novedades'].iter_rows(values_only=True)]
+cab = hoja[0]
+eq('(X) la hoja «Novedades» dice el origen de cada uno de los 4 países (sin cifra inventada donde no la hay)',
+   {p: hoja[1][cab.index('Amazon ' + p)] for p in nv.PAISES},
+   {'ES': 'Amazon', 'IT': 'no está en Amazon IT', 'FR': 'no está en Amazon FR',
+    'DE': 'Amazon no ha dado la tarifa (tarifas: ServerError · InternalError)'})
+eq('(X) …con el motivo de la novedad y sus dos precios por unidad', (hoja[1][cab.index('Novedad')], hoja[1][cab.index('Precio ahora (ud)')],
+                                                                    hoja[1][cab.index('Decisión')]), ('baja_precio', 8.0, 'COMPRAR'))
+
+b = Base(novedades=[novedad(9, estado='lista')], valoraciones=VALS)
+ok, res, txt = correr(b, KeepaFalso())
+eq('(X) sin ningún COMPRAR (la de (I) sale VALORAR): NI Excel ni fila, verde, y lo dice',
+   (b.subidos, b.tablas.get('nov_excel', []), ok, 'ninguna COMPRAR' in txt), ([], [], True, True))
+b = Base(novedades=[novedad(9, estado='lista')], valoraciones=VALS_COMPRA, fallan={'storage'})
+ok, res, txt = correr(b, KeepaFalso())
+eq('(X) 🔴 si el Excel no se puede subir: sin fila en nov_excel, y ROJO con el motivo (la cuenta sí queda hecha)',
+   (b.tablas.get('nov_excel', []), ok, 'el Excel de novedades no se pudo dejar' in cierre(b)['motivo'], len(b.llamadas('nov_guardar_cuenta'))),
+   ([], False, True, 1))
+b = Base(novedades=[dict(novedad(9, estado='lista', nuestro=True, asins=['B0LISTA001']))], valoraciones=VALS_COMPRA)
+ok, res, txt = correr(b, KeepaFalso())
+eq('(X) una NUESTRA lista también se cuenta (y sale en el Excel, marcada)',
+   (len(b.llamadas('nov_guardar_cuenta')), [list(r) for r in load_workbook(_io.BytesIO(b.subidos[0][2]))['Novedades'].iter_rows(values_only=True)][1][6]),
+   (1, 'sí'))
+
+
+def cuentas_sueltas(base, keepa=None, env=None):
+    salida = []
+    ok_, res_ = nv.solo_cuentas(base, run_id='36700000002', ahora=lambda: AHORA + timedelta(minutes=22),
+                                imprimir=lambda *a, **k: salida.append(' '.join(str(x) for x in a)),
+                                keepa_llave=LLAVE, http=keepa or KeepaFalso(), dormir=lambda s: None,
+                                env=env if env is not None else {}, post=post_falso)
+    return ok_, res_, '\n'.join(salida)
+
+
+b = Base(valorar=False, novedades=[novedad(9, estado='lista')], valoraciones=VALS_COMPRA)
+ok, res, txt = cuentas_sueltas(b)
+eq('(X) cuentas sueltas con el interruptor APAGADO: nada (ni cuenta, ni Excel), verde, y lo dice',
+   (b.rpcs, b.subidos, ok, 'APAGADO' in txt), ([], [], True, True))
+b = Base(novedades=[novedad(9, estado='lista'), novedad(3, 'nuevo', ean='889698100033')], valoraciones=VALS_COMPRA)
+ok, res, txt = cuentas_sueltas(b)
+eq('(X) 🔑 cuentas sueltas (y 27): SOLO la cuenta de las «lista» y el Excel: ni Keepa, ni la cola, ni nov_cerrar_valoracion',
+   ([n for n, _p in b.rpcs], [op for op in b.ops if op[0] in ('nov_cola', 'nov_keepa')], ok, res['cuentas'], res['comprar']),
+   (['nov_guardar_cuenta'], [], True, 1, 1))
+eq('(X) …su Excel, a las 20:27 y de origen «cuentas», sin pasada (el reloj de la prueba; el disparo real es a y 40)', (b.subidos[0][1], b.tablas['nov_excel'][0]['origen'],
+                                                                     b.tablas['nov_excel'][0]['pasada_id'], b.tablas['nov_excel'][0]['run_id']),
+   ('heo/novedades/2026-09-29/Novedades_HEO_Funko_2026-09-29_2027.xlsx', 'cuentas', None, 36700000002))
+b = Base(novedades=[novedad(9, estado='lista')], valoraciones=VALS_COMPRA, fallan={'nov_guardar_cuenta'})
+ok, res, txt = cuentas_sueltas(b)
+eq('(X) 🔴 cuentas sueltas con una cuenta que falla: ROJO, dicho, y sin Excel (no hay COMPRAR guardado)',
+   (ok, 'la cuenta de nov-9 falló' in txt, b.subidos), (False, True, []))
+
+# ── (R) EL RESPALDO DE KEEPA Y EL ESCALÓN DE LOS 20 € (añadido 2) ───────────────────────────
+def prod_bb(asin, fee=410, ref=15.0, caja=2100, nuevo=1990, fba=True):
+    """Un producto de Keepa pedido con buybox: stats.current con «nuevo» (1) y la caja de compra (18), en céntimos."""
+    cur = [-1] * 19
+    cur[1], cur[18] = (nuevo if nuevo is not None else -1), (caja if caja is not None else -1)
+    p = {'asin': asin, 'title': 'Funko Pop! Figura', 'referralFeePercentage': ref, 'stats': {'current': cur, 'buyBoxIsFBA': fba}}
+    if fee is not None:
+        p['fbaFees'] = {'pickAndPackFee': fee}
+    return p
+
+
+rd = nv.respaldo_de_producto
+eq('(R) del mismo lado de 20 € (Keepa a 21,00, Amazon a 21,50): de Keepa, su logística y su %, con el PRECIO DE AMAZON',
+   rd(prod_bb('B0R1'), 21.5, 'BB-FBA'),
+   {'estado': 'keepa', 'precio_venta': 21.5, 'canal': 'BB-FBA', 'ref_pct': 15.0, 'fee_fba': 4.1, 'keepa_precio_base': 21.0})
+eq('(R) 🔴 a lados distintos (Keepa a 18,99, Amazon a 21,50): pendiente, CAMBIA DE ESCALÓN, con los dos precios',
+   rd(prod_bb('B0R1', caja=1899), 21.5, 'BB-FBA'),
+   {'estado': 'repedir', 'tipo': 'escalon', 'motivo': 'cambia de escalón: Keepa calculó su tarifa a 18,99 € y el precio es 21,50 €'})
+eq('(R) 🔴 20,00 € exactos pagan la alta: Keepa a 20,00 y Amazon a 19,99 cruzan', rd(prod_bb('B0R1', caja=2000), 19.99, 'SIN BB')['estado'], 'repedir')
+eq('(R) sin caja de compra, el precio base es «nuevo»', rd(prod_bb('B0R1', caja=None, nuevo=1850), 17.9, 'SIN BB')['keepa_precio_base'], 18.5)
+eq('(R) 🔴 sin ningún precio actual en Keepa no se sabe con qué precio calculó: se trata como CRUCE',
+   rd(prod_bb('B0R1', caja=None, nuevo=None), 17.9, 'SIN BB')['motivo'],
+   'cambia de escalón: no se sabe con qué precio calculó Keepa su tarifa (sin precio actual en Keepa)')
+eq('(R) si Amazon no dio precio: el de Keepa, como el viejo (la caja de compra, con su logística; si no, «nuevo»)',
+   [(x['precio_venta'], x['canal']) for x in (rd(prod_bb('B0R1'), None, None), rd(prod_bb('B0R1', fba=False), None, None),
+                                               rd(prod_bb('B0R1', caja=None), None, None))],
+   [(21.0, 'BB-FBA'), (21.0, 'BB-FBM'), (19.9, 'SIN BB')])
+eq('(R) Keepa sin la logística, o sin el producto: pendiente (Keepa no lo tiene), sin cifra',
+   [rd(prod_bb('B0R1', fee=None), 21.5, 'BB-FBA')['tipo'], rd(prod_bb('B0R1', fee=0), 21.5, 'BB-FBA')['tipo'], rd(None, 21.5, 'BB-FBA')['tipo']],
+   ['keepa_sin_dato', 'keepa_sin_dato', 'keepa_sin_dato'])
+
+VALS_FALLA = [dict(VALS_COMPRA[0]),
+              dict(VALS_COMPRA[1], pais='DE', amazon_estado='falta_amazon', precio_venta=31.0, canal='BB-FBM', ref_pct=None, fee_fba=None,
+                   error_amazon='tarifas: ServerError · InternalError (igual en los 4 reintento(s))'),
+              dict(VALS_COMPRA[2], pais='IT', amazon_estado='falta_amazon', precio_venta=18.5, canal='SIN BB', ref_pct=None, fee_fba=None,
+                   error_amazon='tarifas: ServerError', caidas_30d=12)]
+KEEPA_R = {(None, 'x1'): [prod_bb('B0LISTA001', fee=405, ref=15.0, caja=3050)]}
+TELEGRAM.clear()
+b = Base(novedades=[novedad(9, estado='lista')], valoraciones=VALS_FALLA)
+k = KeepaFalso(productos={('DE', 'x'): [prod_bb('B0LISTA001', fee=405, ref=15.0, caja=3050)],
+                          ('IT', 'x'): [prod_bb('B0LISTA001', fee=364, ref=15.0, caja=1990, nuevo=1990)]})
+ok, res, txt = correr(b, k, env={'TELEGRAM_TOKEN': 'TOKEN-TG-DE-MENTIRA', 'TELEGRAM_CHAT_ID': '42'})
+c = b.llamadas('nov_guardar_cuenta')[0]
+por_pais = {x['pais']: x for x in c['p_paises']}
+eq('(R) 🔑 los dos países en que Amazon falló, a Keepa EN ESE MOMENTO: por ASIN, con buybox (3 tokens cada uno), y nada a la caché',
+   (sorted(k.de_producto()), cierre(b)['keepa_tokens'], len(b.tablas['nov_keepa'])),
+   ([('DE', 'asin:B0LISTA001+bb'), ('IT', 'asin:B0LISTA001+bb')], 6, 0))
+eq('(R) DE: de Keepa, con el precio de Amazon (31) y su precio base (30,50) del mismo lado de 20 €',
+   por_pais['DE']['respaldo'], {'estado': 'keepa', 'precio_venta': 31.0, 'canal': 'BB-FBM', 'ref_pct': 15.0, 'fee_fba': 4.05, 'keepa_precio_base': 30.5})
+eq('(R) IT: Keepa calculó a 19,90 y Amazon vende a 18,50: del mismo lado (los dos por debajo de 20), de Keepa',
+   (por_pais['IT']['respaldo']['estado'], por_pais['IT']['respaldo']['keepa_precio_base']), ('keepa', 19.9))
+eq('(R) …y los dos países CUENTAN (tienen cifra), con la fórmula de siempre', (por_pais['DE']['decision'] != 'Sin datos', por_pais['IT']['decision'] != 'Sin datos',
+                                                                             por_pais['ES']['decision'], 'respaldo' in por_pais['ES']),
+   (True, True, 'COMPRAR', False))
+hoja = [list(r) for r in load_workbook(_io.BytesIO(b.subidos[0][2]))['Novedades'].iter_rows(values_only=True)]
+eq('(R) el Excel marca cada país con su origen', {p: hoja[1][hoja[0].index('Amazon ' + p)] for p in nv.PAISES},
+   {'ES': 'Amazon', 'IT': 'de Keepa (Amazon falló)', 'FR': 'no está en Amazon FR', 'DE': 'de Keepa (Amazon falló)'})
+eq('(T) 🔑 con COMPRAR, el Telegram con el formato del viejo: 🟢, una línea por COMPRAR (nombre, margen, precio, país)',
+   (len(TELEGRAM), TELEGRAM[0][1]['text'].split('\n')[0], TELEGRAM[0][1]['text'].split('\n')[1].startswith('• Funko Pop! Figura 9 — '),
+    TELEGRAM[0][1]['parse_mode'], TELEGRAM[0][1]['chat_id']),
+   (1, '🟢 <b>Novedades HEO Funko</b>: 1 para COMPRAR', True, 'HTML', '42'))
+eq('(T) 🔒 la llave de Telegram no sale en el log', 'TOKEN-TG-DE-MENTIRA' in txt, False)
+
+TELEGRAM.clear()
+b = Base(novedades=[novedad(9, estado='lista')], valoraciones=[dict(VALS_FALLA[0], precio_venta=12.0), VALS_FALLA[1]])
+k = KeepaFalso(productos={('DE', 'x'): [prod_bb('B0LISTA001', fee=405, ref=15.0, caja=1899)]})
+ok, res, txt = correr(b, k, env={'TELEGRAM_TOKEN': 'T', 'TELEGRAM_CHAT_ID': '42'})
+de = next(x for x in b.llamadas('nov_guardar_cuenta')[0]['p_paises'] if x['pais'] == 'DE')
+eq('(R) 🔴 DE cruza el escalón (Keepa a 18,99, Amazon a 31): pendiente con su motivo, y ese país sin cifra',
+   (de['respaldo'], de['decision']),
+   ({'estado': 'repedir', 'motivo': 'cambia de escalón: Keepa calculó su tarifa a 18,99 € y el precio es 31,00 €'}, 'Sin datos'))
+eq('(T) 🔴 incompleto y SIN COMPRAR: el Telegram se manda igual, en rojo, diciendo que falta un país',
+   (len(TELEGRAM), TELEGRAM[0][1]['text'].split('\n')[0], 'NOVEDADES INCOMPLETAS</b>: 1 país(es) pendiente(s): cambia de escalón' in TELEGRAM[0][1]['text']),
+   (1, '🔴 <b>Novedades HEO Funko</b>: 0 para COMPRAR', True))
+b = Base(novedades=[novedad(9, estado='lista')], valoraciones=VALS_FALLA)
+ok, res, txt = correr(b, KeepaFalso(productos={}), llave=None)
+eq('(R) sin KEEPA_API_KEY: los dos países pendientes (repedir), la cuenta hecha con lo que hay, y verde (se vuelve a pedir)',
+   ([x['respaldo']['estado'] for x in b.llamadas('nov_guardar_cuenta')[0]['p_paises'] if 'respaldo' in x], len(b.llamadas('nov_guardar_cuenta'))),
+   (['repedir', 'repedir'], 1))
+b = Base(novedades=[novedad(9, estado='lista')], valoraciones=VALS_FALLA)
+ok, res, txt = cuentas_sueltas(b, KeepaFalso(saldo=22, productos={}))
+eq('(R) sin saldo por encima de la reserva (22 − 20 < 3): ni una petición, pendientes, y se dice',
+   ([x['respaldo']['motivo'] for x in b.llamadas('nov_guardar_cuenta')[0]['p_paises'] if 'respaldo' in x], res['keepa_peticiones'], res['incompletos']),
+   (['Keepa sin saldo: quedaban 22 tokens y la reserva es 20'] * 2, 0, 2))
+
+# ── (T) EL TELEGRAM, PURO ────────────────────────────────────────────────────────────────
+def v_compra(i, margen=0.25, precio=19.9, pais='ES', origen='dato'):
+    return {'nov': {'nombre': 'Funko Pop! Figura con un nombre larguísimo número %02d que se corta' % i}, 'foto': {},
+            'decision': 'COMPRAR', 'mejor': pais, 'amazon': {pais: (origen, None)},
+            'r': {'paises': {pais: {'margen': margen, 'precio_venta': precio}}}}
+
+
+m = nv.mensaje_telegram([v_compra(1, pais='DE', origen='keepa')])
+eq('(T) la línea: nombre en 45 caracteres, margen, precio, país y «de Keepa» si ese país salió del respaldo',
+   m.split('\n')[1], '• Funko Pop! Figura con un nombre larguísimo nú — 25% — 19.90€ (DE) de Keepa')
+m = nv.mensaje_telegram([v_compra(i) for i in range(25)])
+eq('(T) tope de 20 líneas y «…y X más»', (len(m.split('\n')), m.split('\n')[-1]), (22, '…y 5 más (mira el Excel de la Biblioteca).'))
+eq('(T) sin COMPRAR, sin avalancha y completo: NO se manda', nv.mensaje_telegram([dict(v_compra(1), decision='VALORAR')]), None)
+eq('(T) avalancha sin COMPRAR: se manda, con el aviso tal cual', nv.mensaje_telegram([], avalancha=150),
+   '⚠️ <b>Avalancha</b>: 150 cambios en HEO Funko — lanza un Escaneo PRO')
+m = nv.mensaje_telegram([], incompletos=[{'tipo': 'reserva'}, {'tipo': 'keepa_sin_dato'}])
+eq('(T) incompleto por la reserva de Keepa y por un país sin dato: rojo y lo dice', (m.split('\n')[0].startswith('🔴'),
+   '1 país(es) sin dato (Amazon falló y Keepa tampoco) y 1 consulta(s) que Keepa no hizo por la reserva' in m), (True, True))
+salida_tg = []
+eq('(T) sin claves: no manda, no falla y lo dice', (nv.enviar_telegram('x', env={}, post=post_falso, imprimir=lambda *a, **k: salida_tg.append(a[0])),
+                                                   'sin claves' in salida_tg[-1]), (False, True))
+
+
+def post_roto(url, data, timeout):
+    raise ConnectionError('Max retries exceeded with url: /botTOKEN-SECRETO/sendMessage')
+
+
+eq('(T) 🔒 si Telegram falla: la corrida sigue, lo dice, y la llave no sale',
+   (nv.enviar_telegram('x', env={'TELEGRAM_TOKEN': 'TOKEN-SECRETO', 'TELEGRAM_CHAT_ID': '1'}, post=post_roto,
+                       imprimir=lambda *a, **k: salida_tg.append(a[0])), 'no se envió' in salida_tg[-1], 'TOKEN-SECRETO' in salida_tg[-1]),
+   (False, True, False))
+
+# ── (A) LA AVALANCHA ─────────────────────────────────────────────────────────────────────
+TELEGRAM.clear()
+b = Base(novedades=[novedad(9, estado='lista')], valoraciones=VALS_COMPRA)
+ok, res, txt = correr(b, KeepaFalso(), novedades_pasada=150, env={'TELEGRAM_TOKEN': 'T', 'TELEGRAM_CHAT_ID': '42'})
+wb = load_workbook(_io.BytesIO(b.subidos[0][2]))
+eq('(A) más de 100 novedades: el Excel se abre en «Novedades» con el aviso arriba, y el run y el Telegram lo dicen',
+   (wb.active.title, wb['Novedades']['A1'].value, 'AVALANCHA: 150 cambios' in txt,
+    '⚠️ <b>Avalancha</b>: 150 cambios en HEO Funko — lanza un Escaneo PRO' in TELEGRAM[0][1]['text']),
+   ('Novedades', 'Avalancha: 150 cambios — lanza un Escaneo PRO', True, True))
+b = Base(novedades=[novedad(9, estado='lista')], valoraciones=VALS_COMPRA)
+ok, res, txt = correr(b, KeepaFalso(), novedades_pasada=100)
+eq('(A) con 100 justas no es avalancha', (load_workbook(_io.BytesIO(b.subidos[0][2])).active.title, 'AVALANCHA' in txt), ('Análisis', False))
+eq('(A) 🔑 (2.ª auditoría) la avalancha cuenta lo que entra a valorar: novedades − subidas fuera (130 − 30 = 100 no; 131 − 30 = 101 sí)',
+   [nv.novedades_a_valorar({'novedades': 130, 'subidas_fuera': 30}), nv.novedades_a_valorar({'novedades': 131, 'subidas_fuera': 30}),
+    nv.novedades_a_valorar({'novedades': 7}), nv.novedades_a_valorar(None)],
+   [100, 101, 7, 0])
+b = Base(novedades=[novedad(9, estado='lista')], valoraciones=VALS_COMPRA)
+ok, res, txt = correr(b, KeepaFalso(), novedades_pasada=nv.novedades_a_valorar({'novedades': 131, 'subidas_fuera': 30}))
+eq('(A) …y con 101 tras restar las subidas, avalancha', 'AVALANCHA: 101 cambios' in txt, True)
+
+# ── (D) SIN DUPLICADOS (2.ª auditoría): la que vuelve a la cuenta por un país «repedir» ─────────
+TELEGRAM.clear()
+b = Base(novedades=[dict(novedad(9, estado='lista'), decision_anterior='COMPRAR')], valoraciones=VALS_COMPRA)
+ok, res, txt = correr(b, KeepaFalso(), env={'TELEGRAM_TOKEN': 'T', 'TELEGRAM_CHAT_ID': '42'})
+eq('(D) vuelve, NO cambia (era COMPRAR y sigue COMPRAR): la cuenta se guarda, pero NO sale en el Excel ni en el Telegram',
+   (len(b.llamadas('nov_guardar_cuenta')), b.subidos, TELEGRAM, 'misma decisión' in txt.lower() or 'MISMA decisión' in txt), (1, [], [], True))
+b = Base(novedades=[dict(novedad(9, estado='lista'), decision_anterior='Sin datos')], valoraciones=VALS_COMPRA)
+ok, res, txt = correr(b, KeepaFalso(), env={'TELEGRAM_TOKEN': 'T', 'TELEGRAM_CHAT_ID': '42'})
+eq('(D) vuelve y PASA A COMPRAR (era «Sin datos»): sale en el Excel y en el Telegram',
+   (len(b.subidos), len(TELEGRAM), b.tablas['nov_excel'][0]['novedades']), (1, 1, ['nov-9']))
+
+# ── (T) EL HTML DEL TELEGRAM, ESCAPADO (2.ª auditoría) ───────────────────────────────────
+m = nv.mensaje_telegram([dict(v_compra(1), nov={'nombre': 'Tom & Jerry <Pop!> Figura'})])
+eq('(T) 🔒 «Tom & Jerry <Pop!>»: el nombre va escapado para el HTML de Telegram', m.split('\n')[1].split(' — ')[0],
+   '• Tom &amp; Jerry &lt;Pop!&gt; Figura')
+
+# ── (K2) KEEPA CAÍDO, RECORDADO EN LA CORRIDA (2.ª auditoría) ────────────────────────────
+VALS_DOS = [dict(VALS_FALLA[0]), dict(VALS_FALLA[1]), dict(VALS_FALLA[2])]
+k = KeepaFalso(caido=True)
+TELEGRAM.clear()
+b = Base(novedades=[novedad(9, estado='lista'), novedad(1)], valoraciones=VALS_DOS)
+ok, res, txt = correr(b, k, env={'TELEGRAM_TOKEN': 'T', 'TELEGRAM_CHAT_ID': '42'})
+eq('(K2) 🔴 Keepa no contesta: el respaldo lo intenta UNA vez (2 intentos del saldo) y ni el otro país ni el paso de ventas lo vuelven a intentar',
+   [q for q, _d, _c in k.llamadas], ['token', 'token'])
+eq('(K2) …los dos países del respaldo, pendientes con el motivo; la de la cola, esperando Keepa',
+   ({x['pais']: x['respaldo']['motivo'][:28] for x in b.llamadas('nov_guardar_cuenta')[0]['p_paises'] if 'respaldo' in x},
+    [n['estado'] for n in b.tablas['nov_novedad'] if n['id'] == 'nov-1']),
+   ({'DE': 'Keepa falló: ConnectionError', 'IT': 'Keepa no contesta en esta co'}, ['espera_keepa']))
+eq('(K2) …y el Telegram sale en 🔴 diciendo que Keepa no contesta (también por el paso de ventas)',
+   (TELEGRAM[0][1]['text'].split('\n')[0].startswith('🔴'), '3 consulta(s) sin hacer porque Keepa no contesta' in TELEGRAM[0][1]['text']), (True, True))
+
 # ── (K) EL MÓDULO, POR ESTRUCTURA ────────────────────────────────────────────────────────
 AQUI = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(AQUI, 'escaner2_novedades.py'), encoding='utf-8') as fh:
@@ -526,9 +864,12 @@ leidas = {c.value for n in ast.walk(arbol) if isinstance(n, ast.Call) and isinst
 eq('(K) lee lo suyo: parámetros, la cola, las novedades y sus filas, la caché, la foto de HEO, productos y el Escaneo PRO',
    sorted(tablas | leidas), sorted({'nov_parametros', 'escaner2_parametros', 'nov_keepa', 'escaner2_cruce', 'nov_cola', 'nov_novedad',
                                     'productos', 'disp_estado', 'nov_valoracion', 'escaner2_foto', 'escaner2_resultado_ean',
-                                    'escaner2_resultado_pais'}))
-eq('(K) 🔒 y solo ESCRIBE insertando en nov_keepa (la película de Keepa): ni update, ni upsert, ni delete, en ninguna tabla',
-   escrituras, {('nov_keepa', 'insert')})
+                                    'escaner2_resultado_pais', 'nov_excel'}))
+eq('(K) 🔒 y solo ESCRIBE insertando en nov_keepa (la película de Keepa) y en nov_excel (el Excel, encargo V): ni update, ni upsert, ni delete',
+   escrituras, {('nov_keepa', 'insert'), ('nov_excel', 'insert')})
+_fuente_sin_comentarios = '\n'.join(l.split('#', 1)[0] for l in open(os.path.join(AQUI, 'escaner2_novedades.py'), encoding='utf-8').read().split('\n'))
+eq('(K) 🔒 (encargo V) el Excel NO va a escaner_resultados ni al buzón `informes` del viejo (sus Excel los leen otros programas)',
+   ['escaner_resultados' in _fuente_sin_comentarios.split('"""', 2)[-1], "'informes'" in _fuente_sin_comentarios], [False, False])
 eq('(K) …el resto, por las funciones de la base: guardar Keepa, guardar la cuenta y cerrar', sorted(funciones),
    ['nov_cerrar_valoracion', 'nov_guardar_cuenta', 'nov_guardar_keepa'])
 eq('(K) 🔒 ni Amazon ni el escáner viejo: ni sellingpartnerapi, ni escaner_memoria, ni una llave de disparo',
