@@ -13,7 +13,7 @@ FBA Pan-EU en seis mercados (ES/IT/FR/DE/NL/BE), Miravia y web propia. Si rompes
 
 - **`index.html` (v1) está CONGELADO.** Solo bugs críticos. Es un monolito y no se refactoriza.
   Si tu cambio lo toca, párate y pregunta.
-- **Cualquier cambio que roce la operativa de Elena se avisa ANTES de desplegar.**
+- **Se fusiona a cualquier hora**; el parte dice si puede perderse un envío a medias (`escalera-de-migraciones.md`).
 - **Fernando no es programador.** Es economista y contable. Explícaselo aterrizado, en lenguaje llano, con analogías
   contables si ayudan. Él decide qué encargo se lanza; el PR lo audita Cowork y lo fusiona Code.
 
@@ -77,7 +77,7 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
   y R2. Una llave que aparece en un chat está quemada y se regenera.
   **Introducir credenciales no es algo que hagas tú: se lo pides a Fernando.**
 - **Supabase es PRODUCCIÓN.** Desde una sesión: **solo lectura**. Cómo llega un cambio a producción
-  y por qué staging no es testigo: `docs/reglas/escalera-de-migraciones.md`.
+  (sin staging desde el 30-sep-2026): `docs/reglas/escalera-de-migraciones.md`.
 - **Todo lo NUEVO nace CERRADO**; `SECURITY DEFINER` solo por uno de tres motivos y con candados:
   ver `docs/reglas/seguridad-permisos.md`.
 - **La v1 tiene escritura anónima abierta** (deuda estructural). **No se toca a mitad de vuelo**:
@@ -135,7 +135,7 @@ Cotejo, línea a línea, en [`COTEJO.md`](docs/reglas/COTEJO.md).
 | §4 | creas o recreas un objeto | [`seguridad-permisos.md`](docs/reglas/seguridad-permisos.md) |
 | §4 | tocas backup, restore o `monitor_*` | [`pendientes-backup-y-permisos.md`](docs/reglas/pendientes-backup-y-permisos.md) |
 | §5 | abres o cierras un worktree | [`como-se-trabaja.md`](docs/reglas/como-se-trabaja.md) |
-| §5 | vas a ensayar una migración | [`escalera-de-migraciones.md`](docs/reglas/escalera-de-migraciones.md) |
+| §5 | fusionas, o una migración va a producción | [`escalera-de-migraciones.md`](docs/reglas/escalera-de-migraciones.md) |
 | §5 | lanzas un workflow o un `.yml` | [`gotchas-del-entorno.md`](docs/reglas/gotchas-del-entorno.md) |
 | §6 | preguntas por dónde va la v2 | [`donde-esta-el-proyecto.md`](docs/reglas/donde-esta-el-proyecto.md) |
 

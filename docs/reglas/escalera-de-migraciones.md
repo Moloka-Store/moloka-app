@@ -1,4 +1,46 @@
-# Antes de ensayar una migración, se restaura staging
+# La cadena de una migración (sin staging desde el 30-sep-2026)
+
+> **Reescrito el 30-sep-2026 (encargo A):** Fernando jubila la base de pruebas (staging,
+> proyecto `lusujlzyndsydibkeija`). Lo que había aquí antes —restaurar staging y ensayar
+> encima— queda más abajo, **literal**, como historia fechada: vale hasta el 30-sep-2026.
+
+Toda escritura en la base sigue esta cadena, y no hay otra:
+
+**rama → PR → auditoría de Cowork (lee el diff entero) → fusión por Code → CI → producción con
+Fernando delante, primero en modo ensayo → verificación SQL en producción después.**
+
+- **CI.** En la v1 corre `.github/workflows/ci-tests-python.yml` (job `tests`) y **no levanta
+  ninguna base**. En la v2, el job `trigger-postgres` prueba las migraciones que toca el PR contra
+  un Postgres propio que nace y muere en el run.
+- **Producción, en modo ensayo primero.** Una migración de la v1 llega a la base por
+  `.github/workflows/aplicar-migracion.yml` (o por el conector de escritura, con Fernando delante):
+  primero `modo=ensayo` —corre de verdad contra la base y se **deshace** con rollback— y, si sale
+  bien, `aplicar`. Desde el 30-sep-2026 ese workflow y los `procesar-*.yml` van a producción por
+  defecto y en modo ensayo por defecto: la opción staging ya no existe.
+- **Verificación después**, en producción y por SQL: objetos, permisos y filas. Nunca el log.
+- **¿Y la copia de seguridad?** Se prueba restaurándola en una base desechable que nace y muere
+  dentro de la ejecución de `restaurar-staging.yml` (el nombre se queda por ahora; el paso a
+  paso, en su cabecera). No hay ninguna base compartida sobre la que ensayar.
+
+## Se fusiona a cualquier hora, y el parte dice si puede perderse un envío a medias
+
+> Decidido por Fernando el 30-sep-2026 (encargo A).
+
+Se fusiona **a cualquier hora, también con Elena trabajando**. A cambio, **todo parte de Code lleva
+una línea «¿Puede perderse un envío a medias?: sí/no, y por qué»**. Es **«sí»** si el cambio toca la
+pantalla de Envíos, el envío que Elena está montando o las funciones que confirman cajas y
+descuentan stock. **Con «sí», Cowork avisa a Fernando antes de fusionar.** Aplicar una migración en
+producción sigue siendo con Fernando delante.
+
+Sustituye, en `CLAUDE.md`, a esta línea (vale hasta el 30-sep-2026):
+
+- **Cualquier cambio que roce la operativa de Elena se avisa ANTES de desplegar.**
+
+---
+
+## HISTORIA — vale hasta el 30-sep-2026 (había staging)
+
+### Antes de ensayar una migración, se restaura staging
 
 > Movido **literalmente** desde `CLAUDE.md` al acortarlo. Ni una palabra
 > cambiada, ni una regla nueva. Índice y cotejo línea a línea:
@@ -35,7 +77,7 @@
   fecha. Si lo que la migración necesita nació DESPUÉS del último volcado, restaurar borra el
   suelo sobre el que se iba a ensayar; en cualquier otro caso, se restaura.
 
-## La cadena de una migración, y por qué staging no es testigo (29-sep-2026)
+### La cadena de una migración, y por qué staging no es testigo (29-sep-2026)
 
 > **Añadido, no movido.** Sustituye en `CLAUDE.md` al tramo «Toda escritura va por rama → PR →
 > auditoría de Cowork → fusión por Code → ensayo en staging → producción», que allí queda como
