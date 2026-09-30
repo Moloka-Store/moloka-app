@@ -50,6 +50,11 @@ import types
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
 fallos = []
+sys.path.insert(0, AQUI)
+import en_mi_bd  # noqa: E402
+# (encargo E, 30-sep-2026) La foto de inventario_fba del doble lleva la fecha de HOY: una foto de mas de dos dias
+# haria que «En mi BD» dijera «foto vieja» y no la cifra.
+HOY_FOTO = en_mi_bd.hoy_madrid().isoformat()
 
 
 def eq(nombre, obtenido, esperado):
@@ -335,8 +340,14 @@ def estado_inicial(e2, M, frenar=None, viejo_extra=(), tolerancia=100):
             'reglas_director': [{'proveedor': 'HEO', 'activo': True, 'marcas': ['Funko', 'OFERTAS'], 'rank_maximo': 30000}],
             'escaner2_parametros': [{'proveedor': 'HEO', 'umbral_caidas_30d': 8, 'paises_filtro': ['ES', 'DE'],
                                      'paises_calculo': ['ES', 'IT', 'FR', 'DE']}],
+            # (encargo E) Como Claptrap (B0DP7C737P) el 30-sep-2026: `stock_fba` congelado en 0 y Amazon con 18
+            #      en la foto, aqui en DOS vidas de SKU del mismo ASIN (10 + 8): «En mi BD» tiene que decir 18.
             'productos': [{'id': 'p1', 'ean': _ean(M, 1), 'asin': 'B0ALFA0001', 'iva_pct': 0.10, 'activo': True,
-                           'stock_moloka': 0, 'stock_fba': 3}],
+                           'es_chase': False, 'stock_moloka': 0, 'stock_fba': 0}],
+            'inventario_fba': [{'sku': 'ALFA-VIDA1', 'asin': 'B0ALFA0001', 'available': 10, 'fc_transfer': 0,
+                                'inbound_shipped': 0, 'inbound_receiving': 0, 'fecha_foto': HOY_FOTO},
+                               {'sku': 'ALFA-VIDA2', 'asin': 'B0ALFA0001', 'available': 6, 'fc_transfer': 2,
+                                'inbound_shipped': 0, 'inbound_receiving': 0, 'fecha_foto': HOY_FOTO}],
             'escaner_resultados': [{'id': 1, 'proveedor': 'HEO', 'modo': 'todo', 'rank_maximo': 30000,
                                     'fecha': '2026-09-24T00:16:10+00:00',
                                     'fichero': 'resultados/Escaneo_HEO_TODAS_20260923_2006.xlsx'}],
@@ -433,7 +444,7 @@ _lista = base64.b64decode(bd['storage']['escaner2']['heo/%s/eans.txt' % pasada])
 eq('2 · la lista para el Visualizador: un EAN por linea, en el bucket escaner2', (len(_lista), p['n_eans_lista'], p['n_tandas']),
    (5, 5, 1))
 eq('2 · ni una tabla nueva fuera de escaner2_', sorted(t for t in T if not t.startswith('escaner2_')),
-   sorted(TABLAS_VIEJO + ('disp_parametros',)))
+   sorted(TABLAS_VIEJO + ('disp_parametros', 'inventario_fba')))   # (encargo E) la foto de FBA, sembrada y solo leida
 eq('2 · (30-sep) el log del cuadre previo dice SIEMPRE la diferencia y la tolerancia',
    'HEO declara 11 y se bajaron 11 · diferencia 0 (tolerancia 100)' in log, True)
 c = T['escaner2_cruce'][0]
@@ -510,8 +521,11 @@ eq('2 · (D) «Ventas» = las caídas de 30 días GUARDADAS de ese país (sin c�
 eq('2 · (D) …y hay alguna con dato (no se compara vacío con vacío)', any(r[_ia['Ventas']] for r in _an[1:]), True)
 eq('2 · (D) «Canal BB»: el CSV dice «yes» en «Caja de Compra: Es FBA» → BB-FBA',
    sorted({r[_ia['Canal BB']] for r in _an[1:] if r[_ia['Precio venta (€)']]}), ['BB-FBA'])
-eq('2 · (B4) «En mi BD» sale del catálogo propio con la función del viejo (el ALFA es nuestro: 3 en FBA)',
-   _fil_es[_ia['En mi BD']], 'OK Alm:0 FBA:3')
+# (encargo E, 30-sep-2026) CAMBIADO A PROPOSITO: hasta hoy decia 'OK Alm:0 FBA:3', el `productos.stock_fba` de la
+#   ficha, que esta congelado. Ahora el FBA es la foto de inventario_fba sumada por ASIN (10 + 6 + 2 = 18) con su fecha,
+#   con la funcion compartida de en_mi_bd.py; la ficha dice stock_fba 0, como Claptrap.
+eq('2 · (E) «En mi BD»: almacén de la ficha y FBA de la ÚLTIMA foto de inventario_fba, sumado por ASIN y con su fecha',
+   _fil_es[_ia['En mi BD']], 'OK Alm:0 FBA:18 (foto %s)' % HOY_FOTO)
 _fil_fr = [r for r in _an[1:] if r[_ia['EAN']] == _ean(M, 1) and r[_ia['País']] == 'FR'][0]
 eq('2 · (B4) sin CSV de FR, su fila dice «Sin datos» y no inventa números',
    (_fil_fr[_ia['Decisión']], _fil_fr[_ia['Margen']], _fil_fr[_ia['Precio venta (€)']]), ('Sin datos', None, None))
@@ -751,6 +765,8 @@ for _n, _bd in BDS.items():
        [o for o in _bd['ops'] if o[2] in TABLAS_VIEJO and o[1] != 'select'], [])
     eq('8 · %s: …y esas tablas acaban exactamente como empezaron' % _n,
        {t: _bd['tablas'].get(t) for t in TABLAS_VIEJO}, SIEMBRA[_n])
+    eq('8 · %s: (encargo E) inventario_fba solo se LEE' % _n,
+       [o for o in _bd['ops'] if o[2] == 'inventario_fba' and o[1] != 'select'], [])
     eq('8 · %s: (30-sep) disp_parametros, la de la foto horaria, solo se LEE' % _n,
        [o for o in _bd['ops'] if o[2] == 'disp_parametros' and o[1] != 'select'], [])
     eq('8 · %s: ni se leen reglas del chase ni la puente (escaner_chase_asin, escaner_memoria, escaner_detalle)' % _n,

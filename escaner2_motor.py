@@ -40,6 +40,8 @@ import os
 import re
 from datetime import datetime, timezone
 
+import en_mi_bd
+
 # 🔑 (B7, 25-sep-2026) LAS PIEZAS SALEN DE LOS FICHEROS HEREDADOS DEL ESCANER 2, NO DEL VIEJO.
 #    escaner2_heredado_*.py llevan el texto EXACTO de cada pieza del viejo (copiado por script del commit
 #    2f9c06a, con su origen encima) y se leen igual que antes se leia el viejo: por nombre, con `ast`.
@@ -210,6 +212,17 @@ class Motor:
         self._ns['sup'] = sup
         return len(sup)
 
+    def poner_foto_fba(self, foto):
+        """(encargo E, 30-sep-2026) La foto de FBA de «En mi BD» (`en_mi_bd.leer_foto_fba`). Sin ponerla, la
+        columna dice «FBA: sin foto»: nunca un cero que no se ha medido."""
+        self._ns['FOTO_FBA'] = foto
+
+    def en_bd_txt(self, core):
+        """(encargo E) La columna «En mi BD»: la ficha que encuentra `_sup` (la del viejo, por EAN) con
+        `en_mi_bd.texto_en_mi_bd`, la MISMA funcion que usan el escaner viejo y el Pro. Ya no se hereda el
+        `en_bd_txt` del viejo: el suyo leia `productos.stock_fba`, que esta congelado."""
+        return en_mi_bd.texto_en_mi_bd(self._sup(core), self._ns.get('FOTO_FBA'))
+
     def iva_por_pais(self, core):
         """El IVA de cada pais para ESTE producto, como la Celda 8 del escaner viejo:
         ES de la ficha (o el general, asumido); IT, FR y DE, el general del pais."""
@@ -217,7 +230,10 @@ class Motor:
 
 
 def cargar_motor(ruta=RUTA_MOTOR):
-    return Motor(sacar_piezas(ruta, DEFS_MOTOR, NOMBRES_MOTOR, base={'re': re, 'sup': {}}))
+    # (encargo E) `en_mi_bd` y `FOTO_FBA` van en el espacio de nombres igual que `sup`: son lo que el `en_bd_txt`
+    # del viejo (moloka_escaner_nube.py) lee como globales, y asi el banco puede ejecutar el suyo con este motor.
+    return Motor(sacar_piezas(ruta, DEFS_MOTOR, NOMBRES_MOTOR,
+                              base={'re': re, 'sup': {}, 'en_mi_bd': en_mi_bd, 'FOTO_FBA': None}))
 
 
 def cargar_filtro_director(regla, ruta=RUTA_DIRECTOR_HEO):
@@ -1352,16 +1368,17 @@ def datos_como_el_viejo(foto, resultados, apartados, M, eleccion=None):
 
 def excel_como_el_viejo(foto, resultados, apartados, M, ruta=RUTA_MOTOR, eleccion=None):
     """El libro de openpyxl con las SEIS hojas del viejo, escritas por SU codigo (la Celda 9, copiada en
-    escaner2_heredado_nube.py como `excel_del_viejo`). El catalogo propio (`M.poner_catalogo_propio`) tiene
-    que estar puesto: «En mi BD» sale de el, con `en_bd_txt` del viejo."""
+    escaner2_heredado_nube.py como `excel_del_viejo`). El catalogo propio (`M.poner_catalogo_propio`) y la foto
+    de FBA (`M.poner_foto_fba`) tienen que estar puestos: «En mi BD» sale de ellos, con `M.en_bd_txt`."""
     return escribir_celda9(datos_como_el_viejo(foto, resultados, apartados, M, eleccion), M, ruta)
 
 
 def escribir_celda9(datos, M, ruta=RUTA_MOTOR):
     """`excel_del_viejo` con estos datos (un dict con las llaves de DATOS_CELDA9), en el espacio de nombres
-    del motor (sus constantes, `sup`, `pct_comision_celda` y `en_bd_txt`). Devuelve el libro."""
+    del motor (sus constantes, `sup`, `pct_comision_celda`) y con `en_bd_txt` = `M.en_bd_txt` (encargo E: la
+    funcion compartida de en_mi_bd.py, inyectada; la del viejo ya no se hereda). Devuelve el libro."""
     from contextlib import redirect_stdout
-    ns = sacar_piezas(ruta, ('pct_comision_celda', 'en_bd_txt', 'excel_del_viejo'), (), base=M._ns)
+    ns = sacar_piezas(ruta, ('pct_comision_celda', 'excel_del_viejo'), (), base=dict(M._ns, en_bd_txt=M.en_bd_txt))
     with redirect_stdout(io.StringIO()):     # sus `print` de la hoja no ensucian el log del cruce
         return ns['excel_del_viejo'](**{k: datos[k] for k in DATOS_CELDA9})
 

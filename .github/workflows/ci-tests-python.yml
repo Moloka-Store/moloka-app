@@ -367,6 +367,13 @@ jobs:
       - name: 25 quaterdecies) test_escaner2_novedades.py
         run: python -u test_escaner2_novedades.py
 
+      # (Encargo E, 30-sep-2026) «En mi BD» con el stock de verdad (en_mi_bd.py): almacen de la ficha y FBA de la
+      # ULTIMA foto de inventario_fba sumada por ASIN, con su fecha; «—» si no hay dato (nunca 0); «foto vieja» con
+      # mas de dos dias. Con el caso real de Claptrap (stock_fba 0, foto 18), ejecutado en los tres usuarios (el
+      # escaner viejo, el Pro y el escaner 2, hasta su Excel), y por estructura: ninguno lee productos.stock_fba.
+      - name: 25 quindecies) test_en_mi_bd.py
+        run: python -u test_en_mi_bd.py
+
       - name: 26) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
@@ -418,6 +425,7 @@ jobs:
             test_escaner2_heredado.py
             test_escaner2_disponibilidad.py
             test_escaner2_novedades.py
+            test_en_mi_bd.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).

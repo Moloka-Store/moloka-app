@@ -78,6 +78,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
+import en_mi_bd
 import escaner2_motor as e2
 
 PROVEEDOR = 'HEO'
@@ -549,10 +550,13 @@ def cuentas(sb, M, params, imprimir=print, valoradas=None, keepa=None, reserva=2
                     [('eq', 'proveedor', PROVEEDOR), ('eq', 'estado', 'lista')])
     if not listas:
         return 0, 0, 0, []
-    productos = _todas(sb, 'productos', 'ean,asin,iva_pct', 'id', [('eq', 'activo', True)])
+    productos = _todas(sb, 'productos', 'ean,asin,iva_pct,stock_moloka,es_chase', 'id', [('eq', 'activo', True)])
     if not productos:
         raise RuntimeError('productos devolvió 0 filas con activo=true: el IVA de la ficha no se puede leer')
     M.poner_catalogo_propio(productos)
+    # (encargo E, 30-sep-2026) «En mi BD» del Excel: almacen de la ficha y FBA de la ultima foto de inventario_fba
+    # (hasta hoy esta consulta no pedia `stock_moloka` y la columna decia «OK Alm:0 FBA:0» de TODAS las nuestras).
+    M.poner_foto_fba(en_mi_bd.leer_foto_fba(sb, imprimir=lambda linea: imprimir(linea, flush=True)))
     estados = estados_de_heo(sb, [n['producto_prov'] for n in listas])
     filas = _en_trozos(sb, 'nov_valoracion', '*', 'pais', 'novedad_id', [n['id'] for n in listas])
     por_nov = {}
