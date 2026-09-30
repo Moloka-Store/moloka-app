@@ -5,15 +5,17 @@ name: Moloka - Procesar CANAL amazon_es
 # que la v1 hace para amazon_it/amazon_fr. Lee de la BD (no de Storage), así que
 # NO necesita SUPABASE_KEY. A DEMANDA. Se lanza DESPUÉS de cada carga de
 # transacciones (el cargador avisa en su resumen de que amazon_es quedó desfasado).
-# Escalera: staging ensayo → staging aplicar → SQL → producción ensayo → aplicar → SQL.
+# Por defecto: PRODUCCIÓN + ENSAYO. Cadena (desde el 30-sep-2026, sin staging):
+# ensayo en producción → aplicar → SQL.
 on:
   workflow_dispatch:
     inputs:
       entorno:
         description: 'Base de datos destino'
         type: choice
-        options: [staging, produccion]
-        default: staging
+        # 🔴 30-sep-2026 (encargo A): staging se jubiló. Solo queda producción; lo que no escribe es el modo ensayo (rollback).
+        options: [produccion]
+        default: produccion
       modo:
         description: 'ensayo = solo dice qué escribiría; aplicar = UPSERT de amazon_es en canales_producto'
         type: choice
@@ -49,5 +51,5 @@ jobs:
         env:
           ENTORNO: ${{ inputs.entorno }}
           MODO: ${{ inputs.modo }}
-          DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -u procesador_canal_amazon_es.py

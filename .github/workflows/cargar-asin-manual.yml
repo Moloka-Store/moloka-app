@@ -1,7 +1,7 @@
 name: Moloka - Cargar ASIN manual (one-off)
 
 # Carga ÚNICA a mano: 25 ASIN + 3 nombres. A DEMANDA, sin reloj.
-# Por defecto: STAGING + ENSAYO (no toca nada de Elena).
+# Por defecto: PRODUCCIÓN + ENSAYO (corre entero y se deshace: no toca nada de Elena).
 # Mira SIEMPRE la línea MODO: del log (el desplegable se queda donde lo dejaste).
 on:
   workflow_dispatch:
@@ -9,8 +9,9 @@ on:
       destino:
         description: 'Base de datos destino'
         type: choice
-        options: [staging, produccion]
-        default: staging
+        # 🔴 30-sep-2026 (encargo A): staging se jubiló. Solo queda producción; lo que no escribe es el modo ensayo (rollback).
+        options: [produccion]
+        default: produccion
       modo:
         description: 'ensayo = solo comprueba y lista; aplicar = escribe los 25 ASIN'
         type: choice
@@ -38,5 +39,5 @@ jobs:
         env:
           DESTINO: ${{ inputs.destino }}
           MODO: ${{ inputs.modo }}
-          DB_URL: ${{ inputs.destino == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -u cargar_asin_manual.py
