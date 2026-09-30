@@ -1061,6 +1061,35 @@ jobs:
           fi
           echo "produccion se ha movido desde la copia: $MOVIDA"
 
+          # 🆕 30-sep-2026 (encargo A): LA BASE CONTRA LA HUELLA DEL DIA DE LA COPIA.
+          #   Con staging, «rojo» podia ser copia mala o deriva, y el paso lo decia pero no
+          #   lo separaba. Ahora se separa midiendo: la huella entera de la base (sin sacar a
+          #   nadie) se compara con la que el fichero anoto de produccion al hacer la copia,
+          #   con la misma formula y el mismo truco del salto final que la linea de arriba.
+          #     · base = origen → el fichero devuelve, uno a uno, los permisos que tenia
+          #       produccion ese dia. Lo que difiera de la produccion de HOY es deriva, y
+          #       se ensena abajo, pero no es un fallo de la copia.
+          #     · base ≠ origen → la copia NO devuelve los permisos. Rojo.
+          #   🔬 Medido en el run 36682576999 (copia del 28-sep 13:52): base 4.444 lineas, el
+          #   fichero anota 4.444; produccion hoy 4.683 (los objetos del 29 y 30-sep).
+          psql "$SIM_DB_URL" -X -q -At -v ON_ERROR_STOP=1 -v excluir='' \
+               -f sql/huella_acl_public.sql | LC_ALL=C sort > acl_base_entera.txt
+          if [ ! -s acl_base_entera.txt ]; then
+            echo "::error::La huella entera de la base ha salido vacia. No se puede comparar con la de la copia."
+            exit 1
+          fi
+          MD5_BASE_ENTERA=$(printf '%s' "$(cat acl_base_entera.txt)" | md5sum | cut -d' ' -f1)
+          if [ -z "$HUELLA_ORIGEN" ]; then
+            FIEL=""
+            echo "la base contra el dia de la copia: no se sabe (el fichero no trae huella de origen)"
+          elif [ "$MD5_BASE_ENTERA" = "$HUELLA_ORIGEN" ]; then
+            FIEL="si"
+            echo "la base contra el dia de la copia: IGUAL ($(wc -l < acl_base_entera.txt) lineas, md5 $MD5_BASE_ENTERA)"
+          else
+            FIEL="no"
+            echo "la base contra el dia de la copia: DISTINTA (base $MD5_BASE_ENTERA, $(wc -l < acl_base_entera.txt) lineas; el fichero anoto $HUELLA_ORIGEN)"
+          fi
+
           # Las politicas de storage, del resumen que dejo el propio fichero en el 4b.
           POL_FICHERO=$(sed -n 's/^storage_politicas_del_fichero|//p'  permisos_resumen.txt)
           POL_REEMP=$(sed -n  's/^storage_politicas_reemplazadas|//p'  permisos_resumen.txt)
@@ -1095,6 +1124,7 @@ jobs:
             echo "- sentencias del fichero: **$HECHAS** ejecutadas, $SALT_ROL saltadas por rol ausente, $SALT_POT por falta de potestad"
             echo "- politicas de storage: **$POL_REEMP reemplazadas + $POL_NUEVAS nuevas = las $POL_FICHERO del fichero**, y $POL_CONS conservadas de la base (${POL_CONS_D:-ninguna})"
             echo "- produccion se ha movido desde la copia: $MOVIDA"
+            echo "- la base contra la huella de produccion del dia de la copia: ${FIEL:-no se sabe}"
           } >> "$GITHUB_STEP_SUMMARY"
 
           # 🔴 QUE LAS POLITICAS VENGAN DEL FICHERO, NO DE LA BASE. Es el punto del
@@ -1110,26 +1140,40 @@ jobs:
             exit 1
           fi
 
-          if [ "$MD5_STG" != "$MD5_PROD" ]; then
-            echo "::error::Los permisos de la base NO son los de produccion. Lineas que difieren (< produccion, > base):"
-            diff acl_prod.txt acl_stg.txt | head -40
+          # 🔴 LA DECISION (encargo A, 30-sep-2026). Manda la comparacion con el dia de la
+          #    copia, que es lo que el simulacro juzga: si la copia devuelve lo que habia.
+          #    Contra la produccion de hoy se sigue comparando y se ensena siempre; si la
+          #    base es fiel a su dia, lo que difiera de hoy es deriva MEDIDA, no supuesta.
+          #    Sin huella de origen en el fichero, se juzga como antes: contra hoy.
+          if [ "$FIEL" = "no" ] || { [ -z "$FIEL" ] && [ "$MD5_STG" != "$MD5_PROD" ]; }; then
+            echo "::error::Los permisos de la base NO son los que tenia produccion el dia de la copia. Lineas que difieren de la produccion de hoy (< produccion, > base):"
+            diff acl_prod.txt acl_stg.txt 2>/dev/null | head -40
             {
               echo ""
-              echo "**resultado: ROJO -- el ACL de la base no es el de produccion**"
+              echo "**resultado: ROJO -- el ACL de la base no es el de produccion el dia de la copia**"
               echo '```'
-              diff acl_prod.txt acl_stg.txt | head -40
+              diff acl_prod.txt acl_stg.txt 2>/dev/null | head -40
               echo '```'
-              echo ""
-              echo "Dos lecturas, y la de arriba dice cual: si produccion NO se ha movido, el fichero de permisos no devuelve lo que dice. Si SI se ha movido, mira el diff: lo que sobre en produccion y no este en la base puede ser sencillamente lo que ha cambiado desde la copia."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          echo "VERDE: los $(wc -l < acl_stg.txt) privilegios de la base son, uno a uno, los de produccion."
+          N_DERIVA=0
+          if [ "$MD5_STG" != "$MD5_PROD" ]; then
+            N_DERIVA=$(diff acl_prod.txt acl_stg.txt | grep -c '^[<>]' || true)
+            echo "::warning title=Produccion se ha movido desde la copia::$N_DERIVA linea(s) de ACL distintas entre la produccion de hoy y la base. La base SI es identica a produccion el dia de la copia: es deriva, no un fallo de la copia."
+            echo "--- deriva desde la copia (< produccion hoy, > base = produccion el dia de la copia), primeras 40 ---"
+            diff acl_prod.txt acl_stg.txt 2>/dev/null | head -40
+          fi
+          echo "VERDE: los $(wc -l < acl_stg.txt) privilegios de la base son, uno a uno, los que tenia produccion el dia de la copia."
           {
             echo ""
             echo "**resultado: VERIFICADO -- tras restaurar, quien tiene que poder leer la base PUEDE:"
-            echo "$(wc -l < acl_stg.txt) privilegios identicos a los de produccion, y las $POL_FICHERO politicas"
+            echo "$(wc -l < acl_stg.txt) privilegios identicos a los de produccion el dia de la copia, y las $POL_FICHERO politicas"
             echo "de storage restauradas DEL FICHERO (ninguna dada por buena por conservarse)**"
+            if [ "$N_DERIVA" != "0" ]; then
+              echo ""
+              echo "> Deriva desde la copia: **${N_DERIVA} linea(s)** de ACL distintas de la produccion de hoy (objetos o permisos cambiados despues de la copia). No es un fallo de la copia."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       # ── 6) Apagar la base desechable ──────────────────────────────────────
