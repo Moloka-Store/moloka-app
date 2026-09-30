@@ -71,6 +71,7 @@ escaner2-heo-novedades-cuentas.yml, a y 40: despues de los reintentos del carter
 🔒 NI escaner_resultados NI el buzon `informes`: el Excel de novedades vive en el bucket escaner2 y en nov_excel.
 🔒 LA LLAVE DE KEEPA no se imprime nunca: los mensajes de error se limpian de ella.
 """
+import html
 import io
 import os
 import re
@@ -98,7 +99,8 @@ ESCALON_EUR = 20.0
 IDX_NUEVO, IDX_CAJA = 1, 18
 CARPETA_EXCEL = 'heo/novedades'
 # Lo que se lee de una novedad «lista» (la cuenta y la hoja «Novedades» del Excel).
-COLUMNAS_NOVEDAD = 'id,producto_prov,ean_norm,nombre,motivo,precio_antes,precio_ahora,cambio_pct,es_chase,es_caja,uds_caja,nuestro'
+COLUMNAS_NOVEDAD = ('id,producto_prov,ean_norm,nombre,motivo,precio_antes,precio_ahora,cambio_pct,es_chase,es_caja,uds_caja,nuestro,'
+                    'decision_anterior')
 
 
 def _ahora():
@@ -145,6 +147,9 @@ class Keepa:
         self.saldo = None
         self.con_tarifa = 0
         self.fichas = 0
+        # 🔴 (2.ª auditoria) Keepa no contesta: se recuerda en la corrida, y nadie mas lo vuelve a intentar (cada intento
+        #    son hasta 2 × 60 s de espera y el paso tiene un tope).
+        self.caido = None
 
     def _limpio(self, texto):
         texto = str(texto)
@@ -479,6 +484,8 @@ def respaldo_keepa(keepa, pais, asin, precio_amazon, canal_amazon, reserva, tope
     `respaldo_de_producto`. Sin llave, sin saldo por encima de la reserva o con Keepa caido: repedir. NUNCA LANZA."""
     if keepa is None or not keepa.llave:
         return {'estado': 'repedir', 'motivo': 'sin KEEPA_API_KEY: el respaldo de Keepa no se ha podido pedir', 'tipo': 'keepa_caido'}
+    if keepa.caido:
+        return {'estado': 'repedir', 'motivo': 'Keepa no contesta en esta corrida: %s' % keepa.caido[:200], 'tipo': 'keepa_caido'}
     try:
         if keepa.saldo is None:
             keepa.leer_saldo()
@@ -487,6 +494,7 @@ def respaldo_keepa(keepa, pais, asin, precio_amazon, canal_amazon, reserva, tope
                     'motivo': 'Keepa sin saldo: quedaban %d tokens y la reserva es %d' % (keepa.saldo, reserva)}
         prods = keepa.productos(pais, [asin], por='asin', buybox=True)
     except KeepaFalla as ex:
+        keepa.caido = str(ex)
         return {'estado': 'repedir', 'motivo': 'Keepa falló: %s' % str(ex)[:200], 'tipo': 'keepa_caido'}
     return respaldo_de_producto(next((x for x in prods if x.get('asin') == asin), None), precio_amazon, canal_amazon)
 
@@ -586,7 +594,13 @@ def cuentas(sb, M, params, imprimir=print, valoradas=None, keepa=None, reserva=2
             sb.rpc('nov_guardar_cuenta', {'p_novedad': n['id'], 'p_decision': decision, 'p_mejor_pais': mejor,
                                           'p_motivo': '%s: %s' % (r['motivo'], r['detalle']), 'p_paises': paises}).execute()
             hechas += 1
-            if valoradas is not None:
+            # 🔑 (2.ª auditoria) SIN DUPLICADOS: una valorada que vuelve a la cuenta (un pais «repedir» llego) solo sale
+            #    otra vez en el Excel y en el Telegram si su decision CAMBIA.
+            repetida = n.get('decision_anterior') is not None and n.get('decision_anterior') == decision
+            if repetida:
+                imprimir('    cuenta %s (%s): vuelve a la cuenta con la MISMA decisión (%s): no sale otra vez en el Excel'
+                         % (n['ean_norm'], asin, decision), flush=True)
+            if valoradas is not None and not repetida:
                 valoradas.append({'nov': n, 'foto': foto, 'r': r, 'decision': decision, 'mejor': mejor, 'M': M,
                                   'amazon': {f['pais']: (f.get('amazon_estado'), f.get('amazon_motivo') or f.get('error_amazon'))
                                              for f in suyas},
@@ -670,7 +684,7 @@ def _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, i
     cola = _todas(sb, 'nov_cola', 'puesto,id,producto_prov,ean_norm,nombre,motivo,precio_ahora,precio_antes,cambio_pct,'
                   'es_chase,es_caja,uds_caja,estado,nuestro,asins_nuestros', 'puesto', [('eq', 'proveedor', PROVEEDOR)])
     t['v_en_cola'] = len(cola)
-    keepa_caido = None
+    keepa_caido = keepa.caido
     if cola:
         momento = ahora()
         estados = estados_de_heo(sb, [n['producto_prov'] for n in cola])
@@ -728,7 +742,7 @@ def _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, i
                     prods = (keepa.productos(p, suyos, por='asin') if suyos is not None
                              else keepa.productos(p, foto['codigos_keepa']))
                 except KeepaFalla as ex:
-                    keepa_caido = str(ex)
+                    keepa_caido = keepa.caido = str(ex)
                     espera = ('fallo', 'Keepa falló: %s' % keepa_caido)
                     break
                 fichas_p = []
@@ -753,6 +767,9 @@ def _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, i
                     except Exception as ex:
                         avisos.append('no se pudo dejar %s esperando Keepa: %s' % (n['id'], str(ex)[:200]))
                 t['v_espera_saldo' if espera[0] == 'saldo' else 'v_espera_fallo'] += 1
+                # (2.ª auditoria) Keepa caido en el paso de ventas: la corrida queda INCOMPLETA (🔴 en el Telegram).
+                if espera[0] == 'fallo' and incompletos is not None:
+                    incompletos.append({'novedad': n['id'], 'pais': None, 'motivo': espera[1], 'tipo': 'keepa_caido'})
                 continue
             try:
                 # 🔴 Encargo T: la ficha que no es de la marca no se usa; ese pais, sin dato, y el motivo lo dice. Una
@@ -932,7 +949,8 @@ def mensaje_telegram(valoradas, avalancha=None, incompletos=()):
     if incompletos:
         escalon = sum(1 for x in incompletos if x['tipo'] == 'escalon')
         reserva = sum(1 for x in incompletos if x['tipo'] == 'reserva')
-        otros = len(incompletos) - escalon - reserva
+        caido = sum(1 for x in incompletos if x['tipo'] == 'keepa_caido')
+        otros = len(incompletos) - escalon - reserva - caido
         trozos = []
         if escalon:
             trozos.append('%d país(es) pendiente(s): cambia de escalón' % escalon)
@@ -940,15 +958,26 @@ def mensaje_telegram(valoradas, avalancha=None, incompletos=()):
             trozos.append('%d país(es) sin dato (Amazon falló y Keepa tampoco)' % otros)
         if reserva:
             trozos.append('%d consulta(s) que Keepa no hizo por la reserva' % reserva)
+        if caido:
+            trozos.append('%d consulta(s) sin hacer porque Keepa no contesta' % caido)
         lineas.append('⚠️ <b>NOVEDADES INCOMPLETAS</b>: ' + ' y '.join(trozos) + '. Los COMPRAR de abajo pueden no ser todos; '
                       'lo pendiente se vuelve a pedir en la corrida siguiente.')
     for v, margen, precio, pais, origen in compras[:20]:
-        nombre = str(v['nov'].get('nombre') or v['foto'].get('nombre') or '')[:45]
+        # 🔒 El nombre viene de HEO: se escapa para el HTML de Telegram (un «&» o un «<» rompen el mensaje entero).
+        nombre = html.escape(str(v['nov'].get('nombre') or v['foto'].get('nombre') or '')[:45], quote=False)
         lineas.append('• %s — %s — %s (%s)%s' % (nombre, ('%.0f%%' % (margen * 100)) if margen is not None else 's/margen',
                                                  ('%.2f€' % precio) if precio else 's/precio', pais, _ORIGEN_TG.get(origen, '')))
     if len(compras) > 20:
         lineas.append('…y %d más (mira el Excel de la Biblioteca).' % (len(compras) - 20))
     return '\n'.join(lineas)
+
+
+def novedades_a_valorar(seleccion):
+    """Las novedades de una pasada que entran a valorar (2.ª auditoria, Fernando: la avalancha cuenta «solo lo que entra
+    a valorar»): la cifra `novedades` de nov_seleccionar_pasada (que cuenta las subidas, medido por SQL el 30-sep) menos
+    `subidas_fuera` (las que ya no se insertan). Puro."""
+    s = seleccion or {}
+    return max(int(s.get('novedades') or 0) - int(s.get('subidas_fuera') or 0), 0)
 
 
 def _post_de_verdad(url, data, timeout):

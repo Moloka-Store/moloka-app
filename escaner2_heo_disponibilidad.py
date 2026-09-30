@@ -182,9 +182,9 @@ def valorar_novedades(pasada, seleccion=None):
     en nov_pasada.valoracion_*. Con el interruptor apagado, cero llamadas a Keepa. Devuelve True si salio bien."""
     try:
         import escaner2_novedades as nv
-        # (Encargo V) Las novedades de la selección: más de 100 es una AVALANCHA (el Excel y el Telegram lo dicen).
+        # (Encargo V) Las que entran a valorar (novedades − subidas fuera): más de 100 es una AVALANCHA.
         ok, _res = nv.valorar_pasada(sb, pasada, keepa_llave=os.environ.get('KEEPA_API_KEY'),
-                                     novedades_pasada=(seleccion or {}).get('novedades'))
+                                     novedades_pasada=nv.novedades_a_valorar(seleccion))
         if not ok:
             print(f"NOVEDADES_NO_VALORADAS: la pasada {pasada} sigue aplicada y sus novedades seleccionadas; la valoración "
                   f"no ha salido bien y queda apuntada en nov_pasada (valoracion_estado y valoracion_motivo).", flush=True)

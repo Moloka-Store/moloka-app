@@ -808,6 +808,44 @@ eq('(A) más de 100 novedades: el Excel se abre en «Novedades» con el aviso ar
 b = Base(novedades=[novedad(9, estado='lista')], valoraciones=VALS_COMPRA)
 ok, res, txt = correr(b, KeepaFalso(), novedades_pasada=100)
 eq('(A) con 100 justas no es avalancha', (load_workbook(_io.BytesIO(b.subidos[0][2])).active.title, 'AVALANCHA' in txt), ('Análisis', False))
+eq('(A) 🔑 (2.ª auditoría) la avalancha cuenta lo que entra a valorar: novedades − subidas fuera (130 − 30 = 100 no; 131 − 30 = 101 sí)',
+   [nv.novedades_a_valorar({'novedades': 130, 'subidas_fuera': 30}), nv.novedades_a_valorar({'novedades': 131, 'subidas_fuera': 30}),
+    nv.novedades_a_valorar({'novedades': 7}), nv.novedades_a_valorar(None)],
+   [100, 101, 7, 0])
+b = Base(novedades=[novedad(9, estado='lista')], valoraciones=VALS_COMPRA)
+ok, res, txt = correr(b, KeepaFalso(), novedades_pasada=nv.novedades_a_valorar({'novedades': 131, 'subidas_fuera': 30}))
+eq('(A) …y con 101 tras restar las subidas, avalancha', 'AVALANCHA: 101 cambios' in txt, True)
+
+# ── (D) SIN DUPLICADOS (2.ª auditoría): la que vuelve a la cuenta por un país «repedir» ─────────
+TELEGRAM.clear()
+b = Base(novedades=[dict(novedad(9, estado='lista'), decision_anterior='COMPRAR')], valoraciones=VALS_COMPRA)
+ok, res, txt = correr(b, KeepaFalso(), env={'TELEGRAM_TOKEN': 'T', 'TELEGRAM_CHAT_ID': '42'})
+eq('(D) vuelve, NO cambia (era COMPRAR y sigue COMPRAR): la cuenta se guarda, pero NO sale en el Excel ni en el Telegram',
+   (len(b.llamadas('nov_guardar_cuenta')), b.subidos, TELEGRAM, 'misma decisión' in txt.lower() or 'MISMA decisión' in txt), (1, [], [], True))
+b = Base(novedades=[dict(novedad(9, estado='lista'), decision_anterior='Sin datos')], valoraciones=VALS_COMPRA)
+ok, res, txt = correr(b, KeepaFalso(), env={'TELEGRAM_TOKEN': 'T', 'TELEGRAM_CHAT_ID': '42'})
+eq('(D) vuelve y PASA A COMPRAR (era «Sin datos»): sale en el Excel y en el Telegram',
+   (len(b.subidos), len(TELEGRAM), b.tablas['nov_excel'][0]['novedades']), (1, 1, ['nov-9']))
+
+# ── (T) EL HTML DEL TELEGRAM, ESCAPADO (2.ª auditoría) ───────────────────────────────────
+m = nv.mensaje_telegram([dict(v_compra(1), nov={'nombre': 'Tom & Jerry <Pop!> Figura'})])
+eq('(T) 🔒 «Tom & Jerry <Pop!>»: el nombre va escapado para el HTML de Telegram', m.split('\n')[1].split(' — ')[0],
+   '• Tom &amp; Jerry &lt;Pop!&gt; Figura')
+
+# ── (K2) KEEPA CAÍDO, RECORDADO EN LA CORRIDA (2.ª auditoría) ────────────────────────────
+VALS_DOS = [dict(VALS_FALLA[0]), dict(VALS_FALLA[1]), dict(VALS_FALLA[2])]
+k = KeepaFalso(caido=True)
+TELEGRAM.clear()
+b = Base(novedades=[novedad(9, estado='lista'), novedad(1)], valoraciones=VALS_DOS)
+ok, res, txt = correr(b, k, env={'TELEGRAM_TOKEN': 'T', 'TELEGRAM_CHAT_ID': '42'})
+eq('(K2) 🔴 Keepa no contesta: el respaldo lo intenta UNA vez (2 intentos del saldo) y ni el otro país ni el paso de ventas lo vuelven a intentar',
+   [q for q, _d, _c in k.llamadas], ['token', 'token'])
+eq('(K2) …los dos países del respaldo, pendientes con el motivo; la de la cola, esperando Keepa',
+   ({x['pais']: x['respaldo']['motivo'][:28] for x in b.llamadas('nov_guardar_cuenta')[0]['p_paises'] if 'respaldo' in x},
+    [n['estado'] for n in b.tablas['nov_novedad'] if n['id'] == 'nov-1']),
+   ({'DE': 'Keepa falló: ConnectionError', 'IT': 'Keepa no contesta en esta co'}, ['espera_keepa']))
+eq('(K2) …y el Telegram sale en 🔴 diciendo que Keepa no contesta (también por el paso de ventas)',
+   (TELEGRAM[0][1]['text'].split('\n')[0].startswith('🔴'), '3 consulta(s) sin hacer porque Keepa no contesta' in TELEGRAM[0][1]['text']), (True, True))
 
 # ── (K) EL MÓDULO, POR ESTRUCTURA ────────────────────────────────────────────────────────
 AQUI = os.path.dirname(os.path.abspath(__file__))
