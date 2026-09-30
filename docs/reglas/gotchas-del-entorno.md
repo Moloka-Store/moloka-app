@@ -20,6 +20,10 @@
   `gh workflow run` (v2.96.0, la de esta máquina) **sí imprime la URL del run creado**, y de
   ahí sale el id:
   ```bash
+  URL=$(gh workflow run X.yml -f modo=ensayo 2>&1 | head -1); ID=${URL##*/}
+  ```
+  *Hasta el 30-sep-2026 (había staging) el ejemplo era:*
+  ```bash
   URL=$(gh workflow run X.yml -f entorno=staging 2>&1 | head -1); ID=${URL##*/}
   ```
   Si algún día no la imprimiera, la salida es acotar por `--branch` o `--created`, **nunca**

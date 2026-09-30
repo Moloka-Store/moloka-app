@@ -1,7 +1,42 @@
-name: Moloka - Restaurar backup en STAGING
+name: Moloka - Simulacro de la copia (base desechable)
 
-# El SIMULACRO DE INCENDIO: coge el backup de R2 y lo restaura en staging para
-# demostrar que la copia sirve de verdad.
+# El SIMULACRO DE INCENDIO: coge la copia de R2 y la restaura en una base que NACE
+# VACIA DENTRO DE ESTE RUN Y MUERE CON EL, para demostrar que la copia sirve de verdad.
+#
+# 🔴 DESDE EL 30-sep-2026 (encargo A) YA NO RESTAURA EN STAGING. Fernando decidio
+#   jubilar la base de pruebas (proyecto lusujlzyndsydibkeija), y este simulacro era
+#   su ultimo uso con sentido. El fichero conserva su nombre (`restaurar-staging.yml`)
+#   a proposito: `workflow_dispatch` solo deja lanzar desde una rama un .yml que ya
+#   existe en `main`, y asi el simulacro se probo de verdad antes de fusionarse (el
+#   run va en el PR). Renombrarlo es un cambio aparte, cuando ya este en `main`.
+#
+# 🔑 LA BASE DESECHABLE ES UN SUPABASE DE VERDAD, NO UNA MAQUETA. Se levanta con la
+#   CLI de Supabase (`supabase start`) dentro del runner: el mismo Postgres de
+#   Supabase, con sus roles (anon, authenticated, service_role, supabase_admin…),
+#   su esquema `auth` (de donde sale `auth.uid()`, que usan 63 politicas de public)
+#   y su esquema `storage` con las tablas que crea el servicio de Storage — que es
+#   donde el fichero de permisos pone las politicas de los buzones. O sea: lo mismo
+#   que tendriamos el dia del incendio, un proyecto de Supabase NUEVO y VACIO. Un
+#   Postgres pelado (el `postgres:16` del CI de la v2) no tiene nada de eso y habria
+#   que fingirlo a mano, que es justo lo que no se quiere juzgar.
+#
+# 🔒 NO VUELVE A HABER BASE COMPARTIDA. Por eso se van tres pasos que solo existian
+#   porque staging era de todos: el «quien restauro antes» (2b), el rastro en
+#   `staging_restauraciones` (9) y el «staging no puede ir por detras de
+#   produccion» (10, que protegia los ensayos que se hacian ENCIMA de staging). Y
+#   el vaciado con captura de las politicas de storage del paso 4: una base que nace
+#   vacia no tiene nada que vaciar ni que conservar. Las politicas de storage que
+#   quedan al final vienen TODAS del fichero de permisos — el caso del incendio.
+#
+# 🔒 LA UNICA CREDENCIAL DE PRODUCCION que toca este workflow es la del paso 5b, y
+#   entra en SOLO LECTURA FORZADA (`default_transaction_read_only=on`). Nada de lo
+#   que hace este run puede escribir en produccion: la base donde se restaura es
+#   `127.0.0.1` del propio runner, y el paso 2b se niega a seguir si no lo es.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# HISTORIA (vale hasta el 30-sep-2026: el destino era staging). Se conserva porque
+# explica por que el veredicto es como es; lo que dice de staging es registro.
+# ─────────────────────────────────────────────────────────────────────────────
 #
 # 🔴 PRIMER AGUJERO (hasta el 30-jul-2026): EL SIMULACRO NO PODIA FALLAR, ASI QUE
 #   NO PROBABA NADA.
@@ -103,54 +138,63 @@ on:
   workflow_dispatch:
     inputs:
       fichero:
-        description: "Nombre del backup (vacio = el mas reciente)"
+        description: "Nombre del volcado (vacio = el de la ultima copia COMPLETA)"
         required: false
         default: ""
       motivo:
-        description: "Para que restauras (lo veran las otras sesiones)"
+        description: "Para que lo lanzas (queda en el resumen del run)"
         required: false
         default: ""
+      # 🔴 LOS DOS DEFAULTS CAMBIAN EL 30-sep-2026 (encargo A): la copia de la v1
+      #    (`bd/`) esta apagada desde el 17-sep-2026 (`scripts/backup/README.md` de
+      #    la v2), asi que «el ultimo de bd/» es una copia de hace dos semanas. La
+      #    copia viva es la de la v2, y la unica que trae permisos.
       prefijo:
-        description: "Cajon de R2 a restaurar: 'bd' (v1, por defecto) o 'v2/bd'"
+        description: "Cajon de R2 a restaurar: 'v2/bd' (por defecto) o 'bd' (la copia vieja de la v1)"
         required: false
-        default: "bd"
+        default: "v2/bd"
       permisos:
-        description: "Aplicar tambien los permisos de esa copia ('no' por defecto; 'si' solo con prefijo v2/bd)"
+        description: "Aplicar y juzgar tambien los permisos de esa copia ('si' por defecto; solo con prefijo v2/bd)"
         required: false
-        default: "no"
+        default: "si"
 
 concurrency:
-  group: restaurar-staging
+  group: simulacro-copia
   cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   restaurar:
     runs-on: ubuntu-24.04
+    # Medido en la prueba del encargo A: ver el run del PR. Con 45 min sobra; sin
+    # tope, GitHub espera 6 horas a un paso colgado.
+    timeout-minutes: 45
+    env:
+      # La CLI se fija por version: la base desechable tiene que ser la misma de un
+      # run a otro, o dos simulacros no se pueden comparar.
+      SUPABASE_CLI_VERSION: 2.118.0
+      DESECHABLE_DIR: ${{ github.workspace }}/../desechable
     steps:
-      # Hace falta por `sql/capturar_politicas_fuera_de_public.sql`, que es la pieza
-      # que este workflow comparte con `backup-bd.yml`. Se escribe una vez y la
-      # consumen los dos: aqui para CONSERVAR lo que el backup no cubre, y alli para
-      # que la copia deje de tener ese agujero.
+      # Hace falta por `sql/huella_acl.sql` y `sql/huella_acl_public.sql`, que son las
+      # formulas de los veredictos y las comparten con quien las compruebe a mano.
       - uses: actions/checkout@v7
 
-      - name: 1) Cerrojo anti-produccion
+      - name: 1) Anotar el motivo
         env:
-          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+          MOTIVO: ${{ github.event.inputs.motivo }}
         run: |
-          case "$STAGING_DB_URL" in
-            *ogfbjjdxcltzpygzuyla*)
-              echo "::error::Esa URL es la BD de PRODUCCION. Me niego."; exit 1;;
-            "")
-              echo "::error::Falta el secret STAGING_DB_URL"; exit 1;;
-          esac
-          echo "Cerrojo OK: no es produccion."
+          echo "### Simulacro de la copia en una base desechable" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "motivo: ${MOTIVO:-(sin motivo)}" >> "$GITHUB_STEP_SUMMARY"
 
       # 🔴 LISTA CERRADA, Y ANTES DE TOCAR NADA (encargo R, 17-sep-2026). El
       #    `prefijo` decide de que cajon de R2 se restaura, asi que un valor que
       #    no sea exactamente uno de los dos que existen hoy no se intenta
-      #    interpretar: se para aqui, antes de bajar nada de R2 y antes de tocar
-      #    staging. `bd` es la v1 (comportamiento de siempre, y el default);
-      #    `v2/bd` es la copia semanal de moloka-app-v2 (`copia-r2.yml`).
+      #    interpretar: se para aqui, antes de bajar nada de R2.
+      #    `v2/bd` es la copia semanal de moloka-app-v2 (`copia-r2.yml`) y el
+      #    default desde el 30-sep-2026; `bd` es la copia vieja de la v1.
       - name: 1b) Cerrojos de los inputs -- prefijo y permisos
         env:
           PREFIJO: ${{ github.event.inputs.prefijo }}
@@ -159,7 +203,7 @@ jobs:
           case "$PREFIJO" in
             bd|v2/bd) echo "Prefijo OK: '$PREFIJO'." ;;
             *)
-              echo "::error::Prefijo '$PREFIJO' no reconocido. Solo se admite 'bd' (v1) o 'v2/bd' (v2). Nada se ha tocado."
+              echo "::error::Prefijo '$PREFIJO' no reconocido. Solo se admite 'v2/bd' (v2) o 'bd' (v1). Nada se ha tocado."
               exit 1
               ;;
           esac
@@ -168,12 +212,11 @@ jobs:
           #    cerrada, y antes de bajar nada de R2. `permisos=si` solo tiene sentido con
           #    `v2/bd`, porque el fichero `permisos_<FECHA>.sql` lo escribe `copia-r2.yml`
           #    de la v2 y vive en `v2/permisos/`. La copia de la v1 (`bd/`) NO guarda
-          #    permisos: pedirselos seria buscar un fichero que no existe, y enterarse
-          #    DESPUES de haber vaciado staging.
+          #    permisos.
           case "$PERMISOS_INPUT" in
             no|si) echo "Permisos: '$PERMISOS_INPUT'." ;;
             *)
-              echo "::error::permisos='$PERMISOS_INPUT' no se reconoce. Solo 'no' (lo de siempre) o 'si'. Nada se ha tocado."
+              echo "::error::permisos='$PERMISOS_INPUT' no se reconoce. Solo 'si' o 'no'. Nada se ha tocado."
               exit 1
               ;;
           esac
@@ -189,44 +232,66 @@ jobs:
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null
           sudo apt-get install -y -qq postgresql-client-17 >/dev/null
 
-      # 🔴 STAGING ES COMPARTIDO. El 11-ago-2026 se restauró TRES VECES en una hora, y una
-      #    de ellas se llevó por delante una vista que otra sesión ya había aplicado y
-      #    verificado; esa sesión siguió midiendo sobre un ensayo que ya no existía.
-      #    🔒 El `concurrency` de arriba impide que dos restauraciones se pisen entre sí,
-      #       pero NO protege a quien está midiendo: para eso hace falta que se vea quién
-      #       ha restaurado y cuándo. Este paso avisa; no impide nada, porque a veces hay
-      #       que restaurar igual.
-      # 🔒 La pregunta anti-cero, hecha codigo, ANTES de que este workflow la use en su
-      #    paso 10 (`comparar_censos.py` corta si un censo viene vacio). Si el guarda
-      #    esta roto, el veredicto de abajo se lo cree. `docs/guion-anti-cero.md`.
-      - name: Mesa de pruebas del guion anti-cero
-        run: python -u test_anti_cero.py
+      - name: 2a) Instalar la CLI de Supabase (version fija)
+        uses: supabase/setup-cli@v1
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
 
-      - name: 2b) Quien restauro antes (staging es compartido)
-        env:
-          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+      # ── 2b) LA BASE DESECHABLE: nace aqui, vacia, y muere con el runner ─────
+      # 🔒 En una carpeta PROPIA, fuera del checkout: `supabase start` aplica lo que
+      #    encuentre en `supabase/migrations` y `supabase/seed.sql` de su carpeta, y
+      #    aqui no tiene que encontrar nada. Una base que nace con algo dentro ya no
+      #    es la del incendio.
+      # 🔒 Se apagan los servicios que no pintan nada (el panel, realtime, funciones,
+      #    logs, correo…). Se quedan la base, Auth y Storage —los que crean los
+      #    esquemas `auth` y `storage` de un proyecto nuevo— y el gateway.
+      - name: 2b) Levantar la base desechable (Supabase local, vacio)
         run: |
-          psql "$STAGING_DB_URL" -q -c "
-            create table if not exists public.staging_restauraciones (
-              id            bigserial primary key,
-              restaurado_en timestamptz not null default now(),
-              quien         text,
-              motivo        text,
-              fichero       text,
-              run_url       text
-            );
-            alter table public.staging_restauraciones enable row level security;" 2>/dev/null || echo "(no se pudo asegurar la tabla; se continua)"
-          echo "--- Ultimas restauraciones de staging ---"
-          psql "$STAGING_DB_URL" -c "
-            select restaurado_en, quien, coalesce(motivo,'-') as motivo
-              from public.staging_restauraciones
-             order by restaurado_en desc limit 5;" 2>/dev/null || true
-          ULT=$(psql "$STAGING_DB_URL" -tAc "
-            select coalesce(extract(epoch from (now() - max(restaurado_en)))::int, 999999)
-              from public.staging_restauraciones;" 2>/dev/null || echo "999999")
-          if [ "$ULT" -lt 3600 ] 2>/dev/null; then
-            echo "::warning::Staging se restauro hace $((ULT/60)) minutos. Si alguien esta midiendo, le estas tirando el ensayo."
-          fi
+          set -euo pipefail
+          mkdir -p "$DESECHABLE_DIR" && cd "$DESECHABLE_DIR"
+          supabase init
+          # La misma version mayor que produccion (17.6, medido el 30-sep-2026).
+          sed -i 's/^major_version = .*/major_version = 17/' supabase/config.toml
+          grep -n '^major_version' supabase/config.toml
+          supabase start -x studio,imgproxy,realtime,edge-runtime,logflare,vector,supavisor,postgres-meta,mailpit
+          SIM_DB_URL=$(supabase status -o env | sed -n 's/^DB_URL="\(.*\)"$/\1/p')
+          # 🔴 EL CERROJO DE ESTE WORKFLOW, AL REVES QUE ANTES: ya no basta con «no es
+          #    produccion». La base tiene que ser la del propio runner, y ninguna otra.
+          case "$SIM_DB_URL" in
+            *ogfbjjdxcltzpygzuyla*) echo "::error::La base del simulacro es PRODUCCION. Me niego."; exit 1;;
+            postgresql://*@127.0.0.1:*|postgresql://*@localhost:*) echo "Cerrojo OK: la base es la del propio runner.";;
+            *) echo "::error::No reconozco la base del simulacro ('$SIM_DB_URL' no es local). Me niego."; exit 1;;
+          esac
+          echo "SIM_DB_URL=$SIM_DB_URL" >> "$GITHUB_ENV"
+          echo "--- imagenes levantadas ---"
+          docker ps --format '{{.Image}}' | sort
+          # 🔒 Y que nace VACIA, con lo que tiene un proyecto nuevo y nada mas. Si
+          #    `public` trajera algo, el veredicto del paso 5 lo contaria como «sobra»
+          #    y no sabriamos si es de la copia o de la base.
+          psql "$SIM_DB_URL" -X -v ON_ERROR_STOP=1 -At -F' | ' <<'SQL'
+          select 'version', version();
+          select 'rol de conexion', current_user || ' (superusuario: ' || (select rolsuper from pg_roles where rolname = current_user) || ')';
+          select 'objetos en public', count(*) from pg_class where relnamespace = 'public'::regnamespace;
+          select 'funciones en public', count(*) from pg_proc where pronamespace = 'public'::regnamespace;
+          select 'auth.uid()', to_regprocedure('auth.uid()') is not null;
+          select 'storage.objects', to_regclass('storage.objects') is not null;
+          select 'storage.buckets', to_regclass('storage.buckets') is not null;
+          select 'extensiones', string_agg(extname || ' ' || extversion, ', ' order by extname) from pg_extension;
+          select 'roles', string_agg(rolname, ', ' order by rolname) from pg_roles where rolname not like 'pg\_%';
+          do $$
+          begin
+            if exists (select 1 from pg_class where relnamespace = 'public'::regnamespace)
+               or exists (select 1 from pg_proc where pronamespace = 'public'::regnamespace) then
+              raise exception 'La base desechable NO nace vacia: public ya trae objetos. No se restaura encima.';
+            end if;
+            if to_regprocedure('auth.uid()') is null then
+              raise exception 'La base desechable no tiene auth.uid(): las politicas de public no se podrian crear.';
+            end if;
+            if to_regclass('storage.objects') is null or to_regclass('storage.buckets') is null then
+              raise exception 'La base desechable no tiene storage.objects/buckets: las politicas de los buzones no se podrian crear.';
+            end if;
+          end $$;
+          SQL
 
       - name: 3) Bajar el backup de R2
         env:
@@ -235,318 +300,69 @@ jobs:
           R2_ACCOUNT_ID:         ${{ secrets.R2_ACCOUNT_ID }}
           FICHERO: ${{ github.event.inputs.fichero }}
         run: |
+          set -euo pipefail
           EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          # 🔴 SE RESUELVE DENTRO DE `$PREFIJO` (encargo R, 17-sep-2026), tanto "el
-          #    ultimo" como el nombre a mano. Con el default ('bd') esto es, byte a
-          #    byte, lo de siempre; ya lo valido y lo cerro el paso 1b.
+          # 🔴 «EL ULTIMO» ES LA ULTIMA COPIA COMPLETA, no el ultimo volcado (encargo
+          #    A, 30-sep-2026). Desde el encargo CR (28-sep) una copia de la v2 es de
+          #    fiar solo si tiene su marca en `v2/completas/`: un volcado sin marca es
+          #    de un run que se corto despues de subirlo. El simulacro juzga la copia
+          #    en la que confiariamos el dia del incendio, no la ultima que se empezo.
           if [ -z "$FICHERO" ]; then
-            FICHERO=$(aws s3 ls "s3://moloka-backups/${PREFIJO}/" --endpoint-url "$EP" --region auto \
-                      | awk '{print $4}' | sort | tail -1)
+            if [ "$PREFIJO" = "v2/bd" ]; then
+              FECHA=$(aws s3 ls "s3://moloka-backups/v2/completas/" --endpoint-url "$EP" --region auto \
+                      | awk '{print $4}' | sed -n 's/^completa_\(.*\)\.txt$/\1/p' | sort | tail -1)
+              if [ -z "$FECHA" ]; then
+                echo "::error::No hay ninguna copia COMPLETA en v2/completas/. Sin copia completa no hay nada de fiar que restaurar."
+                exit 1
+              fi
+              FICHERO="moloka_${FECHA}.sql.gz"
+            else
+              FICHERO=$(aws s3 ls "s3://moloka-backups/${PREFIJO}/" --endpoint-url "$EP" --region auto \
+                        | awk '{print $4}' | sort | tail -1)
+            fi
           fi
           echo "Restaurando: $FICHERO (prefijo: $PREFIJO)"
           echo "BACKUP_FICHERO=$FICHERO" >> "$GITHUB_ENV"
-          # RUTA COMPLETA (prefijo incluido): es lo que se deja en el resumen del
-          # run y en staging_restauraciones.fichero -- esa tabla no tiene columna
-          # para el prefijo, asi que la ruta entera es la unica forma de que, mirando
-          # esa fila mas tarde, se sepa de que cajon vino sin tener que adivinarlo.
           echo "BACKUP_RUTA=${PREFIJO}/$FICHERO" >> "$GITHUB_ENV"
           aws s3 cp "s3://moloka-backups/${PREFIJO}/$FICHERO" backup.sql.gz \
-            --endpoint-url "$EP" --region auto
+            --endpoint-url "$EP" --region auto --no-progress
+          echo "Tamano del volcado comprimido: $(wc -c < backup.sql.gz) bytes"
 
-      # ── 4) Vaciar y restaurar, TODO EN UNA TRANSACCION ────────────────────
-      # 🔒 Este paso es el unico que escribe, y en su entorno SOLO existe la URL de
-      #    staging. La de produccion no esta aqui: no puede tocarla ni por error.
-      #
-      # 🔴 LO QUE EL BACKUP NO CUBRE, ESTE PASO LO CONSERVA -- y hay que entender por
-      #   que existe esto, porque nacio de un susto de verdad (run 31299419508):
-      #   el vaciado de `public` se llevaba por delante, VIA CASCADE, cuatro politicas
-      #   de `storage.objects` (`buzones_v2_*`), porque su clausula usa
-      #   `public.moloka_buzones_fase0()`. Y el backup NO PUEDE DEVOLVERLAS: se hace
-      #   con `pg_dump --schema=public`, asi que `storage` no esta dentro. Aquella vez
-      #   se salvaron de casualidad -- la restauracion fallo despues por otra cosa y la
-      #   transaccion entera hizo rollback. De no fallar, habrian desaparecido y nada
-      #   las habria recreado.
-      #   Asi que ahora: se CAPTURAN antes de vaciar y se RECREAN despues de restaurar.
-      #
-      # 🔒 Y TODO -- comprobar, capturar, vaciar, cargar y recrear -- VA EN LA MISMA
-      #   TRANSACCION, en un solo psql. Si el recrear quedara en una llamada aparte, un
-      #   fallo ahi dejaria staging sin las politicas y sin vuelta atras: exactamente el
-      #   escenario que aquel rollback evito por suerte. Es el mismo argumento por el
-      #   que el vaciado y la carga van juntos.
-      - name: 4) Restaurar en staging (comprobar + capturar + vaciar + cargar + recrear, en UNA transaccion)
-        env:
-          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+      # ── 4) Restaurar, TODO EN UNA TRANSACCION ─────────────────────────────
+      # 🔒 La base nace vacia (lo exige el paso 2b), asi que aqui ya no hay vaciado
+      #    ni politicas de storage que conservar: se carga el volcado tal cual, y si
+      #    una sola sentencia falla, no queda nada a medias.
+      - name: 4) Restaurar en la base desechable (una transaccion)
         run: |
+          set -uo pipefail
           gunzip -f backup.sql.gz
           echo "Lineas del dump: $(wc -l < backup.sql)"
 
           # 🔴 GUARDA DE FORMATO -- falla CERRADO y con el motivo dicho.
           #   Los backups anteriores al 9-ago-2026 se hicieron con `--clean --if-exists`
           #   y empiezan por un bloque de borrados que NO se puede aplicar sobre un
-          #   `public` vacio (es exactamente el fallo del run 31296420722). Sin esta
-          #   guarda, el job reventaria con un "relation does not exist" en la linea 27
-          #   y habria que diagnosticarlo entero otra vez.
+          #   `public` vacio (es exactamente el fallo del run 31296420722).
           if grep -qEm1 '^(ALTER TABLE ONLY .* DROP CONSTRAINT IF EXISTS|DROP (TABLE|VIEW|SEQUENCE|INDEX|FUNCTION|ROUTINE) IF EXISTS)' backup.sql; then
             echo "::error::'$BACKUP_FICHERO' es del formato ANTIGUO (pg_dump con --clean)."
-            echo "::error::Trae un bloque de borrados que no se puede aplicar sobre un esquema vacio:"
-            echo "::error::sus 'DROP CONSTRAINT IF EXISTS' protegen la restriccion, no la tabla."
-            echo "::error::ESTO NO ES UNA AVERIA: es el ORDEN. Al fusionar el cambio, TODOS los"
-            echo "::error::backups que ya habia en R2 son del formato viejo. Hay que generar uno"
-            echo "::error::nuevo ANTES de restaurar:"
-            echo "::error::  1. lanzar backup-bd.yml a mano (o esperar al cron: 02:15 UTC)"
-            echo "::error::  2. y entonces relanzar este workflow"
+            echo "::error::Trae un bloque de borrados que no se puede aplicar sobre un esquema vacio."
             exit 1
           fi
           echo "Formato OK: el dump no trae bloque de borrados."
 
           # 🔴 SE FILTRA UNA SOLA SENTENCIA, POR SU NOMBRE, Y ES BENIGNA.
-          #   `pg_dump --schema=public` incluye `CREATE SCHEMA public;`. Con `--clean`
-          #   no molestaba porque delante iba un DROP; sin el, choca con el esquema que
-          #   aqui se conserva A PROPOSITO (ver mas abajo: el cajon, no el mueble).
-          #   Medido en el run 31299419508: `ERROR: schema "public" already exists` en
-          #   la linea 26 del dump. Crear un esquema que ya existe, y que ademas
-          #   queremos que siga existiendo, no aporta nada: se quita ESA linea y se
+          #   `pg_dump --schema=public` incluye `CREATE SCHEMA public;`, y en un proyecto
+          #   de Supabase el esquema `public` ya existe (con sus permisos y sus DEFAULT
+          #   PRIVILEGES, que son los que hay que conservar). Se quita ESA linea y se
           #   dice cuantas se han quitado. Lo que NO se hace es filtrar por categorias.
           N_SCHEMA=$(grep -c '^CREATE SCHEMA public;$' backup.sql || true)
           echo "Sentencias 'CREATE SCHEMA public;' filtradas del dump: $N_SCHEMA"
-          grep -v '^CREATE SCHEMA public;$' backup.sql > dump_sin_schema.sql
+          grep -v '^CREATE SCHEMA public;$' backup.sql > restaurar.sql
+          echo "Para leer un error: 'restaurar.sql:X' es la linea X del dump original,"
+          echo "o $N_SCHEMA mas abajo si cae despues del 'CREATE SCHEMA public;' filtrado."
 
-          # ── 4.1) ANTES DE TOCAR NADA: ¿puedo escribir en storage.objects? ─────
-          # 🔴 NO SE DA POR HECHO PORQUE LA CONEXION SEA `postgres`: `storage` es de
-          #   Supabase y sus permisos son suyos. Destruir las politicas y descubrir
-          #   DESPUES que no puedo devolverlas es el peor orden posible. Asi que se
-          #   prueba de verdad -- crear y borrar una politica de mentira -- antes de
-          #   que el vaciado toque una sola cosa. Va dentro de la transaccion, asi que
-          #   no deja rastro pase lo que pase.
-          # ⚠️ AVISO PARA EL DIA QUE ESTO SE REUTILICE: el `CREATE POLICY` de prueba
-          #   toma ACCESS EXCLUSIVE sobre `storage.objects`, y ese lock NO se suelta
-          #   con el `DROP POLICY` -- los locks duran hasta el COMMIT, o sea hasta el
-          #   final de TODA la restauracion. En staging da igual, no lo usa nadie. Pero
-          #   si algun dia esta pieza se apunta a una base de la que dependa Elena, le
-          #   bloquearia los buzones durante todo el restore. Ese dia hay que comprobar
-          #   el permiso de otra forma (mirando el owner de la tabla, por ejemplo), no
-          #   escribiendo en ella.
-          cat > 00_permisos.sql <<'SQL'
-          \echo '--- Comprobando que puedo escribir politicas en storage.objects ---'
-          DO $$
-          BEGIN
-            EXECUTE 'CREATE POLICY moloka_prueba_permisos_restore ON storage.objects FOR SELECT USING (false)';
-            EXECUTE 'DROP POLICY moloka_prueba_permisos_restore ON storage.objects';
-            RAISE INFO 'Permiso OK: puedo crear y borrar politicas en storage.objects.';
-          EXCEPTION WHEN OTHERS THEN
-            RAISE EXCEPTION 'ABORTA ANTES DE TOCAR NADA: no puedo escribir politicas en storage.objects (%). '
-                            'El vaciado de public destruiria las politicas de los buzones via CASCADE y no '
-                            'habria forma de devolverlas: el backup no las trae.', SQLERRM;
-          END $$;
-          SQL
-
-          # ── 4.2) CAPTURAR lo que el backup no cubre ───────────────────────────
-          # 🔒 EL `SET LOCAL search_path = public` NO ES DECORACION, y esto costo un
-          #   susto: `pg_policies.qual` devuelve la expresion RENDERIZADA con el
-          #   search_path del momento, y ahi `moloka_buzones_fase0()` sale SIN
-          #   esquema (porque `public` estaba en el path cuando se creo la politica).
-          #   Como el dump hace `set_config('search_path','')` unas lineas mas abajo,
-          #   al recrear la politica esa funcion NO resolveria. Se fija el MISMO path
-          #   al capturar y al recrear, para reproducirla igual. Lo que NO se hace es
-          #   reescribir la expresion cualificando la funcion a mano: eso seria
-          #   reinterpretar una politica que no es nuestra.
-          {
-            echo "SET LOCAL search_path = public;"
-            echo "\\echo '--- Capturando las politicas que viven fuera de public ---'"
-            cat sql/capturar_politicas_fuera_de_public.sql
-            cat <<'SQL'
-          -- Censo de lo que hay FUERA de public, para poder demostrar al final que el
-          -- CASCADE del vaciado no se ha llevado nada mas por delante.
-          CREATE TEMP TABLE moloka_censo_fuera_public AS
-            SELECT 'relaciones'::text AS que, count(*) AS n
-              FROM pg_catalog.pg_class c
-              JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-             WHERE n.nspname NOT IN ('public','information_schema') AND n.nspname NOT LIKE 'pg\_%'
-            UNION ALL
-            SELECT 'rutinas', count(*)
-              FROM pg_catalog.pg_proc p
-              JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
-             WHERE n.nspname NOT IN ('public','information_schema') AND n.nspname NOT LIKE 'pg\_%';
-
-          DO $$
-          DECLARE n_pol int;
-          BEGIN
-            SELECT count(*) INTO n_pol FROM moloka_politicas_fuera_public;
-            RAISE INFO 'Politicas capturadas fuera de public: %', n_pol;
-          END $$;
-          SQL
-          } > 01_capturar.sql
-
-          # ── 4.3) EL VACIADO ───────────────────────────────────────────────────
-          # 🔒 Se borran los OBJETOS de public, no el esquema (ver cabecera).
-          #    Los objetos que pertenecen a una extension se dejan en paz: el dump
-          #    tampoco los trae, y borrarlos romperia la extension.
-          cat > 02_vaciar.sql <<'SQL'
-          \echo '--- Vaciando public en staging (el cajon, no el mueble) ---'
-          DO $$
-          DECLARE r record; n int := 0;
-          BEGIN
-            -- Vistas primero: dependen de las tablas.
-            FOR r IN
-              SELECT c.relname, c.relkind
-                FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-               WHERE n.nspname = 'public' AND c.relkind IN ('v','m')
-                 AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = c.oid AND d.deptype = 'e')
-            LOOP
-              EXECUTE format('DROP %s IF EXISTS public.%I CASCADE',
-                             CASE r.relkind WHEN 'm' THEN 'MATERIALIZED VIEW' ELSE 'VIEW' END,
-                             r.relname);
-              n := n + 1;
-            END LOOP;
-
-            FOR r IN
-              SELECT c.relname
-                FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-               WHERE n.nspname = 'public' AND c.relkind IN ('r','p')
-                 AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = c.oid AND d.deptype = 'e')
-            LOOP
-              EXECUTE format('DROP TABLE IF EXISTS public.%I CASCADE', r.relname);
-              n := n + 1;
-            END LOOP;
-
-            FOR r IN
-              SELECT c.relname
-                FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-               WHERE n.nspname = 'public' AND c.relkind = 'S'
-                 AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = c.oid AND d.deptype = 'e')
-            LOOP
-              EXECUTE format('DROP SEQUENCE IF EXISTS public.%I CASCADE', r.relname);
-              n := n + 1;
-            END LOOP;
-
-            -- 🔴 EL NOMBRE VA CUALIFICADO A MANO, NO POR `::regprocedure`.
-            --   regprocedure imprime el nombre SIN el esquema cuando `public` esta en
-            --   el search_path, y un DROP sin esquema se resuelve por search_path: en
-            --   el mejor caso acierta por casualidad, en el peor borra la funcion de
-            --   OTRO esquema.
-            -- ⚠️ DROP ROUTINE cubre funciones y procedimientos, no AGREGADOS. Hoy en
-            --   produccion las 16 son funciones normales (medido el 9-ago-2026). Si
-            --   algun dia aparece un agregado, esto fallara con su nombre y su motivo
-            --   -- falla CERRADO, que es como tiene que fallar.
-            -- 🔴 Y ESTE CASCADE ES EL QUE SE SALE DE public: `moloka_buzones_fase0()`
-            --   sostiene cuatro politicas de `storage.objects`. Por eso estan
-            --   capturadas antes (4.2) y se recrean despues (4.5).
-            FOR r IN
-              SELECT format('%I.%I(%s)', ns.nspname, p.proname,
-                            pg_get_function_identity_arguments(p.oid)) AS firma
-                FROM pg_proc p JOIN pg_namespace ns ON ns.oid = p.pronamespace
-               WHERE ns.nspname = 'public'
-                 AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')
-            LOOP
-              EXECUTE format('DROP ROUTINE IF EXISTS %s CASCADE', r.firma);
-              n := n + 1;
-            END LOOP;
-
-            FOR r IN
-              SELECT t.typname
-                FROM pg_type t JOIN pg_namespace ns ON ns.oid = t.typnamespace
-               WHERE ns.nspname = 'public' AND t.typtype IN ('e','d','c')
-                 AND NOT EXISTS (SELECT 1 FROM pg_class c WHERE c.reltype = t.oid)
-                 AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = t.oid AND d.deptype = 'e')
-            LOOP
-              EXECUTE format('DROP TYPE IF EXISTS public.%I CASCADE', r.typname);
-              n := n + 1;
-            END LOOP;
-
-            RAISE INFO 'Objetos borrados de public en staging: %', n;
-          END $$;
-          SQL
-
-          # ── 4.5) RECREAR lo capturado, y demostrar que no falta nada mas ──────
-          cat > 03_recrear.sql <<'SQL'
-          -- Mismo search_path que al capturar (ver 4.2): sin esto,
-          -- `moloka_buzones_fase0()` no resuelve y las politicas de los buzones no se
-          -- pueden recrear.
-          SET LOCAL search_path = public;
-          \echo '--- Recreando las politicas de fuera de public que el backup no trae ---'
-          DO $$
-          DECLARE r record; n_creadas int := 0; n_ya int := 0;
-          BEGIN
-            FOR r IN SELECT * FROM moloka_politicas_fuera_public LOOP
-              IF EXISTS (SELECT 1 FROM pg_catalog.pg_policies pp
-                          WHERE pp.schemaname = r.schemaname
-                            AND pp.tablename  = r.tablename
-                            AND pp.policyname = r.policyname) THEN
-                n_ya := n_ya + 1;      -- el CASCADE no llego a esta: se queda como esta
-              ELSE
-                EXECUTE r.sentencia;
-                n_creadas := n_creadas + 1;
-                RAISE INFO 'Recreada: %.% / %', r.schemaname, r.tablename, r.policyname;
-              END IF;
-            END LOOP;
-            RAISE INFO 'Politicas fuera de public: % recreadas, % intactas.', n_creadas, n_ya;
-          END $$;
-
-          -- 🔴 LA DEMOSTRACION, no la confianza. El CASCADE del vaciado pudo llevarse
-          --   por delante algo mas que politicas (una vista, un disparador, una funcion
-          --   de otro esquema). Si el censo de fuera de public ha ENCOGIDO, se aborta y
-          --   la transaccion entera se deshace: staging se queda como estaba. Esto es
-          --   lo que convierte en garantia lo que el 9-ago-2026 fue pura suerte.
-          DO $$
-          DECLARE r record; fallos text := '';
-          BEGIN
-            FOR r IN
-              SELECT c.que, c.n AS antes,
-                     CASE c.que
-                       WHEN 'relaciones' THEN (SELECT count(*) FROM pg_catalog.pg_class cl
-                                                 JOIN pg_catalog.pg_namespace nn ON nn.oid = cl.relnamespace
-                                                WHERE nn.nspname NOT IN ('public','information_schema')
-                                                  AND nn.nspname NOT LIKE 'pg\_%')
-                       ELSE                  (SELECT count(*) FROM pg_catalog.pg_proc pr
-                                                 JOIN pg_catalog.pg_namespace nn ON nn.oid = pr.pronamespace
-                                                WHERE nn.nspname NOT IN ('public','information_schema')
-                                                  AND nn.nspname NOT LIKE 'pg\_%')
-                     END AS ahora
-                FROM moloka_censo_fuera_public c
-            LOOP
-              IF r.ahora < r.antes THEN
-                fallos := fallos || format(E'\n  - %s: habia %s y quedan %s', r.que, r.antes, r.ahora);
-              END IF;
-            END LOOP;
-            IF fallos <> '' THEN
-              RAISE EXCEPTION E'ABORTA: el vaciado de public se ha llevado por delante cosas de OTROS esquemas:%\nStaging se queda como estaba. Mira que dependencia hay y captura tambien eso.', fallos;
-            END IF;
-            RAISE INFO 'Comprobado: fuera de public no falta nada.';
-          END $$;
-
-          -- Y que ninguna politica capturada se haya quedado sin recrear.
-          DO $$
-          DECLARE n_falta int;
-          BEGIN
-            SELECT count(*) INTO n_falta
-              FROM moloka_politicas_fuera_public g
-             WHERE NOT EXISTS (SELECT 1 FROM pg_catalog.pg_policies pp
-                                WHERE pp.schemaname = g.schemaname
-                                  AND pp.tablename  = g.tablename
-                                  AND pp.policyname = g.policyname);
-            IF n_falta > 0 THEN
-              RAISE EXCEPTION 'ABORTA: % politica(s) capturada(s) no estan tras recrearlas.', n_falta;
-            END IF;
-          END $$;
-          SQL
-
-          # 🔒 UN SOLO psql PARA TODO. Si el recrear fuera una llamada aparte, un fallo
-          #    ahi dejaria staging vaciado y SIN las politicas, sin vuelta atras.
-          cat 00_permisos.sql 01_capturar.sql 02_vaciar.sql dump_sin_schema.sql 03_recrear.sql > restaurar.sql
-          # Para poder traducir un "psql:restaurar.sql:X" a la linea del dump ORIGINAL,
-          # que es lo que se contrasta contra el fichero de R2. Son DOS correcciones,
-          # no una: el preambulo que va delante y las lineas filtradas. En esta casa el
-          # numero de linea de un error es lo que ha resuelto los tres agujeros, asi
-          # que la cuenta se da bien o no se da.
-          PREAMBULO=$(cat 00_permisos.sql 01_capturar.sql 02_vaciar.sql | wc -l)
-          echo "Traduccion de lineas para leer un error:"
-          echo "  restaurar.sql:X  →  dump_sin_schema.sql: X - $PREAMBULO"
-          echo "  y en el backup.sql ORIGINAL, $N_SCHEMA linea(s) mas abajo de esa,"
-          echo "  si el error cae despues del 'CREATE SCHEMA public;' filtrado."
-
-          if ! psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 --single-transaction \
+          if ! psql "$SIM_DB_URL" -X -v ON_ERROR_STOP=1 --single-transaction \
                  -q -f restaurar.sql 2> restaurar_error.log; then
-            echo "::error::La restauracion ha FALLADO. Staging se queda como estaba."
+            echo "::error::La restauracion ha FALLADO: la copia no se deja cargar en un Supabase nuevo."
             echo "--- Donde se paro (psql se detiene en el PRIMER error) ---"
             head -40 restaurar_error.log
             echo "----------------------------------------------------------"
@@ -556,45 +372,26 @@ jobs:
             exit 1
           fi
           echo "Restauracion aplicada sin errores."
-          # Los avisos que no llegan a error tambien se miran. Y aqui hay que mirarlos
-          # de verdad: los NOTICE de "drop cascades to ..." son los que descubrieron
-          # que el vaciado se salia de public.
           if [ -s restaurar_error.log ]; then
             echo "--- Avisos de psql (no han parado la restauracion) ---"
             head -60 restaurar_error.log
           fi
 
       # ── 4b) LOS PERMISOS DE ESA MISMA COPIA (encargo P, 17-sep-2026) ──────
-      # 🔴 POR QUÉ EXISTE. Hasta hoy este workflow demostraba que el backup devuelve
-      #   los DATOS, y lo decía en su propio veredicto: «con N politicas de storage
-      #   CONSERVADAS de staging, NO restauradas del backup». Lo que no decía —porque
-      #   no lo miraba— es que tampoco devuelve los PERMISOS. Medido el 17-sep-2026
-      #   sobre la staging recién restaurada del run 35217707471:
-      #     · `authenticated` podía leer 1 de 161 relaciones y escribir en 0;
-      #     · `anon`, ninguna;
-      #   contra las 137 que lee y las 70 que escribe en producción. O sea que el
-      #   simulacro salía VERDE dejando una base que no puede abrir ni la v2 (entra
-      #   por `authenticated`) ni la v1 ni el escáner (entran por `anon`).
-      #
       # 🔑 LO QUE SE APLICA ES EL FICHERO DE ESA COPIA, NO «el último». El nombre sale
       #   del propio volcado (`moloka_<FECHA>.sql.gz` → `permisos_<FECHA>.sql`): son
-      #   pareja, y aplicar los permisos de otro día sobre los datos de este sería
-      #   exactamente el tipo de mezcla que esta casa lleva un año quitando de en medio.
-      #
-      # 🔒 VA DESPUÉS DEL PASO 4 Y NO ANTES: el fichero nombra tablas, vistas y
-      #   funciones de `public` que tienen que existir ya, y las políticas de `storage`
-      #   llaman a funciones de `public` (`moloka_buzones_fase0()`, `es_cuenta_servicio()`).
-      #   Aplicado antes del volcado no resolvería ni la primera línea.
-      #
-      # 🔒 TRANSACCIÓN PROPIA, TODO O NADA. No va dentro del psql del paso 4 a
-      #   propósito: si los permisos fallaran, lo que NO se quiere es perder también la
-      #   restauración de los datos, que es lo caro y lo que tarda. Y si fallan, este
-      #   paso se cae en rojo y staging se queda con los datos puestos y los permisos
-      #   como estaban — un estado que se ve y se puede repetir, no uno a medias.
+      #   pareja.
+      # 🔒 VA DESPUÉS DEL PASO 4: el fichero nombra objetos de `public` que tienen que
+      #   existir ya, y las políticas de `storage` llaman a funciones de `public`.
+      # 🔒 TRANSACCIÓN PROPIA, TODO O NADA.
+      # 🆕 30-sep-2026 (encargo A): ANTES DE APLICARLO SE CREAN LOS ROLES PROPIOS que el
+      #   fichero lista en su censo (moloka_cargadores, moloka_copias…), sin contraseña.
+      #   Es lo que habría que hacer el día del incendio —el censo existe para eso—, y
+      #   así el veredicto 5b compara TODOS los privilegios, también los de esos roles,
+      #   en vez de sacarlos de la comparación como hacía con staging.
       - name: 4b) Aplicar los permisos de ESA copia (solo con permisos=si)
         if: ${{ github.event.inputs.permisos == 'si' }}
         env:
-          STAGING_DB_URL:        ${{ secrets.STAGING_DB_URL }}
           AWS_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_ACCOUNT_ID:         ${{ secrets.R2_ACCOUNT_ID }}
@@ -602,10 +399,6 @@ jobs:
           set -uo pipefail
           EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
-          # La FECHA sale del nombre del volcado que se acaba de restaurar. Si no casa
-          # el patrón, se para: un nombre raro aquí significa que se ha restaurado algo
-          # que no es una copia de la v2, y adivinar el fichero de permisos de eso sería
-          # inventárselo.
           FECHA_COPIA=$(printf '%s' "$BACKUP_FICHERO" | sed 's/^moloka_//; s/\.sql\.gz$//')
           case "$FECHA_COPIA" in
             [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_[0-9][0-9][0-9][0-9]) ;;
@@ -617,14 +410,11 @@ jobs:
           echo "Permisos de esta copia: v2/permisos/$PERM"
 
           if ! aws s3 cp "s3://moloka-backups/v2/permisos/$PERM" "$PERM" \
-                 --endpoint-url "$EP" --region auto; then
-            echo "::error::No esta 'v2/permisos/$PERM' en R2. Esa copia se hizo ANTES del encargo P (17-sep-2026) o su run murio antes de subir los permisos. Los datos SI estan restaurados; lo que falta son los GRANT y las politicas de storage. Usa una copia posterior, o vuelve a lanzar este workflow con permisos=no si solo querias los datos."
+                 --endpoint-url "$EP" --region auto --no-progress; then
+            echo "::error::No esta 'v2/permisos/$PERM' en R2. Los datos SI estan restaurados; lo que falta son los GRANT y las politicas de storage."
             exit 1
           fi
 
-          # LAS MISMAS GUARDAS QUE AL SUBIRLO (paso 5b de `copia-r2.yml` en la v2), y
-          # aquí por una razón distinta: allí se comprueba lo que se sube, aquí lo que
-          # ha llegado. Entre las dos cosas hay una red y ocho semanas.
           BYTES=$(wc -c < "$PERM")
           echo "Fichero de permisos: $(wc -l < "$PERM") lineas, $BYTES bytes"
           if [ "$BYTES" -lt 20000 ]; then
@@ -635,22 +425,51 @@ jobs:
             || { echo "::error::El fichero de permisos no termina con su cierre: llego cortado. No se aplica."; exit 1; }
           echo "--- de donde viene ---"; grep -E '^-- (origen|generado|huella_acl_origen):' "$PERM" || true
 
-          # 🔒 TODO O NADA, y parando en el primer error. El fichero se salta —contándolo—
-          #   lo que no puede hacer (un rol que no exista aquí, un ALTER DEFAULT
-          #   PRIVILEGES de `supabase_admin`); cualquier OTRO error lo tumba entero.
-          if ! psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 --single-transaction -X -q -At \
+          # ── Los roles propios del censo, antes que nada ──
+          # 🔒 Solo los PROPIOS (la columna `propio` la pone el exportador: ni `pg_*`, ni
+          #    `supabase_*`, ni los que trae cualquier proyecto). Los de Supabase no se
+          #    inventan: si alguno falta, el fichero lo dice y el 5b lo saca de la
+          #    comparacion, como antes.
+          {
+            echo "CREATE TEMP TABLE moloka_permisos_roles (rol text, atributos text, miembro_de text, propio boolean);"
+            grep '^INSERT INTO moloka_permisos_roles VALUES ' "$PERM"
+            cat <<'SQL'
+          DO $$
+          DECLARE r record; m text; n int := 0;
+          BEGIN
+            FOR r IN SELECT * FROM moloka_permisos_roles p
+                      WHERE p.propio
+                        AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles g WHERE g.rolname = p.rol)
+                      ORDER BY p.rol
+            LOOP
+              EXECUTE format('CREATE ROLE %I %s', r.rol, coalesce(r.atributos, ''));
+              FOREACH m IN ARRAY coalesce(string_to_array(nullif(r.miembro_de, ''), ', '), '{}') LOOP
+                EXECUTE format('GRANT %I TO %I', m, r.rol);
+              END LOOP;
+              n := n + 1;
+              RAISE INFO 'Rol propio creado (sin contrasena): % [%] miembro de: %', r.rol, r.atributos, coalesce(nullif(r.miembro_de, ''), '-');
+            END LOOP;
+            RAISE INFO 'Roles propios creados: %', n;
+          END $$;
+          SQL
+          } > roles_propios.sql
+          echo "--- roles del censo del fichero ---"
+          grep '^INSERT INTO moloka_permisos_roles VALUES ' "$PERM" | sed 's/^INSERT INTO moloka_permisos_roles VALUES /  /'
+          if ! psql "$SIM_DB_URL" -X -v ON_ERROR_STOP=1 --single-transaction -q -f roles_propios.sql; then
+            echo "::error::No se han podido crear los roles propios del censo. Los datos SI estan restaurados."
+            exit 1
+          fi
+
+          # 🔒 TODO O NADA, y parando en el primer error.
+          if ! psql "$SIM_DB_URL" -v ON_ERROR_STOP=1 --single-transaction -X -q -At \
                  -f "$PERM" > permisos_resumen.txt 2> permisos_avisos.txt; then
-            echo "::error::Los permisos NO se han aplicado. Staging tiene los datos restaurados y los permisos como estaban."
+            echo "::error::Los permisos NO se han aplicado. La base tiene los datos restaurados y los permisos de un proyecto nuevo."
             echo "--- donde se paro ---"; head -40 permisos_avisos.txt
             exit 1
           fi
           echo "--- resumen del fichero de permisos ---"; cat permisos_resumen.txt
           echo "--- avisos (lo que se ha saltado, y por que) ---"; head -60 permisos_avisos.txt
 
-          # Los roles que no existen en staging viajan al veredicto: sin esto, la huella
-          # compararia lo incomparable y saldria roja SIEMPRE por una razon que no es un
-          # fallo (medido el 17-sep-2026: staging no tiene moloka_cargadores, moloka_copias
-          # ni moloka_detector_ro).
           AUSENTES=$(sed -n 's/^roles_ausentes|//p' permisos_resumen.txt)
           echo "PERMISOS_ROLES_AUSENTES=${AUSENTES}" >> "$GITHUB_ENV"
           echo "PERMISOS_FICHERO=${PERM}" >> "$GITHUB_ENV"
@@ -672,10 +491,10 @@ jobs:
       # anoche y produccion no para) y, sobre todo, EL DIA DEL INCENDIO NO HAY
       # PRODUCCION CONTRA LA QUE COMPARAR.
       #
-      # 🔑 La pregunta correcta no es "¿se parece staging a produccion?", es
-      #   "¿tiene staging TODO lo que el backup decia traer?". Y esa se contesta
+      # 🔑 La pregunta correcta no es "¿se parece la base a produccion?", es
+      #   "¿tiene la base TODO lo que el backup decia traer?". Y esa se contesta
       #   DENTRO del propio fichero: el dump lleva su numero de control escrito.
-      #   Por eso este paso NO necesita la credencial de produccion.
+      #   Por eso este paso NO necesita la credencial de produccion (la usa el 5b).
       #
       # 🔑 PARA QUE SE LEE ESTE PASO -- importa, porque no es lo que parece.
       #   El paso 4 corre con ON_ERROR_STOP=1 y --single-transaction: CUALQUIER
@@ -690,9 +509,7 @@ jobs:
       #   El recuento de filas, con ON_ERROR_STOP=1, es tirantes ademas de cinturon:
       #   su valor real es que PONE EL NUMERO DELANTE. Un numero que se mira es lo
       #   unico que ha detectado algo en toda esta historia.
-      - name: 5) VEREDICTO - staging tiene TODO lo que el backup traia
-        env:
-          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+      - name: 5) VEREDICTO - la base desechable tiene TODO lo que el backup traia
         run: |
           # 🔴 LC_ALL=C NO ES DECORACION. `sort` ordena segun el idioma y `comm`/`join`
           #   comparan byte a byte: con un idioma que no sea C, en_US ignora el guion
@@ -704,9 +521,9 @@ jobs:
           export LC_ALL=C
           set -o pipefail
 
-          case "$STAGING_DB_URL" in
-            *ogfbjjdxcltzpygzuyla*) echo "::error::STAGING_DB_URL es produccion. Me niego."; exit 1;;
-            "")                     echo "::error::Falta el secret STAGING_DB_URL"; exit 1;;
+          case "$SIM_DB_URL" in
+            postgresql://*@127.0.0.1:*|postgresql://*@localhost:*) ;;
+            *) echo "::error::La base del veredicto no es la del runner. Me niego."; exit 1;;
           esac
 
           FALLO=0
@@ -842,7 +659,7 @@ jobs:
             exit 1
           fi
 
-          # ── LO QUE HA QUEDADO EN STAGING ──────────────────────────────────────
+          # ── LO QUE HA QUEDADO EN LA BASE DESECHABLE ──────────────────────────────────────
           # 🔒 format('%I') reproduce la MISMA regla de comillas que usa pg_dump
           #    (entrecomilla solo cuando hace falta). Con `nspname || '.' || relname`
           #    a pelo, un nombre que necesitara comillas saldria distinto en cada lado
@@ -851,7 +668,7 @@ jobs:
           # 🔒 Se excluyen los objetos de una EXTENSION, exactamente igual que hace el
           #    vaciado del paso 4: ni el vaciado los borra ni el dump los trae, asi que
           #    contarlos aqui seria un "sobran" que no es culpa de nadie.
-          psql "$STAGING_DB_URL" -At -c "
+          psql "$SIM_DB_URL" -At -c "
             select 'tabla  ' || format('%I.%I', n.nspname, c.relname)
               from pg_class c join pg_namespace n on n.oid = c.relnamespace
              where n.nspname = 'public' and c.relkind in ('r','p')
@@ -876,20 +693,18 @@ jobs:
               from pg_policies where schemaname = 'public'" \
             | sort -u > stg_objetos.txt
 
-          NRUT_STG=$(psql "$STAGING_DB_URL" -At -c "
+          NRUT_STG=$(psql "$SIM_DB_URL" -At -c "
             select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
              where n.nspname = 'public'
                and not exists (select 1 from pg_depend d where d.objid = p.oid and d.deptype = 'e')")
 
           # 🔴 ESTO SE DICE SIEMPRE, TAMBIEN EN VERDE, Y NO ES UN ADORNO.
-          #   Las politicas de fuera de `public` NO vienen del backup: el backup es
-          #   `pg_dump --schema=public` y no las contiene. Estan porque el paso 4 las
-          #   CONSERVA de la propia staging. Si el veredicto saliera en verde a secas,
-          #   estaria mintiendo sobre lo unico que aqui importa de verdad: que la copia
-          #   de seguridad NO cubre `storage`. En un incendio de verdad no habria
-          #   staging de la que conservarlas y los buzones se quedarian sin ninguna.
-          #   🔒 ESTA LINEA SE BORRA EL DIA QUE `backup-bd.yml` LAS TRAIGA. No antes.
-          NPOL_FUERA=$(psql "$STAGING_DB_URL" -At -c "
+          #   Las politicas de fuera de `public` NO vienen del volcado (`pg_dump
+          #   --schema=public`). En una base que nace vacia solo pueden venir de un
+          #   sitio: el fichero de permisos del paso 4b. Con permisos=no son cero, y
+          #   eso es exactamente lo que tendrian los buzones el dia del incendio si
+          #   solo se restaurara el volcado.
+          NPOL_FUERA=$(psql "$SIM_DB_URL" -At -c "
             select count(*) from pg_policies where schemaname <> 'public'")
 
           cuantos() { awk -v t="$2" '$1==t' "$1" | wc -l; }
@@ -902,7 +717,7 @@ jobs:
 
           echo ""
           echo "===================== OBJETOS EN public ====================="
-          printf "  %-12s %14s %14s\n" ""           "trae el backup" "hay en staging"
+          printf "  %-12s %14s %14s\n" ""           "trae el backup" "hay en la base"
           printf "  %-12s %14s %14s\n" "tablas"     "$DT" "$ST"
           printf "  %-12s %14s %14s\n" "vistas"     "$DV" "$SV"
           printf "  %-12s %14s %14s\n" "funciones"  "$DF" "$SF"
@@ -915,11 +730,8 @@ jobs:
           echo "una secuencia puede volver EXISTIENDO y con el contador mal, y eso aqui"
           echo "sale verde. Es un agujero conocido y abierto (ver el comentario del paso)."
           echo ""
-          echo "⚠️  $NPOL_FUERA politica(s) RLS de fuera de public (storage.objects) estan en"
-          echo "    staging CONSERVADAS de la propia staging, NO restauradas del backup:"
-          echo "    el backup es --schema=public y NO LAS CUBRE. En un incendio de verdad"
-          echo "    no habria de donde conservarlas y los buzones se quedarian sin ninguna."
-          echo "    Pendiente en backup-bd.yml. Esto se dice tambien cuando todo sale bien."
+          echo "$NPOL_FUERA politica(s) RLS de fuera de public (storage) en la base. El volcado"
+          echo "no las trae (--schema=public): si hay alguna, viene del fichero de permisos (4b)."
 
           # ── LA HUELLA DE LOS ACL: la medida exacta del frente abierto ─────────
           # 🔴 EL RESTORE REABRE PERMISOS, Y HAY QUE VERLO EN CADA EJECUCION.
@@ -965,7 +777,7 @@ jobs:
           #   fichero.
           # 🔒 Los tres numeros salen de LA MISMA consulta, asi que el denominador y el
           #   numerador de "cuantas con anon" son por construccion la misma poblacion.
-          IFS='|' read -r HUELLA_ACL REL_TOTAL CON_ANON < <(psql "$STAGING_DB_URL" -At -F'|' -f sql/huella_acl.sql)
+          IFS='|' read -r HUELLA_ACL REL_TOTAL CON_ANON < <(psql "$SIM_DB_URL" -At -F'|' -f sql/huella_acl.sql)
           if [ -z "$HUELLA_ACL" ]; then
             echo "::error::No he podido calcular la huella de los ACL con sql/huella_acl.sql."
             echo "::error::Sin ella, este paso no puede decir cuanto reabre el restore. Para y mira."
@@ -973,7 +785,7 @@ jobs:
           fi
           echo ""
           echo "======= PERMISOS: lo que el backup NO restaura ======="
-          echo "  huella md5 de los ACL de public en staging : $HUELLA_ACL"
+          echo "  huella md5 de los ACL de public en la base : $HUELLA_ACL"
           # 🔴 EL DENOMINADOR SON LAS RELACIONES, NO LOS OBJETOS. Aqui puso `$STOT`
           #   (los 181 objetos de las CINCO clases) frente a un recuento que solo mira
           #   relaciones, y salio "83 de 181": se lee como menos de la mitad cuando la
@@ -993,15 +805,8 @@ jobs:
             echo "      La huella NO excluye objetos de extension y el inventario si."
           fi
           echo "====================================================="
-          echo "El backup va con --no-privileges: NO trae permisos. Cada relacion nace"
-          echo "con el default de Supabase, o sea con anon dentro. Esta huella NO tiene"
-          echo "por que coincidir con la de produccion, y hoy NO coincide: esa diferencia"
-          echo "es la medida del frente, no un fallo del restore."
-          echo ""
-          echo "🔴 AVISO PARA QUIEN LEA STAGING DESPUES: ver una tabla con anon=arwdDxtm"
-          echo "   aqui NO significa que una migracion la haya abierto. LO HIZO EL RESTORE."
-          echo "   Lo unico que conserva su ACL al restaurar es lo que lleva su REVOKE"
-          echo "   escrito en migraciones/. Antes de acusar a nadie, mira eso."
+          echo "El volcado va con --no-privileges: NO trae permisos. Los devuelve el fichero"
+          echo "de permisos (4b), y el que juzga si son los de produccion es el paso 5b."
 
           comm -23 dump_objetos.txt stg_objetos.txt > faltan.txt
           comm -13 dump_objetos.txt stg_objetos.txt > sobran.txt
@@ -1009,7 +814,7 @@ jobs:
           if [ -s faltan.txt ]; then
             FALLO=1
             echo "::error::EL BACKUP NO LO TRAJO: $(wc -l < faltan.txt) objeto(s) que el fichero"
-            echo "::error::prometia y que no estan en staging:"
+            echo "::error::prometia y que no estan en la base:"
             sed 's/^/  /' faltan.txt
             echo "  (ojo: el paso 4 corre con ON_ERROR_STOP=1, asi que si el dump lo hubiera"
             echo "   traido y hubiera fallado, el restore entero habria reventado. Que llegue"
@@ -1017,10 +822,11 @@ jobs:
           fi
           if [ -s sobran.txt ]; then
             FALLO=1
-            echo "::error::EL VACIADO SE DEJO ALGO: $(wc -l < sobran.txt) objeto(s) en staging que"
+            echo "::error::SOBRA ALGO: $(wc -l < sobran.txt) objeto(s) en la base que"
             echo "::error::NO venian del backup:"
             sed 's/^/  /' sobran.txt
-            echo "  (esto SI es un fallo del paso 4 de este workflow, y se arregla aqui.)"
+            echo "  (la base nace vacia -lo comprueba el paso 2b-, asi que esto lo ha creado la"
+            echo "   restauracion o el proyecto nuevo de Supabase: se mira cual y se arregla aqui.)"
           fi
 
           # 🔒 La comparacion de arriba es POR NOMBRE, y dos funciones sobrecargadas
@@ -1031,18 +837,18 @@ jobs:
           #   pero esto es para el dia que la haya.)
           if [ "$NRUT_DUMP" != "$NRUT_STG" ]; then
             FALLO=1
-            echo "::error::El backup trae $NRUT_DUMP rutina(s) y en staging hay $NRUT_STG."
+            echo "::error::El backup trae $NRUT_DUMP rutina(s) y en la base hay $NRUT_STG."
             echo "::error::Si los nombres cuadran pero el recuento no, hay una sobrecarga perdida."
           fi
 
           if [ "$FALLO" = "0" ]; then
-            echo "Objetos: los $DTOT que trae el backup estan en staging, y ni uno de mas."
+            echo "Objetos: los $DTOT que trae el backup estan en la base, y ni uno de mas."
           fi
 
           # ── B) FILAS: cada bloque COPY del dump, contra su tabla ──────────────
           # 🔑 IGUALDAD EXACTA, no un umbral. El dump dice cuantas filas trae de cada
-          #   tabla, y tras restaurar sobre un esquema VACIO staging no puede tener ni
-          #   una mas ni una menos. Nada escribe en staging durante el job, y pg_dump
+          #   tabla, y tras restaurar sobre un esquema VACIO la base no puede tener ni
+          #   una mas ni una menos. Nada escribe en ella durante el job, y pg_dump
           #   crea los disparadores DESPUES de cargar los datos, asi que no hay nada
           #   que pueda anadir filas por su cuenta.
           # Y se comprueban TODAS las tablas del dump, no cinco elegidas a mano.
@@ -1057,24 +863,24 @@ jobs:
           awk -F'|' -v q="'" '{ if (NR > 1) printf " union all ";
                                 printf "select %s%s%s, count(*) from %s", q, $1, q, $1 }' \
               dump_filas.txt > cuenta.sql
-          psql "$STAGING_DB_URL" -At -F'|' -f cuenta.sql | sort > stg_filas.txt
+          psql "$SIM_DB_URL" -At -F'|' -f cuenta.sql | sort > stg_filas.txt
           join -t'|' dump_filas.txt stg_filas.txt > filas.txt
 
           # 🔴 SIN ESTA GUARDA EL VEREDICTO TIENE UN AGUJERO: si una tabla del dump no
-          #   existe en staging, el `join` simplemente NO produce esa fila, el bucle no
+          #   existe en la base, el `join` simplemente NO produce esa fila, el bucle no
           #   la recorre y nadie marca fallo. Un recuento que se salta lo que falta es
           #   justo la clase de comprobacion que nos ha traido hasta aqui.
           ND=$(wc -l < dump_filas.txt); NJ=$(wc -l < filas.txt)
           if [ "$ND" -ne "$NJ" ]; then
             FALLO=1
             echo "::error::El dump trae $ND tablas con datos pero solo he podido comparar $NJ."
-            echo "::error::Alguna no existe en staging. Es el HALLAZGO, no un fallo del script."
+            echo "::error::Alguna no existe en la base. Es el HALLAZGO, no un fallo del script."
             comm -23 <(cut -d'|' -f1 dump_filas.txt) <(cut -d'|' -f1 stg_filas.txt) | sed 's/^/  falta: /'
           fi
 
           echo ""
-          echo "======== FILAS: lo que trae el backup vs lo que hay en staging ========"
-          printf "%-44s %12s %12s  %s\n" "tabla" "en el backup" "en staging" "veredicto"
+          echo "======== FILAS: lo que trae el backup vs lo que hay en la base ========"
+          printf "%-44s %12s %12s  %s\n" "tabla" "en el backup" "en la base" "veredicto"
           TOTD=0; TOTS=0; DESCUADRES=0
           while IFS='|' read -r T D S; do
             if [ "$D" = "$S" ]; then
@@ -1096,7 +902,7 @@ jobs:
             echo ""
             echo "backup restaurado: \`${BACKUP_RUTA:-?}\`"
             echo ""
-            echo "| | trae el backup | hay en staging |"
+            echo "| | trae el backup | hay en la base |"
             echo "|---|---|---|"
             echo "| tablas | $DT | $ST |"
             echo "| vistas | $DV | $SV |"
@@ -1108,15 +914,10 @@ jobs:
             echo ""
             echo "\`setval\` en el dump: $NSETVAL — **sin comprobar** (agujero conocido)."
             echo ""
-            echo "> ⚠️ **$NPOL_FUERA políticas RLS de \`storage\` CONSERVADAS de la propia staging, NO restauradas del backup.**"
-            echo "> El backup es \`--schema=public\` y no las cubre. El día del incendio no habría staging"
-            echo "> de la que conservarlas y los buzones se quedarían sin ninguna. Pendiente en \`backup-bd.yml\`."
+            echo "> **$NPOL_FUERA políticas RLS de \`storage\`** en la base: el volcado no las trae; si hay, vienen del fichero de permisos (4b)."
             echo ""
-            echo "> 🔴 **Permisos: el backup no los restaura** (\`--no-privileges\`). Huella md5 de los ACL de"
-            echo "> \`public\` en staging: \`$HUELLA_ACL\` — **$CON_ANON de $REL_TOTAL relaciones con permiso para \`anon\`**."
-            echo "> No tiene por qué coincidir con producción, y hoy no coincide: esa diferencia **es la medida**"
-            echo "> del frente, no un fallo del restore. Lo único que conserva su ACL es lo que lleva su"
-            echo "> \`REVOKE\` escrito en \`migraciones/\`. Ver una tabla abierta aquí **no** acusa a ninguna migración."
+            echo "> Huella md5 de los ACL de \`public\` en la base: \`$HUELLA_ACL\` — **$CON_ANON de $REL_TOTAL relaciones con permiso para \`anon\`**."
+            echo "> El volcado no trae permisos (\`--no-privileges\`); los juzga el paso 5b contra producción."
             if [ -s faltan.txt ]; then
               echo ""
               echo "**El backup NO lo trajo:**"
@@ -1125,7 +926,7 @@ jobs:
             fi
             if [ -s sobran.txt ]; then
               echo ""
-              echo "**El vaciado del paso 4 se dejo esto sin borrar:**"
+              echo "**Sobra en la base (no venia en el backup):**"
               echo ""
               sed 's/^\([a-z]*\)  /- \1 `/; s/$/`/' sobran.txt
             fi
@@ -1133,7 +934,7 @@ jobs:
               echo ""
               echo "**Tablas cuyo numero de filas NO cuadra:**"
               echo ""
-              echo "| tabla | en el backup | en staging |"
+              echo "| tabla | en el backup | en la base |"
               echo "|---|---|---|"
               sed 's/^/| /; s/|/ | /g; s/$/ |/' descuadres.txt
             fi
@@ -1141,10 +942,10 @@ jobs:
 
           if [ "$FALLO" != "0" ]; then
             echo ""
-            echo "::error::LA COPIA NO ESTA DEMOSTRADA: staging no tiene todo lo que el fichero traia."
-            echo "Ojo al nombre: esto NO dice 'staging se ha quedado atras respecto a produccion'."
-            echo "Eso seria DERIVA y es otra pregunta. Esto dice que la copia no reconstruye ni"
-            echo "siquiera su propio contenido. Es el incendio."
+            echo "::error::LA COPIA NO ESTA DEMOSTRADA: la base no tiene todo lo que el fichero traia."
+            echo "Ojo al nombre: esto NO dice 'produccion ha cambiado desde la copia'. Eso seria"
+            echo "DERIVA y es otra pregunta. Esto dice que la copia no reconstruye ni siquiera"
+            echo "su propio contenido. Es el incendio."
             {
               echo ""
               echo "**resultado: LA COPIA NO ESTA DEMOSTRADA -- no reconstruye ni su propio contenido**"
@@ -1154,15 +955,14 @@ jobs:
 
           echo ""
           echo "VERIFICADO: el backup traia $DTOT objetos y $TOTD filas, y eso es exactamente"
-          echo "lo que hay en staging. La copia reconstruye lo que contiene."
+          echo "lo que hay en la base. La copia reconstruye lo que contiene."
           echo ""
           echo "Lo que esto NO dice: si produccion ha cambiado desde que se hizo la copia."
-          echo "Eso es DERIVA, es otra pregunta, y se elimina con la regla de la casa:"
-          echo "ANTES DE ENSAYAR UNA MIGRACION EN STAGING, SE RESTAURA STAGING."
+          echo "Eso es DERIVA, es otra pregunta."
           {
             echo ""
             echo "**resultado: VERIFICADO -- el backup reconstruye lo que contiene ($DTOT objetos, $TOTD filas),"
-            echo "con $NPOL_FUERA politicas de storage CONSERVADAS de staging, NO restauradas del backup**"
+            echo "en un Supabase nuevo y vacio, con $NPOL_FUERA politicas de storage (del fichero de permisos)**"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # ════════════════════════════════════════════════════════════════════════
@@ -1188,17 +988,16 @@ jobs:
       #   Las dos salen rojas a propósito: un simulacro que no distingue no sirve, pero
       #   uno que se calla porque «seguro que es deriva» sirve menos.
       #
-      # ⚠️ LOS ROLES QUE NO EXISTEN EN STAGING SE SACAN DE LA COMPARACIÓN, y no es una
+      # ⚠️ LOS ROLES QUE NO EXISTEN EN LA BASE SE SACAN DE LA COMPARACIÓN, y no es una
       #   manga ancha: el propio fichero los ha dicho por su nombre y los ha contado en
-      #   el paso 4b. Medido el 17-sep-2026: staging no tiene `moloka_cargadores`,
-      #   `moloka_copias` ni `moloka_detector_ro`, así que sin esto el veredicto sería
-      #   rojo SIEMPRE y por algo que no es un fallo — y un rojo permanente se deja de
-      #   leer en dos semanas (la cara B de §3).
+      #   el paso 4b. Con staging eran los propios (`moloka_cargadores`, `moloka_copias`,
+      #   `moloka_detector_ro`: medido el 17-sep-2026). Desde el 30-sep-2026 el paso 4b
+      #   CREA los propios antes de aplicar, así que aquí solo pueden quedar fuera roles
+      #   de Supabase que el proyecto nuevo no traiga, y el resumen dice cuáles.
       # ════════════════════════════════════════════════════════════════════════
-      - name: 5b) VEREDICTO - los permisos de staging son los de produccion
+      - name: 5b) VEREDICTO - los permisos de la base son los de produccion
         if: ${{ github.event.inputs.permisos == 'si' }}
         env:
-          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
           PROD_DB_URL:    ${{ secrets.SUPABASE_DB_URL }}
         run: |
           set -uo pipefail
@@ -1207,25 +1006,25 @@ jobs:
             exit 1
           fi
           AUSENTES="${PERMISOS_ROLES_AUSENTES:-}"
-          echo "Roles que no existen en staging y quedan fuera de la comparacion: ${AUSENTES:-(ninguno)}"
+          echo "Roles que no existen en la base y quedan fuera de la comparacion: ${AUSENTES:-(ninguno)}"
 
           # 🔴 LC_ALL=C: `sort` ordena segun el idioma y el `diff` compara byte a byte.
           #    Mismo motivo que en el paso 5.
           PGOPTIONS='-c default_transaction_read_only=on' \
             psql "$PROD_DB_URL" -X -q -At -v ON_ERROR_STOP=1 -v excluir="$AUSENTES" \
                  -f sql/huella_acl_public.sql | LC_ALL=C sort > acl_prod.txt
-          psql "$STAGING_DB_URL" -X -q -At -v ON_ERROR_STOP=1 -v excluir="$AUSENTES" \
+          psql "$SIM_DB_URL" -X -q -At -v ON_ERROR_STOP=1 -v excluir="$AUSENTES" \
                  -f sql/huella_acl_public.sql | LC_ALL=C sort > acl_stg.txt
 
           # 🔒 CERO ES ROJO. Una huella vacia no es «todo cuadra», es «no he podido mirar».
           if [ ! -s acl_prod.txt ] || [ ! -s acl_stg.txt ]; then
-            echo "::error::Una de las dos huellas ha salido VACIA (produccion: $(wc -l < acl_prod.txt) lineas, staging: $(wc -l < acl_stg.txt)). Esto no ha comprobado nada."
+            echo "::error::Una de las dos huellas ha salido VACIA (produccion: $(wc -l < acl_prod.txt) lineas, base: $(wc -l < acl_stg.txt)). Esto no ha comprobado nada."
             exit 1
           fi
           MD5_PROD=$(md5sum < acl_prod.txt | cut -d' ' -f1)
           MD5_STG=$(md5sum  < acl_stg.txt  | cut -d' ' -f1)
           echo "produccion: $(wc -l < acl_prod.txt) privilegios · md5 $MD5_PROD"
-          echo "staging:    $(wc -l < acl_stg.txt) privilegios · md5 $MD5_STG"
+          echo "base:       $(wc -l < acl_stg.txt) privilegios · md5 $MD5_STG"
 
           # ¿Se ha movido produccion desde que se hizo la copia? El fichero anoto su
           # huella de origen (sin excluir a nadie), asi que se compara con la de ahora.
@@ -1262,6 +1061,35 @@ jobs:
           fi
           echo "produccion se ha movido desde la copia: $MOVIDA"
 
+          # 🆕 30-sep-2026 (encargo A): LA BASE CONTRA LA HUELLA DEL DIA DE LA COPIA.
+          #   Con staging, «rojo» podia ser copia mala o deriva, y el paso lo decia pero no
+          #   lo separaba. Ahora se separa midiendo: la huella entera de la base (sin sacar a
+          #   nadie) se compara con la que el fichero anoto de produccion al hacer la copia,
+          #   con la misma formula y el mismo truco del salto final que la linea de arriba.
+          #     · base = origen → el fichero devuelve, uno a uno, los permisos que tenia
+          #       produccion ese dia. Lo que difiera de la produccion de HOY es deriva, y
+          #       se ensena abajo, pero no es un fallo de la copia.
+          #     · base ≠ origen → la copia NO devuelve los permisos. Rojo.
+          #   🔬 Medido en el run 36682576999 (copia del 28-sep 13:52): base 4.444 lineas, el
+          #   fichero anota 4.444; produccion hoy 4.683 (los objetos del 29 y 30-sep).
+          psql "$SIM_DB_URL" -X -q -At -v ON_ERROR_STOP=1 -v excluir='' \
+               -f sql/huella_acl_public.sql | LC_ALL=C sort > acl_base_entera.txt
+          if [ ! -s acl_base_entera.txt ]; then
+            echo "::error::La huella entera de la base ha salido vacia. No se puede comparar con la de la copia."
+            exit 1
+          fi
+          MD5_BASE_ENTERA=$(printf '%s' "$(cat acl_base_entera.txt)" | md5sum | cut -d' ' -f1)
+          if [ -z "$HUELLA_ORIGEN" ]; then
+            FIEL=""
+            echo "la base contra el dia de la copia: no se sabe (el fichero no trae huella de origen)"
+          elif [ "$MD5_BASE_ENTERA" = "$HUELLA_ORIGEN" ]; then
+            FIEL="si"
+            echo "la base contra el dia de la copia: IGUAL ($(wc -l < acl_base_entera.txt) lineas, md5 $MD5_BASE_ENTERA)"
+          else
+            FIEL="no"
+            echo "la base contra el dia de la copia: DISTINTA (base $MD5_BASE_ENTERA, $(wc -l < acl_base_entera.txt) lineas; el fichero anoto $HUELLA_ORIGEN)"
+          fi
+
           # Las politicas de storage, del resumen que dejo el propio fichero en el 4b.
           POL_FICHERO=$(sed -n 's/^storage_politicas_del_fichero|//p'  permisos_resumen.txt)
           POL_REEMP=$(sed -n  's/^storage_politicas_reemplazadas|//p'  permisos_resumen.txt)
@@ -1285,17 +1113,18 @@ jobs:
 
           {
             echo ""
-            echo "### 5b · ¿los permisos de staging son los de produccion?"
+            echo "### 5b · ¿los permisos de la base son los de produccion?"
             echo ""
-            echo "| | produccion | staging |"
+            echo "| | produccion | base desechable |"
             echo "|---|---|---|"
             echo "| privilegios de \`public\` | $(wc -l < acl_prod.txt) | $(wc -l < acl_stg.txt) |"
             echo "| huella md5 | \`$MD5_PROD\` | \`$MD5_STG\` |"
             echo ""
-            echo "- roles fuera de la comparacion (no existen en staging): ${AUSENTES:-ninguno}"
+            echo "- roles fuera de la comparacion (no existen en la base): ${AUSENTES:-ninguno}"
             echo "- sentencias del fichero: **$HECHAS** ejecutadas, $SALT_ROL saltadas por rol ausente, $SALT_POT por falta de potestad"
-            echo "- politicas de storage: **$POL_REEMP reemplazadas + $POL_NUEVAS nuevas = las $POL_FICHERO del fichero**, y $POL_CONS conservadas de staging (${POL_CONS_D:-ninguna})"
+            echo "- politicas de storage: **$POL_REEMP reemplazadas + $POL_NUEVAS nuevas = las $POL_FICHERO del fichero**, y $POL_CONS conservadas de la base (${POL_CONS_D:-ninguna})"
             echo "- produccion se ha movido desde la copia: $MOVIDA"
+            echo "- la base contra la huella de produccion del dia de la copia: ${FIEL:-no se sabe}"
           } >> "$GITHUB_STEP_SUMMARY"
 
           # 🔴 QUE LAS POLITICAS VENGAN DEL FICHERO, NO DE LA BASE. Es el punto del
@@ -1311,128 +1140,46 @@ jobs:
             exit 1
           fi
 
-          if [ "$MD5_STG" != "$MD5_PROD" ]; then
-            echo "::error::Los permisos de staging NO son los de produccion. Lineas que difieren (< produccion, > staging):"
-            diff acl_prod.txt acl_stg.txt | head -40
+          # 🔴 LA DECISION (encargo A, 30-sep-2026). Manda la comparacion con el dia de la
+          #    copia, que es lo que el simulacro juzga: si la copia devuelve lo que habia.
+          #    Contra la produccion de hoy se sigue comparando y se ensena siempre; si la
+          #    base es fiel a su dia, lo que difiera de hoy es deriva MEDIDA, no supuesta.
+          #    Sin huella de origen en el fichero, se juzga como antes: contra hoy.
+          if [ "$FIEL" = "no" ] || { [ -z "$FIEL" ] && [ "$MD5_STG" != "$MD5_PROD" ]; }; then
+            echo "::error::Los permisos de la base NO son los que tenia produccion el dia de la copia. Lineas que difieren de la produccion de hoy (< produccion, > base):"
+            { diff acl_prod.txt acl_stg.txt 2>/dev/null || true; } | head -40
             {
               echo ""
-              echo "**resultado: ROJO -- el ACL de staging no es el de produccion**"
+              echo "**resultado: ROJO -- el ACL de la base no es el de produccion el dia de la copia**"
               echo '```'
-              diff acl_prod.txt acl_stg.txt | head -40
+              { diff acl_prod.txt acl_stg.txt 2>/dev/null || true; } | head -40
               echo '```'
-              echo ""
-              echo "Dos lecturas, y la de arriba dice cual: si produccion NO se ha movido, el fichero de permisos no devuelve lo que dice. Si SI se ha movido, mira el diff: lo que sobre en produccion y no este en staging puede ser sencillamente lo que ha cambiado desde la copia."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          echo "VERDE: los $(wc -l < acl_stg.txt) privilegios de staging son, uno a uno, los de produccion."
+          N_DERIVA=0
+          if [ "$MD5_STG" != "$MD5_PROD" ]; then
+            N_DERIVA=$(diff acl_prod.txt acl_stg.txt | grep -c '^[<>]' || true)
+            echo "::warning title=Produccion se ha movido desde la copia::$N_DERIVA linea(s) de ACL distintas entre la produccion de hoy y la base. La base SI es identica a produccion el dia de la copia: es deriva, no un fallo de la copia."
+            echo "--- deriva desde la copia (< produccion hoy, > base = produccion el dia de la copia), primeras 40 ---"
+            { diff acl_prod.txt acl_stg.txt 2>/dev/null || true; } | head -40
+          fi
+          echo "VERDE: los $(wc -l < acl_stg.txt) privilegios de la base son, uno a uno, los que tenia produccion el dia de la copia."
           {
             echo ""
             echo "**resultado: VERIFICADO -- tras restaurar, quien tiene que poder leer la base PUEDE:"
-            echo "$(wc -l < acl_stg.txt) privilegios identicos a los de produccion, y las $POL_FICHERO politicas"
+            echo "$(wc -l < acl_stg.txt) privilegios identicos a los de produccion el dia de la copia, y las $POL_FICHERO politicas"
             echo "de storage restauradas DEL FICHERO (ninguna dada por buena por conservarse)**"
+            if [ "$N_DERIVA" != "0" ]; then
+              echo ""
+              echo "> Deriva desde la copia: **${N_DERIVA} linea(s)** de ACL distintas de la produccion de hoy (objetos o permisos cambiados despues de la copia). No es un fallo de la copia."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # 🔒 El rastro se deja AL FINAL y con `if: always()`: si la restauración falla a
-      #    medias, lo que hay en staging tampoco es lo que había antes, así que la otra
-      #    sesión necesita enterarse igual.
-      #    La tabla se recrea aquí porque el dump acaba de pasar por encima. No viene en el
-      #    backup —es de staging, no de producción—, así que normalmente sobrevive; el
-      #    `if not exists` cubre el día que el restore limpie el esquema entero.
-      - name: 9) Dejar rastro de quien ha restaurado
+      # ── 6) Apagar la base desechable ──────────────────────────────────────
+      # El runner se destruye igual al acabar; esto es para que el log diga que la
+      # base murio aqui, pase lo que pase arriba.
+      - name: 6) Apagar la base desechable
         if: always()
-        env:
-          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
-          QUIEN:   ${{ github.actor }}
-          MOTIVO:  ${{ github.event.inputs.motivo }}
-          RESULTADO: ${{ job.status }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          # BACKUP_RUTA (prefijo/fichero) llega por GITHUB_ENV desde el paso 3 -- no
-          # hace falta redeclararla aqui. Si el paso 3 no llego a correr, queda vacia
-          # y el insert de abajo guarda NULL, que es lo correcto: no se sabe que
-          # fichero se iba a restaurar.
         run: |
-          psql "$STAGING_DB_URL" -q -c "
-            create table if not exists public.staging_restauraciones (
-              id            bigserial primary key,
-              restaurado_en timestamptz not null default now(),
-              quien         text,
-              motivo        text,
-              fichero       text,
-              run_url       text
-            );
-            alter table public.staging_restauraciones enable row level security;
-            comment on table public.staging_restauraciones is
-              'Quien ha restaurado staging y cuando. Vive SOLO en staging y NO viene en el
-               backup de produccion, asi que sobrevive a la propia restauracion. Existe
-               porque varias sesiones trabajan a la vez y una restauracion le tira el
-               ensayo a quien este midiendo: al menos que se vea quien fue.';
-            revoke all on public.staging_restauraciones from public, anon, authenticated;
-            grant select on public.staging_restauraciones to authenticated;"
-          # 🔴 `fichero` GUARDA LA RUTA COMPLETA, CON PREFIJO (encargo R, 17-sep-2026):
-          #    esta tabla no tiene columna para el prefijo, asi que "v2/bd/moloka_...
-          #    .sql.gz" es la unica forma de saber, mirando esta fila manana, de que
-          #    cajon de R2 vino sin tener que adivinarlo. Antes se guardaba el input
-          #    crudo de `fichero`, que salia vacio siempre que se pedia "el ultimo".
-          psql "$STAGING_DB_URL" -q -c "
-            insert into public.staging_restauraciones (quien, motivo, fichero, run_url)
-            values (nullif('$QUIEN',''),
-                    nullif(trim(concat('$MOTIVO', ' [', '$RESULTADO', ']')),''),
-                    nullif('$BACKUP_RUTA',''), '$RUN_URL');"
-          echo "--- Rastro dejado ---"
-          psql "$STAGING_DB_URL" -c "
-            select restaurado_en, quien, coalesce(motivo,'-') as motivo
-              from public.staging_restauraciones order by restaurado_en desc limit 3;"
-
-      # ⚠️ VA EL ULTIMO, DETRAS DEL RASTRO, y no por orden estetico: este paso FALLA
-      #    el run cuando staging va por detras, y si fuera antes se llevaria por delante
-      #    el paso 9. La restauracion SI ha ocurrido aunque este veredicto sea rojo, y
-      #    staging es compartido: no dejar constancia de quien restauro seria peor que
-      #    el problema que este paso avisa.
-      # ════════════════════════════════════════════════════════════════════════
-      # 🔴 10) ¿LE FALTA A STAGING ALGO QUE PRODUCCION SI TIENE?
-      #
-      # El backup es de ANOCHE. Restaurar DESHACE lo que se haya aplicado a produccion
-      # HOY, y despues de esto viene un ensayo encima. Fernando, 21-ago-2026:
-      #
-      #   🔑 «puede ser una migracion que se aplique LIMPIAMENTE en un staging al que le
-      #      falta la columna con la que iba a chocar en produccion»
-      #
-      # Ese ensayo saldria VERDE sin probar nada. No es una molestia: es la escalera
-      # mintiendo, y la escalera es la unica red que hay para no romper la operativa de
-      # Elena. 🔬 Paso de verdad esa manana con `paneu_aptos.pendiente_evaluacion`; se
-      # cazo de rebote porque un procesador murio con `column does not exist`.
-      #
-      # 🔒 SE LEE PRODUCCION, Y ES A PROPOSITO. Sin mirarla no se puede separar
-      #    «falta en staging porque produccion ya la tiene» (peligro) de «falta en los dos
-      #    porque es la que vas a ensayar ahora» (normal). Sin esa distincion el aviso
-      #    saltaria SIEMPRE y se dejaria de leer en dos semanas — la cara B de §3.
-      # 🔒 Y SE LEE EN SOLO LECTURA FORZADA: `default_transaction_read_only=on` no es un
-      #    acuerdo, es el servidor negandose. Este workflow tiene un cerrojo
-      #    anti-produccion en el paso 1 y aqui entra la unica credencial de produccion que
-      #    toca en toda su vida; que no pueda escribir lo garantiza Postgres, no el
-      #    cuidado de quien lo escribio.
-      # ⚠️ FALLA EL RUN a proposito. Un resumen verde con un aviso dentro se pasa por
-      #    alto, y lo que se pide es que no se pueda empezar a ciegas. Solo salta cuando
-      #    falta algo de verdad, asi que no es una alarma permanente.
-      - name: 10) VEREDICTO - staging no puede ir por detras de produccion
-        env:
-          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
-          PROD_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-        run: |
-          set -uo pipefail
-          if [ -z "${PROD_DB_URL:-}" ]; then
-            echo "::error::Falta SUPABASE_DB_URL. Sin produccion no se puede saber si staging va por detras, y dar por bueno lo que no se ha mirado es justo lo que este paso evita."
-            exit 1
-          fi
-          python scripts/censo_migraciones.py > /tmp/censo.sql
-          # 🔒 Solo lectura FORZADA por el servidor para la conexion de produccion.
-          PGOPTIONS='-c default_transaction_read_only=on'             psql "$PROD_DB_URL" -t -A -F'|' -v ON_ERROR_STOP=1 -P pager=off -f /tmp/censo.sql > /tmp/censo_prod.txt
-          psql "$STAGING_DB_URL" -t -A -F'|' -v ON_ERROR_STOP=1 -P pager=off -f /tmp/censo.sql > /tmp/censo_stg.txt
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### 10 · ¿staging va por detras de produccion?" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          python scripts/comparar_censos.py /tmp/censo_prod.txt /tmp/censo_stg.txt | tee -a "$GITHUB_STEP_SUMMARY"
-          ESTADO=${PIPESTATUS[0]}
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          exit $ESTADO
+          cd "$DESECHABLE_DIR" 2>/dev/null && supabase stop --no-backup || echo "(no habia base que apagar)"

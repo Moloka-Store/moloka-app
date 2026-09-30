@@ -40,7 +40,8 @@ on:
       entorno:
         description: 'Base de datos a censar'
         type: choice
-        options: [produccion, staging]
+        # 🔴 30-sep-2026 (encargo A): staging se jubiló. Solo queda producción; lo que no escribe es el modo ensayo (rollback).
+        options: [produccion]
         default: produccion
   schedule:
     # Los martes a las 7:13. Minuto raro a proposito: no coincidir con el resto.
@@ -73,7 +74,7 @@ jobs:
 
       - name: A) Censo migracion -> objeto
         env:
-          DB_URL: ${{ inputs.entorno == 'staging' && secrets.STAGING_DB_URL || secrets.SUPABASE_DB_URL }}
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
           set -uo pipefail
           python scripts/censo_migraciones.py > /tmp/censo.sql
@@ -88,7 +89,7 @@ jobs:
 
       - name: B) Cubos por origen (el detector del atajo)
         env:
-          DB_URL: ${{ inputs.entorno == 'staging' && secrets.STAGING_DB_URL || secrets.SUPABASE_DB_URL }}
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
           set -uo pipefail
           # 🔒 La consulta la EMITE el guion, no se teclea aqui: si se copiara a mano, los

@@ -1,17 +1,18 @@
 name: Moloka - Procesar INVENTARIO_INTERNACIONAL
 
 # 6ª pieza de la Fase 0 de la v2 (EJE PAÍS · el inventario, primera pestaña).
-# A DEMANDA, sin reloj. Espejo de procesar-paneu-aptos.yml. STAGING + ENSAYO
-# por defecto. Escalera: staging ensayo → staging aplicar → verificación SQL →
-#           producción ensayo → producción aplicar → verificación SQL.
+# A DEMANDA, sin reloj. Espejo de procesar-paneu-aptos.yml. PRODUCCIÓN + ENSAYO
+# por defecto. Cadena (desde el 30-sep-2026, sin staging): ensayo en producción →
+#           aplicar → verificación SQL.
 on:
   workflow_dispatch:
     inputs:
       entorno:
         description: 'Base de datos destino'
         type: choice
-        options: [staging, produccion]
-        default: staging
+        # 🔴 30-sep-2026 (encargo A): staging se jubiló. Solo queda producción; lo que no escribe es el modo ensayo (rollback).
+        options: [produccion]
+        default: produccion
       modo:
         description: 'ensayo = solo comprueba y dice qué escribiría; aplicar = vuelca inventario_internacional'
         type: choice
@@ -57,7 +58,7 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           ENTORNO: ${{ inputs.entorno }}
           MODO: ${{ inputs.modo }}
-          DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -u procesador_internacional.py
 
       # ═══ LA LÍNEA DEL REGISTRO (encargo H, 23-sep-2026) · SIEMPRE EL ÚLTIMO PASO DEL JOB ═══
@@ -66,7 +67,7 @@ jobs:
       #    `registro_ejecuciones` una línea con el color REAL del job (`job.status`) y el modo. La
       #    lee la revisión mensual con el conector de solo lectura.
       # 🔑 VA A LA MISMA BASE QUE LA CARGA: la misma expresión de `DB_URL` que el paso del procesador.
-      #    Un ensayo en staging se apunta en staging, y uno en producción en producción, con su modo:
+      #    Va a producción, como la carga (staging se jubiló el 30-sep-2026), y con su modo:
       #    un ensayo verde NO es una carga.
       # 🔒 UN FALLO AL APUNTAR NUNCA CAMBIA EL COLOR DEL JOB NI LO RETRASA: `continue-on-error`, un
       #    minuto de tope y 45 s para psql. Sin credenciales nuevas: la cadena de siempre, que entra
@@ -76,7 +77,7 @@ jobs:
         continue-on-error: true
         timeout-minutes: 1
         env:
-          DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           R_RESULTADO: ${{ job.status }}
           R_MODO: ${{ inputs.modo }}
         run: |

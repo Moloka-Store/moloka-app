@@ -34,7 +34,8 @@ on:
       entorno:
         description: 'Base de datos contra la que se diagnostica'
         type: choice
-        options: ['produccion', 'staging']
+        # 🔴 30-sep-2026 (encargo A): staging se jubiló. Solo queda producción; lo que no escribe es el modo ensayo (rollback).
+        options: ['produccion']
         default: 'produccion'
       fuente:
         description: 'Que fuente se simula (decide que materializadas se refrescan)'
@@ -74,5 +75,5 @@ jobs:
         env:
           ENTORNO: ${{ inputs.entorno }}
           FUENTE: ${{ inputs.fuente }}
-          DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -u diagnostico_refresco.py

@@ -26,7 +26,8 @@ on:
       entorno:
         description: 'Base de datos contra la que se mide'
         type: choice
-        options: ['produccion', 'staging']
+        # 🔴 30-sep-2026 (encargo A): staging se jubiló. Solo queda producción; lo que no escribe es el modo ensayo (rollback).
+        options: ['produccion']
         default: 'produccion'
 
 # ⚠️ Las opciones y los defaults van ENTRECOMILLADOS: en YAML un `no` suelto es el
@@ -53,5 +54,5 @@ jobs:
       - name: Medir el plan
         env:
           ENTORNO: ${{ inputs.entorno }}
-          DB_URL: ${{ inputs.entorno == 'produccion' && secrets.SUPABASE_DB_URL || secrets.STAGING_DB_URL }}
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -u diagnostico_plan_app.py
