@@ -42,7 +42,7 @@
 #   Cualquiera que falle → código 1, el workflow entero falla y salta el Telegram.
 #
 # ⚠️ PENDIENTE (NO en este PR, anotado en CLAUDE.md §4): esta copia de FICHEROS no tiene
-#   simulacro de restauración. El restaurador (restaurar-staging.yml) prueba el ensayo de
+#   simulacro de restauración. El restaurador (simulacro-copia.yml) prueba el ensayo de
 #   incendio de la BD; las facturas y los CSV de Keepa que ahora van a R2 no los recupera
 #   ni los verifica nadie. Es el MISMO agujero en el otro activo — el que motivó todo esto.
 #   Hay que montar un "restaurar-ficheros" que baje de R2 una muestra y la abra.

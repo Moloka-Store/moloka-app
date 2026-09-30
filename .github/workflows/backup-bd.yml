@@ -90,11 +90,11 @@ jobs:
           #   El simulacro salia verde solo porque psql corria con ON_ERROR_STOP=0 y
           #   pasaba por encima de esos errores sin mirarlos.
           # 🔒 Ahora el dump es SOLO `CREATE` + `COPY`, y quien vacia el destino es
-          #   quien restaura (restaurar-staging.yml), que es donde se puede hacer
+          #   quien restaura (simulacro-copia.yml), que es donde se puede hacer
           #   dentro de la misma transaccion. Un dump que no borra nada tambien es un
           #   dump que no puede destruir nada por su cuenta.
           # ⚠️ Los backups ANTERIORES a este cambio llevan el bloque de borrados y
-          #   restaurar-staging.yml los RECHAZA por su nombre, con el motivo dicho.
+          #   simulacro-copia.yml los RECHAZA por su nombre, con el motivo dicho.
           /usr/lib/postgresql/17/bin/pg_dump "$SUPABASE_DB_URL" \
             --schema=public --no-owner --no-privileges \
             | gzip > "moloka_${FECHA}.sql.gz"

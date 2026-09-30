@@ -456,7 +456,7 @@ jobs:
           #     · Las migraciones escriben nombres sin cualificar (`FROM v_salud_asin`,
           #       `FROM v_producto_amazon`, `moloka_buzones_fase0()`…). Si `public` no
           #       estuviera en el path, no resolverian.
-          #     · La captura de politicas de `restaurar-staging.yml` (PR #105) depende
+          #     · La captura de politicas de `simulacro-copia.yml` (PR #105) depende
           #       de que el `qual` que devuelve `pg_policies` -- RENDERIZADO con el
           #       search_path del momento -- se pueda volver a interpretar igual.
           #     · Y cualquier definicion sin cualificar que venga detras.

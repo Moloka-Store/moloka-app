@@ -6,7 +6,7 @@
 
 - 🔴 **UNA GUARDA COMPARA INVARIANTES, NO CIFRAS ABSOLUTAS** — y con más motivo si mide algo que
   el backup no copia. `backup-bd.yml` vuelca con `--schema=public`, así que `storage`, `auth` y
-  todo lo demás **no están en la copia** y `restaurar-staging.yml` no los repone. Cualquier número
+  todo lo demás **no están en la copia** y `simulacro-copia.yml` no los repone. Cualquier número
   fijo sobre lo que no se copia da **rojo en staging por el alcance del backup, no por la
   migración**: un falso rojo esperando su día.
   *Medido el 10-ago-2026 en `2026-08-10_buzon_custom_analytics.sql`: el encargo pedía comprobar

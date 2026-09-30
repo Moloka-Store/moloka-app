@@ -32,7 +32,7 @@
 --   nunca se reescribe la formula en el sitio donde se compara.
 --
 -- ⚠️ LA SEPTIMA HUELLA NO ESTA AQUI. La de los PERMISOS (ACL) vive en
---   `sql/huella_acl.sql` y se queda alli: la consume `restaurar-staging.yml` en
+--   `sql/huella_acl.sql` y se queda alli: la consume `simulacro-copia.yml` en
 --   cada ejecucion y tiene su propio motivo de existir. Las siete juntas son la
 --   foto completa de un esquema; estan en dos ficheros, no en uno, porque se
 --   miran en momentos distintos.
@@ -67,7 +67,7 @@
 --
 -- 🔒 EL ORDEN ES `order by x` DENTRO DEL `string_agg`, no el de la tabla: sin el,
 --   el md5 dependeria del orden en que Postgres devuelva las filas y cambiaria
---   solo. Es el mismo cuidado del veredicto de `restaurar-staging.yml`.
+--   solo. Es el mismo cuidado del veredicto de `simulacro-copia.yml`.
 -- ⚠️ El `ORDER BY` sobre texto usa la intercalacion (collation) de la base. Las
 --   dos bases traen la misma hoy (medido el 10-ago-2026); si algun dia una se
 --   creara con otra, dos bases identicas podrian dar md5 distintos. Es el mismo

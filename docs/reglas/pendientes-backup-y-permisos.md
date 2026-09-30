@@ -29,7 +29,7 @@
   la primera inserción del día del incendio choca con clave duplicada. Por nombre, eso sale **verde**.
   El contraste que vale es de **valores**: los `setval` que emite el dump contra
   `pg_sequences.last_value`. Medido el 9-ago-2026: las **23** secuencias de producción tienen el
-  contador avanzado (0 sin estrenar), así que le aplica a las 23. `restaurar-staging.yml` ya
+  contador avanzado (0 sin estrenar), así que le aplica a las 23. `simulacro-copia.yml` ya
   imprime en cada ejecución cuántos `setval` trae el dump, para que el agujero se vea. Es otro
   diseño y merece su propio PR.
 - ⚠️ **PENDIENTE — el simulacro no compara las RESTRICCIONES, y son las que deciden si un ensayo vale.**
@@ -44,7 +44,7 @@
 - ⚠️ **PENDIENTE — la copia de FICHEROS a R2 no tiene simulacro de restauración.** Desde el
   30-jul-2026 el backup diario (`backup-bd.yml` + `backup_storage.py`) copia a R2 los buckets
   `facturas-pdfs` e `informes` (las facturas de proveedor y el archivo histórico de Keepa). Pero
-  `restaurar-staging.yml` solo ensaya el incendio de la **BD**: **esos ficheros no los recupera ni
+  `simulacro-copia.yml` solo ensaya el incendio de la **BD**: **esos ficheros no los recupera ni
   los abre nadie nunca.** Es el MISMO agujero que motivó todo esto (una copia en la que se confía y
   que nadie ha probado), en el otro activo. Falta un `restaurar-ficheros` que baje de R2 una muestra
   y compruebe que abre. Hasta que exista, la copia de ficheros está **hecha pero no verificada de

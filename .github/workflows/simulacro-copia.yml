@@ -5,10 +5,11 @@ name: Moloka - Simulacro de la copia (base desechable)
 #
 # 🔴 DESDE EL 30-sep-2026 (encargo A) YA NO RESTAURA EN STAGING. Fernando decidio
 #   jubilar la base de pruebas (proyecto lusujlzyndsydibkeija), y este simulacro era
-#   su ultimo uso con sentido. El fichero conserva su nombre (`restaurar-staging.yml`)
-#   a proposito: `workflow_dispatch` solo deja lanzar desde una rama un .yml que ya
-#   existe en `main`, y asi el simulacro se probo de verdad antes de fusionarse (el
-#   run va en el PR). Renombrarlo es un cambio aparte, cuando ya este en `main`.
+#   su ultimo uso con sentido. Antes se llamaba `restaurar-staging.yml` y conservo ese
+#   nombre a proposito hasta estar en `main`: `workflow_dispatch` solo deja lanzar desde
+#   una rama un .yml que ya existe en `main`, y asi el simulacro se probo de verdad
+#   antes de fusionarse. Ya en `main`, se renombro a `simulacro-copia.yml` (encargo F,
+#   30-sep-2026); el contenido es el mismo.
 #
 # 🔑 LA BASE DESECHABLE ES UN SUPABASE DE VERDAD, NO UNA MAQUETA. Se levanta con la
 #   CLI de Supabase (`supabase start`) dentro del runner: el mismo Postgres de
