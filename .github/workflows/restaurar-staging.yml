@@ -1147,12 +1147,12 @@ jobs:
           #    Sin huella de origen en el fichero, se juzga como antes: contra hoy.
           if [ "$FIEL" = "no" ] || { [ -z "$FIEL" ] && [ "$MD5_STG" != "$MD5_PROD" ]; }; then
             echo "::error::Los permisos de la base NO son los que tenia produccion el dia de la copia. Lineas que difieren de la produccion de hoy (< produccion, > base):"
-            diff acl_prod.txt acl_stg.txt 2>/dev/null | head -40
+            { diff acl_prod.txt acl_stg.txt 2>/dev/null || true; } | head -40
             {
               echo ""
               echo "**resultado: ROJO -- el ACL de la base no es el de produccion el dia de la copia**"
               echo '```'
-              diff acl_prod.txt acl_stg.txt 2>/dev/null | head -40
+              { diff acl_prod.txt acl_stg.txt 2>/dev/null || true; } | head -40
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
@@ -1162,7 +1162,7 @@ jobs:
             N_DERIVA=$(diff acl_prod.txt acl_stg.txt | grep -c '^[<>]' || true)
             echo "::warning title=Produccion se ha movido desde la copia::$N_DERIVA linea(s) de ACL distintas entre la produccion de hoy y la base. La base SI es identica a produccion el dia de la copia: es deriva, no un fallo de la copia."
             echo "--- deriva desde la copia (< produccion hoy, > base = produccion el dia de la copia), primeras 40 ---"
-            diff acl_prod.txt acl_stg.txt 2>/dev/null | head -40
+            { diff acl_prod.txt acl_stg.txt 2>/dev/null || true; } | head -40
           fi
           echo "VERDE: los $(wc -l < acl_stg.txt) privilegios de la base son, uno a uno, los que tenia produccion el dia de la copia."
           {
