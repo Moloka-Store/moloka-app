@@ -26,7 +26,7 @@ name: Moloka - VACUUM FULL (con Fernando delante)
 #
 # 🔴 SOLO PRODUCCIÓN. A diferencia de aplicar-migracion.yml, este workflow no
 #   tiene selector de entorno: staging se restaura cada noche desde el backup
-#   (simulacro-copia.yml) y vacuum-full.yml no aporta nada ahí. Un solo
+#   (restaurar-staging.yml) y vacuum-full.yml no aporta nada ahí. Un solo
 #   secreto, SUPABASE_DB_URL, igual que backup-bd.yml.
 #
 # 🔴 escaner_memoria NUNCA por defecto. Es la tabla del escáner (§6 del

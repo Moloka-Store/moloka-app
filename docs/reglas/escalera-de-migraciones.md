@@ -47,7 +47,7 @@ Sustituye, en `CLAUDE.md`, a esta línea (vale hasta el 30-sep-2026):
 > [`docs/reglas/COTEJO.md`](COTEJO.md) · vuelta: [`CLAUDE.md`](../../CLAUDE.md)
 
 - 🔴 **ANTES DE ENSAYAR UNA MIGRACIÓN EN STAGING, SE RESTAURA STAGING.** Se lanza
-  `simulacro-copia.yml` y se espera a que salga en VERDE. La escalera entera es:
+  `restaurar-staging.yml` y se espera a que salga en VERDE. La escalera entera es:
   **restaurar staging → staging ensayo → staging aplicar → verificación SQL → producción ensayo →
   producción aplicar → verificación SQL**, con Elena avisada antes de tocar producción.
   **Por qué:** un ensayo en staging solo demuestra algo sobre producción si las dos bases se parecen.

@@ -7,7 +7,7 @@
 - 🔴 **"Es idéntico en efecto" es una hipótesis. Para demostrar que un cambio en la CAÑERÍA no
   cambia nada: DOS RECORRIDOS COMPLETOS Y LAS MISMAS HUELLAS.** Estrenado el 9-ago-2026 con el
   `search_path` explícito de `aplicar-migracion.yml`. El método:
-  1. `simulacro-copia.yml` → `ensayo` → `aplicar`, con la versión **vieja**, y tomar las huellas
+  1. `restaurar-staging.yml` → `ensayo` → `aplicar`, con la versión **vieja**, y tomar las huellas
      md5 del estado resultante.
      ⚠️ *Sin staging desde el 30-sep-2026: el recorrido se hace donde haya una base propia (el
      Postgres del CI de la v2, o una base desechable como la del simulacro de la copia).*

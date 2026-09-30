@@ -58,7 +58,7 @@ name: Moloka - Aplicar MIGRACION
 #
 # 🔴 ANTES DE ENSAYAR EN STAGING, SE RESTAURA STAGING. Regla de la casa desde el
 #   9-ago-2026, y no es burocracia: es lo que hace que la escalera signifique algo.
-#   Se lanza `simulacro-copia.yml` y se espera a que salga en VERDE.
+#   Se lanza `restaurar-staging.yml` y se espera a que salga en VERDE.
 #
 #   POR QUE. Un ensayo en staging solo demuestra algo sobre produccion si las dos
 #   bases se parecen. El 9-ago-2026 staging tenia 54 objetos contra los 83 de
