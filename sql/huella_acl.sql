@@ -19,7 +19,7 @@
 --   es una coincidencia, no una garantia: el dia que alguien retoque una de las dos,
 --   la comparacion empieza a mentir sin que nadie lo note. Es el mismo problema que el
 --   `LC_ALL=C` del veredicto, por otro camino.
---   Asi que la formula vive AQUI y la consumen los dos: `restaurar-staging.yml` y
+--   Asi que la formula vive AQUI y la consumen los dos: `simulacro-copia.yml` y
 --   quien la compruebe a mano. Es el mismo patron que
 --   `sql/capturar_politicas_fuera_de_public.sql`.
 --

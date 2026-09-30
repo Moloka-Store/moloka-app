@@ -15,7 +15,7 @@
 --   por otra cosa y la transaccion entera hizo rollback.
 --
 --   Este fichero lo consumen DOS sitios, y por eso se escribe UNA vez:
---     · `restaurar-staging.yml` — captura las politicas ANTES de vaciar y las
+--     · `simulacro-copia.yml` — captura las politicas ANTES de vaciar y las
 --       vuelve a crear DESPUES de restaurar, dentro de la MISMA transaccion. O sea:
 --       lo que el backup no cubre, el restore lo CONSERVA en vez de destruirlo.
 --     · `backup-bd.yml` — para que la copia deje de tener ese agujero y las traiga

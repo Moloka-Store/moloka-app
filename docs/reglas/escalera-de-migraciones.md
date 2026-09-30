@@ -19,7 +19,7 @@ Fernando delante, primero en modo ensayo → verificación SQL en producción de
   defecto y en modo ensayo por defecto: la opción staging ya no existe.
 - **Verificación después**, en producción y por SQL: objetos, permisos y filas. Nunca el log.
 - **¿Y la copia de seguridad?** Se prueba restaurándola en una base desechable que nace y muere
-  dentro de la ejecución de `restaurar-staging.yml` (el nombre se queda por ahora; el paso a
+  dentro de la ejecución de `simulacro-copia.yml` (antes se llamaba `restaurar-staging.yml`; el paso a
   paso, en su cabecera). No hay ninguna base compartida sobre la que ensayar.
 
 ## Se fusiona a cualquier hora, y el parte dice si puede perderse un envío a medias
@@ -47,7 +47,7 @@ Sustituye, en `CLAUDE.md`, a esta línea (vale hasta el 30-sep-2026):
 > [`docs/reglas/COTEJO.md`](COTEJO.md) · vuelta: [`CLAUDE.md`](../../CLAUDE.md)
 
 - 🔴 **ANTES DE ENSAYAR UNA MIGRACIÓN EN STAGING, SE RESTAURA STAGING.** Se lanza
-  `restaurar-staging.yml` y se espera a que salga en VERDE. La escalera entera es:
+  `simulacro-copia.yml` y se espera a que salga en VERDE. La escalera entera es:
   **restaurar staging → staging ensayo → staging aplicar → verificación SQL → producción ensayo →
   producción aplicar → verificación SQL**, con Elena avisada antes de tocar producción.
   **Por qué:** un ensayo en staging solo demuestra algo sobre producción si las dos bases se parecen.

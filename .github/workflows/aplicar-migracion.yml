@@ -58,7 +58,7 @@ name: Moloka - Aplicar MIGRACION
 #
 # 🔴 ANTES DE ENSAYAR EN STAGING, SE RESTAURA STAGING. Regla de la casa desde el
 #   9-ago-2026, y no es burocracia: es lo que hace que la escalera signifique algo.
-#   Se lanza `restaurar-staging.yml` y se espera a que salga en VERDE.
+#   Se lanza `simulacro-copia.yml` y se espera a que salga en VERDE.
 #
 #   POR QUE. Un ensayo en staging solo demuestra algo sobre produccion si las dos
 #   bases se parecen. El 9-ago-2026 staging tenia 54 objetos contra los 83 de
@@ -456,7 +456,7 @@ jobs:
           #     · Las migraciones escriben nombres sin cualificar (`FROM v_salud_asin`,
           #       `FROM v_producto_amazon`, `moloka_buzones_fase0()`…). Si `public` no
           #       estuviera en el path, no resolverian.
-          #     · La captura de politicas de `restaurar-staging.yml` (PR #105) depende
+          #     · La captura de politicas de `simulacro-copia.yml` (PR #105) depende
           #       de que el `qual` que devuelve `pg_policies` -- RENDERIZADO con el
           #       search_path del momento -- se pueda volver a interpretar igual.
           #     · Y cualquier definicion sin cualificar que venga detras.

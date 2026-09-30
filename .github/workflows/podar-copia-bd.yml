@@ -117,7 +117,7 @@ jobs:
         #    y `construir_plan()` lo vería la próxima vez como un nombre que
         #    no casa el patrón del volcado, con lo que la guarda de "nombre
         #    inválido" dejaría la poda inutilizada de forma permanente (además
-        #    de ensuciar el prefijo del que `restaurar-staging.yml` coge «el
+        #    de ensuciar el prefijo del que `simulacro-copia.yml` coge «el
         #    último»). `_sondas/` no es `bd/`, `v2/` ni `storage/`: no lo mira
         #    ningún otro workflow ni ninguna guarda de este.
         env:
