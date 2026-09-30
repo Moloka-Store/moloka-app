@@ -117,6 +117,9 @@ entera** —la recién aplicada— y solo se vio la otra porque **chocó con un 
 ese choque, ninguna de las dos se habría visto.
 
 **Cerrado en código:** paso 10 de `restaurar-staging.yml` + `scripts/comparar_censos.py`.
+⚠️ *Desde el 30-sep-2026 el caso ya no existe: staging se jubila, el simulacro restaura en una
+base que nace y muere en su run y nadie ensaya encima, así que el paso 10 se quitó.
+`scripts/comparar_censos.py` se queda sin uso (no se borra).*
 
 ### 6 · La comprobación cuyos dos lados son iguales por construcción
 

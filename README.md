@@ -7,7 +7,7 @@
 | | ref del proyecto | nombre en Supabase | región | qué es |
 |---|---|---|---|---|
 | **PRODUCCIÓN** | `ogfbjjdxcltzpygzuyla` | **Moloka** | `eu-west-1` | 🔴 **LA BASE DE VERDAD.** La que usa Elena a diario. Desde una sesión: **sólo lectura** |
-| **STAGING** | `lusujlzyndsydibkeija` | moloka-staging | `eu-central-1` | Desechable. Se restaura antes de cada ensayo |
+| ~~STAGING~~ | `lusujlzyndsydibkeija` | moloka-staging | `eu-central-1` | 🪦 **JUBILADA el 30-sep-2026** (encargo A). Nada de los repos la usa; la borra Fernando a mano. Lo que dice este README sobre ella es historia |
 
 ⚠️ **El nombre NO dice cuál es producción.** El proyecto de producción se llama **«Moloka»
 a secas** — no dice «producción» por ninguna parte, y el de staging sí lleva su etiqueta.
@@ -195,6 +195,10 @@ Si eso no avanza tras un run, BEMS no está vivo aunque el workflow salga verde.
 ---
 
 ## ⚠️ Staging es COMPARTIDO
+
+> **Historia: vale hasta el 30-sep-2026.** Staging se jubila y el simulacro de la copia ya no
+> restaura en ninguna base compartida: la suya nace y muere dentro de su propio run (cabecera
+> de `restaurar-staging.yml`).
 
 Varias sesiones trabajan sobre esta base a la vez. 🔬 El 11-ago-2026 staging se restauró
 **tres veces en una hora**, y una de ellas se llevó por delante una vista ya aplicada y

@@ -9,6 +9,8 @@
   `search_path` explícito de `aplicar-migracion.yml`. El método:
   1. `restaurar-staging.yml` → `ensayo` → `aplicar`, con la versión **vieja**, y tomar las huellas
      md5 del estado resultante.
+     ⚠️ *Sin staging desde el 30-sep-2026: el recorrido se hace donde haya una base propia (el
+     Postgres del CI de la v2, o una base desechable como la del simulacro de la copia).*
   2. El mismo recorrido entero con la versión **nueva**.
   3. Comparar. Si salen idénticas, el cambio es inerte **medido sobre el resultado**, no
      argumentado — y entonces sí se puede llevar a la base de Elena.
