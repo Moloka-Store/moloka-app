@@ -26,6 +26,8 @@ QUE HACE, EN ORDEN:
      Con el dato de los cuatro paises, las PUERTAS del Escaneo PRO (`escaner2_motor.decidir`, con la regla del
      viejo para elegir ficha si un EAN tiene varias): no esta en Amazon o sin dato -> SIN HISTORIAL; no se vende
      -> NO SE VENDE; varias fichas sin poder elegir -> Sin datos; se vende -> a esperar a Amazon (el cartero).
+     🔴 (encargo T, 30-sep-2026) ANTES de las puertas, la ficha de un pais cuyo titulo no es de la marca (Funko: sin
+     «Funko» ni «Pop») se aparta: ese pais cuenta como sin dato y el motivo dice «ficha dudosa: <titulo>».
   3. EL CIERRE: nov_cerrar_valoracion con el flujo del paso (lo cuadra la base) y los tokens gastados.
 
 🔑 LA TARIFA DE KEEPA (fbaFees.pickAndPackFee) viene en el mismo objeto de producto que las caidas, sin pedir nada
@@ -158,6 +160,34 @@ def ficha_de_keepa(p):
             'fee_fba': round(fba / 100.0, 2) if isinstance(fba, (int, float)) and fba > 0 else None,
             'ref_pct': float(ref) if isinstance(ref, (int, float)) and ref >= 0 else None,
             'eans': sorted({str(x) for x in (p.get('eanList') or []) + (p.get('upcList') or []) if x})}
+
+
+# 🔴 LA FICHA TIENE QUE SER DE LA MARCA (encargo T, 30-sep-2026). FK93061 (NFL Saquon Barkley): en IT, Keepa cruzo su
+#    EAN con B08HH6GYRP, un casco de moto que lleva ese EAN en Amazon, y la novedad salio «NO SE VENDE» con las
+#    caidas del casco. Antes de usar la ficha de un pais, su titulo tiene que llevar alguna de estas palabras (sin
+#    distinguir mayusculas, como texto dentro del titulo); si no, ese pais cuenta como SIN DATO y el motivo lo dice.
+#    El Escaneo PRO no tiene una comprobacion asi que reutilizar: su «Coincide» (moloka_escaner_nube._coincide_titulo)
+#    compara con el NOMBRE del proveedor y solo marca, y el cotejo del viejo (`cotejar`) solo elige entre dos o mas
+#    fichas; una sola ficha pasa sin mirar su titulo.
+PALABRAS_DE_LA_MARCA = ('funko', 'pop')
+
+
+def ficha_de_la_marca(titulo):
+    """True si el titulo de la ficha es de un producto de la marca (Funko: lleva «Funko» o «Pop»). Puro."""
+    t = str(titulo or '').lower()
+    return any(p in t for p in PALABRAS_DE_LA_MARCA)
+
+
+def apartar_fichas_dudosas(fichas_por_pais):
+    """({pais: [fichas de la marca]}, {pais: 'ficha dudosa: <titulo>'}). Un pais que solo tenia fichas dudosas se queda
+    SIN fichas: para las puertas del Escaneo PRO es «sin dato» ahi, como si Keepa no lo hubiera encontrado. Puro."""
+    buenas, dudosas = {}, {}
+    for pais, fichas in fichas_por_pais.items():
+        buenas[pais] = [f for f in fichas if ficha_de_la_marca(f.get('titulo'))]
+        malas = [f for f in fichas if not ficha_de_la_marca(f.get('titulo'))]
+        if malas:
+            dudosas[pais] = '; '.join('ficha dudosa: %s' % ((f.get('titulo') or '(sin título)')[:120]) for f in malas)
+    return buenas, dudosas
 
 
 def rec_de_ficha(f):
@@ -532,10 +562,14 @@ def _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, i
                 t['v_espera_saldo' if espera[0] == 'saldo' else 'v_espera_fallo'] += 1
                 continue
             try:
+                # 🔴 Encargo T: la ficha que no es de la marca no se usa; ese pais, sin dato, y el motivo lo dice.
+                fichas, dudosas = apartar_fichas_dudosas(fichas)
                 destino, decision, r = _decidir_ventas(n, foto, fichas, params, M, eleccion)
                 filas = _filas_de_ventas(r, origen, fecha) if r.get('asin') and r['puerta'] != 'b' else []
                 fuentes = sorted(set(origen.values()))
-                motivo = '%s: %s · dato de ventas: %s' % (r['motivo'], r['detalle'], ', '.join(fuentes))
+                motivo = '%s: %s%s · dato de ventas: %s' % (
+                    r['motivo'], r['detalle'],
+                    ''.join(' · %s sin dato (%s)' % (p, dudosas[p]) for p in PAISES if p in dudosas), ', '.join(fuentes))
                 sb.rpc('nov_guardar_keepa', {'p_novedad': n['id'], 'p_destino': destino, 'p_decision': decision,
                                              'p_motivo': motivo[:2000], 'p_filas': filas}).execute()
             except Exception as ex:

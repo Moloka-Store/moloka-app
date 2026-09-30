@@ -159,6 +159,45 @@ eq('(C) caja por sufijo C6: 48 la caja, 8 la unidad', (por['FK67930']['precio_ca
 eq('(C) lo suelto: sin unidades y el mismo precio', (por['FK67928']['uds_caja'], por['FK67928']['precio_unidad']), (None, 8.0))
 eq('(C) la caja agotada también lleva su precio por unidad', por['FK86264']['precio_unidad'], 10.0)
 
+# ── (O) EL EXPOSITOR ES UNA CAJA (encargo T, 30-sep-2026; pendiente del visto bueno de Fernando) ───────────
+eq('(O) las unidades del expositor salen del «(N)» final, con la palabra que lo hace caja; sin ella, o con N < 2, no',
+   [dp.unidades_expositor(n) for n in (
+       'SpongeBob SquarePants Mystery Minis Minifiguras 5 cm Expositor 25th Anniversary (12)',
+       '101 dálmatas Mystery Minis Minifiguras 5 cm Expositor PDQ (12)',
+       'Fresh Farm Figuras Mini Blind Box Display (8)',
+       'tokidoki Cat Frenzies Botanical Lanyard Clips Blind Box Surtido 4 cm (24)',
+       'Elder Scrolls Skyrim Baraja de Naipes Caja expositora (12)',
+       'Jujutsu Kaisen: Kwistal Fwendz Blind Box Assortment (6)',
+       'Dragon Storm Inclusion Pack de Dados Green Dragon (7)',
+       'Ultimate Guard Classic Sleeves Japanese Size (100)',
+       'Las guerreras K-pop Set de 4 Pósteres Movie Key Art 61 x 91 cm (4)',
+       'Star Wars POP! Vinyl Figura Grogu 9 cm',
+       'Figuras Surtido 9 cm',
+       'Figura Expositor (1)',
+       None)],
+   [12, 12, 8, 24, 12, 6, None, None, None, None, None, None, None])
+EXPO = [
+    fila('FK76102', '0889698761024', 'SpongeBob SquarePants Mystery Minis Minifiguras 5 cm Expositor 25th Anniversary (12)',
+         'Funko', 60.0, 'disponible'),
+    fila('FNRL0007', '5904204651234', 'Dragon Storm Inclusion Pack de Dados Green Dragon (7)', 'FanRoll', 14.0, 'disponible'),
+    fila('FK99999', '889698999990 C6', 'Marvel POP! Vinyl Figura 9 cm Expositor (12)', 'Funko', 48.0, 'disponible'),
+]
+filas_o, _co = dp.construir_disponibilidad(EXPO, [], M, con_precio={f['productNumber'] for f in EXPO},
+                                           con_disponibilidad={f['productNumber'] for f in EXPO},
+                                           numeros_crudos=[f['productNumber'] for f in EXPO])
+por_o = {f['producto_prov']: f for f in filas_o}
+eq('(O) 🔴 FK76102: el expositor de 12 es CAJA de 12; el precio del expositor, y el de la unidad, SEPARADOS (60 → 5)',
+   (por_o['FK76102']['es_caja'], por_o['FK76102']['uds_caja'], por_o['FK76102']['precio_catalogo'], por_o['FK76102']['precio_unidad'],
+    por_o['FK76102']['es_chase']), (True, 12, 60.0, 5.0, False))
+eq('(O) «Pack de Dados (7)» sigue siendo UNA cosa: suelta, y su precio tal cual', (por_o['FNRL0007']['es_caja'], por_o['FNRL0007']['uds_caja'],
+                                                                                   por_o['FNRL0007']['precio_unidad']), (False, None, 14.0))
+eq('(O) con sufijo de caja en el EAN (C6), manda el sufijo, como siempre: caja de 6 aunque el nombre diga (12)',
+   (por_o['FK99999']['es_caja'], por_o['FK99999']['uds_caja'], por_o['FK99999']['precio_unidad']), (True, 6, 8.0))
+foto_o, _ap, _c = e2.construir_foto(EXPO, [], e2.filtro_todas()[0], M, modo='todas')
+eq('(O) 🔑 y es un desvío SOLO de esta foto: el barrido (Escaneo PRO) sigue con la regla heredada y el expositor suelto',
+   [(f['producto_heo'], f['es_caja'], f['precio_unidad']) for f in foto_o if f['producto_heo'] == 'FK76102'], [('FK76102', False, 60.0)])
+
+
 # ── (D) EL CUADRE ────────────────────────────────────────────────────────────────────────
 eq('(D) leídas = disponibles + agotados = lo que devolvió descargar_heo',
    (cuentas['n_leidas'], cuentas['n_disponibles'] + cuentas['n_agotados'], cuentas['n_devueltos']), (13, 13, 13))
