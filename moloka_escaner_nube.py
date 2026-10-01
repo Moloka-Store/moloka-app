@@ -1029,6 +1029,12 @@ def _es_ean_valido(s):
     s = str(s).strip()
     return s.isdigit() and len(s) in (12, 13)
 
+def _asin_de_ficha(x):
+    """El ASIN que trae la factura para una fila (MIS_COMPRAS), o None. 10 caracteres
+    alfanumericos; lo que no tenga esa forma NO se usa (la fila sigue por su EAN, como siempre)."""
+    s = str(x or '').strip().upper()
+    return s if re.fullmatch(r'[A-Z0-9]{10}', s) else None
+
 def _parse_precio_libre(x):
     """Precio en cualquier formato razonable: '1,77 EUR', '2.01 €', '8,62', '11.34'."""
     s = str(x)
@@ -1262,7 +1268,14 @@ else:
                                   'Motivo': 'Chase SUELTO descartado (solo se compra en caja de 6)'})
             continue
         core = core_ean(ean_in)
-        if (not core.isdigit()) or len(core) not in (12, 13):
+        # 🔑 El ASIN de la FICHA, que viaja desde la factura (columna 'asin' del catalogo de B2, sacada de
+        #    productos.asin). Con el, la Fase 1 pregunta a Keepa POR ESE ASIN y no por el EAN (identidad:
+        #    ASIN->EAN, nunca EAN->ASIN). Solo en MIS_COMPRAS: los feeds de proveedor no lo traen y su
+        #    escaneo no cambia. Y con ASIN la forma del EAN no estorba: el de las fundas Ultra Pro de la
+        #    casa es 74427811266, ONCE cifras, y hasta hoy esa fila se tiraba aqui como «EAN forma rara»
+        #    antes de preguntar a nadie.
+        _asin_f = _asin_de_ficha(row.get('asin', '')) if PROVEEDOR == 'MIS_COMPRAS' else None
+        if (not core.isdigit()) or (len(core) not in (12, 13) and not _asin_f):
             problematicos.append({'EAN':ean_in, 'Cabecera':row.get(cN,''),
                                   'Motivo':f'EAN forma rara (len={len(core)})'}); continue
         if _tolerante:
@@ -1293,7 +1306,8 @@ else:
                       # La ficha viaja desde la FACTURA en el catalogo de B2 (columna 'producto_id'). Los
                       # feeds de proveedor no traen esa columna -> '' -> None. Se escribe tal cual en
                       # escaner_detalle.producto_id (camino de la factura): NO se cruza EAN->ficha.
-                      'producto_id': (str(row.get('producto_id','')).strip() or None)})
+                      'producto_id': (str(row.get('producto_id','')).strip() or None),
+                      'asin_ficha': _asin_f})   # ver arriba, junto a la forma del EAN
     # Las descartadas, cada una con SU causa (ver el porque arriba, donde se inicializan).
     # La de marca va primero a proposito: es la que contesta "que marcas se estan
     # escaneando de verdad", que es la pregunta que costo dias responder.
@@ -1583,11 +1597,13 @@ def _reduce_prod(prod):
             'listedSince': prod.get('listedSince'),
             'eanList': prod.get('eanList'), 'upcList': prod.get('upcList')}
 
-def keepa_rank(codigos, domain='ES'):
-    clave = _clave_lote(codigos, domain)
+def keepa_rank(codigos, domain='ES', por_asin=False):
+    # por_asin: los codigos son ASIN de ficha (MIS_COMPRAS), no EAN. La clave de la cache lleva
+    # 'ASIN|' delante para no compartir lote con una pregunta por EAN; la de EAN NO cambia.
+    clave = _clave_lote((['ASIN'] if por_asin else []) + list(codigos), domain)
     if clave in _rankcache:
         return _rankcache[clave]                 # de la caja: 0 tokens
-    prods = keepa_query(codigos, product_code_is_asin=False, domain=domain, stats=90, history=0)
+    prods = keepa_query(codigos, product_code_is_asin=por_asin, domain=domain, stats=90, history=0)
     if prods is None:
         return None
     _rankcache[clave] = [_reduce_prod(p) for p in prods]
@@ -1608,6 +1624,7 @@ candidatos, ambiguos = {}, []
 cands_por_ean = {}        # ein -> [todos los candidatos] (para el cotejo). candidatos guarda solo el ganador por rank.
 cotejo_info = {}          # ein -> veredicto del cotejo (se rellena mas abajo; declarado aqui para que exista aunque filas este vacio)
 pasan, sin_rank, no_encontrados = {}, [], []
+eins_por_asin = set()     # ein de las filas que se preguntan por el ASIN de su ficha (MIS_COMPRAS; ver registra_asin)
 
 if filas:
     def pasa_filtro(r_act, r_90):
@@ -1644,6 +1661,51 @@ if filas:
             else: candidatos[ein]=cand
             vistos.add(ein)
 
+    # 🔑 LA FILA QUE TRAE EL ASIN DE SU FICHA (MIS_COMPRAS) NO SE CRUZA POR EAN: el producto de Amazon
+    #    ES ese ASIN, lo diga o no el eanList de Keepa. Por eso aqui no se mira var_norm: caso medido el
+    #    1-oct-2026, Kaffek 7185897225606 -> B000VYP4EM, cuyo eanList en Keepa es 0658564703983 (por EAN,
+    #    Keepa no devuelve nada y la factura se quedaba sin informe). Y NO va a cands_por_ean: eso alimenta
+    #    sondeo_keepa, que es la pelicula de lo que Keepa contesta POR EAN; meter aqui un ASIN preguntado
+    #    por si mismo seria apuntar como «Keepa asocia este EAN a este ASIN» algo que Keepa no ha dicho.
+    def registra_asin(prod, eins_de_asin, vistos):
+        asin = prod.get('asin')
+        if not asin: return
+        st = prod.get('stats') or {}
+        cur, a90 = st.get('current') or [], st.get('avg90') or []
+        for ein in eins_de_asin.get(asin, ()):
+            f = fila_por_ean[ein]
+            candidatos[ein] = {'ean_in':ein, 'asin':asin, 'fila':f, 'propio':es_propio(f['core']),
+                               'r_act':cur[IDX_RANK] if len(cur)>IDX_RANK else -1,
+                               'r_90':a90[IDX_RANK] if len(a90)>IDX_RANK else -1,
+                               'title':prod.get('title') or '',
+                               'rank_drops_30d':st.get('salesRankDrops30'),
+                               'listed_since':prod.get('listedSince')}
+            vistos.add(ein)
+
+    def pasada_asin(eins, etiqueta, lote_size=None):
+        eins_de_asin = {}
+        for ein in eins:
+            eins_de_asin.setdefault(fila_por_ean[ein]['asin_ficha'], []).append(ein)
+        codigos = sorted(eins_de_asin)
+        _ls = lote_size or LOTE_FASE1
+        lotes = [codigos[i:i+_ls] for i in range(0, len(codigos), _ls)]
+        vistos = set()
+        print(f"{etiqueta}: {len(eins)} productos, {len(codigos)} ASIN de ficha, {len(lotes)} lotes")
+        for n, lote in enumerate(lotes, 1):
+            prods = keepa_rank(lote, domain='ES', por_asin=True)
+            if prods is None:
+                # Mismo apunte que la pasada por EAN: no es «Keepa no lo tiene», es que no se pregunto.
+                _perdidos = {e for a in lote for e in eins_de_asin[a]}
+                LOTES_PERDIDOS.append({'fase': 'F1', 'etiqueta': etiqueta, 'lote': n, 'n_codigos': len(lote)})
+                EANS_NO_PREGUNTADOS.update(_perdidos)
+                print(f"  lote {n}/{len(lotes)} NO resuelto tras reintentos -> se salta este lote "
+                      f"({len(_perdidos)} productos quedan SIN PREGUNTAR)")
+                continue
+            for prod in prods: registra_asin(prod, eins_de_asin, vistos)
+            print(f"  lote {n}/{len(lotes)} | tokens {api.tokens_left}")
+        _guardar_rankcache()
+        return vistos
+
     def pasada(cod_por_ean, etiqueta, lote_size=None):
         pool = list(cod_por_ean.keys())
         codigos = sorted({cod_por_ean[e] for e in pool})
@@ -1674,11 +1736,20 @@ if filas:
         _guardar_rankcache()
         return vistos
 
-    vistos = pasada({f['ean_in']: cod_pref(f) for f in filas}, "Fase 1 (1 codigo/producto)")
+    # Las que traen ASIN de ficha, por ASIN; SOLO las que no lo traen siguen por EAN (con sus
+    # variantes de reserva). Una fila por ASIN que Keepa no conoce NO se reintenta por EAN: el
+    # EAN->ASIN es justo lo que no se hace (CLAUDE.md, identidad), y en los packs con EAN compartido
+    # (Ultra Pro 200/300/400) llevaria a la ficha de 100 fundas.
+    filas_ean = [f for f in filas if not f.get('asin_ficha')]
+    eins_por_asin.update(f['ean_in'] for f in filas if f.get('asin_ficha'))
+    vistos = set()
+    if eins_por_asin:
+        vistos |= pasada_asin(sorted(eins_por_asin), "Fase 1 por ASIN de la ficha (MIS_COMPRAS)")
+    vistos |= pasada({f['ean_in']: cod_pref(f) for f in filas_ean}, "Fase 1 (1 codigo/producto)")
     for ronda in (0, 1):
-        faltan = {f['ean_in'] for f in filas} - vistos
+        faltan = {f['ean_in'] for f in filas_ean} - vistos
         rint = {}
-        for f in filas:
+        for f in filas_ean:
             if f['ean_in'] in faltan:
                 rs = cods_reserva(f)
                 if len(rs) > ronda: rint[f['ean_in']] = rs[ronda]
@@ -1712,7 +1783,11 @@ if filas:
         print(f">>> RESCATE {_nr}/{RESCATE_INTENTOS}: {len(_pend)} EAN se quedaron sin preguntar. "
               f"Espero {RESCATE_ESPERA}s y reintento en lotes de {LOTE_RESCATE}.")
         time.sleep(RESCATE_ESPERA)
-        vistos |= pasada({e: cod_pref(fila_por_ean[e]) for e in _pend},
+        # Cada fila se rescata por donde se pregunto: la que trae ASIN de ficha, por su ASIN.
+        _pend_asin = sorted(e for e in _pend if e in eins_por_asin)
+        if _pend_asin:
+            vistos |= pasada_asin(_pend_asin, f"RESCATE {_nr} por ASIN", lote_size=LOTE_RESCATE)
+        vistos |= pasada({e: cod_pref(fila_por_ean[e]) for e in _pend if e not in eins_por_asin},
                          f"RESCATE {_nr}", lote_size=LOTE_RESCATE)
         _rescatados = len(_pend) - len(EANS_NO_PREGUNTADOS - vistos)
         print(f">>> RESCATE {_nr}: recuperados {_rescatados} de {len(_pend)}.")
@@ -1735,6 +1810,8 @@ if filas:
     _n_eval = _n_dud = 0
     if COTEJO_MODO != 'off' and COTEJO_ACTIVO:
         for ein, c in list(candidatos.items()):
+            if ein in eins_por_asin:
+                continue                                    # el ASIN es el de la ficha: no hay nada que elegir
             cands = cands_por_ean.get(ein) or [c]
             nom = fila_por_ean[ein]['nombre']
             elegido, veredicto, detalle = elegir_candidato(nom, cands, keyrank)
@@ -1767,7 +1844,9 @@ if filas:
             # 🔒 No mentir en el motivo: "Keepa sin ASIN" solo si de verdad se
             # pregunto y no lo tenia. Si el lote se perdio, se dice.
             _motivo = ('NO PREGUNTADO (lote perdido por fallo de Keepa)'
-                       if f['ean_in'] in EANS_NO_PREGUNTADOS else 'Keepa sin ASIN')
+                       if f['ean_in'] in EANS_NO_PREGUNTADOS
+                       else f"Keepa no tiene el ASIN de la ficha ({f['asin_ficha']})"
+                       if f['ean_in'] in eins_por_asin else 'Keepa sin ASIN')
             no_encontrados.append({'EAN':f['ean_in'],'Cabecera':f['nombre'],'Motivo':_motivo})
 amb_eans = {a['EAN'] for a in ambiguos}
 print(f"\nCon ASIN: {len(candidatos)} | PASAN: {len(pasan)} | sin rank: {len(sin_rank)} | "
@@ -2502,8 +2581,12 @@ try:
     # 🔴 CENTINELA: por cada EAN que Keepa NO devolvio (esta en no_encontrados) una fila con
     #    asin_candidato = NULL. "Se pregunto y no habia" es un dato; el silencio no. Es lo que el
     #    unique NULLS NOT DISTINCT (sobre ean_norm) permite distinguir EAN a EAN.
+    # 🔑 Las filas preguntadas por el ASIN de su ficha (MIS_COMPRAS) NO dejan centinela: aqui no se
+    #    pregunto su EAN, y una fila «EAN sin ASIN» seria falsa (ver registra_asin).
     for _ne in no_encontrados:
         _ein = _ne.get('EAN')
+        if _ein in eins_por_asin:
+            continue
         _k = (_ean_norm_py(_ein), None)
         if _k in _vistos_snd:
             _dups_snd += 1; continue

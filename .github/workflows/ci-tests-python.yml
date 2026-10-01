@@ -235,6 +235,14 @@ jobs:
       - name: 22 quater) test_escaner_cuadre_memoria.py
         run: python -u test_escaner_cuadre_memoria.py
 
+      # El banco de MIS_COMPRAS por ASIN (1-oct-2026, factura KaffeK sin informe). Corre el escaner de
+      # punta a punta dos veces con un catalogo que trae la columna `asin` de la ficha: en la factura,
+      # la fila con ASIN se pregunta a Keepa POR ESE ASIN y su EAN no se pregunta (ni el de 11 cifras de
+      # Ultra Pro se tira como «forma rara»); en un proveedor (DINOTOYS), la columna se ignora y todo va
+      # por EAN, como hasta hoy. Sin red, sin secretos, sin tocar produccion.
+      - name: 22 quater bis) test_escaner_mis_compras_asin.py
+        run: python -u test_escaner_mis_compras_asin.py
+
       # El banco del centinela del proveedor mudo. Saca con `ast` las tres
       # funciones puras de centinela_escaner.py y las corre con las fechas del
       # apagon del 9-sep-2026 y con un sabado-a-lunes de verdad (los tres
@@ -431,6 +439,7 @@ jobs:
             test_escaner_pelicula_factura.py
             test_escaner_llave_servicio.py
             test_escaner_cuadre_memoria.py
+            test_escaner_mis_compras_asin.py
             test_centinela_mudo.py
             test_actualizador_tcg_freno.py
             test_claude_md_candado.py
