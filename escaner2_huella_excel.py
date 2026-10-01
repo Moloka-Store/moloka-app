@@ -218,6 +218,24 @@ def sin_columnas(ref, quitar, renombrar=None, hoja='Análisis'):
     return salida
 
 
+def con_columna_al_final(ref, nombre, ancho, hoja='Análisis'):
+    """(AA, 1-oct-2026) Una COPIA de la huella `ref` con una columna de TEXTO nueva detras de la ultima de `hoja`, como
+    la escribe el escaner 2 («Ficha compartida»): en la cabecera y con su ancho, sin formula ni formato propio, y la
+    tabla que acababa en la ultima columna, alargada hasta ella. El resto de la huella, intacto."""
+    import copy
+    salida = copy.deepcopy(ref)
+    h = next(x for x in salida['hojas'] if x['hoja'] == hoja)
+    ultima = h['cabecera'][-1]
+    h['cabecera'] = list(h['cabecera']) + [nombre]
+    h['anchos'] = dict(h['anchos'], **{nombre: round(float(ancho), 2)})
+    h['columnas'] = dict(h['columnas'], **{nombre: {'formato': [], 'enlace': False, 'color_letra': [], 'formula': []}})
+    for t in h['tablas']:
+        for par in t['columnas']:
+            if par[1] == ultima:
+                par[1] = nombre
+    return salida
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # (B7, 25-sep-2026) CELDA A CELDA: dos libros IDENTICOS, no solo con la misma huella
 # ═══════════════════════════════════════════════════════════════════════════════

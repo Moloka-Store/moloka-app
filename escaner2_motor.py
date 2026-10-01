@@ -379,6 +379,17 @@ def columnas_keepa(ruta=RUTA_ESCAPARATE):
     return por_columna['dominio'], por_columna['rank_drops_30d']
 
 
+def columnas_ficha_compartida(ruta=RUTA_ESCAPARATE):
+    """(AA, 1-oct-2026) Las tres cabeceras con que se detecta una FICHA COMPARTIDA, de `TIPADAS` del
+    escaparate, como `columnas_keepa`: el ASIN padre, el recuento de variaciones y el puesto actual."""
+    ns = sacar_piezas(ruta, (), ('TIPADAS',))
+    por_columna = {col: cab for cab, col, _t in ns['TIPADAS']}
+    faltan = [c for c in ('asin_padre', 'n_variaciones', 'rank') if c not in por_columna]
+    if faltan:
+        raise PiezaNoEncontrada('%s: TIPADAS ya no declara %s' % (ruta, ', '.join(faltan)))
+    return por_columna['asin_padre'], por_columna['n_variaciones'], por_columna['rank']
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 2 · LA FOTO DEL CATALOGO (paso 2 del encargo)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -765,13 +776,16 @@ def columnas_requeridas(pro, col_caidas):
     return [c['ean'], c['asin'], c['buybox'], c['nuevo'], c['fba'], c['compct'], col_caidas]
 
 
-def examinar_csv(ruta, pro, col_pais, col_caidas):
+def examinar_csv(ruta, pro, col_pais, col_caidas, cols_ficha=None):
     """Lee UN export del Visualizador y devuelve {'pais', 'filas', 'fuente_pais', 'caidas'}.
 
     🔑 EL PAIS LO DICE EL DATO, no se pregunta: la columna `Localización` (la que usa la
        Guarda 5 bis del procesador del escaparate) y, si no estuviera, el dominio de las URL
        de Amazon del propio fichero. Tiene que ser UNO en todo el fichero.
-    `caidas` = {asin: caidas_30d o None}, leidas con el mismo `_num_csv` del Escaner Pro."""
+    `caidas` = {asin: caidas_30d o None}, leidas con el mismo `_num_csv` del Escaner Pro.
+    (AA) Con `cols_ficha` (`columnas_ficha_compartida`), ademas `fichas` = {asin: {'padre', 'nvar', 'rank'}}
+    para detectar la ficha compartida, y `sin_columnas_ficha` = las de esas tres que el fichero no trae (sin
+    ellas no se puede detectar: el CSV se usa igual y quien llama lo avisa)."""
     cab, filas = _leer_crudo(ruta)
     if not filas:
         raise CsvIlegible('sin filas de datos (solo cabecera)')
@@ -810,17 +824,96 @@ def examinar_csv(ruta, pro, col_pais, col_caidas):
 
     caidas, choques = {}, 0
     col_asin = pro.CSV_COLS['asin']
+    sin_cols = [h for h in (cols_ficha or ()) if h not in idx]
+    fichas = {} if (cols_ficha and not sin_cols) else None
     for fila in filas:
         asin = celda(fila, col_asin)
         if not asin:
             continue
+        if fichas is not None and asin not in fichas:
+            # La primera fila de cada ASIN, como las caidas.
+            col_padre, col_nvar, col_rank = cols_ficha
+            fichas[asin] = {'padre': celda(fila, col_padre), 'nvar': pro._num_csv(celda(fila, col_nvar)),
+                            'rank': pro._num_csv(celda(fila, col_rank))}
         v = pro._num_csv(celda(fila, col_caidas))
         if asin in caidas and caidas[asin] != v:
             choques += 1          # el mismo ASIN dos veces con caidas distintas: se queda la primera
             continue
         caidas.setdefault(asin, v)
-    return {'pais': pais, 'filas': len(filas), 'fuente_pais': fuente, 'caidas': caidas,
-            'choques_caidas': choques}
+    salida = {'pais': pais, 'filas': len(filas), 'fuente_pais': fuente, 'caidas': caidas,
+              'choques_caidas': choques}
+    if cols_ficha:
+        salida.update(fichas=fichas or {}, sin_columnas_ficha=sin_cols)
+    return salida
+
+
+# ── (AA, 1-oct-2026) LA FICHA COMPARTIDA ─────────────────────────────────────────────────────
+# Fernando: «Imagina una ficha compartida por 3 productos que marca 30 ventas al mes, esa ficha interesa como poco
+# verla con mis ojos.» Varias figuras pueden colgar de UN padre de Amazon que ordena por un solo puesto: las caidas de
+# 30 dias de cada una son las de la FICHA entera, no las suyas. No se excluyen: se reparten y se marcan.
+#   · deteccion, POR PAIS: un producto de la lista es «ficha compartida» si comparte «ASIN Padre» y «Clasificación de
+#     Ventas: Actual» identicos con al menos OTRO producto (otro ASIN) del mismo CSV. Padre vacio o puesto vacio no
+#     cuentan como coincidencia;
+#   · ventas por figura = caidas de la fila ÷ «Recuento de variaciones» de Amazon (no ÷ los hermanos de la lista);
+#     si el recuento falta o es 0, ÷ los hermanos de la lista, y el detalle lo dice;
+#   · el corte de «se vende» se aplica a esa cifra repartida, no a la de la ficha.
+def fichas_compartidas(fichas_por_pais):
+    """{pais: {asin: {'padre', 'rank'}}} (lo que deja `examinar_csv` en `fichas`) → {pais: {asin: info}} SOLO de las
+    fichas compartidas, con info = {'padre', 'rank', 'hermanos' (los ASIN del grupo, el mismo incluido), 'n_lista',
+    'nvar', 'divisor', 'origen_divisor' ('amazon' o 'lista')}. Puro."""
+    salida = {}
+    for pais, fichas in (fichas_por_pais or {}).items():
+        grupos = {}
+        for asin, f in fichas.items():
+            padre, rank = (f.get('padre') or '').strip(), f.get('rank')
+            if not padre or rank is None:
+                continue
+            grupos.setdefault((padre, rank), []).append(asin)
+        for (padre, rank), asins in grupos.items():
+            if len(asins) < 2:
+                continue
+            hermanos = sorted(asins)
+            for a in asins:
+                nvar = fichas[a].get('nvar')
+                desde_amazon = nvar is not None and nvar > 0
+                salida.setdefault(pais, {})[a] = {
+                    'padre': padre, 'rank': rank, 'hermanos': hermanos, 'n_lista': len(hermanos),
+                    'nvar': nvar if desde_amazon else None,
+                    'divisor': nvar if desde_amazon else len(hermanos),
+                    'origen_divisor': 'amazon' if desde_amazon else 'lista'}
+    return salida
+
+
+def pasa_corte(ventas, umbral):
+    """«Se vende» (D, 28-sep-2026, y AA, 1-oct-2026): MAS de `umbral` caidas en 30 dias, o sea `umbral` + 1 o mas.
+    🔑 Se escribe como «≥ umbral + 1» y no como «> umbral» por la ficha compartida: sus ventas por figura pueden tener
+       decimales, y Fernando dijo «7 o más» (con umbral 6, 6,5 por figura NO pasa). Con caidas enteras es lo mismo."""
+    return ventas is not None and ventas >= umbral + 1
+
+
+def texto_corte(umbral):
+    """El corte con las palabras de Fernando, sacado del parametro: umbral 6 → «7 o más caídas en 30 días»."""
+    return '%d o más caídas en 30 días' % (umbral + 1)
+
+
+def _cifra(x):
+    """Una cifra de ventas para leer: entera sin decimales, y si no, con UN decimal y coma (18,5)."""
+    if x is None:
+        return '—'
+    r = round(float(x), 1)
+    return ('%d' % r) if r == int(r) else ('%.1f' % r).replace('.', ',')
+
+
+def texto_ficha_compartida(info, pais=None):
+    """La marca de una ficha compartida en un pais (AA): «Ficha compartida: N figuras · ventas de la ficha X/mes ·
+    estimadas por figura Y/mes»; con `pais`, «Ficha compartida en ES: …». Si el recuento de Amazon faltaba, lo dice."""
+    txt = 'Ficha compartida%s: %s figuras · ventas de la ficha %s/mes · estimadas por figura %s/mes' % (
+        (' en %s' % pais) if pais else '', _cifra(info['divisor']), _cifra(info['ventas_ficha']),
+        _cifra(info['por_figura']))
+    if info.get('origen_divisor') == 'lista':
+        txt += (' (sin «Recuento de variaciones» de Amazon: repartido entre los %d hermanos de la lista)'
+                % info['n_lista'])
+    return txt
 
 
 def candidatos(fila_foto, datos_pais):
@@ -875,14 +968,16 @@ def _pct(x):
     return ('%.1f %%' % (x * 100)).replace('.', ',') if x is not None else '—'
 
 
-def decidir(fila_foto, cands_por_pais, caidas_por_pais, params, M, eleccion=None):
+def decidir(fila_foto, cands_por_pais, caidas_por_pais, params, M, eleccion=None, compartidas=None):
     """La PUERTA de una fila de la foto. Devuelve {'puerta', 'motivo', 'detalle', 'asin',
-    'fichas', 'paises': {pais: calculo}, 'caidas': {pais: n o None}, 'mejor': {...} o None}.
+    'fichas', 'paises': {pais: calculo}, 'caidas': {pais: n o None}, 'mejor': {...} o None,
+    'compartida': {pais: reparto} (AA, solo con ASIN)}.
 
     `cands_por_pais`: {pais: [fichas del CSV]}, los paises que se CALCULAN de los que se ha
     subido CSV. `params` (escaner2_parametros, Fernando 24-sep-2026), DOS listas distintas:
       · 'paises_filtro'  (los de la fila del proveedor; en HEO, ES/IT/FR/DE desde el encargo D,
-        28-sep-2026): donde se mira si SE VENDE (> `umbral` caidas en 30 dias en alguno de ellos);
+        28-sep-2026): donde se mira si SE VENDE (> `umbral` caidas en 30 dias en alguno de ellos,
+        `pasa_corte`; desde el AA, 1-oct-2026, umbral 6: «7 o más»);
       · 'paises_calculo' (ES, IT, FR, DE): donde se CALCULA la rentabilidad, si traen CSV. El
         mejor pais sale de TODOS los calculados, venda o no alli: cada pais lleva `vende_aqui`
         y la pantalla marca «no vende aquí», pero se ve (decide Fernando).
@@ -890,12 +985,15 @@ def decidir(fila_foto, cands_por_pais, caidas_por_pais, params, M, eleccion=None
     (B4 → B5) `eleccion` (`cargar_eleccion_viejo`): con dos o mas fichas, la del viejo elige UNA
     entre las de ES y el EAN sigue como si solo tuviera esa; su porque va en `detalle` y cada ficha
     lleva `elegida`. (B6) El titulo se coteja en todos los paises con CSV, no solo en ES.
+    (AA) `compartidas` (`fichas_compartidas`): donde la ficha es compartida, el corte se aplica a las ventas
+    REPARTIDAS por figura; `caidas` y cada pais siguen guardando las de la ficha, tal cual.
 
     Orden de las puertas (una y solo una):
       a · ninguna ficha con ASIN en ningun CSV;
       b · dos o mas ASIN distintos para el mismo EAN y la regla del viejo no puede elegir (B5: sin
           `eleccion`, o sin ninguna ficha en ES, que es donde elige el viejo); se listan;
-      c · no se vende: ningun pais del FILTRO con MAS de `umbral` caidas en 30 dias;
+      c · no se vende: ningun pais del FILTRO con MAS de `umbral` caidas en 30 dias (repartidas, si la
+          ficha es compartida: entonces el detalle empieza por «c_ficha_compartida:»);
       d/e/f · se vende: COMPRAR si algun pais da COMPRAR, VALORAR si alguno da VALORAR, y si
               ninguno, sin margen. El mejor pais es el de mas margen dentro de esa decision."""
     todas = [(p, r) for p in cands_por_pais for r in cands_por_pais[p]]
@@ -929,43 +1027,79 @@ def decidir(fila_foto, cands_por_pais, caidas_por_pais, params, M, eleccion=None
         # (B5) La del viejo ha elegido: el EAN sigue con ESA ficha, como si fuera la unica.
         for fi in fichas:
             fi['elegida'] = fi['asin'] == elegida['asin']
-        salida = _decidir_con_asin(fila_foto, cands_por_pais, caidas_por_pais, params, M, elegida['asin'], base)
+        salida = _decidir_con_asin(fila_foto, cands_por_pais, caidas_por_pais, params, M, elegida['asin'], base,
+                                   compartidas)
         descartadas = [a for a in asins if a != elegida['asin']]
         return dict(salida, fichas=fichas, eleccion=elegida,
                     detalle='Ficha %s elegida con la regla del viejo y el título en los cuatro países (%s: %s; descartadas %s) · %s'
                             % (elegida['asin'], elegida['veredicto'], elegida['detalle'],
                                ', '.join(descartadas), salida['detalle']))
-    return _decidir_con_asin(fila_foto, cands_por_pais, caidas_por_pais, params, M, asins[0], base)
+    return _decidir_con_asin(fila_foto, cands_por_pais, caidas_por_pais, params, M, asins[0], base, compartidas)
 
 
-def _decidir_con_asin(fila_foto, cands_por_pais, caidas_por_pais, params, M, asin, base):
-    """Las puertas c, d, e y f para UNA ficha (la unica, o la que eligio la regla del viejo)."""
+def _decidir_con_asin(fila_foto, cands_por_pais, caidas_por_pais, params, M, asin, base, compartidas=None):
+    """Las puertas c, d, e y f para UNA ficha (la unica, o la que eligio la regla del viejo).
+    (AA) `compartidas`: {pais: {asin: info}} de `fichas_compartidas`; None o {} = ninguna (novedades)."""
     umbral = params['umbral']
     filtro = list(params['paises_filtro'])
     # Los que se calculan, en el orden de los parametros; solo los que traen CSV.
     paises = [p for p in params['paises_calculo'] if p in cands_por_pais]
-    calculos, caidas = {}, {}
+    calculos, caidas, ventas, reparto = {}, {}, {}, {}
     for p in paises:
         rec = next((r for r in cands_por_pais.get(p, []) if r.get('asin') == asin), None)
         caidas[p] = caidas_por_pais.get(p, {}).get(asin) if rec is not None else None
+        # (AA) Las ventas con las que se decide: las de la ficha o, si es compartida, las repartidas por figura.
+        ventas[p] = caidas[p]
+        info = ((compartidas or {}).get(p) or {}).get(asin) if rec is not None else None
+        if info is not None and caidas[p] is not None:
+            ventas[p] = caidas[p] / info['divisor']
+            reparto[p] = dict(info, ventas_ficha=caidas[p], por_figura=ventas[p])
         if rec is not None:
             calculos[p] = calcular_pais(p, rec, fila_foto['precio_unidad'], fila_foto['ean_core'], M)
             calculos[p]['caidas_30d'] = caidas[p]
             # 🔑 La marca «no vende aquí»: se decide AQUI y se guarda; la pantalla no la recalcula.
-            calculos[p]['vende_aqui'] = caidas[p] is not None and caidas[p] > umbral
-    salida = dict(base, asin=asin, paises=calculos, caidas=caidas)
+            calculos[p]['vende_aqui'] = pasa_corte(ventas[p], umbral)
+            if p in reparto:
+                calculos[p]['ficha_compartida'] = reparto[p]
+    salida = dict(base, asin=asin, paises=calculos, caidas=caidas, compartida=reparto)
+    marca = ' · '.join(texto_ficha_compartida(reparto[p], p) for p in paises if p in reparto)
 
-    se_vende = any(caidas.get(p) is not None and caidas[p] > umbral for p in filtro)
+    se_vende = any(pasa_corte(ventas.get(p), umbral) for p in filtro)
     if not se_vende:
         con_dato = [p for p in filtro if caidas.get(p) is not None]
         sin_dato = [p for p in filtro if caidas.get(p) is None]
         if not con_dato:
             return dict(salida, puerta='c', motivo='c_sin_dato',
                         detalle='Sin dato de caídas en ' + ' ni en '.join(filtro))
-        det = '≤ %d caídas en %s' % (umbral, ' y en '.join(con_dato))
+        compartidos = [p for p in con_dato if p in reparto]
+        if compartidos:
+            # (AA) Motivo propio, visible en «Puertas». 🔒 El motivo de la base sigue siendo c_pocas_caidas: su CHECK
+            #      (escaner2_resultado_ean_motivo_check) y el cuadre de la c (escaner2_cruce_c_dos_motivos: c = pocas +
+            #      sin dato) solo admiten esos dos; un motivo nuevo pide una migracion de la v2. El detalle lo dice delante.
+            det = 'c_ficha_compartida: %s · por debajo del corte (%s)' % ('; '.join(
+                '%s %s figuras, ventas de la ficha %s/mes → %s/mes por figura' % (
+                    p, _cifra(reparto[p]['divisor']), _cifra(reparto[p]['ventas_ficha']), _cifra(reparto[p]['por_figura']))
+                + ('' if reparto[p]['origen_divisor'] == 'amazon'
+                   else ' (sin recuento de Amazon: ÷ %d hermanos de la lista)' % reparto[p]['n_lista'])
+                for p in compartidos), texto_corte(umbral))
+            resto = [p for p in con_dato if p not in reparto]
+            if resto:
+                det += ' · ≤ %d caídas en %s' % (umbral, ' y en '.join(resto))
+        else:
+            det = '≤ %d caídas en %s' % (umbral, ' y en '.join(con_dato))
         if sin_dato:
             det += ' (%s: sin dato)' % ', '.join(sin_dato)
         return dict(salida, puerta='c', motivo='c_pocas_caidas', detalle=det)
+    return _con_marca(_puerta_def(salida, paises, calculos), marca)
+
+
+def _con_marca(r, marca):
+    """(AA) La puerta d/e/f con la marca de la ficha compartida detras del detalle, si la hay."""
+    return dict(r, detalle=r['detalle'] + ' · ' + marca) if marca else r
+
+
+def _puerta_def(salida, paises, calculos):
+    """Se vende: las puertas d, e y f, por la decision de cada pais calculado."""
 
     def mejor_de(decision):
         cand = [p for p in paises if p in calculos and calculos[p]['decision'] == decision]
@@ -1165,8 +1299,10 @@ def comparar(viejo, nuevo, contexto, M):
                 # 🔑 Solo «pocas caidas» es criterio: «sin dato de caidas» es un HUECO de dato
                 #    (el CSV no las trae), y un hueco se mira, no se explica.
                 if n['motivo'] == 'c_pocas_caidas':
-                    criterio.append('el nuevo pide más de %d caídas en 30 días en %s (%s); el viejo '
-                                    'filtra por puesto ≤ %s en ES' % (umbral, ' o '.join(filtro), n['detalle'],
+                    # (AA) El corte con las palabras de Fernando (umbral 6 → «7 o más»), del parametro; si la ficha es
+                    #      compartida, el detalle (que empieza por «c_ficha_compartida:») dice el reparto.
+                    criterio.append('el nuevo pide %s en %s (%s); el viejo '
+                                    'filtra por puesto ≤ %s en ES' % (texto_corte(umbral), ' o '.join(filtro), n['detalle'],
                                                                      '{:,}'.format(rank_max).replace(',', '.')))
                 if not criterio:
                     notas.append('nuevo: puerta %s · %s' % (n['puerta'], n['detalle']))
@@ -1369,8 +1505,63 @@ def datos_como_el_viejo(foto, resultados, apartados, M, eleccion=None):
 def excel_como_el_viejo(foto, resultados, apartados, M, ruta=RUTA_MOTOR, eleccion=None):
     """El libro de openpyxl con las SEIS hojas del viejo, escritas por SU codigo (la Celda 9, copiada en
     escaner2_heredado_nube.py como `excel_del_viejo`). El catalogo propio (`M.poner_catalogo_propio`) y la foto
-    de FBA (`M.poner_foto_fba`) tienen que estar puestos: «En mi BD» sale de ellos, con `M.en_bd_txt`."""
-    return escribir_celda9(datos_como_el_viejo(foto, resultados, apartados, M, eleccion), M, ruta)
+    de FBA (`M.poner_foto_fba`) tienen que estar puestos: «En mi BD» sale de ellos, con `M.en_bd_txt`.
+    (AA, 1-oct-2026) Despues, la columna «Ficha compartida» al FINAL de «Análisis» (`poner_columna_ficha_compartida`)."""
+    wb = escribir_celda9(datos_como_el_viejo(foto, resultados, apartados, M, eleccion), M, ruta)
+    poner_columna_ficha_compartida(wb, foto, resultados)
+    return wb
+
+
+# (AA, 1-oct-2026) La marca de la ficha compartida en «Análisis», UNA columna nueva AL FINAL (como «ISD s/ Fee Log.» y
+# «Origen IVA» en el viejo: hay quien lee la hoja por letra, y metida en medio correria las demas). No se toca la
+# Celda 9 heredada: se escribe sobre el libro que ella devuelve, y la tabla T_Analisis se alarga para cubrirla.
+COLUMNA_FICHA_COMPARTIDA = 'Ficha compartida'
+ANCHO_FICHA_COMPARTIDA = 70
+
+
+def marca_por_fila(r, pais):
+    """El texto de la columna «Ficha compartida» para la fila (EAN, pais) de «Análisis»: la marca de ESE pais; si la
+    ficha es compartida en otro, la de aquel con su pais delante; si en ninguno, vacio (None)."""
+    rep = r.get('compartida') or {}
+    if pais in rep:
+        return texto_ficha_compartida(rep[pais])
+    otros = [texto_ficha_compartida(rep[p], p) for p in PAISES_COTEJO if p in rep]
+    return ' | '.join(otros) or None
+
+
+def poner_columna_ficha_compartida(wb, foto, resultados):
+    """Anade «Ficha compartida» detras de la ultima columna de «Análisis», fila a fila por (EAN, País), y alarga
+    la tabla. Devuelve cuantas filas llevan marca."""
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.table import TableColumn
+    ws = wb['Análisis']
+    cab = [c.value for c in ws[1]]
+    i_ean, i_pais = cab.index('EAN'), cab.index('País')
+    col = len(cab) + 1
+    ws.cell(row=1, column=col, value=COLUMNA_FICHA_COMPARTIDA).font = Font(bold=True)
+    ws.column_dimensions[get_column_letter(col)].width = ANCHO_FICHA_COMPARTIDA
+    por_ean = {}
+    por_foto = {f['id']: f for f in foto}
+    for r in resultados:
+        if r.get('compartida'):
+            por_ean[str(por_foto[r['foto_id']]['ean_original'])] = r
+    n = 0
+    for fila in range(2, ws.max_row + 1):
+        r = por_ean.get(str(ws.cell(row=fila, column=i_ean + 1).value))
+        texto = marca_por_fila(r, ws.cell(row=fila, column=i_pais + 1).value) if r else None
+        if texto:
+            ws.cell(row=fila, column=col, value=texto)
+            n += 1
+    for tabla in ws.tables.values():
+        ini, fin = tabla.ref.split(':')
+        fila_fin = re.sub(r'^[A-Z]+', '', fin)
+        tabla.ref = '%s:%s%s' % (ini, get_column_letter(col), fila_fin)
+        if tabla.tableColumns:
+            tabla.tableColumns.append(TableColumn(id=len(tabla.tableColumns) + 1, name=COLUMNA_FICHA_COMPARTIDA))
+        if tabla.autoFilter is not None:
+            tabla.autoFilter.ref = tabla.ref
+    return n
 
 
 def escribir_celda9(datos, M, ruta=RUTA_MOTOR):

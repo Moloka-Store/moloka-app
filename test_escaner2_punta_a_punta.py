@@ -207,15 +207,17 @@ def filas_heo(M):
 def csv_visualizador(e2, pro, M, pais, filas):
     col_pais, col_caidas = e2.columnas_keepa(os.path.join(AQUI, e2.RUTA_ESCAPARATE))
     C = pro.CSV_COLS
+    # (AA, 1-oct-2026) Y el «ASIN Padre», como en los exports reales: vacío aquí (ninguna ficha compartida en la escena).
+    col_padre = e2.columnas_ficha_compartida(os.path.join(AQUI, e2.RUTA_ESCAPARATE))[0]
     cab = ['ASIN', col_pais, 'Título', C['ean'], C['rank'], C['rank90'], col_caidas, C['buybox'], C['es_fba'],
-           C['nuevo'], C['fba'], C['compct'], C['nof'], C['vendidos'], C['vendidos2'], C['nvar']]
+           C['nuevo'], C['fba'], C['compct'], C['nof'], C['vendidos'], C['vendidos2'], C['nvar'], col_padre]
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(cab)
     for asin, n, caidas, bb in filas:
         # `n` entero: el EAN de la escena; texto: un EAN real (el de la figura de una caja, B2).
         w.writerow([asin, pais, 'Funko %s' % n, _ean(M, n) if isinstance(n, int) else n, '12000', '15000', caidas, bb,
-                    'yes', bb, '3.50', '15.01 %', '10', '50', '', '0'])
+                    'yes', bb, '3.50', '15.01 %', '10', '50', '', '0', ''])
     return ('﻿' + buf.getvalue()).encode('utf-8')
 
 
@@ -496,9 +498,11 @@ HOJAS_VIEJO = ['Análisis', 'Descartados', 'Ambiguos', 'Sin_rank', 'Precio por l
 HOJAS_E2 = ['Resumen', 'Comparación', 'Varias fichas', 'Puertas', 'Puertas previas']
 eq('2 · 🔴 (B4) las seis hojas del viejo delante, en su orden, y las del escáner 2 detrás',
    _wb.sheetnames, HOJAS_VIEJO + HOJAS_E2)
-_COLS = e2.columnas_analisis(os.path.join(AQUI, e2.RUTA_MOTOR))
+# (AA, 1-oct-2026) …y detrás de la última, «Ficha compartida» (la marca del reparto; vacía en esta escena).
+_COLS = e2.columnas_analisis(os.path.join(AQUI, e2.RUTA_MOTOR)) + [e2.COLUMNA_FICHA_COMPARTIDA]
 _an = list(_wb['Análisis'].iter_rows(values_only=True))
-eq('2 · 🔴 (B4) «Análisis» lleva las cabeceras de COLS del viejo, en su orden', list(_an[0]), list(_COLS))
+eq('2 · 🔴 (B4) «Análisis» lleva las cabeceras de COLS del viejo, en su orden, y (AA) «Ficha compartida» al final',
+   list(_an[0]), list(_COLS))
 _ia = {h: k for k, h in enumerate(_an[0])}
 # Lo esperado sale de la BASE del doble, no de la hoja: los productos de las puertas d, e y f, del
 # de más margen en ES al de menos, y cada uno en los cuatro países del viejo.
@@ -558,11 +562,16 @@ import escaner2_huella_excel as HU  # noqa: E402
 # «Ventas» (escaner2_desvios.py): el resto de la huella —fórmulas por nombre de columna incluidas— sigue siendo la suya.
 _REF = HU.sin_columnas(json.load(open(os.path.join(AQUI, 'huella_excel_viejo_heo.json'), encoding='utf-8')),
                        DV.ANALISIS_QUITADAS, DV.ANALISIS_RENOMBRADAS)
+# (AA, 1-oct-2026) …y con «Ficha compartida» detrás de la última columna, dentro de la tabla T_Analisis.
+_REF = HU.con_columna_al_final(_REF, e2.COLUMNA_FICHA_COMPARTIDA, e2.ANCHO_FICHA_COMPARTIDA)
 _h2 = HU.huella(base64.b64decode(bd['storage']['escaner2'][_xl[0]]))
 eq('2 · 🔴 (B4) el FORMATO de las seis hojas es el del Excel viejo de verdad (huella_excel_viejo_heo.json, con el desvío D)',
    HU.diferencias(_REF, _h2, solo_hojas=HOJAS_VIEJO, vacias=('Sin_rank',)), [])
 eq('2 · (B4) …con Sin_rank vacía (ningún «sin dato» en esta escena), escrita como la escribe el viejo',
    list(next(_wb['Sin_rank'].iter_rows(values_only=True))), ['(vacio)'])
+eq('2 · (AA) el log dice las fichas compartidas por país (ninguna en la escena) y no avisa de columnas que falten',
+   ([x for x in log2.splitlines() if x.startswith('FICHAS COMPARTIDAS')], 'Sin ASIN padre' in log2),
+   (['FICHAS COMPARTIDAS (mismo ASIN padre y mismo puesto que otro producto de la lista): ES 0 · IT 0 · DE 0'], False))
 eq('2 · el log deja el CUADRE, cuadre o no', 'CUADRE [HEO]: crudo=11 | previas=6' in log2
    and '| entradas=5 | suma de puertas=5' in log2, True)
 eq('2 · 🔴 el cruce guarda el crudo y las previas: crudo 11 = previas 6 + puertas 5',

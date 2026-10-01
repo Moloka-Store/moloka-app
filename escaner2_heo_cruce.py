@@ -13,6 +13,8 @@ QUE HACE, EN ORDEN:
      (`leer_csv_visualizador`) y le anade las caidas de 30 dias, que ese lector no trae;
   3. lee la foto de la pasada y `productos` (SOLO LECTURA: el IVA de la ficha, como el viejo);
   4. decide la PUERTA de cada EAN (escaner2_motor.decidir) con `calc_rentabilidad` del viejo;
+     (AA, 1-oct-2026) con la FICHA COMPARTIDA de cada pais (mismo ASIN padre y mismo puesto que otro producto
+     del CSV): el corte se aplica a las caidas repartidas por figura (÷ «Recuento de variaciones»), y se marca;
   5. guarda cada EAN con su puerta y cada pais con su cuenta, y CUADRA CONTRA LA BASE:
      entradas (filas de la foto) = suma de puertas. Si no cuadra, el cruce queda 'fallida';
   6. compara con el escaner viejo (ultimo Excel completo de HEO + novedades posteriores) y
@@ -131,7 +133,8 @@ def main():
         'paises_calculo': params['paises_calculo'],
         'run_id': int(RUN_ID) if (RUN_ID or '').isdigit() else None,
     }).execute()
-    print(f">>> Cruce {cruce} de la pasada {PASADA} abierto · umbral > {params['umbral']} caídas "
+    print(f">>> Cruce {cruce} de la pasada {PASADA} abierto · se vende = {e2.texto_corte(params['umbral'])} "
+          f"(umbral_caidas_30d {params['umbral']}: más de {params['umbral']}) "
           f"en {' o '.join(params['paises_filtro'])} · se calcula en los de "
           f"{', '.join(params['paises_calculo'])} que traigan CSV.", flush=True)
     try:
@@ -165,6 +168,8 @@ def cruzar(cruce, params, pasada):
     previas = {p: int(pasada['p_' + p]) for p in e2.PUERTAS_PREVIAS}
     n_previas = sum(previas.values())
     col_pais, col_caidas = e2.columnas_keepa()
+    # (AA, 1-oct-2026) ASIN padre, recuento de variaciones y puesto actual: la ficha compartida.
+    cols_ficha = e2.columnas_ficha_compartida()
     avisos, rojo = [], False
 
     # ── 1 · Los CSV subidos, y el pais de cada uno (del dato) ───────────────────────────
@@ -175,6 +180,7 @@ def cruzar(cruce, params, pasada):
         raise Fallo('no hay ningún CSV subido para esta pasada')
     tmp = tempfile.mkdtemp(prefix='escaner2_')
     ficheros, errores, rutas_por_pais, caidas_por_pais, fecha_datos = [], [], {}, {}, None
+    fichas_por_pais, sin_ficha = {}, {}
     # 🔑 EL MAS RECIENTE MANDA: el nombre empieza por el sello de la subida (AAAAMMDD-HHMMSS, lo
     #    pone la v2), y leyendo de mas nuevo a mas viejo la primera ficha que se ve de cada ASIN
     #    —y sus caidas— es la del CSV mas fresco. Re-subir un pais corrige el cruce siguiente.
@@ -187,7 +193,7 @@ def cruzar(cruce, params, pasada):
             fh.write(datos)
         subido = o.get('created_at') or o.get('updated_at')
         try:
-            ex = e2.examinar_csv(ruta, pro, col_pais, col_caidas)
+            ex = e2.examinar_csv(ruta, pro, col_pais, col_caidas, cols_ficha)
         except e2.CsvIlegible as err:
             errores.append(f"{o['name']}: {err}")
             ficheros.append({'nombre': o['name'], 'pais': None, 'filas': None, 'usado': False,
@@ -206,6 +212,11 @@ def cruzar(cruce, params, pasada):
         rutas_por_pais.setdefault(ex['pais'], []).append(ruta)
         for asin, v in ex['caidas'].items():
             caidas_por_pais.setdefault(ex['pais'], {}).setdefault(asin, v)
+        # (AA) Padre, variaciones y puesto, con la misma regla: el CSV mas fresco manda.
+        for asin, v in ex['fichas'].items():
+            fichas_por_pais.setdefault(ex['pais'], {}).setdefault(asin, v)
+        if ex['sin_columnas_ficha']:
+            sin_ficha.setdefault(ex['pais'], []).append('%s (le falta %s)' % (o['name'], ', '.join(ex['sin_columnas_ficha'])))
         # La fecha del dato es la del CSV MAS VIEJO que se usa: una cifra no puede presumir de
         # un dato mas fresco que el que la sostiene.
         if subido and (fecha_datos is None or subido < fecha_datos):
@@ -224,6 +235,15 @@ def cruzar(cruce, params, pasada):
             avisos.append(f'Falta el CSV de {p}: «se vende» se mira solo en '
                           f'{", ".join(x for x in params["paises_filtro"] if x in usados) or "ningún país"}')
     datos_por_pais = {p: pro.leer_csv_visualizador(rutas_por_pais[p]) for p in usados}
+    # (AA) Las fichas compartidas, por pais. Un CSV sin esas columnas no tumba el cruce: se avisa, y en ese pais no se
+    #      reparte (sus productos se deciden con las caidas de la ficha, como hasta el 1-oct-2026).
+    compartidas = e2.fichas_compartidas(fichas_por_pais)
+    for p, ficheros_sin in sin_ficha.items():
+        avisos.append('Sin ASIN padre/variaciones/puesto en %s (%s): ahí no se detecta la ficha compartida'
+                      % (p, '; '.join(ficheros_sin)))
+    n_compartidas = {p: len(compartidas.get(p) or {}) for p in usados}
+    print('FICHAS COMPARTIDAS (mismo ASIN padre y mismo puesto que otro producto de la lista): '
+          + ' · '.join('%s %d' % (p, n_compartidas[p]) for p in usados), flush=True)
 
     # ── 2 · La foto y el catalogo propio (el IVA de la ficha) ──────────────────────────
     foto = _todas('escaner2_foto', 'id,ean_original,ean_core,variantes,nombre,marca,precio_unidad,'
@@ -261,7 +281,7 @@ def cruzar(cruce, params, pasada):
     resultados = []
     for f in foto:
         cands = {p: e2.candidatos(f, datos_por_pais[p]) for p in usados}
-        r = e2.decidir(f, cands, caidas_por_pais, params, M, eleccion)
+        r = e2.decidir(f, cands, caidas_por_pais, params, M, eleccion, compartidas)
         r['foto_id'], r['id'] = f['id'], str(uuid.uuid4())
         resultados.append(r)
     cq = e2.cuadre([f['id'] for f in foto], resultados)
@@ -344,7 +364,7 @@ def cruzar(cruce, params, pasada):
             'n_entradas': n_entradas, 'n_bd': n_bd, 'cuadra': cuadra and not motivo_fallo,
             'n_crudo': n_crudo, 'previas': previas, 'modo': pasada.get('modo'), 'lista_viejo': lista_viejo,
             'marcas': pasada.get('marcas'), 'ofertas': pasada.get('ofertas'), 'motor': M, 'eleccion': eleccion,
-            'apartados': apartados,
+            'apartados': apartados, 'n_compartidas': n_compartidas,
             'resumen': cmp_resumen, 'viejos': viejos_meta, 'avisos': avisos})
         sb.storage.from_(BUCKET).upload(ruta_excel, contenido, {
             'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -495,7 +515,11 @@ def escribir_excel(foto, resultados, cmp_filas, info):
     if lv:
         filas_res += [['Lista del viejo (para comparar)', '%s%s · de la pasada %s (%s)'
                        % (', '.join(lv['marcas']), ' y ofertas' if lv['ofertas'] else '', lv['pasada'], lv['fecha'])]]
-    filas_res += [['Umbral de caídas (30 días)', '> %d' % info['params']['umbral']],
+    # (AA, 1-oct-2026) El corte con las palabras de Fernando, del parametro (umbral 6 → «7 o más … (> 6)»).
+    filas_res += [['Umbral de caídas (30 días)', '%s (> %d)' % (e2.texto_corte(info['params']['umbral']),
+                                                              info['params']['umbral'])],
+                  ['Fichas compartidas (productos de la lista, por país)',
+                   ' · '.join('%s %d' % (p, n) for p, n in (info.get('n_compartidas') or {}).items()) or '—'],
                   ['Países del filtro de ventas', ', '.join(info['params']['paises_filtro'])],
                   ['Países que se calculan (si traen CSV)', ', '.join(info['params']['paises_calculo'])],
                   ['Países con CSV', ', '.join(info['usados'])],
