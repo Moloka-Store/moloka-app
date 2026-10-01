@@ -169,6 +169,82 @@ RE_FICHERO_VIS = re.compile(
 UMBRAL_PERTENENCIA = 0.80
 
 # ---------------------------------------------------------------------------
+# 🆕 EL ENCADENADO (encargo del 01-oct-2026). Al acabar una carga, el job `encadenar` del
+#    workflow (encadenar_keepa_escaparate.py) busca en el buzón lo que falta por cargar y
+#    lanza el siguiente. Para que esa red no pueda hacer daño, ESTE procesador tiene que
+#    saber decir «este fichero no se carga» sin abortar en rojo. Dos casos, y ninguno escribe:
+#
+# 🔑 LA IDENTIDAD DE UN FICHERO ES (nombre, hora de subida), NO EL NOMBRE. Medido en
+#    producción el 01-oct-2026: el 27-sep, `KeepaExport-2026-09-27-VisualizadorDeProductos
+#    (1).csv` se cargó como FR a las 08:35 y, con el MISMO nombre resubido a las 15:55, como
+#    IT a las 15:56 (el contador del navegador vuelve a empezar). Por eso «ya cargado» es:
+#    hay filas con ese `fichero` cuyo `procesado_at` es POSTERIOR a la subida de ESA versión.
+#    Por nombre a secas, la carga de IT de aquel día se habría saltado.
+#
+#   1) YA CARGADO. Esa versión del fichero ya está en `keepa_escaparate` o en su histórico.
+#      Volver a cargarla no cambia nada y gasta una corrida; con el encadenado y la cola de la
+#      pantalla trabajando a la vez es lo que evita cargar dos veces el mismo fichero.
+#   2) SUPERADO. La foto viva de su país sale de OTRO fichero del mismo día subido DESPUÉS:
+#      cargarlo pondría la foto vieja encima de la nueva, y la Guarda 11 no lo ve porque la
+#      fecha del nombre es la misma. (Si la foto viva es de un día POSTERIOR, eso ya lo para
+#      la Guarda 11 en rojo; solo en una corrida ENCADENADA se salta en verde, porque ahí el
+#      fichero lo ha elegido una máquina mirando el buzón, no una persona.)
+#
+# 🔒 Saltar es salir en VERDE sin escribir ni un byte, diciéndolo en el log y en el resumen
+#    del run. En verde y no en rojo porque no es un fallo: es la respuesta correcta. Y el
+#    encadenado cuenta una corrida verde de un fichero como «ese ya está tratado».
+# 🔒 Solo en `aplicar`. Un ensayo no escribe, así que no hay nada que proteger: sigue y
+#    enseña sus guardas, diciendo que en `aplicar` se saltaría.
+# ---------------------------------------------------------------------------
+ENCADENADO = os.environ.get('ENCADENADO', '').strip().lower() == 'true'
+
+
+def instante(v):
+    """Un instante con zona: acepta datetime (psycopg2) o texto ISO (Storage, GitHub)."""
+    if v is None or v == '':
+        return None
+    if isinstance(v, datetime):
+        return v
+    return datetime.fromisoformat(str(v).replace('Z', '+00:00'))
+
+
+def ya_cargado(subido, ultima_carga):
+    """¿ESTA versión del fichero ya está cargada? `subido` = updated_at del objeto en el
+    buzón; `ultima_carga` = el `procesado_at` más reciente de sus filas (viva o histórico).
+    Sin hora de subida no se afirma nada: se carga."""
+    subido, ultima_carga = instante(subido), instante(ultima_carga)
+    return subido is not None and ultima_carga is not None and ultima_carga >= subido
+
+
+def superado_por(nombre, fecha_foto, subido, vivo, encadenado):
+    """Devuelve el porqué si cargar este fichero pondría una foto VIEJA encima de la viva de
+    su país; None si no. `vivo` = {'fichero', 'fecha_foto', 'procesado_at', 'subido'} de la
+    foto viva de su dominio (`subido` = hora de subida de ese fichero, None si ya no está en
+    el buzón), o None si el país no tiene foto."""
+    if not vivo or vivo.get('fichero') == nombre:
+        return None
+    if vivo['fecha_foto'] > fecha_foto:
+        if not encadenado:
+            return None   # 🔒 la Guarda 11 lo para en rojo, como siempre
+        return (f"la foto viva de su país es del {vivo['fecha_foto']} ({vivo['fichero']!r}) "
+                f"y este fichero es del {fecha_foto}: es más viejo")
+    v_subido, v_proc, c_subido = (instante(vivo.get('subido')), instante(vivo.get('procesado_at')),
+                                  instante(subido))
+    if (vivo['fecha_foto'] == fecha_foto and v_subido is not None and c_subido is not None
+            and v_proc is not None and v_subido > c_subido and v_proc >= v_subido):
+        return (f"su país ya tiene cargado {vivo['fichero']!r}, del mismo día ({fecha_foto}) "
+                f"y subido después ({v_subido:%H:%M:%S} UTC frente a {c_subido:%H:%M:%S} UTC)")
+    return None
+
+
+def dejar_dicho_en_el_resumen(texto):
+    """Una línea en el resumen del run (GITHUB_STEP_SUMMARY), si existe. Fuera de Actions, nada."""
+    ruta = os.environ.get('GITHUB_STEP_SUMMARY')
+    if ruta:
+        with open(ruta, 'a', encoding='utf-8') as fh:
+            fh.write(texto + '\n')
+
+# ---------------------------------------------------------------------------
 # Columnas TIPADAS: (encabezado EXACTO del CSV, columna Postgres, tipo).
 #   tipo: 't' text · 'i' integer · 'n' numeric · 'b' boolean · 'd' date ·
 #         'ts' timestamptz · 'as' text[] (split por ';') · 'ac' text[] (split por ',').
@@ -935,6 +1011,44 @@ def main():
     # fichero sustituye es la de SU dominio, no la tabla entera: sin acotar,
     # cargar el de ES borraría IT y FR enteros.
     AMBITO = ('dominio', [meta['dominio']])
+
+    # 🆕 ¿YA CARGADO o SUPERADO? (encadenado, 01-oct-2026; ver su cabecera arriba). Antes de
+    #    cualquier guarda que escriba o compare volúmenes: un fichero que no se va a cargar no
+    #    tiene que pasar por ellas. Dos lecturas por índice de `fecha_foto` (~6 ms medidos).
+    subidos = {o['name']: o.get('updated_at') or o.get('created_at') for o in csvs}
+    cur.execute(
+        "SELECT max(procesado_at) FROM ("
+        " SELECT procesado_at FROM keepa_escaparate WHERE fichero = %s AND fecha_foto = %s"
+        " UNION ALL"
+        " SELECT procesado_at FROM keepa_escaparate_hist WHERE fichero = %s AND fecha_foto = %s"
+        ") t;", (fichero, meta['fecha_foto'], fichero, meta['fecha_foto']))
+    ultima_carga = cur.fetchone()[0]
+    cur.execute("SELECT fichero, fecha_foto, procesado_at FROM keepa_escaparate "
+                "WHERE dominio = %s ORDER BY procesado_at DESC NULLS LAST LIMIT 1;",
+                (meta['dominio'],))
+    fila_viva = cur.fetchone()
+    vivo = ({'fichero': fila_viva[0], 'fecha_foto': fila_viva[1], 'procesado_at': fila_viva[2],
+             'subido': subidos.get(fila_viva[0])} if fila_viva else None)
+    salto = None
+    if ya_cargado(subidos.get(fichero), ultima_carga):
+        salto = (f"YA CARGADO: esta versión de {fichero!r} (subida {subidos.get(fichero)}) ya "
+                 f"entró a las {ultima_carga} UTC. Cargarla otra vez no cambia nada.")
+    else:
+        porque = superado_por(fichero, meta['fecha_foto'], subidos.get(fichero), vivo, ENCADENADO)
+        if porque:
+            salto = f"SUPERADO: {porque}. Cargarlo pondría la foto vieja encima de la nueva."
+    if salto and MODO == 'aplicar':
+        con.rollback(); cur.close(); con.close()
+        print(f"\n⏭️  NO SE CARGA (no se ha escrito nada) · dominio {meta['dominio']}:\n   {salto}",
+              flush=True)
+        print(f"::notice title=Keepa · no se carga {fichero}::{salto}", flush=True)
+        dejar_dicho_en_el_resumen(f"### ⏭️ Keepa · `{fichero}` no se carga\n\n{salto}\n")
+        print(f"\n=== FIN · entorno={ENTORNO} · modo={MODO} · SALTADO · {salto.split(':')[0]} ===",
+              flush=True)
+        sys.exit(0)
+    if salto:
+        print(f"\n⏭️  (ensayo) En `aplicar` este fichero NO se cargaría: {salto}\n"
+              f"   El ensayo sigue para enseñar las guardas.", flush=True)
 
     # Guarda 12: PERTENENCIA. Corre ANTES que ninguna otra que toque la base, porque es la
     # que decide si este fichero es NUESTRO. Las demás (encogimiento, no-retroceder) dan
