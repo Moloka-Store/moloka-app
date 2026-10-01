@@ -14,19 +14,29 @@ QUE HACE, EN ORDEN (el esqueleto de escaner2_heo_disponibilidad.py, con la desca
      cierra 'fallida' («entrada rechazada») y no se reintenta: no bloquear la cuenta de Fernando;
   3. localiza en /en/downloads el enlace de `osma_articles.xlsx` de la carpeta `Ordersatz_Updateliste`
      (si la carpeta es otra pagina, la abre). 0 o mas de 1 → 'fallida', sin bajar nada;
-  4. lo baja a memoria y guarda una COPIA ENTERA en el almacen privado `escaner2`, en
-     `osma/<pasada>/osma_articles.xlsx`: lo que hoy no se guarda en la foto se puede sacar despues;
+  4. lo baja a memoria (la copia al almacen va al final, paso 8: solo la de un fichero bueno);
   5. VALIDA antes de subir nada a la base: abre, hoja `Data`, la cabecera (las columnas del plano, con su
      nombre exacto y en su orden; si falta o cambia una → 'fallida' con su nombre), filas >= el minimo
      (si no → 'rechazada_vaciado'), el codigo de articulo (`Item-no_BAN`, la llave) unico y no vacio
-     (si no → 'fallida'), y la fecha de creacion del fichero (docProps/core.xml): no anterior a la ultima
-     pasada aplicada y no mas vieja de 48 h (si no → 'rechazada', «OSMA no ha regenerado el fichero»);
+     (si no → 'fallida'), y la fecha de creacion del fichero (docProps/core.xml), con dos casos (AE2):
+       · «YA ESTABA AL DIA»: la ultima pasada aplicada es de HOY (dia de Madrid) y el fichero no es mas nuevo
+         que ella (es el que ya entro esta mañana, y alguien ha relanzado) → la pasada se cierra
+         'rechazada' con motivo «al día: …» y el run sale en VERDE (OSMA_AL_DIA). Una 'rechazada' no cuenta
+         en ningun sitio (medido el 01-oct-2026: el freno de disp_aplicar_pasada solo cuenta
+         'rechazada_vaciado'; la frescura, la huella de la pantalla y las novedades solo miran 'aplicada');
+       · «OSMA NO HA RENOVADO»: la ultima aplicada es de un dia anterior y el fichero no es mas nuevo que
+         ella, o el fichero tiene mas de 48 h → 'rechazada', en ROJO entre semana y en VERDE el sabado y el
+         domingo (dia de Madrid), que no son horas previstas (disp_parametros.horario_finde vacio);
   6. convierte cada fila con la tabla del apartado 2 del plano (llave = codigo OSMA; precio neto por
      unidad; disponible = stock > 0 o marcado de mas de 10.000), sube las filas a `disp_lectura` en lotes
      de 500 y deja en la pasada sus recuentos: declarado = llegados = filas de la hoja (OSMA no tiene «tres
      endpoints»; la integridad la dan las guardas del paso 5);
   7. llama a `disp_aplicar_pasada` (la funcion comun, SIN TOCAR) y relee la pasada en la base: lo que vale
-     es lo que hay alli.
+     es lo que hay alli;
+  8. SOLO SI HA QUEDADO 'aplicada', guarda la copia ENTERA del Excel en el almacen privado `escaner2`, en una
+     ruta FIJA, `osma/ultimo/osma_articles.xlsx` (se pisa cada dia: Fernando, 01-oct-2026, «con tener la
+     ultima foto ya me valdría de sobre»). Un fichero rechazado o roto no pisa la ultima copia buena. Si la
+     subida falla, la pasada sigue aplicada (no se toca) y el run sale en ROJO con una linea que lo dice.
 
 🔴 REPO PUBLICO: LOS REGISTROS DE EJECUCION LOS VE CUALQUIERA. Este programa SOLO imprime estados y
    recuentos (filas, aplicadas, motivos que escribe el mismo). NUNCA: precios, stock, nombres o codigos de
@@ -38,7 +48,7 @@ QUE HACE, EN ORDEN (el esqueleto de escaner2_heo_disponibilidad.py, con la desca
 🔑 EN SOMBRA: el interruptor de OSMA (disp_fuente) nace en 'memoria'; Reponer sigue leyendo escaner_memoria
    hasta que Fernando lo pase a 'disp'. Este programa no lo toca.
 🔒 SOLO TOCA: `disp_pasada`, `disp_lectura`, la funcion `disp_aplicar_pasada`, y para LEER `disp_parametros`;
-   y el almacen `escaner2` bajo `osma/`. Ni escaner_memoria, ni escaner2_*, ni productos. Cero Keepa, cero
+   y el almacen `escaner2` en `osma/ultimo/`. Ni escaner_memoria, ni escaner2_*, ni productos. Cero Keepa, cero
    Amazon.
 🔒 SIN LOS SECRETOS, NO SE CORRE: sin OSMA_USER/OSMA_PASS (o sin la base) aborta antes de abrir ninguna
    pasada ni ningun cliente.
@@ -65,6 +75,7 @@ FICHERO = 'osma_articles.xlsx'
 CARPETA = 'Ordersatz_Updateliste'
 HOJA = 'Data'
 MAX_EDAD = timedelta(hours=48)
+RUTA_COPIA = 'osma/ultimo/' + FICHERO
 TAM_MAXIMO = 50 * 1024 * 1024       # el tope del almacen escaner2 (medido: 52.428.800)
 ESPERA_S = 60
 AGENTE = 'Mozilla/5.0 (compatible; Moloka-escaner2/1.0)'
@@ -102,8 +113,31 @@ class Rechazo(Exception):
         self.estado, self.motivo = estado, motivo
 
 
+class AlDia(Rechazo):
+    """El fichero de hoy ya esta aplicado (relanzar el mismo dia no es un fallo): 'rechazada' con motivo «al día»,
+    que no cuenta en ningun sitio, y el run en verde."""
+
+    def __init__(self, pasada_aplicada):
+        super().__init__('rechazada', f'al día: el fichero de hoy ya está aplicado (pasada {pasada_aplicada}); nada nuevo')
+        self.pasada_aplicada = pasada_aplicada
+
+
 def _ahora():
     return datetime.now(timezone.utc)
+
+
+def _domingo_ultimo(anio, mes):
+    """El ultimo domingo del mes (marzo u octubre), a la 01:00 UTC: cuando cambia la hora en Europa."""
+    d = datetime(anio, mes, 31, 1, tzinfo=timezone.utc)
+    return d - timedelta(days=(d.weekday() + 1) % 7)
+
+
+def hora_de_madrid(t):
+    """La hora de Madrid de un instante: UTC+2 del ultimo domingo de marzo al ultimo de octubre (a la 01:00 UTC,
+    la regla europea) y UTC+1 el resto. Sin zoneinfo: no depende de los datos de zonas de la maquina."""
+    t = t.astimezone(timezone.utc)
+    verano = _domingo_ultimo(t.year, 3) <= t < _domingo_ultimo(t.year, 10)
+    return (t + timedelta(hours=2 if verano else 1)).replace(tzinfo=None)
 
 
 # ── Lectura de celdas ─────────────────────────────────────────────────────────────────────
@@ -354,12 +388,15 @@ def fecha_de_creacion(contenido):
     return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
 
 
-def comprobar_fecha(creado, ultima_aplicada, ahora):
-    """🔴 OSMA regenera el fichero de madrugada. Uno anterior a la ultima pasada aplicada ya esta aplicado;
-    uno de mas de 48 h esta parado. En los dos casos: 'rechazada', y la foto no se toca."""
-    if ultima_aplicada is not None and creado < ultima_aplicada:
+def comprobar_fecha(creado, ultima_aplicada, ahora, ultima_id=None):
+    """🔴 OSMA regenera el fichero de madrugada. Uno que no es mas nuevo que la ultima pasada aplicada ya esta
+    aplicado: si esa pasada es de HOY (dia de Madrid), es un relanzamiento → AlDia (verde); si es de otro dia,
+    OSMA no lo ha renovado → 'rechazada'. Uno de mas de 48 h esta parado → 'rechazada'. La foto no se toca."""
+    if ultima_aplicada is not None and creado <= ultima_aplicada:
+        if hora_de_madrid(ultima_aplicada).date() == hora_de_madrid(ahora).date():
+            raise AlDia(ultima_id)
         raise Rechazo('rechazada', f'OSMA no ha regenerado el fichero: creado el {creado:%Y-%m-%d %H:%M} UTC, antes de la '
-                                   f'última pasada aplicada ({ultima_aplicada:%Y-%m-%d %H:%M} UTC)')
+                                   f'última pasada aplicada ({ultima_aplicada:%Y-%m-%d %H:%M} UTC, de otro día)')
     if ahora - creado > MAX_EDAD:
         raise Rechazo('rechazada', f'OSMA no ha regenerado el fichero: creado el {creado:%Y-%m-%d %H:%M} UTC, hace más '
                                    f'de 48 h')
@@ -502,15 +539,15 @@ def pasada(sb, sesion, usuario, clave, run_id, ahora=None):
     abrir = {'proveedor': PROVEEDOR, 'estado': 'leyendo', 'run_id': int(run_id) if run_id.isdigit() else None}
     pid = sb.table('disp_pasada').insert(abrir).execute().data[0]['id']
     print(f">>> Pasada de disponibilidad de OSMA {pid} abierta (leyendo).", flush=True)
-    rec = None
+    rec = contenido = None
     try:
         par = sb.table('disp_parametros').select('crudo_minimo').eq('proveedor', PROVEEDOR).execute().data or [{}]
         minimo = par[0].get('crudo_minimo')
         if not isinstance(minimo, int) or isinstance(minimo, bool) or minimo <= 0:
             raise Rechazo('fallida', 'sin mínimo: disp_parametros no da un crudo_minimo válido para OSMA; no se baja nada')
-        ult = (sb.table('disp_pasada').select('creada_en').eq('proveedor', PROVEEDOR).eq('estado', 'aplicada')
+        ult = (sb.table('disp_pasada').select('id, creada_en').eq('proveedor', PROVEEDOR).eq('estado', 'aplicada')
                  .order('creada_en', desc=True).limit(1).execute().data or [{}])
-        ultima_aplicada = _fecha_base(ult[0].get('creada_en'))
+        ultima_aplicada, ultima_id = _fecha_base(ult[0].get('creada_en')), ult[0].get('id')
 
         entrar(sesion, usuario, clave)
         print(">>> Entrada en la web de OSMA: aceptada.", flush=True)
@@ -520,10 +557,6 @@ def pasada(sb, sesion, usuario, clave, run_id, ahora=None):
         url = localizar_enlace(sesion, r.text, r.url)
         contenido = bajar(sesion, url)
         print(f">>> Fichero bajado: {len(contenido)} bytes.", flush=True)
-        ruta = f'osma/{pid}/{FICHERO}'
-        sb.storage.from_(BUCKET).upload(ruta, contenido, {
-            'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'upsert': 'true'})
-        print(f">>> Copia entera guardada en el almacén {BUCKET}: {ruta}", flush=True)
 
         cabecera, datos = leer_hoja(contenido)
         ix = comprobar_cabecera(cabecera)
@@ -540,7 +573,7 @@ def pasada(sb, sesion, usuario, clave, run_id, ahora=None):
         ahora = ahora or _ahora()
         print(f">>> Fichero creado el {creado:%Y-%m-%d %H:%M} UTC (hace {(ahora - creado).total_seconds() / 3600:.1f} h).",
               flush=True)
-        comprobar_fecha(creado, ultima_aplicada, ahora)
+        comprobar_fecha(creado, ultima_aplicada, ahora, ultima_id)
 
         filas, cuentas = convertir(datos, ix)
         print(f">>> Leídas {cuentas['n_leidas']} (disponibles {cuentas['n_disponibles']}, agotados {cuentas['n_agotados']}; "
@@ -558,7 +591,11 @@ def pasada(sb, sesion, usuario, clave, run_id, ahora=None):
         sb.rpc('disp_aplicar_pasada', {'p_pasada': pid}).execute()
     except Rechazo as ex:
         _cerrar(sb, pid, ex.estado, ex.motivo, rec)
-        if ex.estado == 'rechazada' and (ahora or _ahora()).weekday() >= 5:
+        if isinstance(ex, AlDia):
+            # 🔑 Relanzar el mismo día no es un fallo (Fernando, 01-oct-2026, del rojo: «eso no me gusta»).
+            print(f"OSMA_AL_DIA: el fichero de hoy ya está aplicado (pasada {ex.pasada_aplicada}); nada nuevo.", flush=True)
+            return 0
+        if ex.estado == 'rechazada' and hora_de_madrid(ahora or _ahora()).weekday() >= 5:
             # 🔑 El fin de semana no es hora prevista (disp_parametros.horario_finde vacío): un fichero sin
             #    regenerar el sábado o el domingo no es un fallo. Se dice y el run sale bien.
             print(f"OSMA_SIN_FICHERO_NUEVO: pasada {pid} {ex.estado}: {ex.motivo} · fin de semana: no es un fallo.", flush=True)
@@ -588,11 +625,26 @@ def pasada(sb, sesion, usuario, clave, run_id, ahora=None):
         return 1
     print(f">>> PASADA APLICADA: {fila.get('n_en_catalogo')} artículos de OSMA en el catálogo, "
           f"{fila.get('n_disponibles_estado')} disponibles.", flush=True)
+    codigo = 0
+    # 🔑 LA COPIA, SOLO DE UNA PASADA APLICADA y en la ruta fija: un fichero rechazado no pisa la última buena.
+    try:
+        guardar_copia(sb, contenido)
+        print(f">>> Copia entera del Excel guardada en el almacén {BUCKET}: {RUTA_COPIA}", flush=True)
+    except Exception as ex:
+        print(f"OSMA_COPIA_NO_GUARDADA: la pasada {pid} está aplicada (no se toca); la copia del Excel no se ha "
+              f"guardado ({type(ex).__name__}).", flush=True)
+        codigo = 1  # la copia no se ha guardado: que se vea
     if fila.get('caida_aceptada'):
         print(f"CAIDA_ACEPTADA: la pasada {pid} se ha aplicado como NUEVA REFERENCIA tras varios rechazos estables por "
               f"el freno del 90 %: hay que mirar si OSMA ha caído de verdad.", flush=True)
         return 1
-    return 0
+    return codigo
+
+
+def guardar_copia(sb, contenido):
+    """La copia entera del Excel, en la ruta fija (se pisa: solo la última buena)."""
+    sb.storage.from_(BUCKET).upload(RUTA_COPIA, contenido, {
+        'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'upsert': 'true'})
 
 
 def rescatar(sb, run_id):

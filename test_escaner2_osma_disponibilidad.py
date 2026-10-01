@@ -8,27 +8,33 @@ stock son centinelas que no pueden salir en el registro.
 
 QUE PRUEBA:
   (A) EL BUENO APLICA: entra una vez, localiza el enlace en la carpeta buena (habiendo otro
-      osma_articles.xlsx en otra carpeta), guarda la copia ENTERA en escaner2/osma/<pasada>/osma_articles.xlsx,
-      sube las filas en lotes de 500 con la tabla del plano (llave = codigo; precio neto por unidad;
-      disponible = stock > 0 o mas de 10.000) y declarado = llegados = filas; llama a disp_aplicar_pasada UNA
-      vez y relee la pasada. Tambien con la carpeta en otra pagina.
+      osma_articles.xlsx en otra carpeta), sube las filas en lotes de 500 con la tabla del plano (llave = codigo;
+      precio neto por unidad; disponible = stock > 0 o mas de 10.000) y declarado = llegados = filas; llama a
+      disp_aplicar_pasada UNA vez, relee la pasada y SOLO DESPUES guarda la copia ENTERA en la ruta fija
+      escaner2/osma/ultimo/osma_articles.xlsx (AE2). Si esa copia falla, la pasada sigue aplicada y el run sale
+      en rojo diciendolo. Tambien con la carpeta en otra pagina.
   (B) NO APLICAN Y DICEN POR QUE (sin llamar a la funcion ni subir una fila): cabecera cambiada ('fallida',
       con el nombre), filas de menos ('rechazada_vaciado'), codigo repetido o vacio ('fallida'), fichero viejo
       o anterior a la ultima aplicada ('rechazada', «OSMA no ha regenerado el fichero»), lo bajado no es un
-      xlsx, la descarga da 500.
+      xlsx, la descarga da 500. Y ninguno de ellos sube copia (un fichero rechazado no pisa la ultima buena).
   (C) SIN BAJAR NADA: entrada rechazada (UN solo intento), enlace no encontrado, enlace doble.
   (D) SIN SECRETOS: rojo en el primer paso, sin abrir pasada ni cliente de base ni de web.
   (E) 🔴 EL REGISTRO NO SUELTA DATOS, en TODOS los casos: ni el usuario, ni la clave, ni cookies, ni
       cabeceras, ni el HTML, ni el id o la URL del fichero, ni el cuerpo de un error de la web, ni el texto
       de un error de la base (que lleva una fila), ni codigos, EAN, nombres, marcas, precios o stock.
-  (F) El rescate solo cierra la pasada de ESTE run, de OSMA y en 'leyendo'. El fin de semana, un fichero
-      sin regenerar no pone el run en rojo; entre semana, si.
+  (F) El rescate solo cierra la pasada de ESTE run, de OSMA y en 'leyendo'.
+  (I) LA FECHA DEL FICHERO, CON LA HORA FIJADA (AE2): (a) relanzar el mismo dia con el fichero de hoy ya
+      aplicado → VERDE (OSMA_AL_DIA), la pasada 'rechazada' «al día» (que no cuenta en ningun sitio: ni
+      rechazada_vaciado ni fallida), sin filas, sin funcion y sin copia; el dia es el de MADRID (a las 00:10 de
+      Madrid, la de las 23:50 es de ayer aunque en UTC sea el mismo dia); (b) laborable con el fichero de ayer
+      ya aplicado → ROJO; (b) sabado → VERDE (OSMA_SIN_FICHERO_NUEVO).
   (G) Por estructura: el programa solo toca disp_pasada, disp_lectura y disp_parametros (lectura) y la
       funcion disp_aplicar_pasada; el workflow solo se lanza a mano, con grupo propio, los secretos en el
       primer paso y el rescate solo si estaban.
-  (H) 🔴 LA MITAD ROJA: cinco mutantes del programa (sin cabecera, sin fecha vieja, sin codigos repetidos,
-      imprimiendo el error, y con dos intentos de entrada); el banco tiene que ponerse ROJO con cada uno, en
-      la comprobacion que lo vigila.
+  (H) 🔴 LA MITAD ROJA: diez mutantes del programa (sin cabecera, sin fecha vieja, sin codigos repetidos,
+      imprimiendo el error, con dos intentos de entrada; y los del AE2: «al día» en rojo, el dia en UTC, la copia
+      antes de validar, la copia por pasada y la copia que falla en verde); el banco tiene que ponerse ROJO con
+      cada uno, en la comprobacion que lo vigila.
 """
 import ast
 import contextlib
@@ -109,16 +115,18 @@ def esperado(n):
 _CACHE = {}
 
 
-def xlsx(n=2600, cabecera=None, creado_hace=timedelta(hours=3), cambio=None, hoja='Data'):
-    """Los bytes de un osma_articles.xlsx inventado. `cambio(filas)` toca las filas antes de escribir."""
-    clave = (n, tuple(cabecera or ()), creado_hace, cambio.__name__ if cambio else None, hoja)
+def xlsx(n=2600, cabecera=None, creado_hace=timedelta(hours=3), cambio=None, hoja='Data', creado=None):
+    """Los bytes de un osma_articles.xlsx inventado. `cambio(filas)` toca las filas antes de escribir. `creado`
+    (UTC) fija la fecha de creacion; si no, es la de hace `creado_hace`."""
+    clave = (n, tuple(cabecera or ()), creado_hace, cambio.__name__ if cambio else None, hoja, creado)
     if clave not in _CACHE:
         cab = list(cabecera or COLUMNAS)
         filas = [fila_inventada(g) for g in range(n)]
         if cambio:
             cambio(filas)
         libro = openpyxl.Workbook(write_only=True)
-        libro.properties.created = (ahora() - creado_hace).replace(tzinfo=None, microsecond=0)
+        libro.properties.created = ((creado or (ahora() - creado_hace)).astimezone(timezone.utc)
+                                    .replace(tzinfo=None, microsecond=0))
         h = libro.create_sheet(hoja)
         h.append(cab)
         for f in filas:
@@ -263,7 +271,7 @@ class _Consulta:
                 if 'id' in self.filtros:
                     r = [dict(b.pasadas[self.filtros['id']])]
                 elif self.filtros.get('estado') == 'aplicada':
-                    r = [{'creada_en': b.ultima_aplicada.isoformat()}] if b.ultima_aplicada else []
+                    r = [{'id': b.ultima_id, 'creada_en': b.ultima_aplicada.isoformat()}] if b.ultima_aplicada else []
                 elif self.filtros.get('estado') == 'leyendo':
                     r = [{'id': i} for i, p in b.pasadas.items()
                          if p.get('estado') == 'leyendo' and p.get('run_id') == self.filtros.get('run_id')
@@ -283,8 +291,9 @@ class _Consulta:
 
 
 class Base:
-    def __init__(self, minimo=2500, ultima_aplicada=None, falla_lectura=False):
+    def __init__(self, minimo=2500, ultima_aplicada=None, falla_lectura=False, ultima_id='P-ANTES', falla_subida=False):
         self.minimo, self.ultima_aplicada, self.falla_lectura = minimo, ultima_aplicada, falla_lectura
+        self.ultima_id, self.falla_subida = ultima_id, falla_subida
         self.ops, self.pasadas, self.lectura, self.lotes, self.subidas, self.rpcs = [], {}, [], [], [], []
         base = self
 
@@ -293,6 +302,9 @@ class Base:
                 self.nombre = nombre
 
             def upload(self, ruta, datos, opciones):
+                base.ops.append(('storage', 'upload', {}))
+                if base.falla_subida:
+                    raise RuntimeError(f'StorageException 503 · {FILA_BASE} · /object/{ID_FICHERO}')
                 base.subidas.append((self.nombre, ruta, datos, opciones))
 
         self.storage = types.SimpleNamespace(from_=_Cubo)
@@ -306,6 +318,7 @@ class Base:
         class _Llamada:
             def execute(self):
                 base.rpcs.append((nombre, params))
+                base.ops.append(('rpc', nombre, {}))
                 p = base.pasadas[params['p_pasada']]
                 leidas = [x for x in base.lectura if x['pasada_id'] == p['id']]
                 if p.get('n_leidas') == len(leidas) and p.get('n_crudo') == p.get('n_sin_gtin', 0) + len(leidas):
@@ -409,8 +422,14 @@ def comprobar(programa, decir):
         [(x[2] or {}).get('username') == USUARIO and (x[2] or {}).get('password') == CLAVE for x in web.de('POST')], [True])
     chk('(A) …baja el fichero de la carpeta buena, no el de la otra carpeta',
         [x[1] for x in web.de('GET', '/downloads/file/')], [WEB + '/en/downloads/file/' + ID_FICHERO])
-    chk('(A) …la copia ENTERA en escaner2/osma/<pasada>/osma_articles.xlsx',
-        [(s[0], s[1], s[2] == web.fichero) for s in base.subidas], [('escaner2', 'osma/PASADA-OSMA-1/osma_articles.xlsx', True)])
+    chk('(A) …la copia ENTERA, tras aplicar, en escaner2/osma/ultimo/osma_articles.xlsx',
+        ([(s[0], s[1], s[2] == web.fichero, s[3].get('upsert')) for s in base.subidas],
+         [o[0] for o in base.ops if o[0] in ('rpc', 'storage')], 'OSMA_COPIA_NO_GUARDADA' in out),
+        ([('escaner2', 'osma/ultimo/osma_articles.xlsx', True, 'true')], ['rpc', 'storage'], False))
+    cod_c, out_c, base_c, _w, _s, _c = correr(programa, base=Base(falla_subida=True))
+    salidas['la copia falla'] = out_c
+    chk('(A) si la copia falla con la pasada aplicada: ROJO, lo dice, y la pasada sigue aplicada',
+        (cod_c, 'OSMA_COPIA_NO_GUARDADA' in out_c, pasada_de(base_c).get('estado'), base_c.subidas), (1, True, 'aplicada', []))
     chk('(A) …declarado = llegados = filas; sin GTIN y repetidos a 0',
         tuple(p.get(k) for k in ('n_declarado', 'n_crudo', 'n_declarado_precios', 'n_precios', 'n_declarado_disponibilidades',
                                  'n_disponibilidades', 'n_sin_gtin', 'n_duplicados')), (2600,) * 6 + (0, 0))
@@ -456,15 +475,14 @@ def comprobar(programa, decir):
         ('código vacío', Web(fichero=xlsx(cambio=_vacio)), Base(), 'fallida', 'sin código de artículo'),
         ('fichero de hace 3 días', Web(fichero=xlsx(creado_hace=timedelta(days=3))), Base(), 'rechazada',
          'OSMA no ha regenerado el fichero'),
-        ('fichero anterior a la última aplicada', Web(), Base(ultima_aplicada=ahora() - timedelta(hours=1)), 'rechazada',
-         'OSMA no ha regenerado el fichero'),
         ('lo bajado no es un xlsx', Web(fichero=b'<html>' + HTML_SECRETO.encode() + b'</html>'), Base(), 'fallida',
          'no es un xlsx'),
         ('la descarga da 500', Web(estado_fichero=500), Base(), 'fallida', 'respondió 500'),
         ('la red cae al bajar', Web(error_red=True), Base(), 'fallida', 'ConnectionError'),
         ('la base rechaza una fila', Web(), Base(falla_lectura=True), 'fallida', 'RuntimeError'),
     ]
-    finde = ahora().weekday() >= 5
+    g = runpy.run_path(programa, run_name='osma_banco')
+    finde = g['hora_de_madrid'](ahora()).weekday() >= 5
     for nombre, w, b, estado, texto in casos_b:
         cod, out, base, web, ses, _ = correr(programa, web=w, base=b)
         salidas[nombre] = out
@@ -472,8 +490,8 @@ def comprobar(programa, decir):
         cod_esperado = 0 if (estado == 'rechazada' and finde) else 1
         chk('(B) %s: no aplica, sale %s y dice por qué' % (nombre, estado),
             (cod, p.get('estado'), texto in (p.get('motivo') or ''), texto in out), (cod_esperado, estado, True, True))
-        chk('(B) %s: ni una fila en la base ni llamada a la función' % nombre,
-            (base.rpcs, base.lectura), ([], []))
+        chk('(B) %s: ni una fila en la base, ni llamada a la función, ni copia' % nombre,
+            (base.rpcs, base.lectura, base.subidas), ([], [], []))
     # Lo que no es un xlsx no se guarda en el almacén.
     cod, out, base, web, ses, _ = correr(programa, web=Web(fichero=b'<html>' + HTML_SECRETO.encode() + b'</html>'))
     chk('(B) lo que no es un xlsx no se guarda en el almacén', base.subidas, [])
@@ -513,23 +531,46 @@ def comprobar(programa, decir):
         (cod, {k: v['estado'] for k, v in base.pasadas.items()}, web.llamadas),
         (0, {'P-ESTE': 'fallida', 'P-OTRO-RUN': 'leyendo', 'P-HEO': 'leyendo', 'P-YA': 'aplicada'}, []))
 
-    # (F) fin de semana / entre semana, con la hora fijada (el módulo importado, sin __main__).
-    g = runpy.run_path(programa, run_name='osma_banco')
-    hoy = ahora().replace(hour=5, minute=20, second=0, microsecond=0)
-    for dia_semana, cod_esp in ((5, 0), (2, 1)):   # el próximo sábado y el próximo miércoles, a las 07:20 de Madrid
-        momento = hoy + timedelta(days=(dia_semana - hoy.weekday()) % 7 or 7)
-        dia = momento.strftime('%Y-%m-%d')
-        w = Web(fichero=xlsx(creado_hace=timedelta(days=4)))
+    # (I) LA FECHA DEL FICHERO, con la hora fijada (el módulo importado, sin __main__). Octubre de 2026: Madrid = UTC+2.
+    def fija(nombre, ahora_utc, ultima_utc, creado_utc):
+        w = Web(fichero=xlsx(creado=datetime.fromisoformat(creado_utc + '+00:00')))
         sys.modules['requests'] = _modulo_requests(w, [])
-        b = Base()
+        b = Base(ultima_aplicada=datetime.fromisoformat(ultima_utc + '+00:00'), ultima_id='P-ANTES')
         salida = io.StringIO()
-        with contextlib.redirect_stdout(salida):
-            r = g['pasada'](b, sys.modules['requests'].Session(), USUARIO, CLAVE, '4242', ahora=momento)
-        sys.modules.pop('requests', None)
-        salidas['fecha ' + dia] = salida.getvalue()
-        chk('(F) %s (%s): una rechazada por fichero sin regenerar sale con %d'
-            % (dia, 'sábado' if cod_esp == 0 else 'miércoles', cod_esp),
-            (r if pasada_de(b).get('estado') == 'rechazada' else 'no rechazada'), cod_esp)
+        try:
+            with contextlib.redirect_stdout(salida):
+                r = g['pasada'](b, sys.modules['requests'].Session(), USUARIO, CLAVE, '4242',
+                                ahora=datetime.fromisoformat(ahora_utc + '+00:00'))
+        finally:
+            sys.modules.pop('requests', None)
+        salidas[nombre] = salida.getvalue()
+        return r, b, pasada_de(b), salida.getvalue()
+
+    # (a) miércoles 07-oct, 09:00 de Madrid; la de las 07:17 de Madrid ya aplicada; el fichero, de las 03:33 UTC.
+    r, b, p, out = fija('al día', '2026-10-07T07:00:00', '2026-10-07T05:17:00', '2026-10-07T03:33:00')
+    chk('(a) relanzar el mismo día: VERDE, OSMA_AL_DIA con la pasada de esta mañana',
+        (r, 'OSMA_AL_DIA: el fichero de hoy ya está aplicado (pasada P-ANTES); nada nuevo' in out), (0, True))
+    chk('(a) …no cuenta como rechazo: «rechazada» por «al día» (ni rechazada_vaciado ni fallida), sin filas, sin función, sin copia',
+        (p.get('estado'), (p.get('motivo') or '').startswith('al día'), b.rpcs, b.lectura, b.subidas),
+        ('rechazada', True, [], [], []))
+    # (b) el día es el de MADRID: miércoles 00:10 de Madrid (martes 22:10 UTC); la última, el martes a las 23:50 de
+    #     Madrid (21:50 UTC: el MISMO día en UTC). Es de ayer → OSMA no ha renovado, y es laborable: ROJO.
+    r, b, p, out = fija('medianoche de Madrid', '2026-10-06T22:10:00', '2026-10-06T21:50:00', '2026-10-06T03:33:00')
+    chk('(b) a las 00:10 de Madrid, la de las 23:50 es de AYER (aunque en UTC sea hoy): no es «al día», ROJO',
+        (r, p.get('estado'), 'OSMA_AL_DIA' in out, 'OSMA no ha regenerado' in out), (1, 'rechazada', False, True))
+    # (b) laborable: miércoles 09:00 de Madrid; la última, la del martes 07:17; el fichero, del martes 03:33 UTC.
+    r, b, p, out = fija('laborable sin renovar', '2026-10-07T07:00:00', '2026-10-06T05:17:00', '2026-10-06T03:33:00')
+    chk('(b) laborable con el fichero de ayer ya aplicado: ROJO, «OSMA no ha regenerado», sin filas ni copia',
+        (r, p.get('estado'), 'OSMA_NO_APLICADA' in out, 'OSMA no ha regenerado' in out, b.lectura, b.subidas),
+        (1, 'rechazada', True, True, [], []))
+    # (b) sábado 10-oct 09:00 de Madrid; la última, la del viernes; el fichero, del viernes.
+    r, b, p, out = fija('sábado sin renovar', '2026-10-10T07:00:00', '2026-10-09T05:17:00', '2026-10-09T03:33:00')
+    chk('(b) sábado con el fichero del viernes: VERDE (OSMA_SIN_FICHERO_NUEVO), sin filas ni copia',
+        (r, p.get('estado'), 'OSMA_SIN_FICHERO_NUEVO' in out, b.lectura, b.subidas), (0, 'rechazada', True, [], []))
+    # (b) y el fichero nuevo del día siguiente, con la de ayer aplicada: se aplica.
+    r, b, p, out = fija('día siguiente renovado', '2026-10-08T07:00:00', '2026-10-07T05:17:00', '2026-10-08T03:33:00')
+    chk('(b) …y el jueves, con el fichero del jueves y la del miércoles aplicada: se aplica y guarda copia',
+        (r, p.get('estado'), [x[1] for x in b.subidas]), (0, 'aplicada', ['osma/ultimo/osma_articles.xlsx']))
 
     # (E) EL REGISTRO NO SUELTA DATOS, en todos los casos
     for nombre, out in salidas.items():
@@ -614,6 +655,22 @@ MUTANTES = [
      "        sesion.post(WEB + RUTA_ENTRADA, data={'username': usuario, 'password': clave}, timeout=ESPERA_S)\n"
      "        raise Rechazo('fallida', 'entrada rechazada: la web ha vuelto a la página de entrada; no se reintenta '\n",
      '(C) entrada rechazada: UN solo intento (un POST) y ni siquiera abre la página de descargas'),
+    ('al_dia_en_rojo',
+     '            print(f"OSMA_AL_DIA: el fichero de hoy ya está aplicado (pasada {ex.pasada_aplicada}); nada nuevo.", flush=True)\n'
+     '            return 0\n',
+     '            print(f"OSMA_AL_DIA: el fichero de hoy ya está aplicado (pasada {ex.pasada_aplicada}); nada nuevo.", flush=True)\n'
+     '            return 1\n',
+     '(a) relanzar el mismo día: VERDE, OSMA_AL_DIA con la pasada de esta mañana'),
+    ('dia_en_utc', '        if hora_de_madrid(ultima_aplicada).date() == hora_de_madrid(ahora).date():\n',
+     '        if ultima_aplicada.date() == ahora.date():\n',
+     '(b) a las 00:10 de Madrid, la de las 23:50 es de AYER (aunque en UTC sea hoy): no es «al día», ROJO'),
+    ('copia_antes_de_validar', '        print(f">>> Fichero bajado: {len(contenido)} bytes.", flush=True)\n',
+     '        print(f">>> Fichero bajado: {len(contenido)} bytes.", flush=True)\n        guardar_copia(sb, contenido)\n',
+     '(B) cabecera cambiada: ni una fila en la base, ni llamada a la función, ni copia'),
+    ('copia_por_pasada', "RUTA_COPIA = 'osma/ultimo/' + FICHERO\n", "RUTA_COPIA = 'osma/' + FICHERO\n",
+     '(A) …la copia ENTERA, tras aplicar, en escaner2/osma/ultimo/osma_articles.xlsx'),
+    ('copia_falla_en_verde', '        codigo = 1  # la copia no se ha guardado: que se vea\n', '        codigo = 0\n',
+     '(A) si la copia falla con la pasada aplicada: ROJO, lo dice, y la pasada sigue aplicada'),
 ]
 with tempfile.TemporaryDirectory() as carpeta:
     for nombre, viejo, nuevo, vigila in MUTANTES:
@@ -627,5 +684,6 @@ print()
 if fallos:
     print('ROJO: %d fallo(s): %s' % (len(fallos), '; '.join(fallos)))
     sys.exit(1)
-print('VERDE: la pasada de OSMA entra una vez, baja el fichero de su carpeta, guarda la copia, valida antes de subir '
-      'nada, aplica con la función común y su registro no suelta ningún dato; y cada mutante lo pone en rojo.')
+print('VERDE: la pasada de OSMA entra una vez, baja el fichero de su carpeta, valida antes de subir nada, aplica con '
+      'la función común y SOLO ENTONCES guarda la copia en la ruta fija; relanzar el mismo día sale en verde; su '
+      'registro no suelta ningún dato; y cada mutante lo pone en rojo.')
