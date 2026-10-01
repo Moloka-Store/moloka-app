@@ -13,7 +13,9 @@ QUE SE PRUEBA, Y COMO (calcado de `test_escaner_pelicula_factura.py`): el escane
 proceso, con `keepa` y `supabase` sustituidos por dobles en memoria que APUNTAN cada pregunta a Keepa y cada
 fila escrita. Catalogo de cuatro filas, con la columna `asin` que manda la v2:
   - KaffeK: con ASIN, y Keepa por EAN no lo conoce;
-  - Ultra Pro 200: con ASIN del pack, y Keepa por EAN devuelve la de 100 fundas;
+  - Ultra Pro 200: con ASIN del pack, y Keepa por EAN devuelve la de 100 fundas. Su `pvd` es el coste del
+    PACK (1,06 = 2 x 0,53): la v2 solo manda el ASIN con el coste en la unidad de la ficha (devolucion de
+    Cowork, 1-oct-2026; lib/entrada/unidad-ficha.ts). El escaner no convierte nada: lo usa tal cual;
   - Chai: SIN ASIN -> sigue por EAN, como siempre;
   - una ficha con un ASIN que Keepa no tiene.
   [factura]  (MIS_COMPRAS) -> los tres primeros con informe, cada uno con SU ASIN; ninguno de los tres EAN con
@@ -36,7 +38,7 @@ PID = {'kaffek': '766394d3-b6c9-4548-ab88-2bc09ec9cf29', 'up200': '930daa2d-26fe
 CATALOGO = (
     "ean,pvd,nombre,producto_id,asin\n"
     "7185897225606,10.1975,Elephant Vanilla Chai 398 gr,%s,B000VYP4EM\n"
-    "74427811266,0.53,Fundas Standard Regular Cards (200 fundas) Ultra Pro,%s,B085DK713X\n"
+    "74427811266,1.06,Fundas Standard Regular Cards (200 fundas) Ultra Pro,%s,B085DK713X\n"
     "8412345678905,3.10,Chai latte polvo,%s,\n"
     "8400000000017,2.00,Ficha con ASIN que Keepa no tiene,%s,B0FANTASMA\n"
     % (PID['kaffek'], PID['up200'], PID['chai'], PID['fantasma']))
@@ -271,6 +273,8 @@ eq('[factura] Chai (por EAN): su ASIN de Keepa, como siempre',
 eq('[factura] la ficha con un ASIN que Keepa no tiene se queda sin filas', PID['fantasma'] in por_ficha, False)
 eq('[factura] el coste viaja tal cual (KaffeK pa=10.1975)',
    {r['pa'] for r in b['detalle'] if r['producto_id'] == PID['kaffek']}, {10.1975})
+eq('[factura] 🔴 Ultra Pro 200: el coste es el del PACK (1.06), no el de 100 fundas (0.53)',
+   {r['pa'] for r in b['detalle'] if r['producto_id'] == PID['up200']}, {1.06})
 eq('[factura] ni una fila con el ASIN de 100 fundas', any(r['asin'] == 'B0002TT3N4' for r in b['detalle']), False)
 eq('[factura] Ultra Pro (EAN de 11 cifras) ya NO cae en «EAN forma rara»', 'EAN problematicos: 0 ' in out, True)
 
