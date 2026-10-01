@@ -374,6 +374,13 @@ jobs:
       - name: 25 quindecies) test_en_mi_bd.py
         run: python -u test_en_mi_bd.py
 
+      # (Encargo AA, 1-oct-2026) El escaner 2: «se vende» = 7 o más caídas, leído de escaner2_parametros (7 entra, 6 no,
+      # y 6,5 por figura tampoco); la ficha compartida (mismo ASIN padre y mismo puesto que otro producto de la lista),
+      # repartida ÷ «Recuento de variaciones» (o ÷ los hermanos si falta), su motivo propio en la c y su columna al final
+      # de «Análisis».
+      - name: 25 sexdecies) test_escaner2_ficha_compartida.py
+        run: python -u test_escaner2_ficha_compartida.py
+
       - name: 26) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
@@ -426,6 +433,7 @@ jobs:
             test_escaner2_disponibilidad.py
             test_escaner2_novedades.py
             test_en_mi_bd.py
+            test_escaner2_ficha_compartida.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).

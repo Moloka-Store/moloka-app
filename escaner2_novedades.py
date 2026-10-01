@@ -520,7 +520,10 @@ def solo_suyas(fichas, asins):
 # 4 · EL PASO ENTERO
 # ═══════════════════════════════════════════════════════════════════════════════
 def _decidir_ventas(nov, foto, fichas_por_pais, params, M, eleccion):
-    """Las puertas del Escaneo PRO con el dato de ventas de los cuatro paises (sin precio) -> (destino, decision, r)."""
+    """Las puertas del Escaneo PRO con el dato de ventas de los cuatro paises (sin precio) -> (destino, decision, r).
+    (AA, 1-oct-2026) El umbral es el de escaner2_parametros, como en el Escaneo PRO. La FICHA COMPARTIDA no se reparte
+    aqui: lo guardado (nov_keepa.fichas, `ficha_de_keepa`; escaner2_resultado_pais) no trae ASIN padre ni recuento de
+    variaciones, y sin ellos no se puede detectar sin pedir otra vez a Keepa."""
     cands = {p: [rec_de_ficha(f) for f in fichas_por_pais.get(p, [])] for p in PAISES}
     caidas = {p: {f['asin']: f.get('caidas_30d') for f in fichas_por_pais.get(p, []) if f.get('asin')} for p in PAISES}
     r = e2.decidir(foto, cands, caidas, params, M, eleccion)
