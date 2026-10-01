@@ -1,0 +1,100 @@
+# ============================================================
+# Moloka - Escaner 2 · DISPONIBILIDAD DE OSMA (encargo AE, tramo 2 del plano Y, 01-oct-2026)
+#
+# Entra en la web de OSMA con el usuario de Fernando, baja osma_articles.xlsx (el catalogo entero de
+# OSMA, regenerado cada madrugada), guarda una copia entera en el almacen privado escaner2 y deja en la
+# base lo que tiene OSMA ahora (disp_estado) y lo que ha cambiado (disp_cambio), con la MISMA funcion
+# que HEO (disp_aplicar_pasada). EN SOMBRA: el interruptor de OSMA nace en 'memoria' y Reponer sigue
+# leyendo lo de siempre hasta que Fernando lo cambie. Sin Keepa y sin Amazon.
+#
+# 🔴 REPO PUBLICO: este registro lo ve cualquiera. El programa SOLO imprime estados y recuentos; nada de
+#    precios, stock, productos, EAN, usuario, cookies, cabeceras, HTML ni la URL del fichero. Sin modo
+#    verboso (lo comprueba test_escaner2_osma_disponibilidad.py).
+# 🔴 UN SOLO INTENTO DE ENTRADA: si OSMA la rechaza, la pasada sale 'fallida' y no se reintenta (no
+#    bloquear la cuenta de Fernando).
+#
+# 🔒 SOLO TOCA disp_pasada, disp_lectura, la funcion disp_aplicar_pasada, lee disp_parametros, y escribe
+#    en el almacen escaner2 bajo osma/. La migracion 20261001124000_disp_osma_en_sombra.sql de
+#    moloka-app-v2 tiene que estar APLICADA antes de que corra (si no, no hay fila de OSMA y no abre).
+#
+# >>> SIN RELOJ, A PROPOSITO <<<  Se lanza a mano desde Actions. El reloj es cron-job.org (un `schedule:`
+#     de GitHub llega horas tarde en esta cuenta) y lo pone Fernando: TODOS LOS DIAS a las 07:15 de Madrid
+#     (OSMA regenera el fichero de madrugada; el 30-sep, a las 03:33 UTC). La base solo espera la de
+#     lunes a viernes (disp_parametros.horario_*): si OSMA no regenera el sabado o el domingo, esas salen
+#     'rechazada' («OSMA no ha regenerado el fichero») sin poner el run en rojo ni encender el aviso.
+#     La tarea: POST https://api.github.com/repos/Moloka-Store/moloka-app/actions/workflows/escaner2-osma-disponibilidad.yml/dispatches
+#     con cuerpo {"ref":"main"} y las mismas cabeceras que el job de HEO.
+# ============================================================
+name: Moloka - Escaner 2 · Disponibilidad OSMA
+
+on:
+  workflow_dispatch:
+
+# 🔒 GRUPO PROPIO: no comparte credenciales con HEO. Nunca dos pasadas de OSMA a la vez con el mismo
+#    usuario. Sin cancelar lo que esta en curso (un pendiente nuevo cancela al pendiente anterior, no al
+#    que corre).
+concurrency:
+  group: escaner2-osma
+  cancel-in-progress: false
+
+jobs:
+  leer:
+    runs-on: ubuntu-24.04
+    # Solo leer el repo: todo lo demas lo hace con la llave de servicio de Supabase.
+    permissions:
+      contents: read
+    # Un Excel de ~3.000 filas: unos minutos.
+    timeout-minutes: 15
+    steps:
+      # 🔴 PRIMERO, LOS SECRETOS: sin ellos, rojo aqui y sin tocar la base (el rescate tampoco corre).
+      - name: Comprobar los secretos
+        id: secretos
+        env:
+          OSMA_USER:            ${{ secrets.OSMA_USER }}
+          OSMA_PASS:            ${{ secrets.OSMA_PASS }}
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          if [ -z "$OSMA_USER" ] || [ -z "$OSMA_PASS" ]; then
+            echo "::error title=Faltan secretos::faltan OSMA_USER/OSMA_PASS en los secretos de moloka-app; no se abre ninguna pasada"
+            exit 1
+          fi
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_KEY" ]; then
+            echo "::error title=Faltan secretos::faltan SUPABASE_URL/SUPABASE_SERVICE_KEY; no se abre ninguna pasada"
+            exit 1
+          fi
+          echo "secretos: presentes"
+
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        # Las mismas versiones FIJADAS que el escaner 2 de HEO (requests: la web · supabase: base y almacen ·
+        # openpyxl: el Excel).
+        run: pip install --quiet supabase==2.31.0 requests==2.34.2 openpyxl==3.1.5
+
+      - name: Leer OSMA y aplicar la pasada
+        # El tope va en el PASO (10 min), no solo en el job (15): si se agota, el rescate corre.
+        timeout-minutes: 10
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          OSMA_USER:            ${{ secrets.OSMA_USER }}
+          OSMA_PASS:            ${{ secrets.OSMA_PASS }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_osma_disponibilidad.py
+
+      # 🔴 SI EL RUN MUERE A MEDIAS, LA PASADA NO SE QUEDA 'leyendo' PARA SIEMPRE. Solo si los secretos
+      #    estaban (si no, no hay pasada que rescatar ni se toca la base).
+      - name: Rescate · si el run ha fallado, la pasada de este run queda 'fallida'
+        if: (failure() || cancelled()) && steps.secretos.outcome == 'success'
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_osma_disponibilidad.py --rescate
