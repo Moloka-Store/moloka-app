@@ -381,6 +381,14 @@ jobs:
       - name: 25 sexdecies) test_escaner2_ficha_compartida.py
         run: python -u test_escaner2_ficha_compartida.py
 
+      # (Encargo AE, 1-oct-2026) La pasada de disponibilidad de OSMA (escaner2_osma_disponibilidad.py), el programa entero
+      # contra una web y una base de mentira y un Excel INVENTADO (el catalogo real no se sube: repo publico): el bueno
+      # aplica; cabecera cambiada, filas de menos, codigo repetido o vacio y fichero viejo no aplican y dicen por que;
+      # entrada rechazada (un solo intento) y enlace no encontrado o doble, sin bajar nada; el registro no suelta ningun
+      # dato (usuario, cookies, HTML, URL del fichero, codigos, precios, stock); y cinco mutantes lo ponen en rojo.
+      - name: 25 septendecies) test_escaner2_osma_disponibilidad.py
+        run: python -u test_escaner2_osma_disponibilidad.py
+
       - name: 26) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
@@ -434,6 +442,7 @@ jobs:
             test_escaner2_novedades.py
             test_en_mi_bd.py
             test_escaner2_ficha_compartida.py
+            test_escaner2_osma_disponibilidad.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).
