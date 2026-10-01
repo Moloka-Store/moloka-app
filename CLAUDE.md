@@ -91,7 +91,7 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
 
 - **UN PR, UNA COSA.** Sin excepciones.
 - 🔴 **AL TERMINAR UN TRABAJO, EL PARTE SE DEJA EN LA BANDEJA.** Además del PR, se escribe
-  una copia del informe en `G:\Mi unidad\Moloka\bandeja\` con el nombre
+  una copia del informe en `~/Mi unidad/Moloka/bandeja/` (nunca con letra de unidad) con el nombre
   **`AAAA-MM-DD-HHMM-tema.md`** (hora española). **Primera línea del fichero: quién lo lee y
   cuándo.** Sin esa copia, el trabajo solo existe dentro del repo y Fernando tiene que hacer de
   correveidile entre Code y los chats. La bandeja es lo que lo evita, y **no depende de que
