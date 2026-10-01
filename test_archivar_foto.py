@@ -150,8 +150,87 @@ r, err, insert, dichas = corre(viva, NORMALES, excluir=('crudo',))
 eq('(5) 🔒 lo excluido no entra', 'crudo' in insert, False)
 eq('(5) 🔒 … y no aborta', err, None)
 
+print('\n== 6) 🔴 KEEPA ARCHIVA SIN LOS TEXTOS DE FICHA (encargo C, 01-oct-2026) ==')
+# El orden obligatorio: el procesador deja de copiar los 16 textos ANTES de que la migracion
+# de la v2 (20261001120000_keepa_hist_sin_textos_de_ficha.sql) los quite del historico.
+# 🔑 Lo que se prueba es la LLAMADA DE VERDAD, no una tupla copiada aqui: se lee del
+#    procesador por su arbol (ast), asi que un comentario o una cadena suelta no cuentan.
+# 🔬 Las columnas son las de PRODUCCION medidas el 01-oct-2026 (pg_attribute, conector de
+#    lectura): la foto viva con sus 3 generadas y el historico con `archivado_en` y sin `crudo`.
+import ast  # noqa: E402
+import re  # noqa: E402
+
+TEXTOS = {'titulo', 'bullet_1', 'bullet_2', 'bullet_3', 'bullet_4', 'bullet_5', 'imagenes',
+          'comprados_juntos', 'asins_variacion', 'atributos_variacion', 'slug_amazon',
+          'ean_keepa_crudo', 'upc_keepa', 'fabricante', 'tipo_producto', 'subcategoria'}
+
+_proc = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'procesador_keepa_escaparate.py')
+with open(_proc, encoding='utf-8') as _f:
+    _arbol = ast.parse(_f.read())
+llamadas = [n for n in ast.walk(_arbol)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            and n.func.id == 'archivar_foto']
+eq('(6) el procesador llama UNA vez a archivar_foto', len(llamadas), 1)
+kw = {k.arg: k.value for k in llamadas[0].keywords} if llamadas else {}
+EXCLUIR_REAL = tuple(ast.literal_eval(kw['excluir'])) if 'excluir' in kw else ()
+eq('(6) 🔴 excluye EXACTAMENTE crudo + los 16 textos (ni uno menos, ni uno de mas)',
+   sorted(EXCLUIR_REAL), sorted({'crudo'} | TEXTOS))
+eq('(6) … sin repetidos', len(EXCLUIR_REAL), len(set(EXCLUIR_REAL)))
+
+VIVA_PROD = (
+    'asin dominio ean_keepa_crudo upc_keepa titulo marca fabricante tipo_producto imagenes '
+    'n_imagenes tarifa_fba comision_pct comision_eur_bb bb_precio bb_vendedor bb_es_fba bb_stock '
+    'bb_pct_amazon_30d bb_disponibilidad fba_mas_barato fbm_mas_barato p3_fba_precio p3_fba_stock '
+    'p3_fbm_stock ofertas_nuevas ofertas_nuevas_fba ofertas_nuevas_fbm ofertas_total '
+    'umbral_competitivo amazon_precio amazon_disponibilidad rank rank_30d rank_90d rank_drops_30d '
+    'rank_drops_90d categoria subcategoria monthly_sold_ultimo monthly_sold_ultimo_fecha '
+    'comprados_mes_pasado asin_padre asins_variacion n_variaciones atributos_variacion paq_peso_g '
+    'paq_largo_cm paq_ancho_cm paq_alto_cm fecha_lanzamiento keepa_actualizado listado_desde rating '
+    'n_valoraciones comprados_juntos slug_amazon bullet_1 bullet_2 bullet_3 bullet_4 bullet_5 '
+    'bb_seller_id fichero fecha_foto seller_id crudo procesado_at bb_envio bb_pais_envio '
+    'bb_plazo_txt nuevo_precio').split()
+GENERADAS_PROD = ['asin_k', 'dominio_k', 'imagen_principal']
+viva = [col(c) for c in VIVA_PROD] + [col(c, generada=True) for c in GENERADAS_PROD]
+# El historico de produccion: la foto sin `crudo` ni generadas, mas `archivado_en`.
+hist_antes = [col(c) for c in VIVA_PROD if c != 'crudo'] + [col('archivado_en')]
+hist_despues = [c for c in hist_antes if c[0] not in TEXTOS]
+eq('(6) 🔬 los recuentos medidos: 74 en la foto, 71 en el historico, 55 tras el DROP',
+   (len(viva), len(hist_antes), len(hist_despues)), (74, 71, 55))
+
+ARCHIVA = set(VIVA_PROD) - {'crudo'} - TEXTOS
+# Las columnas del historico que LEEN las vistas (pg_depend) y las funciones (prosrc, por su alias)
+# de produccion, y `fichero` (el compresor), medido el 01-oct-2026. Si una de estas se colara en
+# `excluir`, el trackeador se quedaria sin dato.
+LEIDAS = {'asin', 'dominio', 'fecha_foto', 'procesado_at', 'bb_seller_id', 'bb_stock', 'bb_es_fba',
+          'bb_precio', 'bb_vendedor', 'bb_plazo_txt', 'fba_mas_barato', 'p3_fba_precio', 'p3_fba_stock',
+          'amazon_precio', 'amazon_disponibilidad', 'fichero'}
+
+
+def columnas_del_insert(sql):
+    m = re.search(r'INSERT INTO \w+ \(([^)]*)\)', sql)
+    return set(c.strip() for c in m.group(1).split(',')) if m else None
+
+
+r, err, insert, dichas = corre(viva, hist_antes, excluir=EXCLUIR_REAL)
+eq('(6a) ANTES del DROP: no aborta', err, None)
+eq('(6a) … archiva las 54 y `archivado_en`, y NINGUN texto (quedan a NULL)',
+   columnas_del_insert(insert), ARCHIVA | {'archivado_en'})
+eq('(6a) 🔬 … que son 54', len(ARCHIVA), 54)
+eq('(6a) 🔒 … y entre ellas TODAS las que leen las vistas y funciones', LEIDAS <= ARCHIVA, True)
+
+r, err, insert, dichas = corre(viva, hist_despues, excluir=EXCLUIR_REAL)
+eq('(6b) DESPUES del DROP: no aborta', err, None)
+eq('(6b) … y archiva lo mismo', columnas_del_insert(insert), ARCHIVA | {'archivado_en'})
+
+# 🔴 La mitad que prueba el ORDEN: con el DROP puesto y la llamada de antes (`crudo` solo),
+#    la carga de Keepa se PARA. Es lo que pasaria si la migracion fuera antes que este codigo.
+r, err, insert, dichas = corre(viva, hist_despues, excluir=('crudo',))
+eq('(6c) 🔴 con el DROP y la llamada VIEJA, archivar ABORTA', err is not None, True)
+eq('(6c) 🔴 … nombrando los 16 textos', all(t in (err or '') for t in TEXTOS), True)
+eq('(6c) 🔒 … y sin escribir nada', insert, '')
+
 print('')
 if fallos:
     print('%d FALLOS: %s' % (len(fallos), ', '.join(fallos)))
     sys.exit(1)
-print('TODO OK · archivar_foto y las columnas generadas')
+print('TODO OK · archivar_foto, las columnas generadas y los textos de Keepa')
