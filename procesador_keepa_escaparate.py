@@ -998,10 +998,24 @@ def main():
         # 🔒 `crudo` NO se archiva: es copia del CSV de Keepa, que ya vive en Storage
         # (informes/keepa_escaparate/, archivo histórico permanente). El rescate de
         # cualquiera de las 512 claves que solo viven en `crudo` se hace por `fichero`
-        # contra ese CSV. Las 63 columnas propias del histórico (bb_*, p3_*, ofertas_*,
-        # rank_*, monthly_sold, rating…) SÍ se archivan: son la munición del trackeador.
+        # contra ese CSV.
+        # 🔒 Los TEXTOS DE FICHA tampoco se archivan (encargo C, 01-oct-2026): título,
+        # viñetas, imágenes, variaciones, códigos, fabricante, tipo y subcategoría eran
+        # 77 MiB de los 104 del histórico y no los lee NADIE en él (censo: vistas,
+        # funciones y los dos repos). La foto viva los sigue teniendo, y el pasado se
+        # rescata igual que el `crudo`: por `fichero` contra el CSV de Storage.
+        # 🔴 Esto va ANTES que el DROP de esas columnas en el histórico (migración de la
+        # v2 `20261001120000_keepa_hist_sin_textos_de_ficha.sql`): con el DROP puesto y
+        # sin esta lista, `faltan_en_hist` ABORTA la carga entera de Keepa.
+        # El resto (bb_*, p3_*, ofertas_*, rank_*, monthly_sold, rating, paq_*…: 54
+        # columnas a 01-oct-2026) SÍ se archiva: es la munición del trackeador.
         arch = archivar_foto(cur, 'keepa_escaparate', ['asin', 'dominio'], 'fecha_foto',
-                             excluir=('crudo',))
+                             excluir=('crudo',
+                                      'titulo', 'bullet_1', 'bullet_2', 'bullet_3',
+                                      'bullet_4', 'bullet_5', 'imagenes', 'comprados_juntos',
+                                      'asins_variacion', 'atributos_variacion', 'slug_amazon',
+                                      'ean_keepa_crudo', 'upc_keepa', 'fabricante',
+                                      'tipo_producto', 'subcategoria'))
     except Aborta as e:
         print(f"\n❌ ABORTA (no se ha escrito nada):\n{e}", flush=True)
         con.rollback(); cur.close(); con.close(); sys.exit(1)
