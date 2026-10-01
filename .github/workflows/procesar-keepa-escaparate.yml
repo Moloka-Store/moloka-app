@@ -1,5 +1,13 @@
 name: Moloka - Procesar KEEPA_ESCAPARATE
 
+# 🔑 EL TÍTULO DE CADA CORRIDA LLEVA EL MODO Y EL FICHERO (encadenado, 01-oct-2026). No es
+#    decoración: es la MEMORIA del encadenado. El job `encadenar` y la ruta de disparo de la v2
+#    cuentan los intentos de un fichero contando corridas con este título, sin tabla nueva.
+# 🔒 El texto está repetido en DOS sitios más, y tiene que ser EL MISMO al carácter:
+#    `titulo_corrida()` en encadenar_keepa_escaparate.py (lo vigila test_encadenar_keepa.py
+#    leyendo este YAML) y `porFichero.tituloCorrida` en lib/buzones/catalogo.ts de la v2.
+run-name: "Keepa · ${{ inputs.modo }} · ${{ inputs.fichero || '(el más reciente)' }}"
+
 # Pieza nueva de la Fase 0 de la v2. A DEMANDA, sin reloj. Espejo de
 # procesar-salud-fba.yml. Por defecto: PRODUCCIÓN + ENSAYO (no toca nada).
 # Cadena (desde el 30-sep-2026, sin staging): ensayo en producción → aplicar →
@@ -26,6 +34,14 @@ on:
         type: string
         required: false
         default: ''
+      encadenado:
+        # 🆕 01-oct-2026. Lo pone a true SOLO el job `encadenar` al lanzar el siguiente fichero.
+        # Cambia una cosa: un fichero cuya foto viva de su país ya es de un día POSTERIOR se
+        # SALTA en verde en vez de abortar en rojo por la Guarda 11 (ahí el fichero lo ha
+        # elegido una máquina mirando el buzón, no una persona). A mano, déjalo en false.
+        description: 'Uso interno del encadenado. A mano: false.'
+        type: boolean
+        default: false
 
 concurrency:
   group: procesar-keepa-escaparate
@@ -76,6 +92,7 @@ jobs:
           ENTORNO: ${{ inputs.entorno }}
           MODO: ${{ inputs.modo }}
           FICHERO: ${{ inputs.fichero }}
+          ENCADENADO: ${{ inputs.encadenado }}
           DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -u procesador_keepa_escaparate.py
 
@@ -130,3 +147,51 @@ jobs:
             echo "::warning title=Registro sin apuntar::No se pudo escribir la línea en registro_ejecuciones (salida ${rc}). El job conserva su color."
             exit "$rc"
           fi
+
+  # ═══ EL ENCADENADO (01-oct-2026) · la red de DEBAJO de la cola de la página ═══
+  # 🔴 POR QUÉ: los CSV de Keepa se cargan de uno en uno (el `concurrency` de arriba y el 409 de
+  #    la ruta de la v2), y quien los ponía en fila era la PÁGINA de Buzones. Si la página se
+  #    cerraba, la fila moría: el 01-oct-2026 se subieron cuatro países y se cargaron dos.
+  #    Este job, al acabar una carga, busca lo que falta en el buzón y lanza el siguiente. El
+  #    cómo y el porqué de cada regla, en la cabecera de encadenar_keepa_escaparate.py.
+  # 🔑 CORRE TAMBIÉN SI LA CARGA FALLÓ (no solo si salió bien): si no, un fichero malo pararía
+  #    la fila entera y los países de detrás se quedarían sin cargar. No hay bucle: un fichero
+  #    se intenta como mucho DOS veces (el de la página + un reintento de aquí).
+  # 🔒 NO corre en `ensayo` (no hay carga que encadenar) ni si la carga se CANCELÓ (si alguien
+  #    para una corrida a mano, el encadenado no la desobedece lanzando otra).
+  # 🔒 Va en un job aparte para que el paso del registro siga siendo el ÚLTIMO del job
+  #    `procesar` (test_registro_ejecuciones.py) y para que sus permisos no lleguen a la carga:
+  #    `actions: write` (lanzar la siguiente corrida con el GITHUB_TOKEN de este run, sin llave
+  #    nueva) vive SOLO aquí.
+  # 🔒 `continue-on-error`: un fallo del encadenado no pone en rojo una carga que salió bien. Lo
+  #    que no se encadene lo sigue avisando la tarjeta de Keepa en Buzones.
+  # ⏱️ El tope es el mismo que el de `procesar` porque test_topes_cuelgue.py exige a TODO job de
+  #    un procesar-*.yml uno por encima del éxito más largo medido; este job tarda segundos.
+  encadenar:
+    needs: procesar
+    if: ${{ always() && inputs.modo == 'aplicar' && (needs.procesar.result == 'success' || needs.procesar.result == 'failure') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    continue-on-error: true
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install --quiet supabase psycopg2-binary
+
+      - name: Buscar el siguiente fichero del buzón y lanzarlo
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GH_TOKEN: ${{ github.token }}
+          PROPIO_FICHERO: ${{ inputs.fichero }}
+          PROPIO_RESULTADO: ${{ needs.procesar.result }}
+        run: python -u encadenar_keepa_escaparate.py
