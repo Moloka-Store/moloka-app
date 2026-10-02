@@ -1,0 +1,57 @@
+# ============================================================
+# Moloka - Escaner 2 · CRUCE DEL ESCANEO PRO DE OSMA con los CSV del Visualizador (encargo AG, 02-oct-2026)
+#
+# Lo dispara la v2 (Escaneo PRO · pestaña OSMA) cuando el buzon de Keepa tiene todos los CSV: los de la lista de
+# EAN y los de la lista de ASIN, de ES, IT, FR y DE. Decide cada articulo con las reglas de compra del PRO de HEO
+# (el corte de ventas, los cuatro paises, la ficha compartida y la formula de rentabilidad del viejo, sin tocar),
+# con el cruce por codigo de OSMA y el coste de nuestros packs; cuadra contra la base y deja el Excel, que la
+# biblioteca de escaneos enseña como OSMA.
+#
+# 🔴 REPO PUBLICO: el programa SOLO imprime estados, recuentos y el nombre de los CSV subidos.
+# 🔒 CERO tokens de Keepa y cero llamadas a Amazon: todo sale de los CSV.
+# ============================================================
+name: Moloka - Escaner 2 · Cruce OSMA
+
+on:
+  workflow_dispatch:
+    inputs:
+      pasada:
+        description: 'id de la pasada de OSMA (escaner2_pasada.id) que se cruza con los CSV subidos'
+        type: string
+        required: true
+
+concurrency:
+  group: escaner2-osma-pro
+  cancel-in-progress: false
+
+jobs:
+  cruzar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        # Las mismas versiones FIJADAS que el cruce de HEO.
+        run: pip install supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13
+
+      - name: Cruzar los CSV con la foto
+        timeout-minutes: 25
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PASADA:               ${{ inputs.pasada }}
+        run: python -u escaner2_osma_cruce.py
+
+      - name: Rescate · si el run ha fallado, la fila de este run queda 'fallida'
+        if: failure() || cancelled()
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python -u escaner2_rescate.py cruce

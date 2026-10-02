@@ -405,6 +405,14 @@ jobs:
       - name: 25 septendecies) test_escaner2_osma_disponibilidad.py
         run: python -u test_escaner2_osma_disponibilidad.py
 
+      # (Encargo AG, 2-oct-2026) El Escaneo PRO de OSMA (escaner2_osma*.py): el porte con la regla de la puerta comun y
+      # aplicado UNA vez (el doble lo caza); la foto desde la descarga (crudo = previas + foto, EAN de relleno fuera); los
+      # enlaces por codigo y las dos listas (EAN y ASIN); el cruce por codigo; el factor de nuestros packs (el de lib/packs
+      # de la v2); y los dos programas de punta a punta con la cabecera REAL del Visualizador: el Excel con el formato del
+      # viejo y «No habra mas», el registro sin un EAN ni un precio, y los fallos (porte doble, OSMA fuera de disp, otra foto).
+      - name: 25 septendecies bis) test_escaner2_osma_pro.py
+        run: python -u test_escaner2_osma_pro.py
+
       # (Encadenado de Keepa, 1-oct-2026) El job `encadenar` de procesar-keepa-escaparate.yml: el titulo de la
       # corrida igual en el YAML y en el codigo; el job por estructura (tras `procesar`, solo en aplicar, exito o
       # fallo, continue-on-error, actions: write solo en el); la decision con el buzon, las cargas y las corridas
@@ -469,6 +477,7 @@ jobs:
             test_en_mi_bd.py
             test_escaner2_ficha_compartida.py
             test_escaner2_osma_disponibilidad.py
+            test_escaner2_osma_pro.py
             test_encadenar_keepa.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
