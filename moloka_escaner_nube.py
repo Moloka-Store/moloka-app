@@ -26,6 +26,7 @@ import keepa
 from supabase import create_client
 from datetime import datetime, timezone
 from collections import Counter
+from verificar_subida import fichero_en_storage   # la subida del Excel, por su nombre
 
 # Salida SIN BUFFER: que cada print aparezca en el log de Actions al instante
 # (antes los print quedaban atrapados en el buffer y el log parecia "mudo";
@@ -2355,9 +2356,9 @@ if not _sin_excel:
                 ruta_storage, fp.read(),
                 {'content-type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                  'upsert':'true'})
-        # verificar que esta en Storage
-        _res = sb.storage.from_(BUCKET).list(CARPETA_RESULTADOS) or []
-        subido_ok = any(o.get('name') == nombre_xlsx for o in _res)
+        # verificar que esta en Storage: por SU nombre, no listando la carpeta entera
+        # (que corta en 100 y TCG va el ultimo del alfabeto). Ver verificar_subida.py.
+        subido_ok = fichero_en_storage(sb, BUCKET, CARPETA_RESULTADOS, nombre_xlsx)
         print(f"Excel subido a Storage: {ruta_storage} | verificado: {subido_ok}")
     except Exception as ex:
         print("ATENCION: no se pudo subir el Excel a Storage:", ex)

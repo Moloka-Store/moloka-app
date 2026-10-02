@@ -26,6 +26,7 @@ from supabase import create_client
 # Motor validado (mismo repo). No re-implementamos formulas: se reutilizan tal cual.
 from moloka_escaner_pro import (leer_proveedor, escanear_pro, escribir_excel, norm, PERFILES)
 import en_mi_bd
+from verificar_subida import fichero_en_storage   # la subida del Excel, por su nombre
 
 def abortar(motivo):
     """Un run que NO escanea no es verde: sale en ROJO y con una linea grepable.
@@ -201,8 +202,8 @@ def main():
             sb.storage.from_(BUCKET).upload(ruta_storage, fp.read(),
                 {'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                  'upsert': 'true'})
-        _r = sb.storage.from_(BUCKET).list(CARPETA_RESULTADOS) or []
-        subido_ok = any(o.get('name') == nombre for o in _r)
+        # por SU nombre, no listando la carpeta entera (corta en 100): verificar_subida.py
+        subido_ok = fichero_en_storage(sb, BUCKET, CARPETA_RESULTADOS, nombre)
         print(f"Excel subido: {ruta_storage} | verificado: {subido_ok}")
     except Exception as ex:
         print('ATENCION: no se pudo subir el Excel:', ex)
