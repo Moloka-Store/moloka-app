@@ -1564,12 +1564,17 @@ def poner_columna_ficha_compartida(wb, foto, resultados):
     return n
 
 
-def escribir_celda9(datos, M, ruta=RUTA_MOTOR):
+def escribir_celda9(datos, M, ruta=RUTA_MOTOR, paises=None):
     """`excel_del_viejo` con estos datos (un dict con las llaves de DATOS_CELDA9), en el espacio de nombres
     del motor (sus constantes, `sup`, `pct_comision_celda`) y con `en_bd_txt` = `M.en_bd_txt` (encargo E: la
-    funcion compartida de en_mi_bd.py, inyectada; la del viejo ya no se hereda). Devuelve el libro."""
+    funcion compartida de en_mi_bd.py, inyectada; la del viejo ya no se hereda). Devuelve el libro.
+    (AM, 02-oct-2026) `paises`: los paises que pinta «Análisis», en vez de los cuatro de `PAISES` del viejo; se
+    inyecta en su espacio de nombres (su bucle y su banda gris los leen de ahi). HEO no lo pasa: los cuatro."""
     from contextlib import redirect_stdout
-    ns = sacar_piezas(ruta, ('pct_comision_celda', 'excel_del_viejo'), (), base=dict(M._ns, en_bd_txt=M.en_bd_txt))
+    base = dict(M._ns, en_bd_txt=M.en_bd_txt)
+    if paises:
+        base['PAISES'] = tuple(paises)
+    ns = sacar_piezas(ruta, ('pct_comision_celda', 'excel_del_viejo'), (), base=base)
     with redirect_stdout(io.StringIO()):     # sus `print` de la hoja no ensucian el log del cruce
         return ns['excel_del_viejo'](**{k: datos[k] for k in DATOS_CELDA9})
 
