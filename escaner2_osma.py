@@ -40,6 +40,13 @@ LO PROPIO DE OSMA:
      v2, portado aqui: `factores_por_ficha`).
   6. UN SOLO AÑADIDO EN EL EXCEL: la columna «No habrá más» al final de «Análisis» (descatalogados con existencias).
      Descartado por Fernando (02-oct-2026): ni la marca «solo si va en el palé» ni la linea de control final.
+  7. (AM, 02-oct-2026) LOS PACKS DE AMAZON: si el ASIN de una fila que se vende es un multipack de la unidad de OSMA,
+     el coste es N × precio, con la regla de `factor_pack_amazon` (dos señales que dicen lo mismo); si las señales no
+     bastan o se contradicen, «posible pack en Amazon: revisar» y nunca COMPRAR. Va en «Coherencia caja».
+  8. (AM) EL PEDIDO PREVISTO Y EL PORTE, VIVOS EN EL EXCEL: dos celdas amarillas en «Resumen», «PA (€)» y «Decisión»
+     de «Análisis» como formulas que apuntan a ellas, y la columna «Precio OSMA sin porte (€)» al final. La base no se
+     toca (disp_parametros, la puerta comun y Reponer siguen con su pedido).
+  9. (AM) «Análisis» pinta solo los paises que se calculan cuando es uno (OSMA: ES); HEO sigue con sus cuatro.
 """
 import io
 import re
@@ -553,17 +560,29 @@ def candidatos_osma(fila, datos, por_asin, enlace, asins_enlazados, M, ean_ficha
 
 
 def decidir_osma(fila, cands_por_pais, caidas_por_pais, params, M, eleccion, compartidas, enlace, factores,
-                 caminos=None, apartadas=None):
+                 caminos=None, apartadas=None, senales_pack=None):
     """La puerta de UNA fila de OSMA con las reglas de compra del PRO de HEO (`escaner2_motor.decidir`, sin
     tocarlas), y lo propio de OSMA alrededor:
       · fila enlazada: el IVA (y «En mi BD») se leen de NUESTRA ficha (su EAN), no del EAN nuevo de OSMA;
       · si la ficha que sale es uno de nuestros PACKS, el coste es unidades × precio: se decide OTRA VEZ con ese
         coste (la eleccion de ficha no depende del precio: sale la misma, y se comprueba);
+      · (AM) si no lo es y la fila se vende (puertas d, e y f), el PACK DE AMAZON (`factor_pack_amazon`, con las
+        señales de `senales_pack`: {pais: {asin: señal}} de `senales_pack_csv`): con pack, igual que el nuestro
+        (N × precio y se decide otra vez); con «posible pack», la fila nunca es COMPRAR (baja a VALORAR);
       · el detalle dice por donde llego la ficha y lo apartado.
-    Devuelve el resultado de `decidir` con 'factor' y 'pa' (el coste con el que se ha calculado)."""
+    Devuelve el resultado de `decidir` con 'factor', 'pa' (el coste con el que se ha calculado), 'pack' (None,
+    'nuestro' o 'amazon') y 'pack_amazon' (el veredicto, o None si no se ha mirado)."""
     calc = dict(fila, ean_core=str(enlace['ean_ficha']).strip()) if (enlace and enlace.get('ean_ficha')) else dict(fila)
     r = e2.decidir(calc, cands_por_pais, caidas_por_pais, params, M, eleccion, compartidas)
     factor = (factores or {}).get(r.get('asin'), 1) if r.get('asin') else 1
+    pack = 'nuestro' if factor > 1 else None
+    pack_amz = None
+    if factor == 1 and senales_pack is not None and r.get('asin') and r['puerta'] in e2.PUERTAS_ANALISIS:
+        senal = next((senales_pack[p][r['asin']] for p in params['paises_calculo']
+                      if r['asin'] in (senales_pack.get(p) or {})), None)
+        pack_amz = factor_pack_amazon(senal, cantidad_osma(fila.get('nombre')))
+        if pack_amz['estado'] == PACK_SI:
+            factor, pack = pack_amz['factor'], 'amazon'
     pa = fila['precio_unidad']
     if factor > 1 and pa is not None:
         pa = float((_dec(pa) * factor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
@@ -572,6 +591,8 @@ def decidir_osma(fila, cands_por_pais, caidas_por_pais, params, M, eleccion, com
             raise FalloOsma('la ficha elegida cambia con el coste del pack (%s → %s): no debería'
                             % (r.get('asin'), r2.get('asin')))
         r = r2
+    if pack_amz and pack_amz['estado'] == PACK_DUDOSO and r['puerta'] == 'f':
+        r = _sin_comprar(r, params)
     notas = []
     caminos = caminos or {}
     if enlace and 'codigo' in caminos.values():
@@ -580,17 +601,263 @@ def decidir_osma(fila, cands_por_pais, caidas_por_pais, params, M, eleccion, com
         notas.append('Código %s enlazado, pero el CSV no trae nuestra ficha: decidido por el EAN de OSMA'
                      % fila['producto_heo'])
     if factor > 1:
-        notas.append('pack de %d: coste %d × %s € = %s €' % (factor, factor, _coma(fila['precio_unidad']), _coma(pa)))
+        notas.append(texto_pack(factor, fila['precio_unidad'], pa, pack))
+    if pack == 'amazon':
+        notas.append('señales: %s' % pack_amz['senales'])
+    if pack_amz and pack_amz['estado'] == PACK_DUDOSO:
+        notas.append('%s (%s)' % (TEXTO_POSIBLE_PACK, pack_amz['senales']))
     aparte = sorted({x.get('asin') for xs in (apartadas or {}).values() for x in xs if x.get('asin')})
     if aparte:
         notas.append('apartadas (de otra ficha enlazada o del EAN nuevo): %s' % ', '.join(aparte))
     if notas:
         r = dict(r, detalle='%s · %s' % (r['detalle'], ' · '.join(notas)))
-    return dict(r, factor=factor, pa=pa)
+    return dict(r, factor=factor, pa=pa, pack=pack, pack_amazon=pack_amz)
+
+
+def texto_pack(factor, precio, pa, pack):
+    """«pack de 3: coste 3 × 2,13 € = 6,39 €» (nuestro) o «pack de 48 en Amazon: coste 48 × 0,32 € = 15,36 €»."""
+    return 'pack de %d%s: coste %d × %s € = %s €' % (factor, ' en Amazon' if pack == 'amazon' else '', factor,
+                                                     _coma(precio), _coma(pa))
+
+
+def _sin_comprar(r, params):
+    """(AM) Un «posible pack en Amazon» nunca es COMPRAR: cada pais que decia COMPRAR pasa a VALORAR y la puerta se
+    saca OTRA VEZ con `escaner2_motor._puerta_def` (la e, con su mejor pais). En el detalle se cambia SOLO el trozo
+    que escribe `_puerta_def` (lo de delante, la eleccion de ficha, y lo de detras, la ficha compartida, se quedan)."""
+    paises = [p for p in params['paises_calculo'] if p in (r.get('paises') or {})]
+    antes = e2._puerta_def(dict(r), paises, r['paises'])['detalle']
+    calculos = {p: dict(c, decision='VALORAR') if c.get('decision') == 'COMPRAR' else c for p, c in r['paises'].items()}
+    nuevo = e2._puerta_def(dict(r, paises=calculos), paises, calculos)
+    if r['detalle'].count(antes) != 1:
+        raise FalloOsma('el detalle de la puerta no se puede rehacer (posible pack): %r no está una vez' % antes)
+    return dict(nuevo, detalle=r['detalle'].replace(antes, nuevo['detalle']))
 
 
 def _coma(x):
     return '—' if x is None else ('%.2f' % x).replace('.', ',')
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 4 bis · (AM, 02-oct-2026) LOS PACKS DE AMAZON
+# ═══════════════════════════════════════════════════════════════════════════════
+# OSMA vende la unidad suelta, y el cruce por EAN cae a veces en un ASIN que es un MULTIPACK con el EAN de la unidad
+# (las Melody Pops de 15 g en el «Pack 48»): con el coste de UNA unidad salian COMPRAR falsos (primera pasada real,
+# 655b3e06). Aqui se lee, del CSV del Visualizador, cuantas unidades de OSMA lleva el ASIN, y se multiplica el coste
+# SOLO cuando lo sostienen dos señales independientes que dicen lo mismo.
+#
+# LA REGLA. Cada señal es una LECTURA de N = unidades de OSMA que lleva el ASIN, comparando lo que dice Amazon con la
+# cantidad del nombre de OSMA (`cantidad_osma`: el recuento «24er», «8 Stück», «56x10», y la medida «45g», «50ml»,
+# «100ml + 250ml»; sin recuento en el nombre, el articulo de OSMA es UNA unidad):
+#   · contenido   «Detalles de la unidad»: valor y tipo. En g/ml, ÷ la medida de OSMA; en unidades, ÷ su recuento.
+#   · tamaño      «Tamaño» («45 g (Paquete de 24)» = 1080 g; «24 unità (Confezione da 1)» = 24 ud), igual.
+#   · recuento    «Número de artículos» (solo si es 2 o más: Amazon pone 1 casi siempre), ÷ el recuento de OSMA.
+#   · paquete     «Paquete: Cantidad» (solo si es 2 o más), igual.
+#   · título      «Pack 48», «paquete de 4», «lote de 12», «3 x 50 ml», «10 piezas», «24 unidades» (2 o más), igual.
+#   El contenido en unidades y el recuento son, los dos, el recuento que escribe el vendedor: cuentan como UNA señal.
+# Y el veredicto, por este orden:
+#   1. Si las lecturas de CONTENIDO y TAMAÑO que hay dan todas 1 contra una cantidad LEIDA en el nombre de OSMA, el
+#      ASIN lleva justo lo que vende OSMA: no es pack, diga lo que diga el recuento (el set de Adidas: 100 + 250 ml =
+#      350 ml, aunque Amazon diga «6 artículos»).
+#   2. Si ninguna lectura da 2 o más: no es pack.
+#   3. Se MULTIPLICA por N si todas las lecturas dan N (un entero ≥ 2), vienen de DOS señales distintas como poco, y
+#      el nombre de OSMA se ha leido sin ambigüedad.
+#   4. Si no (una sola señal, o señales que se contradicen, o el nombre de OSMA con dos cantidades distintas): NO se
+#      multiplica y la fila nunca es COMPRAR: baja a VALORAR con «posible pack en Amazon: revisar (…las señales…)».
+# 🔒 Si el ASIN es de una ficha nuestra que ya se valora como pack (`factor_por_asin`), esto no se mira: no se
+#    multiplica dos veces.
+COLUMNAS_PACK = {'n_art': 'Número de artículos', 'valor_ud': 'Detalles de la unidad: Valor de la unidad',
+                 'tipo_ud': 'Detalles de la unidad: Tipo de unidad', 'paquete': 'Paquete: Cantidad',
+                 'tamano': 'Tamaño'}
+# La columna del titulo, como la busca el lector del CSV del viejo (escaner2_heredado_pro.leer_csv_visualizador).
+COLUMNAS_TITULO = ('Título', 'Titulo', 'Title', 'Título principal', 'Titulo principal')
+PACK_SI, PACK_DUDOSO, PACK_NO = 'pack', 'dudoso', 'no'
+# Lo que se admite como «el mismo numero» (58,33 ml × 6 = 349,98 ml frente a 350 ml).
+TOLERANCIA_PACK = 0.02
+TEXTO_POSIBLE_PACK = 'posible pack en Amazon: revisar'
+
+# Unidades, a g, ml o 'ud' (recuento). Lo que no esta aqui (cm, metro, onzas…) no es una cantidad que se compare.
+_UNIDAD = {'ml': ('ml', 1), 'mililitro': ('ml', 1), 'millilitro': ('ml', 1), 'milliliter': ('ml', 1),
+           'milliliters': ('ml', 1), 'mililitros': ('ml', 1), 'cl': ('ml', 10), 'l': ('ml', 1000),
+           'ltr': ('ml', 1000), 'liter': ('ml', 1000), 'litro': ('ml', 1000), 'litros': ('ml', 1000),
+           'g': ('g', 1), 'gr': ('g', 1), 'gramo': ('g', 1), 'gramos': ('g', 1), 'gram': ('g', 1), 'grams': ('g', 1),
+           'kg': ('g', 1000), 'kilogramo': ('g', 1000), 'kilogramos': ('g', 1000),
+           'unidad': ('ud', 1), 'unidades': ('ud', 1), 'unità': ('ud', 1), 'unité': ('ud', 1), 'unités': ('ud', 1),
+           'stück': ('ud', 1), 'stückzahl': ('ud', 1), 'count': ('ud', 1), 'pieza': ('ud', 1), 'piezas': ('ud', 1)}
+_MEDIDA = r'(ml|cl|ltr|liter|l|kg|gr|g)'
+_FIN_PALABRA = r'(?![a-zäöüßà-ÿ])'
+_RE_N_X_MEDIDA = re.compile(r'(?<![\d.,])(\d{1,3})\s*[xX]\s*(\d+(?:[.,]\d+)?)\s*' + _MEDIDA + _FIN_PALABRA, re.I)
+_RE_MEDIDA_OSMA = re.compile(r'(?<![\d.,])(\d+(?:[.,]\d+)?)\s*' + _MEDIDA + r'\.?' + _FIN_PALABRA, re.I)
+_RE_ER = re.compile(r'(?<![\d.,])(\d+)\s*er' + _FIN_PALABRA, re.I)
+_RE_STUECK = re.compile(r'(?<![\d.,])(\d+)\s*-?\s*(?:stück|stck|stk|st|teilig|teil|tlg)\.?' + _FIN_PALABRA, re.I)
+# «56x10» (Tempo: 56 paquetes de 10) es un recuento; «190x68» (una vela) o «20x15cm» son medidas: solo cifras de una
+# o dos y sin unidad ni otra «x» detras.
+_RE_NXM = re.compile(r'(?<![\d.,])(\d{1,2})\s*[xX]\s*(\d{1,2})(?![\d.,])(?!\s*(?:[xX]|cm|mm|m' + _FIN_PALABRA + r'|'
+                     + _MEDIDA + _FIN_PALABRA + r'))', re.I)
+# «im 18er Tray», «12 St. im Aufsteller»: el expositor, no lo que se vende.
+_RE_EXPOSITOR = re.compile(r'^\W*(?:im\s+)?(?:tray|display|aufsteller|karton)' + _FIN_PALABRA, re.I)
+_RE_TAMANO = re.compile(r'^\s*(?:(\d{1,3})\s*x\s*)?(\d+(?:[.,]\d+)?)\s*([a-zà-ÿ]+)\b(?:\s*\((?:paquete de|pack of|'
+                        r'confezione da|lot de|packung mit)\s*(\d+)\)|\s*\((\d+)er[\s-]*pack\))?', re.I)
+_RES_TITULO = [re.compile(p, re.I) for p in (
+    r'\bpack\s*(?:de\s*)?(\d+)\b', r'\b(\d+)\s*-?\s*pack\b', r'\blote\s+de\s+(\d+)\b', r'\bpaquete\s+de\s+(\d+)\b',
+    r'\bcaja\s+de\s+(\d+)\b', r'\b(\d+)\s*x\s*\d+(?:[.,]\d+)?\s*' + _MEDIDA + r'\b', r'\b(\d+)\s+(?:piezas|unidades)\b')]
+
+
+def _numero(s):
+    try:
+        return float(str(s).strip().replace(',', '.'))
+    except (TypeError, ValueError):
+        return None
+
+
+def senales_pack_csv(rutas):
+    """{asin: {'n_art', 'valor_ud', 'tipo_ud', 'paquete', 'tamano', 'titulo'}} del CSV del Visualizador, tal cual
+    (texto). `rutas`: una o varias, del mas nuevo al mas viejo, y EL MAS NUEVO MANDA (como el lector del viejo). Una
+    columna que el CSV no trae sale vacia."""
+    import csv
+    salida = {}
+    for ruta in ([rutas] if isinstance(rutas, str) else rutas):
+        with open(ruta, encoding='utf-8-sig', newline='') as fh:
+            filas = csv.reader(fh)
+            cab = next(filas, [])
+            ix = {h: i for i, h in enumerate(cab)}
+            if 'ASIN' not in ix:
+                continue
+            col_tit = next((c for c in COLUMNAS_TITULO if c in ix), None)
+
+            def celda(fila, col):
+                return fila[ix[col]].strip() if (col in ix and ix[col] < len(fila)) else ''
+            for fila in filas:
+                asin = celda(fila, 'ASIN')
+                if asin and asin not in salida:
+                    salida[asin] = dict({k: celda(fila, c) for k, c in COLUMNAS_PACK.items()},
+                                        titulo=celda(fila, col_tit) if col_tit else '')
+    return salida
+
+
+def cantidad_osma(nombre):
+    """Lo que dice el nombre de OSMA de su cantidad → {'n': recuento o None, 'medida': (total, 'g'|'ml') o None,
+    'ambigua': bool, 'texto': lo leido}. El recuento: «24er», «8 Stück», «132 St.», «77Stk», «32 teil.», «4tlg»,
+    «56x10», o el N de «6x50g»; el de un expositor («im 18er Tray») no cuenta. La medida, en g o ml: «45g», «1,35 Liter», «6x50g» = 300 g,
+    y las de un set con «+» se suman («100ml + 250ml» = 350 ml). Dos recuentos distintos, o dos medidas distintas sin
+    «+», no se adivinan: 'ambigua'."""
+    s = str(nombre or '')
+    recuentos, medidas, tapado = [], [], []
+    for m in _RE_N_X_MEDIDA.finditer(s):
+        dim, k = _UNIDAD[m.group(3).lower()]
+        recuentos.append(int(m.group(1)))
+        medidas.append((m.start(), m.end(), int(m.group(1)) * _numero(m.group(2)) * k, dim))
+        tapado.append((m.start(), m.end()))
+    for m in _RE_MEDIDA_OSMA.finditer(s):
+        if any(a <= m.start() < b for a, b in tapado):
+            continue
+        dim, k = _UNIDAD[m.group(2).lower()]
+        medidas.append((m.start(), m.end(), _numero(m.group(1)) * k, dim))
+    for rx in (_RE_ER, _RE_STUECK):
+        for m in rx.finditer(s):
+            if not _RE_EXPOSITOR.match(s[m.end():]):
+                recuentos.append(int(m.group(1)))
+    for m in _RE_NXM.finditer(s):
+        recuentos.append(int(m.group(1)) * int(m.group(2)))
+    recuentos = [n for n in recuentos if n > 0]
+    ambigua = len(set(recuentos)) > 1
+    n = recuentos[0] if (recuentos and not ambigua) else None
+    medida = None
+    if medidas:
+        medidas.sort()
+        dims = {x[3] for x in medidas}
+        unidas = all('+' in s[medidas[i][1]:medidas[i + 1][0]] for i in range(len(medidas) - 1))
+        if len(dims) == 1 and len(medidas) > 1 and unidas:
+            medida = (sum(x[2] for x in medidas), medidas[0][3])
+        elif len(dims) == 1 and len({round(x[2], 6) for x in medidas}) == 1:
+            medida = (medidas[0][2], medidas[0][3])
+        else:
+            ambigua = True
+    partes = ([('%d ud' % n)] if n else []) + ([_cifra_pack(medida[0]) + ' ' + medida[1]] if medida else [])
+    return {'n': n, 'medida': medida, 'ambigua': ambigua,
+            'texto': ' · '.join(partes) or ('cantidad ambigua' if ambigua else 'sin cantidad: 1 unidad')}
+
+
+def _cifra_pack(x):
+    return ('%d' % round(x)) if abs(x - round(x)) < 1e-9 else ('%.2f' % x).rstrip('0').rstrip('.').replace('.', ',')
+
+
+def _entero_pack(v):
+    """La lectura como entero si lo es (con la tolerancia), y si no None."""
+    if v is None or v <= 0:
+        return None
+    n = round(v)
+    return n if (n >= 1 and abs(v - n) <= TOLERANCIA_PACK * n) else None
+
+
+def lecturas_pack(senal, cant):
+    """Las lecturas de N (unidades de OSMA que lleva el ASIN) de cada señal del CSV → [{'fuente', 'grupo', 'texto',
+    'valor', 'trivial'}]. `trivial`: comparada contra el «1 unidad» que se supone a un nombre de OSMA sin recuento
+    (no contra una cantidad leida)."""
+    if not senal:
+        return []
+    recuento = cant.get('n') or 1
+    sin_recuento = cant.get('n') is None
+    medida = cant.get('medida')
+    salida = []
+
+    def contra(total, dim, fuente, texto, grupo=None):
+        if dim == 'ud':
+            salida.append({'fuente': fuente, 'grupo': grupo or fuente, 'texto': texto, 'valor': total / recuento,
+                           'trivial': sin_recuento})
+        elif medida and medida[1] == dim and medida[0] > 0:
+            salida.append({'fuente': fuente, 'grupo': grupo or fuente, 'texto': texto, 'valor': total / medida[0],
+                           'trivial': False})
+
+    v, tipo = _numero(senal.get('valor_ud')), _UNIDAD.get(str(senal.get('tipo_ud') or '').strip().lower())
+    if v and v > 0 and tipo:
+        contra(v * tipo[1], tipo[0], 'contenido', 'contenido %s %s' % (senal['valor_ud'], senal['tipo_ud']),
+               grupo='recuento' if tipo[0] == 'ud' else 'contenido')
+    m = _RE_TAMANO.match(str(senal.get('tamano') or ''))
+    if m and m.group(3).lower() in _UNIDAD:
+        dim, k = _UNIDAD[m.group(3).lower()]
+        por = int(m.group(1) or 1) * int(m.group(4) or m.group(5) or 1)
+        total = _numero(m.group(2)) * k * por
+        texto = 'tamaño «%s»' % senal['tamano']
+        if dim == 'ud' or (medida and medida[1] == dim):
+            contra(total, dim, 'tamaño', texto)
+        elif por >= 2:
+            # «20 g (Paquete de 3)» sin medida en el nombre de OSMA: cuenta el «Paquete de».
+            salida.append({'fuente': 'tamaño', 'grupo': 'tamaño', 'texto': texto, 'valor': por / recuento,
+                           'trivial': sin_recuento})
+    for clave, fuente, grupo, rotulo in (('n_art', 'recuento', 'recuento', 'n.º de artículos'),
+                                         ('paquete', 'paquete', 'paquete', 'paquete: cantidad')):
+        x = _numero(senal.get(clave))
+        if x is not None and x >= 2 and x == int(x):
+            salida.append({'fuente': fuente, 'grupo': grupo, 'texto': '%s %d' % (rotulo, x), 'valor': x / recuento,
+                           'trivial': sin_recuento})
+    vistos = set()
+    for rx in _RES_TITULO:
+        for mt in rx.finditer(str(senal.get('titulo') or '')):
+            x = int(mt.group(1))
+            if x >= 2 and x not in vistos:
+                vistos.add(x)
+                salida.append({'fuente': 'título', 'grupo': 'título', 'texto': 'título «%s»' % mt.group(0).strip(),
+                               'valor': x / recuento, 'trivial': sin_recuento})
+    return salida
+
+
+def factor_pack_amazon(senal, cant):
+    """El veredicto de la regla de arriba → {'estado': PACK_SI | PACK_DUDOSO | PACK_NO, 'factor', 'senales': texto}."""
+    lecturas = lecturas_pack(senal, cant)
+    texto = 'OSMA %s; Amazon: %s' % (cant['texto'], ' · '.join(
+        '%s → %s' % (x['texto'], _cifra_pack(x['valor'])) for x in lecturas) or 'sin señales')
+    no = {'estado': PACK_NO, 'factor': 1, 'senales': texto}
+    totales = [x for x in lecturas if x['fuente'] in ('contenido', 'tamaño') and not x['trivial']]
+    if totales and all(_entero_pack(x['valor']) == 1 for x in totales):
+        return no
+    packs = [x for x in lecturas if (_entero_pack(x['valor']) or 0) >= 2]
+    if not packs:
+        return no
+    ns = {_entero_pack(x['valor']) for x in packs}
+    contra = [x for x in lecturas if _entero_pack(x['valor']) not in ns]
+    if len(ns) == 1 and not contra and not cant['ambigua'] and len({x['grupo'] for x in packs}) >= 2:
+        return {'estado': PACK_SI, 'factor': ns.pop(), 'senales': texto}
+    return {'estado': PACK_DUDOSO, 'factor': 1, 'senales': texto}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -611,25 +878,124 @@ def foto_para_excel(foto, resultados, enlaces):
         e = enlaces.get(f['producto_heo'])
         if e and e.get('ean_ficha'):
             g['ean_core'] = str(e['ean_ficha']).strip()
-        if r.get('factor', 1) > 1:
+        factor = r.get('factor', 1)
+        # (AM) Lo que pide la celda viva de «PA (€)»: el precio de OSMA sin porte (× N si es pack) y el factor.
+        g['_factor'] = factor
+        g['_sin_porte'] = (None if f.get('precio_catalogo') is None
+                           else float(_dec(f['precio_catalogo']) * factor))
+        if factor > 1:
             g['precio_unidad'] = r['pa']
-            g['nombre'] = '%s · pack de %d (%d × %s €)' % (f.get('nombre') or '', r['factor'], r['factor'],
-                                                         _coma(f['precio_unidad']))
+            g['nombre'] = '%s · pack de %d%s (%d × %s €)' % (f.get('nombre') or '', factor,
+                                                           ' en Amazon' if r.get('pack') == 'amazon' else '', factor,
+                                                           _coma(f['precio_unidad']))
+            # (AM) «Coherencia caja», que en OSMA iba vacia: el pack, nuestro o de Amazon.
+            g['aviso_caja'] = texto_pack(factor, f['precio_unidad'], r['pa'], r.get('pack'))
+        elif (r.get('pack_amazon') or {}).get('estado') == PACK_DUDOSO:
+            g['aviso_caja'] = '%s (%s)' % (TEXTO_POSIBLE_PACK, r['pack_amazon']['senales'])
         salida.append(g)
     return salida
 
 
-def excel_como_el_viejo_osma(foto_excel, resultados, apartados, M, eleccion=None):
+def paises_de_la_hoja(params, M):
+    """(AM) Los paises que pinta «Análisis»: con UN solo pais calculado (OSMA, solo ES), ese; con mas, los cuatro del
+    viejo, como HEO (las filas de un pais sin CSV salen «Sin datos»)."""
+    calc = list(params.get('paises_calculo') or [])
+    return [p for p in M.PAISES if p in calc] if len(calc) == 1 else list(M.PAISES)
+
+
+def excel_como_el_viejo_osma(foto_excel, resultados, apartados, M, eleccion=None, paises=None):
     """Las hojas del viejo con SU codigo (la Celda 9, `escaner2_motor.escribir_celda9`) y la columna «Ficha
     compartida», como el PRO de HEO (`escaner2_motor.excel_como_el_viejo`), con `PROVEEDOR` = 'OSMA': la Celda 9
     solo escribe «Chase_manual» para HEO (son los Funko chase sin ASIN), igual que hacia el escaner viejo con
-    OSMA. Y DETRAS de todo, en «Análisis», la columna «No habrá más»."""
+    OSMA. Y DETRAS de todo, en «Análisis», la columna «No habrá más» y (AM) «Precio OSMA sin porte (€)», con «PA (€)»
+    y «Decisión» vivas (`poner_pedido_vivo`). (AM) `paises`: los de `paises_de_la_hoja`."""
     datos = e2.datos_como_el_viejo(foto_excel, resultados, apartados, M, eleccion)
     datos['PROVEEDOR'] = PROVEEDOR
-    wb = e2.escribir_celda9(datos, M)
+    wb = e2.escribir_celda9(datos, M, paises=paises)
     e2.poner_columna_ficha_compartida(wb, foto_excel, resultados)
     poner_columna_no_habra_mas(wb, foto_excel)
+    poner_pedido_vivo(wb, foto_excel, resultados)
     return wb
+
+
+# ── (AM) EL PEDIDO PREVISTO Y EL PORTE, VIVOS EN EL EXCEL ────────────────────────────────────────────────────────
+# Fernando quiere ver que pasa si pide mas o menos. NO se toca la base (disp_parametros.pedido_previsto_eur, la
+# puerta comun ni Reponer): en «Resumen» van dos celdas amarillas, el pedido previsto y el porte de la pasada, y en
+# «Análisis» «PA (€)» y «Decisión» son formulas que apuntan a ellas (por su nombre: PedidoPrevisto y PorteEnvio).
+#   · PA (€) = REDONDEAR(sin porte × (1 + porte ÷ pedido); 2), la cuenta de `pa_con_porte` (el redondeo DESPUES del
+#     porte, como la puerta comun); en un pack, N × REDONDEAR(sin porte ÷ N × (1 + porte ÷ pedido); 2), como
+#     `decidir_osma` (N × el precio de la unidad ya redondeado). Sin pedido (o a 0), sin porte, como `porte_de`.
+#   · Decisión = la de `decision_de` del viejo con el margen de la fila: COMPRAR si margen × 100 ≥ 10, VALORAR si ≥ 1,
+#     y si no NO COMPRAR; y en un «posible pack en Amazon», nunca COMPRAR. Solo donde la fila tiene cuenta (si no,
+#     «Sin datos» escrito, como hoy). Beneficio, ROI y Margen no se tocan.
+COLUMNA_SIN_PORTE = 'Precio OSMA sin porte (€)'
+ANCHO_SIN_PORTE = 16
+NOMBRE_PEDIDO, NOMBRE_PORTE = 'PedidoPrevisto', 'PorteEnvio'
+CELDA_PEDIDO, CELDA_PORTE = '$B$2', '$B$3'
+UMBRAL_COMPRAR, UMBRAL_VALORAR = 10, 1   # los de decision_de (escaner2_heredado_nube.py), en % de margen
+
+
+def formula_pa(letra_sin_porte, fila, factor):
+    pct = 'IF(N(%s)>0,N(%s)/%s,0)' % (NOMBRE_PEDIDO, NOMBRE_PORTE, NOMBRE_PEDIDO)
+    if factor > 1:
+        return '=%d*ROUND(%s%d/%d*(1+%s),2)' % (factor, letra_sin_porte, fila, factor, pct)
+    return '=ROUND(%s%d*(1+%s),2)' % (letra_sin_porte, fila, pct)
+
+
+def formula_decision(letra_margen, fila, posible_pack):
+    m = '%s%d*100' % (letra_margen, fila)
+    if posible_pack:
+        return '=IF(%s>=%d,"VALORAR","NO COMPRAR")' % (m, UMBRAL_VALORAR)
+    return '=IF(%s>=%d,"COMPRAR",IF(%s>=%d,"VALORAR","NO COMPRAR"))' % (m, UMBRAL_COMPRAR, m, UMBRAL_VALORAR)
+
+
+def poner_pedido_vivo(wb, foto_excel, resultados):
+    """«Precio OSMA sin porte (€)» detras de la ultima columna de «Análisis» (alarga la tabla), y «PA (€)» y
+    «Decisión» como formulas (ver arriba). Devuelve cuantas filas llevan la Decisión viva."""
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.table import TableColumn
+    ws = wb['Análisis']
+    cab = [c.value for c in ws[1]]
+    i = {n: cab.index(n) + 1 for n in ('EAN', 'PA (€)', 'Beneficio (€)', 'Margen', 'Decisión')}
+    col = len(cab) + 1
+    letra = get_column_letter(col)
+    ws.cell(row=1, column=col, value=COLUMNA_SIN_PORTE).font = Font(bold=True)
+    ws.column_dimensions[letra].width = ANCHO_SIN_PORTE
+    por_ean = {str(f['ean_original']): f for f in foto_excel}
+    por_foto = {r['foto_id']: r for r in resultados}
+    n = 0
+    for fila in range(2, ws.max_row + 1):
+        f = por_ean[str(ws.cell(row=fila, column=i['EAN']).value)]
+        r = por_foto.get(f['id']) or {}
+        if f.get('_sin_porte') is None:
+            continue
+        c = ws.cell(row=fila, column=col, value=f['_sin_porte'])
+        c.number_format = '0.000'
+        if ws.cell(row=fila, column=i['PA (€)']).value is not None:
+            ws.cell(row=fila, column=i['PA (€)']).value = formula_pa(letra, fila, f.get('_factor', 1))
+        # La Decision, viva solo donde la hoja echa la cuenta (el Beneficio es formula); si no, «Sin datos» escrito.
+        if str(ws.cell(row=fila, column=i['Beneficio (€)']).value or '').startswith('='):
+            dudoso = (r.get('pack_amazon') or {}).get('estado') == PACK_DUDOSO
+            ws.cell(row=fila, column=i['Decisión']).value = formula_decision(
+                get_column_letter(i['Margen']), fila, dudoso)
+            n += 1
+    for tabla in ws.tables.values():
+        ini, fin = tabla.ref.split(':')
+        tabla.ref = '%s:%s%s' % (ini, letra, re.sub(r'^[A-Z]+', '', fin))
+        if tabla.tableColumns:
+            tabla.tableColumns.append(TableColumn(id=len(tabla.tableColumns) + 1, name=COLUMNA_SIN_PORTE))
+        if tabla.autoFilter is not None:
+            tabla.autoFilter.ref = tabla.ref
+    return n
+
+
+def poner_celdas_pedido(wb, ws_resumen):
+    """Los nombres PedidoPrevisto y PorteEnvio, a las dos celdas de entrada del Resumen."""
+    from openpyxl.workbook.defined_name import DefinedName
+    hoja = "'%s'" % ws_resumen.title
+    for nombre, celda in ((NOMBRE_PEDIDO, CELDA_PEDIDO), (NOMBRE_PORTE, CELDA_PORTE)):
+        wb.defined_names[nombre] = DefinedName(nombre, attr_text='%s!%s' % (hoja, celda))
 
 
 def poner_columna_no_habra_mas(wb, foto):
@@ -673,7 +1039,8 @@ def escribir_excel(foto, resultados, apartados, M, info):
     from openpyxl.styles import Font
     por_foto = {f['id']: f for f in foto}
     foto_excel = foto_para_excel(foto, resultados, info['enlaces'])
-    wb = excel_como_el_viejo_osma(foto_excel, resultados, apartados, M, eleccion=info.get('eleccion'))
+    wb = excel_como_el_viejo_osma(foto_excel, resultados, apartados, M, eleccion=info.get('eleccion'),
+                                  paises=paises_de_la_hoja(info['params'], M))
 
     def hoja(nombre, cabecera, filas, anchos=None):
         ws = wb.create_sheet(nombre)
@@ -689,7 +1056,35 @@ def escribir_excel(foto, resultados, apartados, M, info):
 
     p = info['params']
     po = info.get('porte') or {}
-    filas_res = [['Pasada', info['pasada']], ['Cruce', info['cruce']],
+    # (AM) Arriba, lo que se puede tocar: el pedido y el porte (celdas amarillas, con nombre), y lo que cambia con
+    # ellos. Las filas 2 y 3 son las de CELDA_PEDIDO y CELDA_PORTE.
+    an = wb['Análisis']
+    cab_an = [c.value for c in an[1]]
+    from openpyxl.utils import get_column_letter
+    l_pais, l_dec = (get_column_letter(cab_an.index(n) + 1) for n in ('País', 'Decisión'))
+    pais_cuenta = 'ES'
+    en_hoja = [r for r in resultados if r['puerta'] in e2.PUERTAS_ANALISIS]
+    pasada_dec = {d: sum(1 for r in en_hoja if ((r.get('paises') or {}).get(pais_cuenta) or {}).get('decision') == d)
+                  for d in ('COMPRAR', 'VALORAR')}
+    vivas = {d: "=COUNTIFS('Análisis'!$%s:$%s,\"%s\",'Análisis'!$%s:$%s,\"%s\")"
+                % (l_pais, l_pais, pais_cuenta, l_dec, l_dec, d) for d in ('COMPRAR', 'VALORAR')}
+    pk = [r.get('pack_amazon') or {} for r in en_hoja]
+    n_mult = sum(1 for r in en_hoja if r.get('pack') == 'amazon')
+    n_dud_val = sum(1 for r, x in zip(en_hoja, pk) if x.get('estado') == PACK_DUDOSO and r['puerta'] == 'e')
+    n_dud_no = sum(1 for r, x in zip(en_hoja, pk) if x.get('estado') == PACK_DUDOSO and r['puerta'] != 'e')
+    filas_vivas = [
+        ['Pedido previsto (€)', po.get('pedido_previsto')],
+        ['Porte del envío (€)', po.get('gastos_envio')],
+        ['Porte en el precio', '=IF(N(%s)>0,N(%s)/%s,0)' % (NOMBRE_PEDIDO, NOMBRE_PORTE, NOMBRE_PEDIDO)],
+        ['Nota', 'Si el pedido no cabe en un palé, pon aquí el porte de los palés que sean. Al cambiar estas dos '
+                 'celdas cambian «PA (€)», el beneficio y la «Decisión» de «Análisis», y estos recuentos.'],
+        ['Recuento en %s' % pais_cuenta, 'con el pedido de arriba (fórmula)', 'en la pasada'],
+        ['COMPRAR', vivas['COMPRAR'], pasada_dec['COMPRAR']],
+        ['VALORAR', vivas['VALORAR'], pasada_dec['VALORAR']],
+        ['Puertas y cuadre', 'con el pedido de la pasada'],
+        ['Packs de Amazon detectados', '%d multiplicados · %d dudosos a VALORAR%s' % (
+            n_mult, n_dud_val, (' · %d dudosos sin margen (NO COMPRAR)' % n_dud_no) if n_dud_no else '')]]
+    filas_res = filas_vivas + [['Pasada', info['pasada']], ['Cruce', info['cruce']],
                  ['Proveedor', 'OSMA · artículos con marca y existencias'],
                  ['Descarga de OSMA', '%s (pasada %s)' % (info.get('descarga_en') or '—', info.get('disp_pasada') or '—')],
                  ['Porte en el precio (el de la puerta común, una sola vez)',
@@ -722,7 +1117,15 @@ def escribir_excel(foto, resultados, apartados, M, info):
         '' if f.get('usado') else ' · NO USADO', (' · ' + f['error']) if f.get('error') else '')]
         for f in info['ficheros']]
     filas_res += [['Aviso', a] for a in info['avisos']]
-    hoja('Resumen', ['Qué', 'Valor'], filas_res, {'A': 44, 'B': 90})
+    wr = hoja('Resumen', ['Qué', 'Valor'], filas_res, {'A': 44, 'B': 90, 'C': 14})
+    from openpyxl.styles import PatternFill
+    amarillo = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
+    for celda in (CELDA_PEDIDO, CELDA_PORTE):
+        wr[celda.replace('$', '')].fill = amarillo
+        wr[celda.replace('$', '')].number_format = '#,##0.00'
+        wr['A' + celda.split('$')[-1]].font = Font(bold=True)
+    wr['B4'].number_format = '0.00%'
+    poner_celdas_pedido(wb, wr)
 
     hoja('Comparación', ['EAN', 'Nombre', 'Categoría', 'Viejo', 'País viejo', 'Fecha viejo (UTC)', 'Excel viejo',
                          'Puerta nuevo', 'Nuevo', 'País nuevo', 'Fecha nuevo (UTC)', 'Diferencia de criterio',

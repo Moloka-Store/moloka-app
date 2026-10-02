@@ -416,6 +416,154 @@ _r1 = e2.decidir(_prot, _cands, _caidas, _params, M, None, {})
 eq('A7 · …con un margen distinto del de una unidad (sin el factor saldría mejor de lo que es)',
    _r1['paises']['ES']['margen'] > _rp['paises']['ES']['margen'], True)
 
+print('A8 · (AM) los packs de Amazon, con las señales REALES del CSV de la primera pasada (655b3e06, 02-oct-2026)')
+# (ASIN, nombre en OSMA, «Número de artículos», «Valor de la unidad», «Tipo de unidad», «Paquete: Cantidad», «Tamaño»,
+# «Título»), sacadas del CSV con `senales_pack_csv`, no tecleadas.
+SENALES = [
+    ('B004SGFVHE', 'Food Chupa Chups Melody Pops 15g', '48', '48', 'unidad', '1', '48 Unidad (Paquete de 1)',
+     'CHUPA CHUPS Melody Pops, Caramelo con Palo, Sabor Fresa, Pack 48 Piruletas'),
+    ('B00XAQ99PI', 'Food Haribo Mega Roulette 45g Frucht', '1', '1080', 'gramo', '1', '45 g (Paquete de 24)',
+     'Haribo Mega Roulette Caramelos de Goma - 45g cada paquete, 1080 gr en total'),
+    ('B0DDF9RDYG', 'Seife Lux 80g Aqua Sparkle', '12', '960', 'gramo', '12', '80 g (Paquete de 12)',
+     'Lux Aqua Sparkle - Lote de 12 jabones perfumados florales con aroma a almizcle y aceite de menta (80 g)'),
+    ('B08W2BS7VD', 'RUSTIK Stumpenkerze 190x68 altrot', '4', '4', 'unidad', '1', '19 x 7 cm',
+     'Bolsius Vela rústica de pilar rojo oscuro, paquete de 4, larga duración de combustión de 85 horas, vela '
+     'doméstica, decoración de interiores, sin perfume, cera vegana natural, sin aceite de palma, 19 x'),
+    ('B003UWY00Q', 'Swiffer Wet Wischtücher Nachfüllpackung 24er', '1', '72', 'unidad', '1', '24 unità (Confezione da 1)',
+     'Swiffer Limpiador De Pisos Suelo Mojado De Toallitas Con El Limón Fresco Olor'),
+    ('B000GPI7YA', 'TESA Klebefilm 33mx15mm Lose, Preis pro Rolle', '1', '10', 'unidad', '1', '33m x 15mm',
+     'tesa film transparente, Cinta Autoadhesiva Resistente al Paso del Tiempo y al Rompimiento, Cinta de Oficina con '
+     'Fuerte Adhesión, 33 m x 15 mm, 10 Piezas'),
+    ('B098DWKTCY', 'Dr. Beckmann Fleckenteufel 50ml Fett+Saucen', '3', '150', 'mililitro', '3', '50 ml (Paquete de 3)',
+     'Dr. Beckmann Manchas grasas y salsas | Quitamanchas especial contra manchas de grasa, manchas de chocolate, etc. '
+     '| 3 x 50 ml'),
+    ('B00829FH1I', 'Vileda Schwammtuch Original 8er', '8', '8', 'unidad', '1', '8 Unidad (Paquete de 1)',
+     'Vileda 142274 esponja paño – Alta Absorción hasta 100 ml, 1 paquete de 8 [colores surtidos]'),
+    ('B0DCNWGPHM', 'Ohropax Ohrstöpsel Color 8 Stück', '8', '8', 'unidad', '1', '8 unidades',
+     'OHROPAX Tapones para los oídos Color – Tapones para los oídos de espuma suave – Muy cómodos incluso durante mu'),
+    ('B0DCNTJKHZ', 'Ohropax Ohrstöpsel Soft 10 Stück', '10', '10', 'unidad', '1', '10 unidades',
+     'OHROPAX Tapones para los oídos blandos de espuma suave – muy discretos y cómodos – Aislamiento acústico SNR 31'),
+    ('B000EGQT7I', 'Batterie VARTA Akku Power Mignon AA 2er Blister', '2', '2', 'unidad', '1', '2 unidades',
+     'VARTA Pilas AA, recargables, paquete de 2, Recharge Accu Power, batería recargable, 2100 mAh Ni-MH, sin efecto'),
+    ('B08H5F8184', 'Gillette Blue3 Einwegrasierer 12er', '1', '12', 'unidad', '1', '12 unidad (Paquete de 1)',
+     'Gillette Blue 3 Smooth Afeitadoras Desechables, 12 unidades (paquete de 1)'),
+    ('B0000WU094', 'Gillette Contour Plus 10er Klingen', '10', '10', 'unidad', '1', '1 unidad (Paquete de 10)',
+     'Gillette Contour Plus Recambio de Maquinilla de Afeitar para Hombre 10 Recambios'),
+    ('B000094G2Z', 'Wasserfilter Kartusche BRITA CLASSIC 3er-Pack', '3', '3', 'unidad', '3', '3 Unidad (Paquete de 1)',
+     'Brita M91904 - Filtro classic, 3 unidades'),
+    ('B014SY8BRC', 'Tempo Taschentücher 56x10 4 lagig', '560', '560', 'unidad', '1', '1 unidad (Paquete de 560)',
+     'Tempo Classic Pañuelos (56 paquetes de 10 pañuelos)'),
+    ('B0C9T9RZT3', 'Corega Gebissreiniger Tabs Intensiv 108er', '1', '108', 'unidad', '1', '',
+     'Corega Limpiador dental intensivo de TABS, protección completa para prótesis dentales extraíbles/terceros '
+     'dientes, 1 x 108 pastillas de limpieza de dientes'),
+    ('B0BXBDB433', 'Calgon 4in1 Tabs 77Stk Wasserenthärter 1001g', '1', '77', 'unidad', '', '77 unidad (Paquete de 1)',
+     'Calgon Tabs 4 en 1 77'),
+    ('B0BLW8TF8V', 'Pampers Premium Protect. Gr.1 New Baby 180 Stück', '1', '180', 'unidad', '1', 'Größe 1 (180 Stück)',
+     'Pampers Pañales para bebé tamaño 1 (2-5 kg) Premium Protection, Newborn, HalBMONATSBOX, la mejor comodidad y p'),
+    ('B0BLW7N46Z', 'Pampers Baby Dry Gr.7 Extra Large (15+kg) 132 St.', '1', '132', 'unidad', '1', 'Größe 7 (132 Stück)',
+     'Pampers Pañales tamaño 7 (15 kg+) Baby Dry, extra grande, caja de meses, hasta 12 horas de protección contra f'),
+    ('B0BCFMZ8WR', 'Swiffer Wet Wischtücher NF 24er Morning Fresh', '1', '24', 'unidad', '', '24 unidad (Paquete de 1)',
+     'Mopa Swiffer Paños Húmedos Con Fragancia Fresca De Frescura de la mañana 24 Unidades Para Una Limpieza Rápida '),
+    ('B0794VHRVZ', 'Lenor Trocknertücher 34er Aprilfrisch', '1', '34', 'unidad', '1', '34 unidad (Paquete de 1)',
+     'Lenor -Toallitas de secado con aroma a flores de primavera, cuidado de la ropa en la secadora, lavado sin arru'),
+    ('B087RWYJN3', 'Dr. Beckmann Waschmaschinen Reiniger Frische 3er', '3', '60', 'gramo', '1', '20 g (Paquete de 3)',
+     'Dr. Beckmann Limpiador de lavadora | 3 x 20 g Caps'),
+    ('B0FC2RR77V', 'Adidas GP EdT 100ml + Dusch 250ml Ice Dive', '6', '350', 'mililitro', '', '58.33 ml (Paquete de 6)',
+     'adidas Ice Dive Giftset including an Eau de Toilette and Shower Gel'),
+    ('B0CVHD3RKQ', 'Scholl Einlegesohle GelActiv Everyday Größe S', '2', '2', 'unidad', '1', '35.5-40.5 cm',
+     'Scholl GelActiv Plantillas Everyday para mujer, pies cómodos durante todo el día, amortiguación de espuma visc'),
+    ('B01GIE0QSM', 'Protefix Haftcreme 47g Extra Stark mit Aloe Vera', '3', '141', 'gramo', '3', '47 g (Paquete de 3)',
+     'PROTEFIX Crema Adhesiva Extra Fuerte Aloe Vera 3x40ml')]
+_sen = {a: {'n_art': n, 'valor_ud': v, 'tipo_ud': t, 'paquete': q, 'tamano': tam, 'titulo': tit}
+        for a, _nom, n, v, t, q, tam, tit in SENALES}
+_nom = {a: x[1] for x in SENALES for a in (x[0],)}
+
+
+def _veredicto(asin):
+    x = eo.factor_pack_amazon(_sen[asin], eo.cantidad_osma(_nom[asin]))
+    return x['estado'], x['factor']
+
+
+SI_PACK = {'B004SGFVHE': 48, 'B00XAQ99PI': 24, 'B0DDF9RDYG': 12, 'B08W2BS7VD': 4, 'B000GPI7YA': 10, 'B098DWKTCY': 3}
+eq('🔴 A8 · se multiplican, cada uno con dos señales o más: Melody Pops ×48, Haribo ×24, Lux ×12, Rustik ×4, TESA ×10, '
+   'Fleckenteufel ×3', {a: _veredicto(a) for a in SI_PACK}, {a: (eo.PACK_SI, n) for a, n in SI_PACK.items()})
+eq('🔴 A8 · el Swiffer Wet 24er NO va ×3: el contenido dice 72 pero el tamaño dice «24 unità» (y nuestra ficha, '
+   'enlazada a su código, es «refill 24\'s»): se contradicen → posible pack, sin multiplicar',
+   _veredicto('B003UWY00Q'), (eo.PACK_DUDOSO, 1))
+NO_PACK = ['B00829FH1I', 'B0DCNWGPHM', 'B0DCNTJKHZ', 'B000EGQT7I', 'B08H5F8184', 'B0000WU094', 'B000094G2Z',
+           'B014SY8BRC', 'B0C9T9RZT3', 'B0BXBDB433', 'B0BLW8TF8V', 'B0BLW7N46Z', 'B0BCFMZ8WR', 'B0794VHRVZ', 'B087RWYJN3']
+eq('🔴 A8 · NO se multiplican: la cantidad de OSMA ya coincide (Vileda 8er, Ohropax 8 y 10 Stück, VARTA 2er, Blue3 12er, '
+   'Contour 10er, BRITA 3er, Tempo 56x10, Corega 108er, Calgon 77Stk, Pampers 180 y 132, Swiffer NF 24er, Lenor 34er, '
+   'Dr. Beckmann 3er)', {a: _veredicto(a) for a in NO_PACK}, {a: (eo.PACK_NO, 1) for a in NO_PACK})
+eq('🔴 A8 · Adidas: Amazon dice «6 artículos», pero 100 + 250 ml = 350 ml es lo que lleva el ASIN: el set, no un pack',
+   _veredicto('B0FC2RR77V'), (eo.PACK_NO, 1))
+eq('A8 · Scholl GelActiv: «2 artículos» y «2 unidad» son el mismo recuento del vendedor (una sola señal; es un par): '
+   'posible pack, no se multiplica', _veredicto('B0CVHD3RKQ'), (eo.PACK_DUDOSO, 1))
+eq('A8 · la cantidad del nombre de OSMA: medida, recuento, «56x10», el set con «+», la vela «190x68» (medida, no '
+   'recuento), el expositor y el «6x50g»',
+   [(c['n'], c['medida'], c['ambigua']) for c in map(eo.cantidad_osma, (
+       'Food Chupa Chups Melody Pops 15g', 'Swiffer Wet Wischtücher Nachfüllpackung 24er',
+       'Tempo Taschentücher 56x10 4 lagig', 'Adidas GP EdT 100ml + Dusch 250ml Ice Dive',
+       'RUSTIK Stumpenkerze 190x68 altrot', 'Duftöl 10ml Christkindl in Glasfl. im 18er Tray',
+       'WC Frisch Kraft-Aktiv Lemon XXL-Pack 6x50g', 'Perwoll Feinwaschmittel Sport 27WL 1,35 Liter',
+       'Pampers Baby Dry Gr.7 Extra Large (15+kg) 132 St.', 'Wundverb. Erste Hilfe Reise Set 32 teil.',
+       'Kosmetik 3er Set mit 4 Stück'))],
+   [(None, (15.0, 'g'), False), (24, None, False), (560, None, False), (None, (350.0, 'ml'), False),
+    (None, None, False), (None, (10.0, 'ml'), False), (6, (300.0, 'g'), False), (None, (1350.0, 'ml'), False),
+    (132, None, False), (32, None, False), (None, None, True)])
+eq('A8 · con dos recuentos distintos en el nombre de OSMA, aunque Amazon diga lo mismo dos veces: posible pack',
+   eo.factor_pack_amazon(_sen['B08W2BS7VD'], eo.cantidad_osma('Kosmetik 3er Set mit 4 Stück'))['estado'],
+   eo.PACK_DUDOSO)
+
+# La decision: el pack de Amazon cuesta N × el precio, el «posible pack» nunca es COMPRAR, y nuestro pack no se
+# multiplica dos veces. Precios de Amazon inventados (los de `_r`: 10 €, 15 %, 3 € de FBA).
+_melody = eo.construir_foto([d('7020', ean13('400000000020'), 0.299, 'CHUPA CHUPS',
+                               nombre='Food Chupa Chups Melody Pops 15g')], {}, M, po['pct'])[0][0]
+_sp = {'ES': {'B004SGFVHE': _sen['B004SGFVHE'], 'B0CVHD3RKQ': _sen['B0CVHD3RKQ'], 'B01GIE0QSM': _sen['B01GIE0QSM']}}
+_c_mel = {'ES': [_r('B004SGFVHE', 'Pack 48 Piruletas')]}
+_r_uno = eo.decidir_osma(_melody, _c_mel, {'ES': {'B004SGFVHE': 30}}, _params, M, None, {}, None, {})
+eq('A8 · sin las señales (como hasta hoy), las Melody Pops a 0,32 € salen COMPRAR', (_r_uno['puerta'], _r_uno['pack']),
+   ('f', None))
+_r48 = eo.decidir_osma(_melody, _c_mel, {'ES': {'B004SGFVHE': 30}}, _params, M, None, {}, None, {}, senales_pack=_sp)
+eq('🔴 A8 · con ellas: pack de 48 en Amazon, coste 48 × 0,32 € = 15,36 € → NO COMPRAR, y el detalle lo dice como el pack '
+   'nuestro', (_r48['puerta'], _r48['factor'], _r48['pa'], _r48['paises']['ES']['pa'], _r48['pack'],
+               'pack de 48 en Amazon: coste 48 × 0,32 € = 15,36 €' in _r48['detalle']),
+   ('d', 48, 15.36, 15.36, 'amazon', True))
+_scholl = eo.construir_foto([d('7021', ean13('400000000021'), 6.499, 'SCHOLL',
+                               nombre='Scholl Einlegesohle GelActiv Everyday Größe S')], {}, M, po['pct'])[0][0]
+_c_sch = {'ES': [dict(_r('B0CVHD3RKQ', 'Scholl GelActiv'), buybox=25.0, nuevo=25.0)]}
+_rs = eo.decidir_osma(_scholl, _c_sch, {'ES': {'B0CVHD3RKQ': 30}}, _params, M, None, {}, None, {}, senales_pack=_sp)
+_rs0 = eo.decidir_osma(_scholl, _c_sch, {'ES': {'B0CVHD3RKQ': 30}}, _params, M, None, {}, None, {})
+eq('🔴 A8 · el posible pack con margen de COMPRAR baja a VALORAR (puerta e, y ES dice VALORAR), con el mismo coste y '
+   'margen, y el detalle dice por qué',
+   (_rs0['puerta'], _rs['puerta'], _rs['motivo'], _rs['paises']['ES']['decision'], _rs['pa'],
+    _rs['paises']['ES']['margen'] == _rs0['paises']['ES']['margen'], _rs['detalle'].startswith('VALORAR en ES (margen '),
+    'posible pack en Amazon: revisar (OSMA sin cantidad: 1 unidad; Amazon: contenido 2 unidad → 2 · n.º de artículos 2 '
+    '→ 2)' in _rs['detalle'], _rs['factor']),
+   ('f', 'e', 'e_valorar', 'VALORAR', 6.94, True, True, True, 1))
+_rp3 = eo.decidir_osma(_prot, _cands, _caidas, _params, M, None, {}, None, FACTORES, senales_pack=_sp)
+eq('🔴 A8 · la Protefix es NUESTRO pack de 3 (y Amazon también dice 3): 3 × 2,13 = 6,39, no 9 × 2,13; ni se mira el de '
+   'Amazon', (_rp3['factor'], _rp3['pa'], _rp3['pack'], _rp3['pack_amazon'], 'en Amazon' in _rp3['detalle']),
+   (3, 6.39, 'nuestro', None, False))
+_rc = eo.decidir_osma(_melody, _c_mel, {'ES': {'B004SGFVHE': 2}}, _params, M, None, {}, None, {}, senales_pack=_sp)
+eq('A8 · lo que no se vende (puerta c) no se mira: sin decisión, no hay coste que corregir',
+   (_rc['puerta'], _rc['pack_amazon'], _rc['factor']), ('c', None, 1))
+
+print('A9 · (AM) las fórmulas vivas de «Análisis»')
+eq('A9 · «PA (€)»: el sin porte × (1 + porte ÷ pedido), redondeado a 2 DESPUÉS; sin pedido, sin porte',
+   eo.formula_pa('AD', 7, 1), '=ROUND(AD7*(1+IF(N(PedidoPrevisto)>0,N(PorteEnvio)/PedidoPrevisto,0)),2)')
+eq('A9 · …y en un pack de N, N × el precio de UNA unidad ya redondeado (como `decidir_osma` y la Protefix 3 × 2,13)',
+   eo.formula_pa('AD', 7, 48), '=48*ROUND(AD7/48*(1+IF(N(PedidoPrevisto)>0,N(PorteEnvio)/PedidoPrevisto,0)),2)')
+eq('A9 · «Decisión»: la de decision_de del viejo (≥ 10 % COMPRAR, ≥ 1 % VALORAR); el posible pack, sin COMPRAR',
+   (eo.formula_decision('P', 7, False), eo.formula_decision('P', 7, True)),
+   ('=IF(P7*100>=10,"COMPRAR",IF(P7*100>=1,"VALORAR","NO COMPRAR"))', '=IF(P7*100>=1,"VALORAR","NO COMPRAR")'))
+_dec_viejo = e2.sacar_piezas(e2.RUTA_MOTOR, ('decision_de',), ())['decision_de']
+eq('A9 · 🔴 los umbrales de la fórmula son la frontera de decision_de del viejo (se le pregunta a él justo en el umbral '
+   'y una millonésima por debajo)',
+   [_dec_viejo(eo.UMBRAL_COMPRAR / 100), _dec_viejo(eo.UMBRAL_COMPRAR / 100 - 1e-6),
+    _dec_viejo(eo.UMBRAL_VALORAR / 100), _dec_viejo(eo.UMBRAL_VALORAR / 100 - 1e-6)],
+   ['COMPRAR', 'VALORAR', 'VALORAR', 'NO COMPRAR'])
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PARTE B · LOS DOS PROGRAMAS, DE PUNTA A PUNTA
@@ -433,12 +581,12 @@ def csv_real(pais, filas):
     w = csv.writer(buf)
     w.writerow(CABECERA)
     ix = {h: i for i, h in enumerate(CABECERA)}
-    for asin, eans, caidas, precio, titulo in filas:
+    for asin, eans, caidas, precio, titulo, *extra in filas:
         fila = [''] * len(CABECERA)
         for h, v in ((C['asin'], asin), (COL_PAIS, pais), ('Título', titulo), (C['ean'], eans),
                      (C['rank'], '9000'), (C['rank90'], '11000'), (COL_CAIDAS, caidas), (C['buybox'], precio),
                      (C['es_fba'], 'yes'), (C['nuevo'], precio), (C['fba'], '3.10'), (C['compct'], '15.01 %'),
-                     (C['nvar'], ''), (COL_PADRE, '')):
+                     (C['nvar'], ''), (COL_PADRE, '')) + tuple((extra[0] if extra else {}).items()):
             fila[ix[h]] = v
         w.writerow(fila)
     return ('\ufeff' + buf.getvalue()).encode('utf-8')
@@ -541,10 +689,16 @@ eq('B2 · en la foto, Kukident a 3,52 (el porte una vez)', (_fk['precio_catalogo
 # dos EAN (la caja nueva de OSMA con otra ficha, y nuestra ficha por el suyo) y NO trae el Lenor (no conoce su EAN).
 # Y un CSV de FR que se cuela (el buzón de la v2 ya lo rechaza): el cruce lo ignora y lo avisa.
 _carpeta = 'osma/%s/csv/' % pas['id']
+# (AM) Con las señales de pack: la ficha de la Corega es un pack de 3 en Amazon (324 tabletas = 3 × las 108 de OSMA, y el
+# tamaño lo dice), y la Protefix, nuestro pack de 3, también lo dice Amazon (no se multiplica otra vez).
+_PACK_COREGA = {'Detalles de la unidad: Valor de la unidad': '324', 'Detalles de la unidad: Tipo de unidad': 'unidad',
+                'Tamaño': '108 unidad (Paquete de 3)'}
+_PACK_PROTEFIX = {'Número de artículos': '3', 'Paquete: Cantidad': '3', 'Tamaño': '47 g (Paquete de 3)'}
 _filas_es = [('B001PASC5E', '4002448039440', '30', '12.95', 'Kukident Active Plus 99 Tabletas'),
              ('B0NUEVA001', EAN_OSMA_COREGA, '40', '9.99', 'Corega Tabs caja nueva'),
-             ('B0C9T9RZT3', EAN_FICHA_COREGA, '18', '11.50', 'Corega Tabs pastillas limpiadoras 108'),
-             ('B01GIE0QSM', '4009932002171', '25', '19.50', 'Protefix Crema adhesiva Aloe Vera 47 g pack de 3'),
+             ('B0C9T9RZT3', EAN_FICHA_COREGA, '18', '11.50', 'Corega Tabs pastillas limpiadoras 108', _PACK_COREGA),
+             ('B01GIE0QSM', '4009932002171', '25', '19.50', 'Protefix Crema adhesiva Aloe Vera 47 g pack de 3',
+              _PACK_PROTEFIX),
              ('B0NIVEA001', EAN_NORMAL, '12', '8.90', 'Nivea Creme 150 ml'),
              # Dos fichas para el EAN de la Nivea: la hoja «Ambiguos» del viejo tiene algo que enseñar.
              ('B0NIVEA002', EAN_NORMAL, '9', '9.40', 'Nivea Creme 150 ml lata')]
@@ -580,7 +734,14 @@ eq('🔴 B2 · el Lenor NO se rescata: Keepa no conoce su EAN, el CSV no lo trae
 eq('B2 · la Protefix (por EAN) es nuestro pack de 3', (_res['3000']['asin'], 'pack de 3' in _res['3000']['detalle']),
    ('B01GIE0QSM', True))
 _rp = [p for p in T['escaner2_resultado_pais'] if p['resultado_ean_id'] == _res['3000']['id'] and p['pais'] == 'ES'][0]
-eq('B2 · …y su cuenta de ES va con el coste del pack (3 × 2,13 = 6,39)', _rp['pa'], 6.39)
+eq('B2 · …y su cuenta de ES va con el coste del pack (3 × 2,13 = 6,39), aunque Amazon también diga 3: no se multiplica '
+   'dos veces', (_rp['pa'], 'en Amazon' in _res['3000']['detalle']), (6.39, False))
+_rpc = [p for p in T['escaner2_resultado_pais'] if p['resultado_ean_id'] == _res['1929']['id'] and p['pais'] == 'ES'][0]
+eq('🔴 B2 · (AM) la ficha de la Corega es un pack de 3 en Amazon: coste 3 × 4,48 = 13,44, NO COMPRAR, y el detalle lo dice',
+   (_rpc['pa'], _res['1929']['puerta'], 'pack de 3 en Amazon: coste 3 × 4,48 € = 13,44 €' in _res['1929']['detalle']),
+   (13.44, 'd', True))
+_rpk = [p for p in T['escaner2_resultado_pais'] if p['resultado_ean_id'] == _res['4213']['id'] and p['pais'] == 'ES'][0]
+eq('B2 · el Kukident, sin pack: su cuenta de ES con 3,52 (el porte una vez)', _rpk['pa'], 3.52)
 _xl = [k for k in _alm if k.startswith('osma/%s/%s/Escaner2_OSMA_' % (pas['id'], cr['id']))]
 eq('B2 · el Excel, en su carpeta y con su nombre (el que guarda el cruce)', (len(_xl), cr['ruta_excel'] == _xl[0]), (1, True))
 from openpyxl import load_workbook  # noqa: E402
@@ -591,37 +752,82 @@ HOJAS_E2 = ['Resumen', 'Comparación', 'Varias fichas', 'Puertas', 'Puertas prev
 eq('B2 · las hojas del PRO de HEO, en su orden (sin «Chase_manual»: es de los Funko chase de HEO)',
    _wb.sheetnames, HOJAS_VIEJO + HOJAS_E2)
 _cab = [c.value for c in _wb['Análisis'][1]]
-eq('B2 · «Análisis»: las columnas del PRO de HEO y, AL FINAL, «No habrá más» (el único añadido)',
-   _cab, e2.columnas_analisis() + [e2.COLUMNA_FICHA_COMPARTIDA, eo.COLUMNA_NO_HABRA_MAS])
+eq('B2 · «Análisis»: las columnas del PRO de HEO y, AL FINAL, «No habrá más» y (AM) «Precio OSMA sin porte (€)»',
+   _cab, e2.columnas_analisis() + [e2.COLUMNA_FICHA_COMPARTIDA, eo.COLUMNA_NO_HABRA_MAS, eo.COLUMNA_SIN_PORTE])
 import escaner2_desvios as DV  # noqa: E402
 import escaner2_huella_excel as HU  # noqa: E402
 _REF = HU.sin_columnas(json.load(open(os.path.join(AQUI, 'huella_excel_viejo_heo.json'), encoding='utf-8')),
                        DV.ANALISIS_QUITADAS, DV.ANALISIS_RENOMBRADAS)
 _REF = HU.con_columna_al_final(_REF, e2.COLUMNA_FICHA_COMPARTIDA, e2.ANCHO_FICHA_COMPARTIDA)
 _REF = HU.con_columna_al_final(_REF, eo.COLUMNA_NO_HABRA_MAS, eo.ANCHO_NO_HABRA_MAS)
+_REF = HU.con_columna_al_final(_REF, eo.COLUMNA_SIN_PORTE, eo.ANCHO_SIN_PORTE)
+# (AM) Las dos únicas fórmulas nuevas de «Análisis», escritas a mano en R1C1 (la huella pone «k» en cada número): «PA (€)»
+# (la de una unidad y la de un pack) apunta a «Precio OSMA sin porte (€)» y a las celdas con nombre del Resumen, y
+# «Decisión» (la normal y la del posible pack) al «Margen» de su fila. Ninguna otra.
+_an_ref = next(h for h in _REF['hojas'] if h['hoja'] == 'Análisis')
+_an_ref['columnas']['PA (€)']['formula'] = [
+    '=ROUND(C[25]R[0]*(k+IF(N(PedidoPrevisto)>k,N(PorteEnvio)/PedidoPrevisto,k)),k)',
+    '=k*ROUND(C[25]R[0]/k*(k+IF(N(PedidoPrevisto)>k,N(PorteEnvio)/PedidoPrevisto,k)),k)']
+_an_ref['columnas']['Decisión']['formula'] = ['=IF(C[-1]R[0]*k>=k,"COMPRAR",IF(C[-1]R[0]*k>=k,"VALORAR","NO COMPRAR"))',
+                                              '=IF(C[-1]R[0]*k>=k,"VALORAR","NO COMPRAR")']
 _REF['hojas'] = [h for h in _REF['hojas'] if h['hoja'] != 'Chase_manual']
-eq('B2 · 🔴 el FORMATO de las hojas del viejo es el del Excel viejo de verdad (con «Ventas», «Ficha compartida» y «No habrá más»)',
-   HU.diferencias(_REF, HU.huella(_bytes), solo_hojas=HOJAS_VIEJO, vacias=('Sin_rank',)), [])
+_huella = HU.huella(_bytes)
+eq('B2 · 🔴 el FORMATO de las hojas del viejo es el del Excel viejo de verdad (con «Ventas», «Ficha compartida», «No habrá '
+   'más», «Precio OSMA sin porte (€)» y las dos fórmulas vivas)',
+   HU.diferencias(_REF, _huella, solo_hojas=HOJAS_VIEJO, vacias=('Sin_rank',)), [])
+eq('B2 · …y las fórmulas vivas están de verdad en la hoja (la huella de arriba solo dice que no hay otras)',
+   [sorted(next(h for h in _huella['hojas'] if h['hoja'] == 'Análisis')['columnas'][c]['formula'])
+    for c in ('PA (€)', 'Decisión')],
+   [sorted(_an_ref['columnas']['PA (€)']['formula']), [_an_ref['columnas']['Decisión']['formula'][0]]])
 _filas = list(_wb['Análisis'].iter_rows(min_row=2, values_only=True))
-_i = {n: _cab.index(n) for n in ('EAN', 'ASIN', 'PA (€)', 'Nombre', eo.COLUMNA_NO_HABRA_MAS)}
-eq('B2 · 🔴 el porte UNA vez: el Kukident lleva 3,52 en «PA (€)», el mismo de la puerta común',
-   sorted({r[_i['PA (€)']] for r in _filas if r[_i['EAN']] == '4002448039440'}), [3.52])
-eq('B2 · la Protefix pack 3: «PA (€)» 6,39 y el nombre lo dice',
-   sorted({(r[_i['PA (€)']], r[_i['Nombre']]) for r in _filas if r[_i['ASIN']] == 'B01GIE0QSM'}),
-   [(6.39, 'Protefix Haftcreme 47g Aloe Vera · pack de 3 (3 × 2,13 €)')])
-eq('B2 · «no habrá más» en las cuatro filas del descatalogado (Nivea) y en ninguna otra',
+_i = {n: _cab.index(n) for n in ('EAN', 'ASIN', 'PA (€)', 'Nombre', 'Decisión', 'Coherencia caja',
+                                 eo.COLUMNA_NO_HABRA_MAS, eo.COLUMNA_SIN_PORTE)}
+_l_sin = _wb['Análisis'].cell(row=1, column=_i[eo.COLUMNA_SIN_PORTE] + 1).column_letter
+_por_ean = {r[_i['EAN']]: (n, r) for n, r in enumerate(_filas, 2)}
+_n, _k = _por_ean['4002448039440']
+eq('B2 · 🔴 el porte UNA vez: el Kukident lleva en «PA (€)» la fórmula sobre su precio sin porte (3,299), que con el '
+   'pedido y el porte del Resumen da los 3,52 de la puerta común (lo prueba Excel en el parte)',
+   (_k[_i['PA (€)']], _k[_i[eo.COLUMNA_SIN_PORTE]]), (eo.formula_pa(_l_sin, _n, 1), 3.299))
+_n, _k = _por_ean['4009932002171']
+eq('B2 · la Protefix pack 3: «PA (€)» = 3 × la unidad redondeada, sin porte 3 × 1,999, y el nombre y la coherencia lo dicen',
+   (_k[_i['PA (€)']], _k[_i[eo.COLUMNA_SIN_PORTE]], _k[_i['Nombre']], _k[_i['Coherencia caja']]),
+   (eo.formula_pa(_l_sin, _n, 3), 5.997, 'Protefix Haftcreme 47g Aloe Vera · pack de 3 (3 × 2,13 €)',
+    'pack de 3: coste 3 × 2,13 € = 6,39 €'))
+_n, _k = _por_ean[EAN_OSMA_COREGA]
+eq('🔴 B2 · (AM) la Corega, pack de 3 en Amazon: «PA (€)» = 3 × la unidad, «Coherencia caja» lo dice',
+   (_k[_i['PA (€)']], _k[_i[eo.COLUMNA_SIN_PORTE]], _k[_i['Coherencia caja']]),
+   (eo.formula_pa(_l_sin, _n, 3), 12.597, 'pack de 3 en Amazon: coste 3 × 4,48 € = 13,44 €'))
+eq('B2 · «Decisión» viva en las filas con cuenta (la de su margen)',
+   sorted({_k[_i['Decisión']] == eo.formula_decision('P', _n, False) for _n, _k in _por_ean.values()}), [True])
+eq('B2 · «no habrá más» en la fila del descatalogado (Nivea) y en ninguna otra',
    sorted((r[_i['EAN']], r[_i[eo.COLUMNA_NO_HABRA_MAS]]) for r in _filas if r[_i[eo.COLUMNA_NO_HABRA_MAS]]),
-   [(EAN_NORMAL, 'no habrá más')] * 4)
-# (AG2) La Celda 9 del viejo escribe SIEMPRE una fila por país (ES, IT, FR, DE): las de un país sin CSV, como las deja
-# el motor, «sin datos» y sin cuenta. Nada inventado.
-_sin = [r for r in _filas if r[_cab.index('País')] != 'ES']
-eq('🔴 B2 · «Análisis»: ES con su cuenta; IT, FR y DE como un país sin CSV («sin datos», sin precio ni beneficio)',
-   (sorted({r[_cab.index('País')] for r in _filas}),
-    sorted({(r[_cab.index('Canal BB')], r[_cab.index('Decisión')], r[_cab.index('Precio venta (€)')],
-             r[_cab.index('Beneficio (€)')], r[_cab.index('Ventas')]) for r in _sin}),
-    all(r[_cab.index('Decisión')] != 'Sin datos' for r in _filas if r[_cab.index('País')] == 'ES')),
-   (['DE', 'ES', 'FR', 'IT'], [('sin datos', 'Sin datos', None, None, None)], True))
-_resu = {r[0]: r[1] for r in _wb['Resumen'].iter_rows(values_only=True)}
+   [(EAN_NORMAL, 'no habrá más')])
+# (AM) OSMA calcula un solo país: «Análisis» pinta solo ES, una fila por artículo que se vende (HEO sigue con cuatro).
+eq('🔴 B2 · «Análisis»: solo ES, una fila por artículo de las puertas d, e y f, todas con su cuenta',
+   (sorted({r[_cab.index('País')] for r in _filas}), len(_filas),
+    all(r[_cab.index('Decisión')] != 'Sin datos' for r in _filas)),
+   (['ES'], sum(1 for r in T['escaner2_resultado_ean'] if r['cruce_id'] == cr['id'] and r['puerta'] in 'def'), True))
+_ws_res = _wb['Resumen']
+_resu = {r[0]: r[1] for r in _ws_res.iter_rows(values_only=True)}
+_l_dec = _wb['Análisis'].cell(row=1, column=_i['Decisión'] + 1).column_letter
+_l_pais = _wb['Análisis'].cell(row=1, column=_cab.index('País') + 1).column_letter
+eq('🔴 B2 · (AM) arriba del Resumen, las dos celdas amarillas con el pedido y el porte de la pasada, con su nombre, y lo '
+   'que sale de ellas',
+   ([(_ws_res[c].value, _ws_res[c].fill.fgColor.rgb) for c in ('A2', 'B2', 'A3', 'B3')], _ws_res['B4'].value,
+    sorted((n, _wb.defined_names[n].attr_text) for n in (eo.NOMBRE_PEDIDO, eo.NOMBRE_PORTE))),
+   ([('Pedido previsto (€)', '00000000'), (2500.0, '00FFFF00'), ('Porte del envío (€)', '00000000'),
+     (168.19, '00FFFF00')], '=IF(N(PedidoPrevisto)>0,N(PorteEnvio)/PedidoPrevisto,0)',
+    [('PedidoPrevisto', "'Resumen'!$B$2"), ('PorteEnvio', "'Resumen'!$B$3")]))
+eq('🔴 B2 · (AM) COMPRAR y VALORAR de ES, por fórmula (contando «Decisión») y al lado los de la pasada; y la línea de '
+   'puertas y cuadre y la de los packs de Amazon',
+   ([[c.value for c in _ws_res[f]] for f in (6, 7, 8)], _resu.get('Puertas y cuadre'),
+    _resu.get('Packs de Amazon detectados')),
+   ([['Recuento en ES', 'con el pedido de arriba (fórmula)', 'en la pasada'],
+     ['COMPRAR', "=COUNTIFS('Análisis'!$%s:$%s,\"ES\",'Análisis'!$%s:$%s,\"COMPRAR\")"
+      % (_l_pais, _l_pais, _l_dec, _l_dec), cr['n_f']],
+     ['VALORAR', "=COUNTIFS('Análisis'!$%s:$%s,\"ES\",'Análisis'!$%s:$%s,\"VALORAR\")"
+      % (_l_pais, _l_pais, _l_dec, _l_dec), cr['n_e']]],
+    'con el pedido de la pasada', '1 multiplicados · 0 dudosos a VALORAR'))
 eq('🔴 B2 · el Resumen dice el porte (una vez), los países, los códigos y el EAN de sus fichas, las fichas que quedan '
    'fuera (calculadas con keepa_escaparate) y los packs',
    (_resu.get('Porte en el precio (el de la puerta común, una sola vez)'), _resu.get('Países del filtro de ventas'),

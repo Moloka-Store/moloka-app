@@ -14,8 +14,8 @@ QUE HACE, EN ORDEN:
      el barrido), `productos` (SOLO LECTURA: el IVA de la ficha y los factores de nuestros packs) y `keepa_escaparate`
      (SOLO LECTURA: que fichas nuestras quedan fuera porque Keepa no conoce su EAN, para el Resumen);
   4. decide la PUERTA de cada articulo con las reglas de compra del PRO de HEO (`escaner2_motor.decidir`), con
-     las fichas de cada articulo segun OSMA (`escaner2_osma.candidatos_osma`: por codigo y por EAN) y el coste de
-     nuestros packs (`escaner2_osma.decidir_osma`);
+     las fichas de cada articulo segun OSMA (`escaner2_osma.candidatos_osma`: por codigo y por EAN), el coste de
+     nuestros packs y (AM) el de los packs de Amazon, con las señales del mismo CSV (`escaner2_osma.decidir_osma`);
   5. guarda cada articulo con su puerta y cada pais con su cuenta, y CUADRA CONTRA LA BASE (entradas = suma de
      puertas, y catalogo = previas + puertas). Si no cuadra, el cruce queda 'fallida';
   6. deja el Excel en `escaner2/osma/<pasada>/<cruce>/Escaner2_OSMA_<sello>.xlsx` (el formato del PRO de HEO con
@@ -218,6 +218,8 @@ def cruzar(cruce, params, pasada):
     datos = {p: pro.leer_csv_visualizador(rutas[p]) for p in usados}
     por_asin = {p: eo.indice_por_asin(datos[p]) for p in usados}
     ids_fichas = {p: eo.de_las_fichas(datos[p], eans_fichas, M) for p in usados}
+    # (AM) Las señales de pack de cada ASIN (numero de articulos, contenido, tamaño, paquete y titulo), del mismo CSV.
+    senales_pack = {p: eo.senales_pack_csv(rutas[p]) for p in usados}
     compartidas = e2.fichas_compartidas(fichas_por_pais)
     for p, fs in sin_ficha.items():
         avisos.append('Sin ASIN padre/variaciones/puesto en %s (%s): ahí no se detecta la ficha compartida'
@@ -268,13 +270,17 @@ def cruzar(cruce, params, pasada):
             cands[p], caminos[p], apartadas[p] = eo.candidatos_osma(
                 f, datos[p], por_asin[p], enlace, asins_enlazados, M, eans_fichas.get(f['producto_heo']), ids_fichas[p])
         r = eo.decidir_osma(f, cands, caidas_por_pais, params, M, eleccion, compartidas, enlace, factores,
-                            caminos, apartadas)
+                            caminos, apartadas, senales_pack)
         n_codigo += 'codigo' in caminos.values()
-        n_packs += r['factor'] > 1
+        n_packs += r['pack'] == 'nuestro'
         r['foto_id'], r['id'] = f['id'], str(uuid.uuid4())
         resultados.append(r)
     cq = e2.cuadre([f['id'] for f in foto], resultados)
-    print(f"POR CÓDIGO: {n_codigo} artículo(s) decididos con nuestra ficha · packs nuestros {n_packs}", flush=True)
+    n_pack_amz = {x: sum(1 for r in resultados if (r.get('pack_amazon') or {}).get('estado') == x)
+                  for x in (eo.PACK_SI, eo.PACK_DUDOSO)}
+    print(f"POR CÓDIGO: {n_codigo} artículo(s) decididos con nuestra ficha · packs nuestros {n_packs} · packs de "
+          f"Amazon multiplicados {n_pack_amz[eo.PACK_SI]} · posibles packs de Amazon {n_pack_amz[eo.PACK_DUDOSO]}",
+          flush=True)
 
     filas_ean, filas_pais = [], []
     for r in resultados:
