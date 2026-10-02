@@ -125,12 +125,15 @@ print('    miro %d ficheros .py (%s) y %d workflows' % (len(_PY), ', '.join(_PY)
 # (Encargo E, 29-sep-2026) Entran la pasada de disponibilidad, su modulo y su workflow: se miran igual.
 # (Encargo V, 30-sep-2026) Y las cuentas sueltas de las novedades (su programa y su workflow).
 # (Encargo AE, 01-oct-2026) Y la pasada de disponibilidad de OSMA (su programa y su workflow).
-eq('(A) hay qué mirar: los programas, el motor, la huella y los cinco heredados, y los cinco workflows',
+# (Encargo AG, 02-oct-2026) Y el Escaneo PRO de OSMA: su modulo, su barrido, su cruce y sus dos workflows.
+eq('(A) hay qué mirar: los programas, el motor, la huella y los cinco heredados, y los siete workflows',
    ({'escaner2_motor.py', 'escaner2_heo_barrido.py', 'escaner2_heo_cruce.py', 'escaner2_heo_disponibilidad.py',
      'escaner2_disponibilidad.py', 'escaner2_novedades.py', 'escaner2_heo_novedades_cuentas.py',
-     'escaner2_osma_disponibilidad.py'} | {h for h, _v in HEREDADOS}) <= set(_PY)
+     'escaner2_osma_disponibilidad.py', 'escaner2_osma.py', 'escaner2_osma_barrido.py',
+     'escaner2_osma_cruce.py'} | {h for h, _v in HEREDADOS}) <= set(_PY)
    and [os.path.basename(y) for y in _YML] == ['escaner2-heo-barrido.yml', 'escaner2-heo-cruce.yml',
                                                'escaner2-heo-disponibilidad.yml', 'escaner2-heo-novedades-cuentas.yml',
+                                               'escaner2-osma-barrido.yml', 'escaner2-osma-cruce.yml',
                                                'escaner2-osma-disponibilidad.yml'], True)
 _hallado = {f: lecturas_del_viejo(leer(f)) for f in _PY}
 _hallado.update({f: lecturas_yml(leer(f)) for f in _YML})

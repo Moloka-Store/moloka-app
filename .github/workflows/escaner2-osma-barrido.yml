@@ -1,0 +1,58 @@
+# ============================================================
+# Moloka - Escaner 2 · BARRIDO DEL ESCANEO PRO DE OSMA (encargo AG, 02-oct-2026)
+#
+# Lo dispara el boton «Barrer OSMA» de la v2 (moloka-app-v2, Escaneo PRO · pestaña OSMA), con el mismo mecanismo
+# que HEO (workflow_dispatch con GH_TOKEN). NO entra en la web de OSMA: trabaja sobre la descarga diaria que ya
+# esta en la base (escaner2-osma-disponibilidad.yml, 07:15 de Madrid). Construye la FOTO (articulos con marca y
+# existencias, con el precio y el porte de la puerta comun, comprobado contra ella) y deja en el almacen cerrado
+# `escaner2` LA lista para el Visualizador de Keepa (encargo AG2, 02-oct-2026: una sola, para el CSV de España):
+# los EAN de OSMA y el EAN de nuestra ficha de cada codigo enlazado que esta en la foto.
+#
+# 🔴 REPO PUBLICO: este registro lo ve cualquiera. El programa SOLO imprime estados y recuentos; nada de precios,
+#    EAN, ASIN, nombres ni el texto de un error (va a la base, que es privada).
+# 🔒 Cero tokens de Keepa, cero Amazon, cero credenciales de OSMA: solo la llave de servicio de Supabase.
+# >>> SIN RELOJ <<<  Solo cuando se pulsa el boton (o a mano desde Actions).
+# ============================================================
+name: Moloka - Escaner 2 · Barrido OSMA
+
+on:
+  workflow_dispatch:
+
+# 🔒 Barrido y cruce de OSMA, de uno en uno (el cruce lee la foto que el barrido deja). Grupo PROPIO: no espera a
+#    HEO ni a la descarga diaria (si coincide con ella, el barrido lo nota y falla con el motivo: se vuelve a barrer).
+concurrency:
+  group: escaner2-osma-pro
+  cancel-in-progress: false
+
+jobs:
+  barrer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        # Las mismas versiones FIJADAS que el barrido de HEO.
+        run: pip install supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13
+
+      - name: De la descarga de OSMA a la foto y la lista
+        # El tope en el PASO (15 min), no solo en el job (20): si se agota, el rescate de abajo tiene tiempo.
+        timeout-minutes: 15
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python -u escaner2_osma_barrido.py
+
+      # 🔴 SI EL RUN MUERE A MEDIAS, LA PASADA NO SE QUEDA COLGADA en 'descargando'.
+      - name: Rescate · si el run ha fallado, la pasada de este run queda 'fallida'
+        if: failure() || cancelled()
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python -u escaner2_rescate.py pasada
