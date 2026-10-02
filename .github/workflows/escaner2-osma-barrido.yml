@@ -5,8 +5,8 @@
 # que HEO (workflow_dispatch con GH_TOKEN). NO entra en la web de OSMA: trabaja sobre la descarga diaria que ya
 # esta en la base (escaner2-osma-disponibilidad.yml, 07:15 de Madrid). Construye la FOTO (articulos con marca y
 # existencias, con el precio y el porte de la puerta comun, comprobado contra ella) y deja en el almacen cerrado
-# `escaner2` las DOS listas para el Visualizador de Keepa: los EAN de OSMA y los ASIN de nuestras fichas enlazadas
-# por codigo.
+# `escaner2` LA lista para el Visualizador de Keepa (encargo AG2, 02-oct-2026: una sola, para el CSV de España):
+# los EAN de OSMA y el EAN de nuestra ficha de cada codigo enlazado que esta en la foto.
 #
 # 🔴 REPO PUBLICO: este registro lo ve cualquiera. El programa SOLO imprime estados y recuentos; nada de precios,
 #    EAN, ASIN, nombres ni el texto de un error (va a la base, que es privada).
@@ -41,7 +41,7 @@ jobs:
         # Las mismas versiones FIJADAS que el barrido de HEO.
         run: pip install supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13
 
-      - name: De la descarga de OSMA a la foto y las dos listas
+      - name: De la descarga de OSMA a la foto y la lista
         # El tope en el PASO (15 min), no solo en el job (20): si se agota, el rescate de abajo tiene tiempo.
         timeout-minutes: 15
         env:

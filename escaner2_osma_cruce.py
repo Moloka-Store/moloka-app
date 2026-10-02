@@ -2,16 +2,17 @@
 # -*- coding: utf-8 -*-
 """ESCANER 2 · EL CRUCE DEL ESCANEO PRO DE OSMA (encargo AG, 02-oct-2026).
 
-Lo lanza la v2 cuando el buzon de Keepa de la pestaña OSMA tiene todos los CSV (workflow escaner2-osma-cruce.yml,
-input `pasada`): los de la lista de EAN y los de la lista de ASIN, de ES, IT, FR y DE. Cero tokens de Keepa.
+Lo lanza la v2 cuando el buzon de Keepa de la pestaña OSMA tiene su CSV (workflow escaner2-osma-cruce.yml, input
+`pasada`): desde el encargo AG2 (02-oct-2026), UNO, el de España, de la unica lista. Cero tokens de Keepa.
 
 QUE HACE, EN ORDEN:
   1. abre un cruce en `escaner2_cruce` con la FOTO de los parametros de OSMA (`escaner2_parametros`: el umbral y
-     los paises, los mismos que HEO);
-  2. baja los CSV de `escaner2/osma/<pasada>/csv/`; de cada uno saca el PAIS del dato (como HEO) y DE QUE LISTA es
-     (EAN o ASIN: `escaner2_osma.lista_de_csv`, la misma regla que el buzon);
-  3. lee la foto de la pasada, su `barrido.json` (enlaces por codigo y porte, los que uso el barrido) y `productos`
-     (SOLO LECTURA: el IVA de la ficha y los factores de nuestros packs);
+     los paises; desde el AG2, solo ES);
+  2. baja los CSV de `escaner2/osma/<pasada>/csv/` y de cada uno saca el PAIS del dato (como HEO); el de un pais que
+     no se calcula se ignora y se avisa;
+  3. lee la foto de la pasada, su `barrido.json` (enlaces por codigo, el EAN de cada ficha y el porte, los que uso
+     el barrido), `productos` (SOLO LECTURA: el IVA de la ficha y los factores de nuestros packs) y `keepa_escaparate`
+     (SOLO LECTURA: que fichas nuestras quedan fuera porque Keepa no conoce su EAN, para el Resumen);
   4. decide la PUERTA de cada articulo con las reglas de compra del PRO de HEO (`escaner2_motor.decidir`), con
      las fichas de cada articulo segun OSMA (`escaner2_osma.candidatos_osma`: por codigo y por EAN) y el coste de
      nuestros packs (`escaner2_osma.decidir_osma`);
@@ -150,19 +151,21 @@ def cruzar(cruce, params, pasada):
     cols_ficha = e2.columnas_ficha_compartida()
     avisos, rojo = [], False
 
-    # ── 0 · Lo que dejo el barrido: enlaces por codigo, la lista de ASIN y el porte ────────────
+    # ── 0 · Lo que dejo el barrido: enlaces por codigo, el EAN de cada ficha y el porte ────────
     base = f'{eo.CARPETA}/{PASADA}'
     try:
         barrido = json.loads(descargar_buzon(sb, BUCKET, f'{base}/barrido.json').decode('utf-8'))
     except Exception as ex:
         raise Fallo(f'no se puede leer {base}/barrido.json ({type(ex).__name__}): re-barre OSMA')
+    if 'eans_fichas' not in barrido:
+        raise Fallo('barrido.json es de antes de la lista única (sin el EAN de las fichas): re-barre OSMA')
     enlaces = barrido.get('enlaces') or {}
-    lista_asins = list(barrido.get('lista_asins') or [])
+    eans_fichas = barrido.get('eans_fichas') or {}
     asins_enlazados = {a for e in enlaces.values() for a in e['asins']}
-    if set(lista_asins) != asins_enlazados:
-        raise Fallo('barrido.json no es coherente: la lista de ASIN no son los de los enlaces')
+    if not set(eans_fichas) <= set(enlaces):
+        raise Fallo('barrido.json no es coherente: hay EAN de fichas de códigos que no están en los enlaces')
 
-    # ── 1 · Los CSV subidos: pais y lista de cada uno ──────────────────────────────────────
+    # ── 1 · Los CSV subidos: el pais de cada uno ───────────────────────────────────────────
     carpeta = f'{base}/csv'
     objetos = [o for o in listar_buzon(sb, BUCKET, carpeta) if (o.get('name') or '').lower().endswith(('.csv', '.csv.gz'))]
     if not objetos:
@@ -182,20 +185,19 @@ def cruzar(cruce, params, pasada):
             ex = e2.examinar_csv(ruta, pro, col_pais, col_caidas, cols_ficha)
         except e2.CsvIlegible as err:
             errores.append(f"{o['name']}: {err}")
-            ficheros.append({'nombre': o['name'], 'pais': None, 'lista': None, 'filas': None, 'usado': False,
+            ficheros.append({'nombre': o['name'], 'pais': None, 'filas': None, 'usado': False,
                              'error': str(err), 'subido': subido})
             continue
-        lista = eo.lista_de_csv(list(ex['caidas']), lista_asins)
         usado = ex['pais'] in params['paises_calculo']
-        ficheros.append({'nombre': o['name'], 'pais': ex['pais'], 'lista': lista, 'filas': ex['filas'], 'usado': usado,
+        ficheros.append({'nombre': o['name'], 'pais': ex['pais'], 'filas': ex['filas'], 'usado': usado,
                          'fuente_pais': ex['fuente_pais'], 'choques_caidas': ex['choques_caidas'], 'error': None,
                          'subido': subido})
-        print(f"    CSV {o['name']}: {ex['pais']} · lista de {lista.upper()} · {ex['filas']} filas"
-              + ('' if usado else ' → IGNORADO'), flush=True)
+        print(f"    CSV {o['name']}: {ex['pais']} · {ex['filas']} filas" + ('' if usado else ' → IGNORADO'), flush=True)
         if not usado:
-            avisos.append(f"CSV de {ex['pais']} ignorado ({o['name']})")
+            avisos.append(f"CSV de {ex['pais']} ignorado ({o['name']}): OSMA se cruza solo en "
+                          f"{', '.join(params['paises_calculo'])}")
             continue
-        rutas.setdefault(ex['pais'], {}).setdefault(lista, []).append(ruta)
+        rutas.setdefault(ex['pais'], []).append(ruta)
         for asin, v in ex['caidas'].items():
             caidas_por_pais.setdefault(ex['pais'], {}).setdefault(asin, v)
         for asin, v in ex['fichas'].items():
@@ -212,18 +214,10 @@ def cruzar(cruce, params, pasada):
         if p not in usados:
             avisos.append(f'Falta el CSV de {p}: «se vende» se mira solo en '
                           f'{", ".join(x for x in params["paises_filtro"] if x in usados) or "ningún país"}')
-    for p in usados:
-        if 'ean' not in rutas[p]:
-            avisos.append(f'Falta el CSV de la lista de EAN de {p}')
-        if lista_asins and 'asin' not in rutas[p]:
-            avisos.append(f'Falta el CSV de la lista de ASIN de {p}: ahí nuestras fichas enlazadas se buscan por el EAN de OSMA')
-    datos_ean = {p: pro.leer_csv_visualizador(rutas[p].get('ean') or []) for p in usados}
-    por_asin = {p: eo.indice_por_asin(pro.leer_csv_visualizador(rutas[p].get('asin') or [])) for p in usados}
-    # El lector indexa por EAN: una ficha de la lista de ASIN que en Keepa no traiga ningun EAN no llega al indice.
-    for p in usados:
-        perdidas = [a for a in lista_asins if a in (caidas_por_pais.get(p) or {}) and a not in por_asin[p]]
-        if perdidas and 'asin' in rutas[p]:
-            avisos.append('%s: %d ficha(s) de la lista de ASIN sin EAN en Keepa, no se pueden leer' % (p, len(perdidas)))
+    # 🔑 EL MAS RECIENTE MANDA: `rutas[p]` va del mas nuevo al mas viejo y el lector se queda con el primero.
+    datos = {p: pro.leer_csv_visualizador(rutas[p]) for p in usados}
+    por_asin = {p: eo.indice_por_asin(datos[p]) for p in usados}
+    ids_fichas = {p: eo.de_las_fichas(datos[p], eans_fichas, M) for p in usados}
     compartidas = e2.fichas_compartidas(fichas_por_pais)
     for p, fs in sin_ficha.items():
         avisos.append('Sin ASIN padre/variaciones/puesto en %s (%s): ahí no se detecta la ficha compartida'
@@ -244,6 +238,21 @@ def cruzar(cruce, params, pasada):
     M.poner_foto_fba(en_mi_bd.leer_foto_fba(sb, imprimir=lambda linea: print(linea, flush=True)))
     factores, avisos_packs = eo.factor_por_asin(productos)
     avisos += avisos_packs
+    # (AG2) Las fichas nuestras que la lista no puede traer (Keepa no conoce su EAN): NO se rescatan, se dicen. Con
+    # keepa_escaparate de los paises de este cruce, leido ahora (cajon FOTO: va con su fecha).
+    dominios = {p.lower() for p in usados}
+    try:
+        keepa = [k for a in sorted(asins_enlazados)
+                 for k in _todas('keepa_escaparate', 'asin,dominio,ean_keepa_crudo,upc_keepa,fecha_foto', 'dominio',
+                                 asin=a)]
+        fuera_keepa = eo.fuera_de_keepa(enlaces, eans_fichas, keepa, dominios)
+        print(f"KEEPA: fichas nuestras de la foto {len(asins_enlazados)} · fuera porque Keepa no conoce su EAN "
+              f"{len(fuera_keepa['fuera'])} · sin fila en keepa_escaparate {len(fuera_keepa['sin_dato'])}", flush=True)
+    except Exception as ex:
+        # Es una linea del Resumen, no una decision: sin ella el cruce sigue, y lo dice.
+        fuera_keepa = None
+        avisos.append(f'No se pudo mirar en keepa_escaparate qué fichas nuestras quedan fuera ({type(ex).__name__})')
+        print(f'!!! keepa_escaparate no se pudo leer ({type(ex).__name__})', flush=True)
 
     # ── 3 · Las puertas ────────────────────────────────────────────────────────────────────
     apartados = _todas('escaner2_apartado', 'ean_original,nombre,marca,precio_catalogo,motivo,detalle,producto_heo',
@@ -256,7 +265,8 @@ def cruzar(cruce, params, pasada):
         enlace = enlaces.get(f['producto_heo'])
         cands, caminos, apartadas = {}, {}, {}
         for p in usados:
-            cands[p], caminos[p], apartadas[p] = eo.candidatos_osma(f, datos_ean[p], por_asin[p], enlace, asins_enlazados)
+            cands[p], caminos[p], apartadas[p] = eo.candidatos_osma(
+                f, datos[p], por_asin[p], enlace, asins_enlazados, M, eans_fichas.get(f['producto_heo']), ids_fichas[p])
         r = eo.decidir_osma(f, cands, caidas_por_pais, params, M, eleccion, compartidas, enlace, factores,
                             caminos, apartadas)
         n_codigo += 'codigo' in caminos.values()
@@ -326,7 +336,8 @@ def cruzar(cruce, params, pasada):
             'pasada': PASADA, 'cruce': cruce, 'params': params, 'usados': usados, 'ficheros': ficheros,
             'n_entradas': n_entradas, 'n_bd': n_bd, 'cuadra': cuadra and not motivo_fallo, 'n_crudo': n_crudo,
             'previas': previas, 'eleccion': eleccion, 'n_compartidas': n_compartidas, 'avisos': avisos,
-            'enlaces': enlaces, 'enlaces_foto': list(enlaces), 'lista_asins': lista_asins, 'n_packs': n_packs,
+            'enlaces': enlaces, 'enlaces_foto': list(enlaces), 'eans_fichas': eans_fichas,
+            'n_eans_fichas_nuevos': barrido.get('n_eans_fichas_nuevos'), 'fuera_keepa': fuera_keepa, 'n_packs': n_packs,
             'porte': barrido.get('porte'), 'descarga_en': barrido.get('descarga_en'),
             'disp_pasada': barrido.get('disp_pasada')})
         sb.storage.from_(BUCKET).upload(ruta, contenido, {

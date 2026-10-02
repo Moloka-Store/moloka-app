@@ -7,9 +7,12 @@ PARTE A · LO PURO (escaner2_osma.py), en este proceso:
       veces, `comprobar_porte` lo caza;
   A3  la foto: cada articulo por una puerta previa o en la foto, crudo = previas + foto; EAN de relleno fuera; el
       duplicado se queda con el codigo enlazado;
-  A4  los enlaces (la familia del Lenor da dos ASIN; el chase y las fichas inactivas no) y las dos listas;
-  A5  de que lista es un CSV, y las fichas de cada articulo: por codigo gana, la misma ficha no sale dos veces, el
-      EAN nuevo con otra ficha se aparta, y una ficha enlazada no se cuelga de otro articulo;
+  A4  los enlaces (la familia del Lenor da dos ASIN; el chase y las fichas inactivas no) y (AG2) LA lista: los EAN de
+      OSMA + el EAN de nuestra ficha de cada codigo de la foto, sin repetir; y que fichas quedan fuera porque Keepa
+      no conoce su EAN (keepa_escaparate);
+  A5  las fichas de cada articulo con UN CSV: por codigo gana, la misma ficha no sale dos veces, el EAN nuevo con
+      otra ficha se aparta, una fila con el EAN de nuestra ficha es de la fila de su codigo, y una ficha enlazada no
+      se cuelga de otro articulo;
   A6  el factor de nuestros packs, el de lib/packs de la v2 (Ultra Pro x1-x4, Protefix x1-x2-x5, Lenor x1-x2, la
       casilla; el «2-PACK» suelto y el «Maxi pack 128» no son packs);
   A7  la puerta de un pack: coste = unidades × precio, la misma ficha, y el detalle lo dice.
@@ -17,11 +20,12 @@ PARTE A · LO PURO (escaner2_osma.py), en este proceso:
 PARTE B · LOS PROGRAMAS (escaner2_osma_barrido.py y escaner2_osma_cruce.py), cada uno en su proceso, contra un
 `supabase` en memoria (sin red, sin secretos, sin produccion):
   B1  [sin_llave] sin la llave de servicio no nace ningun cliente;
-  B2  [bueno] barrido → 'esperando_csv' con su foto, sus listas (EAN y ASIN) y barrido.json; se suben los CSV de
-      las dos listas de ES, IT, FR y DE (con la CABECERA REAL del Visualizador, 561 columnas, sacada de un export
-      del 02-oct-2026); cruce → 'lista', cuadra, y el Excel: las hojas del PRO de HEO (sin «Chase_manual»), el
-      FORMATO del Excel viejo de verdad con «Ficha compartida» y «No habrá más» al final, Kukident a 3,52 (el
-      porte una vez), la Protefix pack 3 a 3 × 2,13, la Corega por su codigo y «no habrá más» donde toca;
+  B2  [bueno] barrido → 'esperando_csv' con su foto, SU lista (una: n_tandas 1, sin asins.txt) y barrido.json; se
+      sube el CSV de ES (con la CABECERA REAL del Visualizador, 561 columnas, sacada de un export del 02-oct-2026) y
+      uno de FR, que el cruce ignora y avisa; cruce → 'lista', cuadra, solo ES, y el Excel: las hojas del PRO de HEO
+      (sin «Chase_manual»), el FORMATO del Excel viejo de verdad con «Ficha compartida» y «No habrá más» al final,
+      Kukident a 3,52 (el porte una vez), la Protefix pack 3 a 3 × 2,13, la Corega por su codigo (por el EAN de su
+      ficha), el Lenor fuera (Keepa no conoce su EAN, y el Resumen lo dice) y «no habrá más» donde toca;
   B3  🔴 el registro (repo PUBLICO) no lleva ni un EAN, ASIN ni precio;
   B4  nada escribe fuera de escaner2_* (ni disp_*, ni productos, ni codigos_proveedor, ni facturas);
   B5  [porte_doble] la puerta comun con el porte sumado dos veces → la pasada falla y no sale lista;
@@ -307,35 +311,73 @@ eq('A3 · con el mismo EAN, gana el código ENLAZADO aunque sea más caro',
    ([f['producto_heo'] for f in _dup[0]], [a['detalle'] for a in _dup[1]]),
    (['4213'], ['Mismo EAN que el código 4213: me quedo con 4213 (el código 4213 está enlazado a nuestra ficha)']))
 
-print('A4 · los enlaces y las dos listas')
+print('A4 · los enlaces y LA lista (AG2)')
 eq('A4 · los enlaces: el Lenor trae suelta y Pack 2 (ni el chase ni la inactiva); el código sin ficha se avisa',
    ({c: e['asins'] for c, e in ENLACES.items()}, AVISOS_ENL),
    ({'1056': ['B0BCPP43YN'], '1929': ['B0C9T9RZT3'], '4213': ['B001PASC5E'], '18459': ['B014DGG0OQ', 'B07HCJQ45L']},
     ['El código 9999 de OSMA apunta a una ficha que no está en productos']))
-EANS, ASINS = eo.listas_para_keepa(FOTO, ENLACES)
-eq('A4 · la lista de EAN: los de la foto (el EAN de OSMA, también el nuevo de la Corega)',
-   sorted(EANS), sorted(['4002448039440', EAN_OSMA_COREGA, '8001090747723', '4009932002171', EAN_NORMAL]))
-eq('A4 · la lista de ASIN: los de los códigos enlazados QUE ESTÁN EN LA FOTO (el 1056 no tiene existencias)',
-   ASINS, ['B0C9T9RZT3', 'B001PASC5E', 'B014DGG0OQ', 'B07HCJQ45L'])
+ASINS = ['B0C9T9RZT3', 'B001PASC5E', 'B014DGG0OQ', 'B07HCJQ45L']  # los de los códigos de la foto
+LISTA, EANS_FICHAS = eo.lista_para_keepa_osma(FOTO, ENLACES, M)
+eq('🔴 A4 · UNA lista: los EAN de OSMA de la foto y, detrás, el de nuestra ficha de la Corega (el único que OSMA no '
+   'traía ya); sin repetir el del Kukident ni el del Lenor',
+   LISTA, e2.lista_para_keepa(FOTO) + [EAN_FICHA_COREGA])
+eq('A4 · el EAN de nuestra ficha, por código, solo de los enlazados QUE ESTÁN EN LA FOTO (el 1056 no tiene existencias)',
+   EANS_FICHAS, {'1929': EAN_FICHA_COREGA, '4213': '4002448039440', '18459': '8001090747723'})
+eq('A4 · …y sin repetir aunque el EAN de la ficha venga con ceros delante (el Kukident con «00…»: no entra otra vez)',
+   eo.lista_para_keepa_osma(FOTO, dict(ENLACES, **{'4213': dict(ENLACES['4213'], ean_ficha='004002448039440')}), M)[0],
+   LISTA)
+_ENL_FOTO = {c: e for c, e in ENLACES.items() if c in EANS_FICHAS}
+KEEPA = [  # keepa_escaparate: lo que Keepa lista de cada ficha (02-oct-2026, medido para el Kukident y el Lenor)
+    {'asin': 'B001PASC5E', 'dominio': 'es', 'ean_keepa_crudo': '4002448039440', 'upc_keepa': None, 'fecha_foto': '2026-10-01'},
+    {'asin': 'B014DGG0OQ', 'dominio': 'es', 'ean_keepa_crudo': '5413149849693,5413149849709,7427128022579,8001841036984',
+     'upc_keepa': None, 'fecha_foto': '2026-10-02'},
+    {'asin': 'B07HCJQ45L', 'dominio': 'es', 'ean_keepa_crudo': '4055902127801', 'upc_keepa': None, 'fecha_foto': '2026-10-02'},
+    # En FR sí lo conoce (inventado): no cuenta, el cruce es solo de ES.
+    {'asin': 'B07HCJQ45L', 'dominio': 'fr', 'ean_keepa_crudo': '8001090747723', 'upc_keepa': None, 'fecha_foto': '2026-10-03'}]
+FK = eo.fuera_de_keepa(_ENL_FOTO, EANS_FICHAS, KEEPA, {'es'})
+eq('🔴 A4 · fuera: las dos fichas del Lenor (Keepa no conoce su EAN en ES); la Corega, sin fila, «no se sabe»',
+   FK, {'fuera': [('18459', 'B014DGG0OQ', 'Keepa no conoce el EAN 8001090747723 de la ficha (ES)'),
+                  ('18459', 'B07HCJQ45L', 'Keepa no conoce el EAN 8001090747723 de la ficha (ES)')],
+        'sin_dato': [('1929', 'B0C9T9RZT3')], 'fecha': '2026-10-02'})
+eq('A4 · …con la fila de FR que sí lo lista, el Lenor Pack 2 ya no está fuera (se mira en los países del cruce)',
+   [x[1] for x in eo.fuera_de_keepa(_ENL_FOTO, EANS_FICHAS, KEEPA, {'es', 'fr'})['fuera']], ['B014DGG0OQ'])
+eq('A4 · …una ficha sin EAN, fuera; y la línea del Resumen lo dice todo, con la fecha de keepa_escaparate',
+   (eo.fuera_de_keepa({'1': {'asins': ['B0SINEAN01']}}, {}, [], {'es'})['fuera'], eo.texto_fuera_de_keepa(FK)),
+   ([('1', 'B0SINEAN01', 'la ficha no tiene EAN')],
+    '18459 · B014DGG0OQ: Keepa no conoce el EAN 8001090747723 de la ficha (ES) | 18459 · B07HCJQ45L: Keepa no conoce '
+    'el EAN 8001090747723 de la ficha (ES) | sin fila en keepa_escaparate (no se sabe): 1929 · B0C9T9RZT3 '
+    '(keepa_escaparate del 2026-10-02)'))
 
-print('A5 · la lista de cada CSV y las fichas de cada artículo')
-eq('A5 · un CSV con todos sus ASIN en la lista de ASIN es de esa lista; uno con uno de cien, de la de EAN',
-   (eo.lista_de_csv(['B001PASC5E', 'B0C9T9RZT3'], ASINS),
-    eo.lista_de_csv(['B001PASC5E'] + ['B0X%07d' % i for i in range(99)], ASINS), eo.lista_de_csv([], ASINS)),
-   ('asin', 'ean', 'ean'))
+print('A5 · las fichas de cada artículo, con UN CSV')
 _r = lambda asin, t='': {'asin': asin, 'titulo': t, 'buybox': 10.0, 'es_fba': True, 'nuevo': 10.0, 'compct': 15.0,  # noqa: E731
                          'fba': 3.0, 'rank': 1000.0, 'rank90': 1000.0}
 _corega = _por['1929']
-_datos_ean = {M.norm(EAN_OSMA_COREGA): [_r('B0NUEVA001'), _r('B0C9T9RZT3')]}
-_por_asin = {'B0C9T9RZT3': _r('B0C9T9RZT3', 'por la lista de ASIN')}
-c, camino, aparte = eo.candidatos_osma(_corega, _datos_ean, _por_asin, ENLACES['1929'], set(ASINS))
-eq('A5 · la Corega: por su código (la ficha de la lista de ASIN, una vez) y el EAN nuevo con otra ficha, apartado',
-   ([x['titulo'] for x in c], camino, [x['asin'] for x in aparte]), (['por la lista de ASIN'], 'codigo', ['B0NUEVA001']))
-c, camino, aparte = eo.candidatos_osma(_corega, _datos_ean, {}, ENLACES['1929'], set(ASINS))
-eq('A5 · si la lista de ASIN no trae su ficha, por su EAN de OSMA, como cualquier otra fila',
-   ([x['asin'] for x in c], camino, aparte), (['B0NUEVA001', 'B0C9T9RZT3'], 'ean_sin_codigo', []))
+_nuestra = _r('B0C9T9RZT3', 'por el EAN de nuestra ficha')
+_ajena = _r('B0AJENA001', 'otra ficha con el EAN de la nuestra')
+_datos = {M.norm(EAN_OSMA_COREGA): [_r('B0NUEVA001')], M.norm(EAN_FICHA_COREGA): [_nuestra, _ajena]}
+_ids = eo.de_las_fichas(_datos, EANS_FICHAS, M)
+c, camino, aparte = eo.candidatos_osma(_corega, _datos, eo.indice_por_asin(_datos), ENLACES['1929'], set(ASINS), M,
+                                       EAN_FICHA_COREGA, _ids)
+eq('🔴 A5 · la Corega: por su código, con la fila del EAN de NUESTRA ficha; lo del EAN nuevo de OSMA y la otra ficha '
+   'con nuestro EAN, apartado',
+   ([x['titulo'] for x in c], camino, [x['asin'] for x in aparte]),
+   (['por el EAN de nuestra ficha'], 'codigo', ['B0NUEVA001', 'B0AJENA001']))
+_datos2 = {M.norm(EAN_OSMA_COREGA): [_r('B0NUEVA001'), _nuestra], M.norm(EAN_FICHA_COREGA): [_nuestra]}
+c, camino, aparte = eo.candidatos_osma(_corega, _datos2, eo.indice_por_asin(_datos2), ENLACES['1929'], set(ASINS), M,
+                                       EAN_FICHA_COREGA, eo.de_las_fichas(_datos2, EANS_FICHAS, M))
+eq('A5 · la misma ficha por los dos caminos (EAN de OSMA y EAN de la ficha): una, la del código',
+   ([x['asin'] for x in c], camino, [x['asin'] for x in aparte]), (['B0C9T9RZT3'], 'codigo', ['B0NUEVA001']))
+_datos3 = {M.norm(EAN_OSMA_COREGA): [_r('B0NUEVA001')]}
+c, camino, aparte = eo.candidatos_osma(_corega, _datos3, eo.indice_por_asin(_datos3), ENLACES['1929'], set(ASINS), M,
+                                       EAN_FICHA_COREGA, frozenset())
+eq('A5 · si el CSV no trae nuestra ficha, por su EAN de OSMA, como cualquier otra fila',
+   ([x['asin'] for x in c], camino, aparte), (['B0NUEVA001'], 'ean_sin_codigo', []))
+_otro = eo.construir_foto([d('7010', EAN_FICHA_COREGA, 1.0, 'COREGA')], {}, M, None)[0][0]
+c, camino, aparte = eo.candidatos_osma(_otro, _datos, eo.indice_por_asin(_datos), None, set(ASINS), M, None, _ids)
+eq('🔴 A5 · otro artículo de OSMA con el EAN de nuestra ficha NO se queda sus filas: son de la fila del código',
+   ([x['asin'] for x in c], camino, [x['asin'] for x in aparte]), ([], 'ean', ['B0C9T9RZT3', 'B0AJENA001']))
 c, camino, aparte = eo.candidatos_osma(_por['7001'], {M.norm(EAN_NORMAL): [_r('B0C9T9RZT3'), _r('B0NIVEA001')]}, {},
-                                       None, set(ASINS))
+                                       None, set(ASINS), M, None, frozenset())
 eq('A5 · una ficha enlazada a otro código no se cuelga de otro artículo aunque comparta su EAN',
    ([x['asin'] for x in c], camino, [x['asin'] for x in aparte]), (['B0NIVEA001'], 'ean', ['B0C9T9RZT3']))
 
@@ -409,7 +451,7 @@ PUERTA = [{'proveedor': 'OSMA', 'ean': '4002448039440', 'es_case': False, 'pa': 
           {'proveedor': 'OSMA', 'ean': '4001499961472', 'es_case': False, 'pa': 1.81, 'presente': False},
           {'proveedor': 'HEO', 'ean': '889698000000', 'es_case': False, 'pa': 9.99, 'presente': True}]
 SEMBRADAS = ('disp_pasada', 'disp_estado', 'disp_fuente', 'disp_parametros', 'facturas', 'codigos_proveedor',
-             'productos', 'v_escaner_fuente', 'inventario_fba')
+             'productos', 'v_escaner_fuente', 'inventario_fba', 'keepa_escaparate')
 
 
 def estado_inicial(escena):
@@ -426,8 +468,9 @@ def estado_inicial(escena):
     return {'tablas': {
         'escaner2_parametros': [{'proveedor': 'HEO', 'umbral_caidas_30d': 6, 'paises_filtro': ['ES', 'IT', 'FR', 'DE'],
                                  'paises_calculo': ['ES', 'IT', 'FR', 'DE']},
-                                {'proveedor': 'OSMA', 'umbral_caidas_30d': 6, 'paises_filtro': ['ES', 'IT', 'FR', 'DE'],
-                                 'paises_calculo': ['ES', 'IT', 'FR', 'DE']}],
+                                # (AG2) OSMA, solo España: la fila que deja la migración de la v2.
+                                {'proveedor': 'OSMA', 'umbral_caidas_30d': 6, 'paises_filtro': ['ES'],
+                                 'paises_calculo': ['ES']}],
         'disp_pasada': [{'id': 'p-vieja', 'proveedor': 'OSMA', 'estado': 'aplicada', 'creada_en': '2026-10-01T12:01:00+00:00',
                          'terminada_en': '2026-10-01T12:02:00+00:00', 'n_leidas': 3050},
                         {'id': 'p-osma', 'proveedor': 'OSMA', 'estado': 'aplicada', 'creada_en': '2026-10-02T05:15:38+00:00',
@@ -445,6 +488,7 @@ def estado_inicial(escena):
         'productos': json.loads(json.dumps(PRODUCTOS)),
         'v_escaner_fuente': puerta,
         'inventario_fba': [],
+        'keepa_escaparate': json.loads(json.dumps(KEEPA)),
     }, 'storage': {}}
 
 
@@ -469,41 +513,45 @@ for _prog in ('escaner2_osma_barrido.py', 'escaner2_osma_cruce.py'):
     eq('B1 · %s: ROJO, la línea exacta y NINGÚN cliente' % _prog,
        (_cod, 'ESCANER2_NO_EJECUTADO: sin llave de servicio' in _log, 'CLIENTES_CREADOS=0' in _log), (1, True, True))
 
-print('B2 · [bueno] barrido → listas → CSV de las dos listas → cruce → Excel')
+print('B2 · [bueno] barrido → LA lista → el CSV de ES (y uno de FR, que no cuenta) → cruce → Excel')
 cod, log, bd, ruta, inicial = caso('bueno')
 eq('B2 · el barrido sale en VERDE', cod, 0)
 pas = [p for p in bd['tablas']['escaner2_pasada'] if p.get('run_id') == 515151][0]
-eq('B2 · la pasada: OSMA, modo todas, esperando_csv, crudo 11 = previas 6 + foto 5, dos listas',
+eq('B2 · 🔴 la pasada: OSMA, modo todas, esperando_csv, crudo 11 = previas 6 + foto 5, UNA lista (n_tandas 1)',
    (pas['proveedor'], pas['modo'], pas['estado'], pas['n_crudo'], pas['n_foto'],
-    sum(pas['p_' + p] for p in e2.PUERTAS_PREVIAS), pas['n_tandas'], pas['ruta_lista']),
-   ('OSMA', 'todas', 'esperando_csv', 11, 5, 6, 2, 'osma/%s/eans.txt' % pas['id']))
+    sum(pas['p_' + p] for p in e2.PUERTAS_PREVIAS), pas['n_tandas'], pas['tanda'], pas['ruta_lista']),
+   ('OSMA', 'todas', 'esperando_csv', 11, 5, 6, 1, 6, 'osma/%s/eans.txt' % pas['id']))
 _alm = bd['storage']['escaner2']
 _txt = lambda k: base64.b64decode(_alm[k]).decode('utf-8')  # noqa: E731
-eq('B2 · las dos listas en el almacén cerrado (5 EAN · 4 ASIN) y n_eans_lista = 9',
-   (len(_txt('osma/%s/eans.txt' % pas['id']).split('\n')), _txt('osma/%s/asins.txt' % pas['id']).split('\n'),
-    pas['n_eans_lista']), (5, ASINS, 9))
+eq('🔴 B2 · en el almacén cerrado, LA lista (los 5 EAN de OSMA + el de la ficha de la Corega) y n_eans_lista = 6; '
+   'ni asins.txt',
+   (_txt('osma/%s/eans.txt' % pas['id']).split('\n'), pas['n_eans_lista'],
+    sorted(k.split('/')[-1] for k in _alm if k.startswith('osma/%s/' % pas['id']))),
+   (LISTA, 6, ['barrido.json', 'eans.txt']))
 _sc = json.loads(_txt('osma/%s/barrido.json' % pas['id']))
-eq('B2 · barrido.json: de qué descarga sale, el porte comprobado en 4 filas de la puerta común y los 3 enlaces de la foto',
-   (_sc['disp_pasada'], _sc['porte']['pct'], _sc['porte_comprobado'], sorted(_sc['enlaces'])),
-   ('p-osma', '0.067276', 4, ['18459', '1929', '4213']))
+eq('B2 · barrido.json: de qué descarga sale, el porte comprobado en 4 filas de la puerta común, los 3 enlaces de la foto '
+   'y el EAN de cada ficha (1 que OSMA no traía)',
+   (_sc['disp_pasada'], _sc['porte']['pct'], _sc['porte_comprobado'], sorted(_sc['enlaces']), _sc['eans_fichas'],
+    _sc['n_eans_fichas_nuevos'], 'lista_asins' in _sc),
+   ('p-osma', '0.067276', 4, ['18459', '1929', '4213'], EANS_FICHAS, 1, False))
 _fk = [f for f in bd['tablas']['escaner2_foto'] if f['producto_heo'] == '4213'][0]
 eq('B2 · en la foto, Kukident a 3,52 (el porte una vez)', (_fk['precio_catalogo'], _fk['precio_unidad']), (3.299, 3.52))
 
-# Fernando exporta las dos listas en los cuatro países y las suelta en el buzón.
+# Fernando exporta LA lista en el Visualizador de España y suelta el CSV en el buzón. Keepa trae la Corega por los
+# dos EAN (la caja nueva de OSMA con otra ficha, y nuestra ficha por el suyo) y NO trae el Lenor (no conoce su EAN).
+# Y un CSV de FR que se cuela (el buzón de la v2 ya lo rechaza): el cruce lo ignora y lo avisa.
 _carpeta = 'osma/%s/csv/' % pas['id']
-_filas_ean = [('B001PASC5E', '4002448039440', '30', '12.95', 'Kukident Active Plus 99 Tabletas'),
-              ('B0NUEVA001', EAN_OSMA_COREGA, '40', '9.99', 'Corega Tabs caja nueva'),
-              ('B01GIE0QSM', '4009932002171', '25', '19.50', 'Protefix Crema adhesiva Aloe Vera 47 g pack de 3'),
-              ('B0NIVEA001', EAN_NORMAL, '12', '8.90', 'Nivea Creme 150 ml')]
-_filas_asin = [('B001PASC5E', '4002448039440', '30', '12.95', 'Kukident Active Plus 99 Tabletas'),
-               ('B0C9T9RZT3', EAN_FICHA_COREGA, '18', '11.50', 'Corega Tabs pastillas limpiadoras 108'),
-               ('B014DGG0OQ', '5413149849693', '10', '6.50', 'Lenor toallitas secadora abril fresco 34'),
-               ('B07HCJQ45L', '4055902127801', '8', '11.90', 'Lenor toallitas secadora abril fresco 34 pack 2')]
-for _i, _pais in enumerate(('es', 'it', 'fr', 'de')):
-    _alm[_carpeta + '20261002-09%02d00-KeepaExport-2026-10-02-VisualizadorDeProductos (%d).csv' % (_i, 2 * _i)] = \
-        base64.b64encode(csv_real(_pais, _filas_ean)).decode()
-    _alm[_carpeta + '20261002-09%02d30-KeepaExport-2026-10-02-VisualizadorDeProductos (%d).csv' % (_i, 2 * _i + 1)] = \
-        base64.b64encode(csv_real(_pais, _filas_asin)).decode()
+_filas_es = [('B001PASC5E', '4002448039440', '30', '12.95', 'Kukident Active Plus 99 Tabletas'),
+             ('B0NUEVA001', EAN_OSMA_COREGA, '40', '9.99', 'Corega Tabs caja nueva'),
+             ('B0C9T9RZT3', EAN_FICHA_COREGA, '18', '11.50', 'Corega Tabs pastillas limpiadoras 108'),
+             ('B01GIE0QSM', '4009932002171', '25', '19.50', 'Protefix Crema adhesiva Aloe Vera 47 g pack de 3'),
+             ('B0NIVEA001', EAN_NORMAL, '12', '8.90', 'Nivea Creme 150 ml'),
+             # Dos fichas para el EAN de la Nivea: la hoja «Ambiguos» del viejo tiene algo que enseñar.
+             ('B0NIVEA002', EAN_NORMAL, '9', '9.40', 'Nivea Creme 150 ml lata')]
+_alm[_carpeta + '20261002-090000-KeepaExport-2026-10-02-VisualizadorDeProductos.csv'] = \
+    base64.b64encode(csv_real('es', _filas_es)).decode()
+_alm[_carpeta + '20261002-090100-KeepaExport-2026-10-02-VisualizadorDeProductos (1).csv'] = \
+    base64.b64encode(csv_real('fr', _filas_es)).decode()
 bd.pop('programa', None)
 json.dump(bd, open(ruta, 'w', encoding='utf-8'), default=str)
 cod2, log2 = correr(ruta, 'escaner2_osma_cruce.py', {'SUPABASE_SERVICE_KEY': 'svc-de-mentira', 'PASADA': pas['id'],
@@ -513,19 +561,22 @@ T = bd['tablas']
 _alm = bd['storage']['escaner2']
 eq('B2 · el cruce sale en VERDE', cod2, 0)
 cr = [c for c in T['escaner2_cruce'] if c.get('run_id') == 525252][0]
-eq('B2 · 🔴 el cruce: lista, cuadra, catálogo 11 = previas 6 + 5 puertas',
-   (cr['estado'], cr['cuadra'], cr['n_crudo'], cr['n_previas'], cr['n_entradas'], sum(cr['n_' + x] for x in 'abcdef')),
-   ('lista', True, 11, 6, 5, 5))
-eq('B2 · los 8 CSV leídos: 4 de la lista de EAN y 4 de la de ASIN, uno por país',
-   sorted((f['pais'], f['lista']) for f in cr['ficheros']),
-   sorted((p, li) for p in ('ES', 'IT', 'FR', 'DE') for li in ('ean', 'asin')))
+eq('B2 · 🔴 el cruce: lista, cuadra, catálogo 11 = previas 6 + 5 puertas, con los países de OSMA (solo ES)',
+   (cr['estado'], cr['cuadra'], cr['n_crudo'], cr['n_previas'], cr['n_entradas'], sum(cr['n_' + x] for x in 'abcdef'),
+    cr['paises_filtro'], cr['paises_calculo'], cr['paises_usados']),
+   ('lista', True, 11, 6, 5, 5, ['ES'], ['ES'], ['ES']))
+eq('🔴 B2 · los CSV: el de ES cuenta; el de FR se ignora y se avisa',
+   (sorted((f['pais'], f['usado']) for f in cr['ficheros']), 'CSV de FR ignorado' in (cr['aviso'] or '')),
+   ([('ES', True), ('FR', False)], True))
+eq('B2 · y solo se calcula ES: ninguna cuenta de otro país',
+   sorted({p['pais'] for p in T['escaner2_resultado_pais'] if p['cruce_id'] == cr['id']}), ['ES'])
 _res = {f['producto_heo']: r for r in T['escaner2_resultado_ean'] for f in T['escaner2_foto'] if f['id'] == r['foto_id']}
-eq('B2 · la Corega por su código: nuestra ficha, no la de la caja nueva',
+eq('🔴 B2 · la Corega por su código, con la fila del EAN de nuestra ficha: nuestra ficha, no la de la caja nueva',
    (_res['1929']['asin'], 'Por el código 1929 de OSMA' in _res['1929']['detalle'], 'B0NUEVA001' in _res['1929']['detalle']),
    ('B0C9T9RZT3', True, True))
 eq('B2 · el Kukident por su código (la misma ficha por los dos caminos: una)', _res['4213']['asin'], 'B001PASC5E')
-eq('B2 · el Lenor, con una de nuestras dos fichas (las trae la lista de ASIN: Keepa no conoce su EAN)',
-   _res['18459']['asin'] in ('B014DGG0OQ', 'B07HCJQ45L'), True)
+eq('🔴 B2 · el Lenor NO se rescata: Keepa no conoce su EAN, el CSV no lo trae → no está (puerta a)',
+   (_res['18459']['puerta'], _res['18459']['asin']), ('a', None))
 eq('B2 · la Protefix (por EAN) es nuestro pack de 3', (_res['3000']['asin'], 'pack de 3' in _res['3000']['detalle']),
    ('B01GIE0QSM', True))
 _rp = [p for p in T['escaner2_resultado_pais'] if p['resultado_ean_id'] == _res['3000']['id'] and p['pais'] == 'ES'][0]
@@ -561,18 +612,34 @@ eq('B2 · la Protefix pack 3: «PA (€)» 6,39 y el nombre lo dice',
 eq('B2 · «no habrá más» en las cuatro filas del descatalogado (Nivea) y en ninguna otra',
    sorted((r[_i['EAN']], r[_i[eo.COLUMNA_NO_HABRA_MAS]]) for r in _filas if r[_i[eo.COLUMNA_NO_HABRA_MAS]]),
    [(EAN_NORMAL, 'no habrá más')] * 4)
+# (AG2) La Celda 9 del viejo escribe SIEMPRE una fila por país (ES, IT, FR, DE): las de un país sin CSV, como las deja
+# el motor, «sin datos» y sin cuenta. Nada inventado.
+_sin = [r for r in _filas if r[_cab.index('País')] != 'ES']
+eq('🔴 B2 · «Análisis»: ES con su cuenta; IT, FR y DE como un país sin CSV («sin datos», sin precio ni beneficio)',
+   (sorted({r[_cab.index('País')] for r in _filas}),
+    sorted({(r[_cab.index('Canal BB')], r[_cab.index('Decisión')], r[_cab.index('Precio venta (€)')],
+             r[_cab.index('Beneficio (€)')], r[_cab.index('Ventas')]) for r in _sin}),
+    all(r[_cab.index('Decisión')] != 'Sin datos' for r in _filas if r[_cab.index('País')] == 'ES')),
+   (['DE', 'ES', 'FR', 'IT'], [('sin datos', 'Sin datos', None, None, None)], True))
 _resu = {r[0]: r[1] for r in _wb['Resumen'].iter_rows(values_only=True)}
-eq('B2 · el Resumen dice el porte (una vez), los códigos y ASIN de la lista y los packs',
-   (_resu.get('Porte en el precio (el de la puerta común, una sola vez)'),
-    _resu.get('Códigos enlazados en la foto (lista de ASIN)'), _resu.get('Packs nuestros valorados como unidades × precio')),
-   ('168,19 € de la factura 3c3f364c (2026-08-21) ÷ pedido previsto 2500,00 € = 6,73 %', '3 códigos · 4 ASIN',
-    1 + (_res['18459']['asin'] == 'B07HCJQ45L')))
+eq('🔴 B2 · el Resumen dice el porte (una vez), los países, los códigos y el EAN de sus fichas, las fichas que quedan '
+   'fuera (calculadas con keepa_escaparate) y los packs',
+   (_resu.get('Porte en el precio (el de la puerta común, una sola vez)'), _resu.get('Países del filtro de ventas'),
+    _resu.get('Países con CSV'), _resu.get('Códigos enlazados en la foto (el EAN de nuestra ficha va en la lista)'),
+    _resu.get('Fichas nuestras que quedan fuera: Keepa no conoce su EAN (no se rescatan)'),
+    _resu.get('Packs nuestros valorados como unidades × precio')),
+   ('168,19 € de la factura 3c3f364c (2026-08-21) ÷ pedido previsto 2500,00 € = 6,73 %', 'ES', 'ES',
+    '3 códigos · 3 EAN de nuestras fichas (1 que no traía ya OSMA)', eo.texto_fuera_de_keepa(FK), 1))
+eq('B2 · …y la línea de las fichas fuera nombra el Lenor', '18459 · B014DGG0OQ' in str(
+    _resu.get('Fichas nuestras que quedan fuera: Keepa no conoce su EAN (no se rescatan)')), True)
 eq('B2 · «Puertas previas» con los nombres de OSMA', sorted({r[4] for r in list(_wb['Puertas previas'].iter_rows(
     values_only=True))[1:]}), sorted(['Sin marca', 'EAN con forma rara o de relleno', 'Mismo EAN que otro artículo de OSMA']))
 
 print('B3 · 🔴 el registro (repo PÚBLICO) no lleva ni un EAN, ASIN ni precio')
 _prohibido = ['4002448039440', EAN_OSMA_COREGA, EAN_FICHA_COREGA, EAN_NORMAL, 'B001PASC5E', 'B0C9T9RZT3', 'B01GIE0QSM',
-              '3.52', '3,52', '3.299', '6.39', 'Kukident', 'Corega', 'Protefix', 'Nivea']
+              '3.52', '3,52', '3.299', '6.39', 'Kukident', 'Corega', 'Protefix', 'Nivea',
+              # (AG2) Ni el Lenor que queda fuera (sus ASIN y el EAN de la ficha).
+              'B014DGG0OQ', 'B07HCJQ45L', '8001090747723', 'Lenor']
 eq('B3 · ni en el barrido ni en el cruce', [x for x in _prohibido if x in log or x in log2], [])
 
 print('B4 · solo se escribe en escaner2_* y en su carpeta del almacén')

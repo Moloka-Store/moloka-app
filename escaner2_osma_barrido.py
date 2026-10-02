@@ -18,10 +18,10 @@ QUE HACE, EN ORDEN:
      dos, o la pasada falla (el porte se aplica UNA vez);
   6. guarda la foto en `escaner2_foto` y las listas de las puertas previas en `escaner2_apartado`, y lo CUENTA en la
      base;
-  7. deja en el almacen cerrado `escaner2`: `osma/<pasada>/eans.txt` (los EAN, uno por linea), `asins.txt` (los ASIN
-     de nuestras fichas enlazadas que estan en la foto) y `barrido.json` (de que descarga sale, el porte y los
-     enlaces: lo que el cruce necesita para decidir igual);
-  8. cierra la pasada en 'esperando_csv' (n_tandas = 2: lista de EAN y lista de ASIN; 1 si no hay ASIN) o en
+  7. deja en el almacen cerrado `escaner2`: `osma/<pasada>/eans.txt` (LA lista, encargo AG2: los EAN de OSMA y el
+     EAN de nuestra ficha de cada codigo enlazado que esta en la foto, uno por linea, sin repetir) y `barrido.json`
+     (de que descarga sale, el porte, los enlaces y el EAN de cada ficha: lo que el cruce necesita para decidir igual);
+  8. cierra la pasada en 'esperando_csv' (n_tandas = 1: una lista, un CSV del Visualizador, el de España) o en
      'fallida' con el motivo.
 
 🔴 REPO PUBLICO: LOS REGISTROS LOS VE CUALQUIERA. Solo se imprimen estados y recuentos: NUNCA precios, EAN, ASIN,
@@ -104,7 +104,7 @@ def main():
         'run_id': int(RUN_ID) if (RUN_ID or '').isdigit() else None}).execute()
     print(f">>> Pasada {pasada} abierta (descargando) · OSMA, artículos con marca y existencias.", flush=True)
     try:
-        cierre, n_eans, n_asins = barrer(pasada)
+        cierre, n_lista, n_fichas = barrer(pasada)
         # 🔒 El cierre DENTRO del try: si la base lo rechaza (el check del cuadre), la pasada queda 'fallida'.
         sb.table('escaner2_pasada').update(cierre).eq('id', pasada).execute()
     except Exception as ex:
@@ -114,8 +114,8 @@ def main():
                                                 **getattr(ex, 'recuentos', {}))).eq('id', pasada).execute()
         # Al log, solo el tipo: el motivo puede llevar precios o EAN y el repo es publico.
         abortar(f'pasada {pasada} fallida ({type(ex).__name__}); el motivo está en escaner2_pasada.motivo_fallo')
-    print(f">>> PASADA LISTA: {cierre['n_foto']} en la foto · lista de EAN {n_eans} · lista de ASIN {n_asins} · "
-          f"{cierre['n_tandas']} lista(s) por país. Esperando los CSV de Keepa.", flush=True)
+    print(f">>> PASADA LISTA: {cierre['n_foto']} en la foto · una lista de {n_lista} códigos (de ellos, {n_fichas} "
+          f"EAN de nuestras fichas que no traía OSMA). Esperando el CSV de Keepa de España.", flush=True)
 
 
 def barrer(pasada):
@@ -183,12 +183,13 @@ def barrer(pasada):
         raise Fallo('ninguna fila de OSMA de la puerta común está en la foto: no se puede comprobar el porte',
                     recuentos)
 
-    eans, asins = eo.listas_para_keepa(foto, enlaces)
-    if len(eans) > eo.TOPE_LISTA:
-        raise Fallo('la lista de EAN tiene %d códigos y el Visualizador admite %d' % (len(eans), eo.TOPE_LISTA),
-                    recuentos)
-    if len(eans) > eo.AVISO_LISTA:
-        print(f"AVISO: la lista de EAN pasa de {eo.AVISO_LISTA} ({len(eans)})", flush=True)
+    # (AG2) UNA lista: los EAN de OSMA + el EAN de nuestra ficha de cada codigo enlazado de la foto, sin repetir.
+    lista, eans_fichas = eo.lista_para_keepa_osma(foto, enlaces, M)
+    n_fichas_nuevos = len(lista) - len(e2.lista_para_keepa(foto))
+    if len(lista) > eo.TOPE_LISTA:
+        raise Fallo('la lista tiene %d códigos y el Visualizador admite %d' % (len(lista), eo.TOPE_LISTA), recuentos)
+    if len(lista) > eo.AVISO_LISTA:
+        print(f"AVISO: la lista pasa de {eo.AVISO_LISTA} ({len(lista)})", flush=True)
 
     # ── 5 · La foto y las listas de las puertas previas, en la base, y CONTADAS ─────────────────
     filas_foto = []
@@ -211,30 +212,27 @@ def barrer(pasada):
     if distintas:
         raise Fallo('las listas de las puertas previas no son su recuento: %s' % distintas, recuentos)
 
-    # ── 6 · Las dos listas y lo que el cruce necesita, en el almacen cerrado ────────────────────
+    # ── 6 · La lista y lo que el cruce necesita, en el almacen cerrado ──────────────────────────
     base = f'{eo.CARPETA}/{pasada}'
     texto = {'content-type': 'text/plain; charset=utf-8', 'upsert': 'true'}
-    sb.storage.from_(BUCKET).upload(f'{base}/eans.txt', '\n'.join(eans).encode('utf-8'), texto)
-    if asins:
-        sb.storage.from_(BUCKET).upload(f'{base}/asins.txt', '\n'.join(asins).encode('utf-8'), texto)
+    sb.storage.from_(BUCKET).upload(f'{base}/eans.txt', '\n'.join(lista).encode('utf-8'), texto)
     en_foto = {f['producto_heo'] for f in foto}
     sidecar = {
         'pasada': pasada, 'disp_pasada': ult['id'], 'descarga_en': ult.get('terminada_en') or ult.get('creada_en'),
         'porte': dict(porte, pct=None if porte['pct'] is None else str(porte['pct'])),
         'enlaces': {c: e for c, e in enlaces.items() if c in en_foto},
-        'lista_asins': asins, 'n_eans': len(eans), 'avisos': avisos_enl,
-        'porte_comprobado': comprobadas,
+        'eans_fichas': eans_fichas, 'n_eans_fichas_nuevos': n_fichas_nuevos, 'n_lista': len(lista),
+        'avisos': avisos_enl, 'porte_comprobado': comprobadas,
     }
     sb.storage.from_(BUCKET).upload(f'{base}/barrido.json', json.dumps(sidecar, ensure_ascii=False, default=str)
                                     .encode('utf-8'), {'content-type': 'application/json', 'upsert': 'true'})
 
     cierre = {'estado': 'esperando_csv', 'terminada_en': _ahora(), 'regla_activa': None, 'marcas': None,
               'ofertas': None, 'n_crudo': cuentas['n_crudo'], 'n_foto': cuentas['n_foto'],
-              'ruta_lista': f'{base}/eans.txt', 'n_eans_lista': len(eans) + len(asins),
-              'n_tandas': 2 if asins else 1, 'tanda': max(len(eans), len(asins), 1)}
+              'ruta_lista': f'{base}/eans.txt', 'n_eans_lista': len(lista), 'n_tandas': 1, 'tanda': max(len(lista), 1)}
     for p in e2.PUERTAS_PREVIAS:
         cierre['p_' + p] = previas[p]
-    return cierre, len(eans), len(asins)
+    return cierre, len(lista), n_fichas_nuevos
 
 
 if __name__ == '__main__':

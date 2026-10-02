@@ -1,17 +1,18 @@
 # -*- coding: utf-8 -*-
-"""ESCANER 2 · ESCANEO PRO DE OSMA · LA PARTE PURA (encargo AG, 02-oct-2026)
+"""ESCANER 2 · ESCANEO PRO DE OSMA · LA PARTE PURA (encargo AG, 02-oct-2026; AG2, mismo dia: solo España y una lista)
 
-QUE ES. El calculo del Escaneo PRO de OSMA, sin red y sin base: la foto desde la descarga diaria, las dos
-listas para el Visualizador, el cruce de cada articulo con sus fichas de Keepa y el Excel. La red vive en los
+QUE ES. El calculo del Escaneo PRO de OSMA, sin red y sin base: la foto desde la descarga diaria, la lista
+para el Visualizador, el cruce de cada articulo con sus fichas de Keepa y el Excel. La red vive en los
 dos programas que lo usan:
-  · escaner2_osma_barrido.py (workflow escaner2-osma-barrido.yml): de la descarga a la foto y las listas.
+  · escaner2_osma_barrido.py (workflow escaner2-osma-barrido.yml): de la descarga a la foto y la lista.
   · escaner2_osma_cruce.py   (workflow escaner2-osma-cruce.yml):   los CSV del Visualizador, las puertas y el Excel.
 
 🔑 CADA ESCANER, A LA MEDIDA DE SU PROVEEDOR (Fernando, 02-oct-2026): nada de tronco comun con adaptadores. Leer
    el catalogo, filtrar y cruzar es codigo de OSMA y vive aqui. Lo que se REUTILIZA del escaner 2 de HEO, sin
    tocarlo, son las REGLAS DE COMPRA (las mismas que aplica hoy su PRO) y el formato del Excel:
      · `escaner2_motor.decidir` (las seis puertas, el corte de ventas de escaner2_parametros, el calculo en los
-       cuatro paises venda o no en cada uno, la eleccion de ficha del viejo y la FICHA COMPARTIDA del encargo AA),
+       paises de escaner2_parametros venda o no en cada uno, la eleccion de ficha del viejo y la FICHA COMPARTIDA
+       del encargo AA; en OSMA, desde el AG2, los paises son solo ES),
        que por debajo usa `calc_rentabilidad` y `decision_de` del viejo, copiados en escaner2_heredado_nube.py;
      · `escaner2_motor.examinar_csv`, `fichas_compartidas` y el lector del CSV del Visualizador
        (escaner2_heredado_pro.py);
@@ -26,14 +27,15 @@ LO PROPIO DE OSMA:
      (1 + porte de la ultima factura de OSMA ÷ pedido previsto), redondeado a 2 decimales DESPUES. La puerta comun
      solo trae las ~30 filas de OSMA que casan con una ficha; para las demas, la MISMA cuenta (`pa_con_porte`), y
      el barrido comprueba que en las filas que estan en los dos sitios el precio es EL MISMO (si no, falla).
-  3. DOS LISTAS PARA EL VISUALIZADOR (plano Y, apartado 4): los EAN de OSMA y los ASIN de nuestras fichas
-     enlazadas por codigo. 🔴 Por que dos y no una (medido el 02-oct-2026 en keepa_escaparate, ES/IT/FR/DE): para el
-     Lenor 18459 (B014DGG0OQ y B07HCJQ45L) Keepa NO lista el EAN de la ficha (8001090747723) en ningun pais, asi que
-     una lista de EAN no las encontraria nunca. El encargo lo previo: «vuelve a la lista de ASIN aparte».
+  3. UNA SOLA LISTA Y UN SOLO CSV, EL DE ESPAÑA (encargo AG2, Fernando, 02-oct-2026: «Las cosas de Osma es
+     dificil venderlas en Pan EU»). La lista lleva los EAN de OSMA del filtro + el EAN de NUESTRA ficha de cada
+     codigo enlazado que esta en la foto, sin repetir (`lista_para_keepa_osma`). La ficha cuyo EAN no conoce Keepa
+     NO se rescata (el Lenor 18459, medido el 02-oct-2026): se dice en el Resumen, calculado en cada pasada con
+     keepa_escaparate (`fuera_de_keepa`). Ya no hay lista de ASIN.
   4. EL CRUCE POR CODIGO: el articulo de OSMA de un codigo enlazado (codigos_proveedor, lista CERRADA de 20) se
-     decide con SUS fichas (las que llegan por la lista de ASIN), no con lo que diga el EAN nuevo de OSMA. Si la
-     misma ficha llega por los dos caminos, se queda la del codigo. Una fila de Keepa de una ficha enlazada no se
-     cuelga de OTRO articulo de OSMA aunque comparta EAN.
+     decide con SUS fichas (las de su familia que traiga el CSV), no con lo que diga el EAN nuevo de OSMA. Una fila
+     del CSV con el EAN de una ficha enlazada es de la fila de ESE codigo; la misma ficha por los dos caminos: una,
+     la del codigo. Una fila de Keepa de una ficha enlazada no se cuelga de OTRO articulo de OSMA aunque comparta EAN.
   5. NUESTROS PACKS: coste = unidades × precio (como Reponer desde el encargo AC; el factor, como lib/packs de la
      v2, portado aqui: `factores_por_ficha`).
   6. UN SOLO AÑADIDO EN EL EXCEL: la columna «No habrá más» al final de «Análisis» (descatalogados con existencias).
@@ -53,11 +55,6 @@ MODO = 'todas'
 # El Visualizador no admite mas de 10.000 codigos por lista; por encima de 5.000 se avisa (encargo AG).
 TOPE_LISTA = e2.TOPE_VISUALIZADOR
 AVISO_LISTA = 5000
-# Las dos listas de la pasada. En la pasada viajan como dos «tandas»: 1 = EAN, 2 = ASIN (n_tandas = 2).
-LISTAS = ('ean', 'asin')
-# Un CSV es de la lista de ASIN si al menos este tanto de sus ASIN estan en esa lista (la de EAN, con ~1.700
-# articulos, no puede tener mas de una veintena de esos ASIN).
-UMBRAL_LISTA_ASIN = 0.9
 
 # Los nombres de las puertas previas EN OSMA. Las mismas ocho del escaner 2 (el cuadre crudo = previas + foto es
 # el de siempre); en OSMA solo se usan cinco y las otras tres salen a 0.
@@ -442,30 +439,76 @@ def comprobar_porte(foto, enlaces, puerta):
     return comprobadas, mal
 
 
-def listas_para_keepa(foto, enlaces):
-    """(eans, asins): los EAN de la foto (uno por linea, sin repetir, con el rescate de GTIN del viejo como HEO) y
-    los ASIN de nuestras fichas de los codigos enlazados QUE ESTAN EN LA FOTO (un codigo sin existencias o sin marca
-    no tiene a que fila colgarse)."""
-    eans = e2.lista_para_keepa(foto)
+def lista_para_keepa_osma(foto, enlaces, M):
+    """(AG2) LA lista para el Visualizador → (codigos, eans_fichas):
+      · los EAN de la foto (uno por linea, sin repetir, con el rescate de GTIN del viejo como HEO), y
+      · el EAN de NUESTRA ficha de cada codigo enlazado QUE ESTA EN LA FOTO (un codigo sin existencias o sin marca
+        no tiene a que fila colgarse), detras y solo si no estaba ya (sin ceros delante, como compara Keepa).
+    La familia de un codigo (activas, no chase, `enlaces_de`) comparte EAN: es UN EAN por codigo. `eans_fichas`:
+    {codigo: EAN de la ficha} de los codigos de la foto que tienen EAN (este o no ya en la lista)."""
+    codigos = e2.lista_para_keepa(foto)
+    vistos = {M.norm(c) for c in codigos}
     en_foto = {f['producto_heo'] for f in foto}
-    asins = list(dict.fromkeys(a for c in sorted(enlaces, key=_clave_codigo) if c in en_foto
-                               for a in enlaces[c]['asins']))
-    return eans, asins
+    eans_fichas = {}
+    for c in sorted(enlaces, key=_clave_codigo):
+        ean = str(enlaces[c].get('ean_ficha') or '').strip()
+        if c not in en_foto or not M.norm(ean):
+            continue
+        eans_fichas[c] = ean
+        if M.norm(ean) not in vistos:
+            vistos.add(M.norm(ean))
+            codigos.append(ean)
+    return codigos, eans_fichas
+
+
+def _codigos_keepa(fila):
+    """Los codigos que Keepa tiene de una ficha (keepa_escaparate: `ean_keepa_crudo` y `upc_keepa`), normalizados."""
+    texto = '%s,%s' % (fila.get('ean_keepa_crudo') or '', fila.get('upc_keepa') or '')
+    return {k for k in (ean_norm(x) for x in re.split(r'[^0-9]+', texto)) if k}
+
+
+def fuera_de_keepa(enlaces, eans_fichas, keepa, dominios):
+    """(AG2) Nuestras fichas de los codigos de la foto que la lista NO puede traer porque Keepa no conoce su EAN:
+    NO se rescatan (Fernando, 02-oct-2026). Se calcula en cada cruce con keepa_escaparate (FOTO: se dice su fecha),
+    en los paises del cruce (`dominios`, en minusculas: 'es'). → {'fuera': [(codigo, asin, por que)],
+    'sin_dato': [(codigo, asin)], 'fecha': la mas reciente de las filas miradas}.
+      · el codigo sin EAN en la ficha → fuera ('la ficha no tiene EAN');
+      · la ficha con fila en keepa_escaparate en algun pais del cruce y en NINGUNO lista nuestro EAN → fuera;
+      · sin fila en ningun pais del cruce → 'sin_dato' (no se sabe: se dice aparte, no se da por fuera)."""
+    por_asin = {}
+    for k in keepa or []:
+        if str(k.get('dominio') or '').lower() in dominios:
+            por_asin.setdefault(k.get('asin'), []).append(k)
+    fuera, sin_dato, fechas = [], [], []
+    for c in sorted(enlaces, key=_clave_codigo):
+        clave = ean_norm(eans_fichas.get(c))
+        for a in enlaces[c]['asins']:
+            filas = por_asin.get(a) or []
+            fechas += [str(k['fecha_foto']) for k in filas if k.get('fecha_foto')]
+            if not clave:
+                fuera.append((c, a, 'la ficha no tiene EAN'))
+            elif not filas:
+                sin_dato.append((c, a))
+            elif not any(clave in _codigos_keepa(k) for k in filas):
+                fuera.append((c, a, 'Keepa no conoce el EAN %s de la ficha (%s)'
+                              % (eans_fichas[c], ', '.join(sorted(str(k['dominio']).upper() for k in filas)))))
+    return {'fuera': fuera, 'sin_dato': sin_dato, 'fecha': max(fechas) if fechas else None}
+
+
+def texto_fuera_de_keepa(fk):
+    """La linea del Resumen: las fichas que quedan fuera, por codigo, y las que no se saben."""
+    if not fk:
+        return 'no se ha podido mirar'
+    partes = ['%s · %s: %s' % (c, a, porque) for c, a, porque in fk['fuera']] or ['ninguna']
+    if fk['sin_dato']:
+        partes.append('sin fila en keepa_escaparate (no se sabe): %s'
+                      % ', '.join('%s · %s' % (c, a) for c, a in fk['sin_dato']))
+    return '%s (keepa_escaparate del %s)' % (' | '.join(partes), fk['fecha'] or '—')
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 4 · EL CRUCE: DE QUE LISTA ES CADA CSV, Y LAS FICHAS DE CADA ARTICULO
+# 4 · EL CRUCE: LAS FICHAS DE CADA ARTICULO
 # ═══════════════════════════════════════════════════════════════════════════════
-def lista_de_csv(asins_del_csv, lista_asins):
-    """'asin' si el CSV es la exportacion de la lista de ASIN (casi todos sus ASIN estan en ella), 'ean' si no.
-    La MISMA regla que el buzon de la v2 (`listaOsmaDe`, lib/escaner2/buzon.ts)."""
-    asins = {a for a in asins_del_csv or [] if a}
-    if not asins:
-        return 'ean'
-    dentro = len(asins & set(lista_asins or []))
-    return 'asin' if dentro / len(asins) >= UMBRAL_LISTA_ASIN else 'ean'
-
-
 def indice_por_asin(datos_por_ean):
     """{asin: registro} a partir de lo que devuelve `leer_csv_visualizador` (indexado por EAN): el primer
     registro de cada ASIN (el lector recorre los CSV del mas nuevo al mas viejo, como el cruce de HEO)."""
@@ -477,22 +520,36 @@ def indice_por_asin(datos_por_ean):
     return salida
 
 
-def candidatos_osma(fila, datos_ean, por_asin, enlace, asins_enlazados):
-    """Las fichas de UN pais para una fila de la foto → (candidatas, camino, apartadas).
-      · fila de un codigo ENLAZADO: las de nuestras fichas que trae la lista de ASIN (`camino` 'codigo'); las que
-        trae su EAN con OTRO ASIN se apartan (la misma ficha por los dos caminos: se queda la del codigo). Si la
-        lista de ASIN no trae ninguna, las de su EAN, como cualquier otra fila ('ean_sin_codigo').
-      · las demas: las de su EAN ('ean'), menos las de una ficha enlazada a otro codigo, que se apartan.
-    `datos_ean`: el lector del CSV de la lista de EAN; `por_asin`: `indice_por_asin` de la lista de ASIN."""
-    por_ean = e2.candidatos(fila, datos_ean or {})
+def de_las_fichas(datos, eans_fichas, M):
+    """(AG2) Los registros del CSV que llegan por el EAN de una ficha enlazada (por identidad: el lector cuelga el
+    mismo registro de cada uno de sus EAN). Son de la fila de ESE codigo, nunca de otro articulo de OSMA."""
+    return {id(r) for e in (eans_fichas or {}).values() for r in (datos or {}).get(M.norm(e), [])}
+
+
+def candidatos_osma(fila, datos, por_asin, enlace, asins_enlazados, M, ean_ficha=None, ids_fichas=frozenset()):
+    """Las fichas de UN pais para una fila de la foto → (candidatas, camino, apartadas). (AG2) UN solo CSV, con los
+    EAN de OSMA y los de nuestras fichas:
+      · fila de un codigo ENLAZADO: las de nuestras fichas que trae el CSV, por cualquiera de sus EAN (`camino`
+        'codigo'); lo que traen su EAN de OSMA o el de nuestra ficha con OTRO ASIN se aparta (la misma ficha por los
+        dos caminos: una, la del codigo). Si el CSV no trae ninguna de nuestras fichas, las de su EAN de OSMA, como
+        cualquier otra fila ('ean_sin_codigo').
+      · las demas: las de su EAN ('ean'), menos las de una ficha enlazada y las que llegan por el EAN de una ficha
+        enlazada (`ids_fichas`, de `de_las_fichas`), que se apartan: son de la fila de su codigo.
+    `datos`: el lector del CSV; `por_asin`: `indice_por_asin` del mismo CSV."""
+    por_ean = e2.candidatos(fila, datos or {})
     if enlace:
         por_codigo = [por_asin[a] for a in enlace['asins'] if a in (por_asin or {})]
         if por_codigo:
-            apartadas = [r for r in por_ean if r.get('asin') and r['asin'] not in enlace['asins']]
+            por_ficha = e2.candidatos({'variantes': [M.norm(ean_ficha)]}, datos or {}) if M.norm(ean_ficha or '') else []
+            vistos, apartadas = set(), []
+            for r in por_ean + por_ficha:
+                if r.get('asin') and r['asin'] not in enlace['asins'] and r['asin'] not in vistos:
+                    vistos.add(r['asin'])
+                    apartadas.append(r)
             return por_codigo, 'codigo', apartadas
         return por_ean, 'ean_sin_codigo', []
-    apartadas = [r for r in por_ean if r.get('asin') in asins_enlazados]
-    return [r for r in por_ean if r.get('asin') not in asins_enlazados], 'ean', apartadas
+    fuera = [r for r in por_ean if r.get('asin') in asins_enlazados or id(r) in ids_fichas]
+    return [r for r in por_ean if not (r.get('asin') in asins_enlazados or id(r) in ids_fichas)], 'ean', fuera
 
 
 def decidir_osma(fila, cands_por_pais, caidas_por_pais, params, M, eleccion, compartidas, enlace, factores,
@@ -520,7 +577,7 @@ def decidir_osma(fila, cands_por_pais, caidas_por_pais, params, M, eleccion, com
     if enlace and 'codigo' in caminos.values():
         notas.append('Por el código %s de OSMA (nuestra ficha %s)' % (fila['producto_heo'], ', '.join(enlace['asins'])))
     elif enlace:
-        notas.append('Código %s enlazado, pero la lista de ASIN no trae su ficha: decidido por el EAN de OSMA'
+        notas.append('Código %s enlazado, pero el CSV no trae nuestra ficha: decidido por el EAN de OSMA'
                      % fila['producto_heo'])
     if factor > 1:
         notas.append('pack de %d: coste %d × %s € = %s €' % (factor, factor, _coma(fila['precio_unidad']), _coma(pa)))
@@ -646,8 +703,12 @@ def escribir_excel(foto, resultados, apartados, M, info):
                  ['Países del filtro de ventas', ', '.join(p['paises_filtro'])],
                  ['Países que se calculan (si traen CSV)', ', '.join(p['paises_calculo'])],
                  ['Países con CSV', ', '.join(info['usados'])],
-                 ['Códigos enlazados en la foto (lista de ASIN)', '%d códigos · %d ASIN'
-                  % (len(info.get('enlaces_foto') or []), len(info.get('lista_asins') or []))],
+                 ['Códigos enlazados en la foto (el EAN de nuestra ficha va en la lista)', '%d códigos · %d EAN de '
+                  'nuestras fichas (%d que no traía ya OSMA)'
+                  % (len(info.get('enlaces_foto') or []), len(info.get('eans_fichas') or {}),
+                     info.get('n_eans_fichas_nuevos') or 0)],
+                 ['Fichas nuestras que quedan fuera: Keepa no conoce su EAN (no se rescatan)',
+                  texto_fuera_de_keepa(info.get('fuera_keepa'))],
                  ['Packs nuestros valorados como unidades × precio', info.get('n_packs', 0)],
                  ['Catálogo de OSMA (descarga)', info['n_crudo']]]
     filas_res += [['Puerta previa · %s' % NOMBRE_PREVIA[x], info['previas'][x]] for x in e2.PUERTAS_PREVIAS]
@@ -656,8 +717,8 @@ def escribir_excel(foto, resultados, apartados, M, info):
     filas_res += [['Puertas previas + suma de puertas', sum(info['previas'].values()) + sum(info['n_bd'].values())],
                   ['Cuadra', 'SÍ' if info['cuadra'] else 'NO'],
                   ['Comparación con el escáner viejo', 'no se hace: el viejo no tiene escaneos de OSMA']]
-    filas_res += [['CSV', '%s · %s · lista de %s · %s filas%s%s' % (
-        f['nombre'], f.get('pais') or '¿?', (f.get('lista') or '¿?').upper(), f.get('filas') or 0,
+    filas_res += [['CSV', '%s · %s · %s filas%s%s' % (
+        f['nombre'], f.get('pais') or '¿?', f.get('filas') or 0,
         '' if f.get('usado') else ' · NO USADO', (' · ' + f['error']) if f.get('error') else '')]
         for f in info['ficheros']]
     filas_res += [['Aviso', a] for a in info['avisos']]
