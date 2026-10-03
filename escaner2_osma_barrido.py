@@ -192,9 +192,17 @@ def barrer(pasada):
     # el Visualizador traiga sus ventas: con ellas, la valoracion de los packs puede llegar a COMPRAR. Si no se pueden leer
     # (las tablas aun no existen, o fallan), la lista sale como siempre y barrido.json lo dice.
     eans_packs, sin_ean_packs, aviso_packs = packs_para_la_lista(lista, M)
+    # (AN-2) Respetando el tope del Visualizador: si no caben todos, se recortan LOS DE PACK (nunca los de OSMA) y
+    # barrido.json lo dice. Por los packs el barrido no falla nunca.
+    import escaner2_osma_packs as op
+    eans_packs, recortados = op.recortar_al_tope(lista, eans_packs, eo.TOPE_LISTA)
+    if recortados:
+        aviso_packs = (aviso_packs + ' · ' if aviso_packs else '') + \
+            '%d EAN de packs no caben en la lista (tope %d del Visualizador): van en el próximo' % (recortados, eo.TOPE_LISTA)
     lista = lista + eans_packs
-    print(f">>> PACKS en la lista: {len(eans_packs)} EAN de packs de Amazon encontrados · sin EAN {sin_ean_packs}"
-          + (' · AVISO: no se pudieron leer' if aviso_packs else ''), flush=True)
+    print(f">>> PACKS en la lista: {len(eans_packs)} EAN de packs de Amazon encontrados · sin EAN {sin_ean_packs} · "
+          f"recortados por el tope {recortados}" + (' · AVISO: no se pudieron leer' if aviso_packs and not recortados else ''),
+          flush=True)
     if len(lista) > eo.TOPE_LISTA:
         raise Fallo('la lista tiene %d códigos y el Visualizador admite %d' % (len(lista), eo.TOPE_LISTA), recuentos)
     if len(lista) > eo.AVISO_LISTA:
@@ -232,7 +240,7 @@ def barrer(pasada):
         'enlaces': {c: e for c, e in enlaces.items() if c in en_foto},
         'eans_fichas': eans_fichas, 'n_eans_fichas_nuevos': n_fichas_nuevos, 'n_lista': len(lista),
         'avisos': avisos_enl, 'porte_comprobado': comprobadas,
-        'n_eans_packs': len(eans_packs), 'aviso_packs': aviso_packs,
+        'n_eans_packs': len(eans_packs), 'n_eans_packs_recortados': recortados, 'aviso_packs': aviso_packs,
     }
     sb.storage.from_(BUCKET).upload(f'{base}/barrido.json', json.dumps(sidecar, ensure_ascii=False, default=str)
                                     .encode('utf-8'), {'content-type': 'application/json', 'upsert': 'true'})
@@ -256,8 +264,16 @@ def packs_para_la_lista(lista, M):
             return [], 0, None
         ids = [x['id'] for x in _todas('osma_packs_cola', 'id', 'id', cruce_id=ult[0]['cruce_id'])]
         cands = []
+        # (AN-2) Por TROZOS de ids (una URL con cientos de uuid no cabe) y cada trozo PAGINADO (la API corta en 1.000 filas).
         for i in range(0, len(ids), 100):
-            cands += sb.table('osma_packs_candidato').select('clase,eans').in_('cola_id', ids[i:i + 100]).execute().data or []
+            desde = 0
+            while True:
+                pagina = (sb.table('osma_packs_candidato').select('clase,eans').in_('cola_id', ids[i:i + 100])
+                          .order('id').range(desde, desde + 999).execute().data or [])
+                cands += pagina
+                if len(pagina) < 1000:
+                    break
+                desde += 1000
         nuevos, sin_ean = op.eans_de_packs(cands, lista, M)
         return nuevos, sin_ean, None
     except Exception as ex:

@@ -230,6 +230,7 @@ class _Q:
 
     def insert(self, filas):
         self.op, self.payload = 'insert', filas if isinstance(filas, list) else [filas]
+        self.bd.setdefault('log', []).append(('insert', self.t, len(self.payload)))
         return self
 
     def eq(self, k, v):
@@ -241,6 +242,7 @@ class _Q:
         return self
 
     def in_(self, k, vs):
+        self.bd.setdefault('log', []).append(('in_', self.t, len(vs)))
         self.f.append(lambda x, k=k, vs=vs: x.get(k) in vs)
         return self
 
@@ -389,6 +391,130 @@ finally:
             os.environ.pop(_k, None)
         else:
             os.environ[_k] = _v
+
+# ── H · (AN-2) LO QUE PIDIÓ COWORK ───────────────────────────────────────────────────────
+def _mundo():
+    bd = {'t': {k: [dict(x) for x in v] for k, v in {
+        'escaner2_cruce': [{'id': CRUCE, 'estado': 'lista', 'pasada_id': PASADA, 'run_id': 4242, 'creado_en': '2026-10-03T10:00:00Z'}],
+        'escaner2_pasada': [{'id': PASADA, 'proveedor': 'OSMA', 'creado_en': '2026-10-03T09:00:00Z'}],
+        'escaner2_foto': [dict(f, pasada_id=PASADA) for f in FOTO],
+        'escaner2_resultado_ean': [dict(r, cruce_id=CRUCE, id='r%d' % i) for i, r in enumerate(RESULTADOS)],
+        'productos': PRODUCTOS, 'amz_ficha': [dict(asin='B014DGG0OQ', pais='ES', **AMZ['B014DGG0OQ'])], 'keepa_escaparate': [],
+        'escaner2_parametros': [{'proveedor': 'OSMA', 'umbral_caidas_30d': 6}],
+        'nov_parametros': [{'proveedor': 'HEO', 'keepa_reserva': 100, 'keepa_tope_peticion': 100}],
+        'nov_keepa': [], 'inventario_fba': [],
+    }.items()}, 's': {'osma/%s/barrido.json' % PASADA: json.dumps({'enlaces': ENLACES, 'porte': INFO['porte']}).encode(),
+                      'osma/%s/csv/20261002_0900_es.csv' % PASADA: _csv.encode('utf-8')}}
+    return bd
+
+
+# H1 · una fila que no cumple los CHECK de la tabla se salta y se cuenta (el código con un espacio), y la cola va en
+#      UNA sola inserción.
+bd = _mundo()
+bd['t']['escaner2_foto'][2]['producto_heo'] = '19 29'
+log = []
+n = op.encolar(_Sb(bd), PASADA, '4242', imprimir=lambda *a, **k: log.append(' '.join(str(x) for x in a)))
+inserciones = [x for x in bd.get('log', []) if x[0] == 'insert' and x[1] == 'osma_packs_cola']
+eq('H1 · (AN-2) la fila que no cumple la tabla (código «19 29») se SALTA y se cuenta; las demás, en UNA sola inserción',
+   [n, sorted(x['codigo_osma'] for x in bd['t']['osma_packs_cola']), [x[2] for x in inserciones],
+    any('saltadas por no cumplir la tabla 1 codigo=1' in linea for linea in log)],
+   [2, ['18459', '4213'], [2], True])
+eq('H1b · motivo_fila_invalida mira lo de la tabla: EAN de más, ASIN mal, PA 0, Price_net 0, factor 0, sin puerta y no nuestra',
+   [op.motivo_fila_invalida(dict(por['4213'], **c)) for c in (
+       {'eans': ['1', '2', '3', '4', '5']}, {'asin_ref': 'b001pasc5e'}, {'pa_unidad': 0}, {'price_net': 0}, {'factor_ref': 0},
+       {'puerta': None, 'nuestra': False}, {})],
+   ['eans', 'asin_ref', 'pa_unidad', 'price_net', 'factor_ref', 'puerta', None])
+# H2 · una cola INCOMPLETA (de antes) se completa con las que faltan, sin repetir.
+bd = _mundo()
+bd['t']['osma_packs_cola'] = [dict(por['4213'], cruce_id=CRUCE, id='ya-4213', estado='buscada', buscada_en='2026-10-03T11:00:00Z')]
+n2 = op.encolar(_Sb(bd), PASADA, '4242', imprimir=lambda *a, **k: None)
+eq('H2 · (AN-2) una cola incompleta (solo 4213) se COMPLETA con las dos que faltan y no repite la que estaba',
+   [n2, sorted(x['codigo_osma'] for x in bd['t']['osma_packs_cola']), [x['estado'] for x in bd['t']['osma_packs_cola'] if x['codigo_osma'] == '4213']],
+   [2, ['18459', '1929', '4213'], ['buscada']])
+eq('H2b · …y si ya está entera, no apunta nada', op.encolar(_Sb(bd), PASADA, '4242', imprimir=lambda *a, **k: None), 0)
+
+# H3 · paginación: los ids, de 100 en 100; y cada trozo, de 1.000 en 1.000 filas.
+bd = {'t': {'t': [{'id': '%05d' % i, 'k': 'id%03d' % (i % 250)} for i in range(2600)]}, 's': {}}
+filas = op._todas(_Sb(bd), 't', 'id,k', 'id', en=('k', ['id%03d' % i for i in range(250)]))
+trozos = [x[2] for x in bd['log'] if x[0] == 'in_']
+eq('H3 · (AN-2) 250 ids en trozos de 100 (100, 100, 50) y las 2.600 filas enteras, paginando',
+   [len(filas), len({x['id'] for x in filas}), sorted(set(trozos)), max(trozos)], [2600, 2600, [50, 100], 100])
+
+# H4 · el tope de la lista del Visualizador: se recortan los de pack, nunca los de OSMA.
+eq('H4 · (AN-2) con la lista casi llena, los EAN de packs que no caben se recortan (y se cuentan); los de OSMA, intactos',
+   [op.recortar_al_tope(['1'] * 9998, ['7', '8', '9'], 10000), op.recortar_al_tope(['1'] * 10000, ['7'], 10000),
+    op.recortar_al_tope(['1'], ['7'], 10000)],
+   [(['7', '8'], 1), ([], 1), (['7'], 0)])
+
+# H5 · la valoración SIN botón (el reloj de y 40): el último cruce con su cola entera buscada y sin Excel.
+CRUCE_B = '11111111-2222-4333-8444-555555555555'
+bd = _mundo()
+bd['t']['escaner2_cruce'].append({'id': CRUCE_B, 'estado': 'lista', 'pasada_id': PASADA, 'run_id': 1, 'creado_en': '2026-10-03T12:00:00Z'})
+bd['t']['osma_packs_cola'] = [{'id': 'q1', 'cruce_id': CRUCE, 'estado': 'buscada'}, {'id': 'q2', 'cruce_id': CRUCE_B, 'estado': 'pendiente'}]
+eq('H5 · (AN-2) sin cruce, el reloj elige el último cruce con su cola ENTERA buscada (el más nuevo aún espera al cartero)',
+   op.cruce_a_valorar(_Sb(bd)), CRUCE)
+bd['t']['osma_packs_excel'] = [{'id': 'e', 'cruce_id': CRUCE, 'quitado_biblioteca_en': '2026-10-03T13:00:00Z'}]
+enviados = []
+eq('H5b · …con su Excel QUITADO de la biblioteca, el reloj NO lo vuelve a hacer', op.cruce_a_valorar(_Sb(bd)), None)
+if op.cruce_a_valorar(_Sb(bd)) is None:
+    eq('H5c · …y sin nada que valorar, sale sin Excel ni Telegram',
+       [op.valorar_cruce(_Sb(bd), '', '1', ahora=AHORA, imprimir=lambda *a, **k: None, enviar=lambda *a: enviados.append(a)), enviados,
+        len(bd['t']['osma_packs_excel'])], [None, [], 1])
+
+
+# H6 · las ventas de Keepa por ASIN: los packs sin ventas se piden (y se guardan), con los tokens contados.
+class _KeepaDoble:
+    def __init__(self, saldo=1000, falla=False):
+        self.saldo, self.falla, self.tokens, self.pedidos = saldo, falla, 0, []
+
+    def leer_saldo(self):
+        if self.falla:
+            raise RuntimeError('Keepa caído')
+        return self.saldo
+
+    def productos(self, pais, asins, por='code', buybox=False):
+        self.pedidos.append((pais, list(asins), por))
+        self.tokens += len(asins)
+        return [{'asin': a, 'title': 't', 'stats': {'salesRankDrops30': 30, 'current': [0, 0, 0, 1500], 'avg90': [0, 0, 0, 1800]}} for a in asins]
+
+
+bd = _mundo()
+sbk = _Sb(bd)
+op.encolar(sbk, PASADA, '4242', imprimir=lambda *a, **k: None)
+for x in bd['t']['osma_packs_cola']:
+    x['id'], x['estado'] = 'cola-' + x['codigo_osma'], 'buscada'
+bd['t']['osma_packs_candidato'] = [dict(SUELTO, cola_id='cola-4213', id='k1'), dict(PACK, cola_id='cola-4213', id='k2'),
+                                   dict(UNA, cola_id='cola-4213', id='k3')]
+kd = _KeepaDoble()
+logk = []
+fk = op.valorar_cruce(sbk, CRUCE, '77', ahora=AHORA, imprimir=lambda *a, **k: logk.append(' '.join(str(x) for x in a)), enviar=lambda *a: None,
+                      keepa=kd)
+eq('H6 · (AN-2) sin ventas guardadas, se piden a Keepa ES por ASIN (los dos packs), se GUARDAN en osma_packs_keepa y cuentan los tokens',
+   [kd.pedidos, sorted(x['asin'] for x in bd['t'].get('osma_packs_keepa', [])), [x['caidas_30d'] for x in bd['t']['osma_packs_keepa']],
+    any('tokens gastados 2' in linea for linea in logk)],
+   [[('ES', ['B08629V7YQ', 'B0UNASENAL'], 'asin')], ['B08629V7YQ', 'B0UNASENAL'], [30, 30], True])
+xl = load_workbook(io.BytesIO(bd['s'][fk['ruta_excel']]))
+eq('H6b · …y la valoración las usa: ningún pack queda «sin ventas de Keepa»', any(op.TEXTO_SIN_VENTAS in str(c.value) for row in xl['Análisis'].iter_rows() for c in row), False)
+bd = _mundo()
+sbk = _Sb(bd)
+op.encolar(sbk, PASADA, '4242', imprimir=lambda *a, **k: None)
+for x in bd['t']['osma_packs_cola']:
+    x['id'], x['estado'] = 'cola-' + x['codigo_osma'], 'buscada'
+bd['t']['osma_packs_candidato'] = [dict(SUELTO, cola_id='cola-4213', id='k1'), dict(PACK, cola_id='cola-4213', id='k2')]
+fk2 = op.valorar_cruce(sbk, CRUCE, '78', ahora=AHORA, imprimir=lambda *a, **k: None, enviar=lambda *a: None, keepa=_KeepaDoble(falla=True))
+res = [str(c.value) for c in load_workbook(io.BytesIO(bd['s'][fk2['ruta_excel']]))['Resumen']['B']]
+eq('H6c · (AN-2) Keepa no responde: sigue sin ventas (VALORAR como mucho) y el Resumen lo dice; el Excel sale igual',
+   [fk2['n_comprar'], any(v.startswith('Keepa no respondió') for v in res)], [0, True])
+kr = _KeepaDoble(saldo=101)
+bd['t']['osma_packs_excel'] = []
+op.valorar_cruce(sbk, CRUCE, '79', ahora=AHORA, imprimir=lambda *a, **k: None, enviar=lambda *a: None, keepa=kr)
+eq('H6d · (AN-2) con el saldo justo por encima de la reserva de las novedades (101 − 1 < 100 no; aquí 101 − 1 = 100 sí): pide',
+   kr.pedidos, [('ES', ['B08629V7YQ'], 'asin')])
+kr2 = _KeepaDoble(saldo=100)
+bd['t']['osma_packs_excel'] = []
+bd['t']['osma_packs_keepa'] = []
+op.valorar_cruce(sbk, CRUCE, '80', ahora=AHORA, imprimir=lambda *a, **k: None, enviar=lambda *a: None, keepa=kr2)
+eq('H6e · (AN-2) …y si pedir bajaría de la reserva (100 − 1 < 100), NO pide', kr2.pedidos, [])
 
 # ── G · QUE LOS TESTS MUERDEN ───────────────────────────────────────────────────────────
 _orig = op.n_del_pack

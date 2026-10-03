@@ -14,9 +14,10 @@ Amazon no sale nunca (lleva su propio EAN). Se busca POR FAMILIA, en tres pasos:
      con porte y el Price_net. HEO no encola nada (este programa solo abre cruces de OSMA).
   2. BUSCAR: el cartero de la v2 (sp-api/cartero-osma-packs.mjs), en su vuelta horaria. Deja en `osma_packs_candidato`
      lo que contesto Amazon: el suelto, los «mismo», los «parecido» y los nuestros, con precio y tarifa de Amazon ES.
-  3. VALORAR (`python escaner2_osma_packs.py valorar`, workflow escaner2-osma-packs.yml, lo lanza «Valorar packs» de la
-     pestaña OSMA con el mismo mecanismo que el cruce): el N de cada pack, su coste, la rentabilidad con la formula del
-     viejo, el Excel «Escaner2_OSMA_Packs_<AAAAMMDD_HHMM>.xlsx» en la biblioteca y el aviso por Telegram.
+  3. VALORAR (`python escaner2_osma_packs.py valorar`, workflow escaner2-osma-packs.yml; AN-2: lo lanza cron-job.org a
+     y 40 SIN cruce —el ultimo con su cola entera buscada y sin Excel de packs; si no hay, nada— y «Valorar packs» de la
+     pestaña OSMA como atajo manual): el N de cada pack, su coste, la rentabilidad con la formula del viejo, el Excel
+     «Escaner2_OSMA_Packs_<AAAAMMDD_HHMM>.xlsx» en la biblioteca y el aviso por Telegram.
 
 🔑 EL N DEL PACK (la regla del AM, `escaner2_osma.factor_pack_amazon`: se multiplica SOLO con dos señales distintas que
    dicen el mismo N; una sola o contradictorias → «posible pack», nunca COMPRAR). Aqui la vara de medir es el SUELTO de
@@ -37,11 +38,14 @@ Amazon no sale nunca (lleva su propio EAN). Se busca POR FAMILIA, en tres pasos:
 🔑 LAS VENTAS: caidas de 30 dias de Keepa de ESE ASIN en España, si estan guardadas desde hace 15 dias o menos: las de
    las novedades (`nov_keepa`) o las del CSV del Visualizador de ESTA pasada (los EAN de los packs encontrados entran
    solos en la lista del proximo «Barrer OSMA»: `eans_de_packs`). Con el corte del PRO (7 o mas: `escaner2_parametros`).
+   (AN-2) Los packs que siguen sin ventas se piden a Keepa POR ASIN (stats=90, sin historial, ~1 token cada uno, con la
+   via y la llave de las novedades, respetando su reserva de tokens) y se guardan en osma_packs_keepa.
    Sin ventas: el Excel enseña el puesto de ventas de Amazon y la decision queda en VALORAR como mucho, con el motivo
    «sin ventas de Keepa: entra en la lista del proximo PRO». Con ventas por debajo del corte: no se vende (fuera de
    «Análisis», contado en el Resumen).
 🔴 REPO PUBLICO: LOS REGISTROS LOS VE CUALQUIERA. Solo estados y recuentos; nunca precios, EAN, ASIN ni nombres.
-🔒 SOLO ESCRIBE `osma_packs_cola` (encolar), `osma_packs_excel` y su Excel en `escaner2/osma/<pasada>/<id>/` (valorar).
+🔒 SOLO ESCRIBE `osma_packs_cola` (encolar: UNA insercion, entera o nada), `osma_packs_excel`, `osma_packs_keepa` y su Excel en
+   `escaner2/osma/<pasada>/<id>/` (valorar).
    Ni productos, ni identidad: un pack encontrado es una PROPUESTA en un Excel, nunca un ASIN pegado a una ficha.
 """
 import csv
@@ -259,9 +263,10 @@ def rec_de_candidato(c):
             'fba': None if fee is None else float(fee)}
 
 
-def ventas_de(asin, nov_keepa, csv_caidas, ahora):
+def ventas_de(asin, nov_keepa, csv_caidas, ahora, packs_keepa=None):
     """(caidas de 30 dias, de donde) de Keepa en España guardadas hace DIAS_VENTAS o menos, o (None, None). Puro.
-    `nov_keepa`: filas (pais ES) con `fichas` y `consultada_en`; `csv_caidas`: {asin: caidas} con 'fecha' (la subida)."""
+    `nov_keepa`: filas (pais ES) con `fichas` y `consultada_en`; `csv_caidas`: {asin: caidas} con 'fecha' (la subida);
+    (AN-2) `packs_keepa`: filas de osma_packs_keepa (asin, caidas_30d, consultada_en), las pedidas por ASIN. La mas nueva manda."""
     limite = ahora - timedelta(days=DIAS_VENTAS)
     mejor = None
     for k in nov_keepa or []:
@@ -271,6 +276,10 @@ def ventas_de(asin, nov_keepa, csv_caidas, ahora):
         for fi in k.get('fichas') or []:
             if fi.get('asin') == asin and fi.get('caidas_30d') is not None and (mejor is None or cuando > mejor[0]):
                 mejor = (cuando, fi['caidas_30d'], 'Keepa (novedades, %s)' % cuando.strftime('%d/%m'))
+    for k in packs_keepa or []:
+        cuando = _fecha(k.get('consultada_en'))
+        if k.get('asin') == asin and k.get('caidas_30d') is not None and cuando is not None and cuando >= limite                 and (mejor is None or cuando > mejor[0]):
+            mejor = (cuando, k['caidas_30d'], 'Keepa (por ASIN, %s)' % cuando.strftime('%d/%m'))
     if csv_caidas and asin in (csv_caidas.get('caidas') or {}) and csv_caidas['caidas'][asin] is not None:
         cuando = _fecha(csv_caidas.get('fecha'))
         if cuando is not None and cuando >= limite and (mejor is None or cuando > mejor[0]):
@@ -290,7 +299,7 @@ def _fecha(v):
         return None
 
 
-def valorar(cola, candidatos, M, umbral, nov_keepa, csv_caidas, ahora):
+def valorar(cola, candidatos, M, umbral, nov_keepa, csv_caidas, ahora, packs_keepa=None):
     """La valoracion de los packs de un cruce → (packs, cuentas). Puro (salvo `M`, el motor del viejo ya cargado).
     Cada pack: {'fam', 'c' (el candidato), 'n', 'n_osma', 'estado', 'senales', 'pa', 'calc', 'tope', 'motivos',
     'caidas', 'ventas_de', 'decision'}. Solo «mismo» y «parecido» que sean pack (o posible pack); nunca nuestros."""
@@ -324,7 +333,7 @@ def valorar(cola, candidatos, M, umbral, nov_keepa, csv_caidas, ahora):
                 estado = eo.PACK_DUDOSO
             n_osma = v['n'] * (fam.get('factor_ref') or 1)
             pa = _r2(_dec(fam['pa_unidad']) * n_osma)
-            caidas, origen = ventas_de(c['asin'], nov_keepa, csv_caidas, ahora)
+            caidas, origen = ventas_de(c['asin'], nov_keepa, csv_caidas, ahora, packs_keepa)
             if caidas is not None and not e2.pasa_corte(caidas, umbral):
                 cuentas['no_se_vende'].append((fam['codigo_osma'], c['asin'], caidas))
                 continue
@@ -555,10 +564,31 @@ def eans_de_packs(candidatos, lista, M):
     return nuevos, sin_ean
 
 
+def recortar_al_tope(lista, eans_packs, tope):
+    """(AN-2) Los EAN de packs que CABEN detras de la lista sin pasar del tope del Visualizador → (los que caben, cuantos
+    se recortan). Se recortan los de PACK, nunca los de OSMA (la lista ya hecha no se toca). Puro."""
+    cabe = max(0, tope - len(lista))
+    return list(eans_packs)[:cabe], max(0, len(eans_packs) - cabe)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 6 · LOS DOS PROGRAMAS (con la base inyectada: el test pasa un doble)
 # ═══════════════════════════════════════════════════════════════════════════════
+TROZO_IDS = 100
+
+
 def _todas(sb, tabla, columnas, orden, filtros=(), en=None):
+    """Todas las filas, paginando de 1.000 en 1.000. (AN-2) Con `en` = (columna, ids), los ids van en TROZOS de
+    TROZO_IDS (una URL con cientos de uuid no cabe) y cada trozo se pagina entero."""
+    if en:
+        salida = []
+        for i in range(0, len(en[1]), TROZO_IDS):
+            salida += _paginar(sb, tabla, columnas, orden, filtros, (en[0], en[1][i:i + TROZO_IDS]))
+        return salida
+    return _paginar(sb, tabla, columnas, orden, filtros, None)
+
+
+def _paginar(sb, tabla, columnas, orden, filtros, en):
     salida, desde = [], 0
     while True:
         q = sb.table(tabla).select(columnas)
@@ -591,8 +621,50 @@ def _csv_de_la_pasada(sb, pasada, M):
     return ruta, o.get('created_at') or o.get('updated_at')
 
 
+# (AN-2) Lo que exige `osma_packs_cola` (sus CHECK), mirado ANTES de insertar: una fila que no lo cumple se salta y se
+# cuenta, en vez de tumbar la cola entera en la base.
+_RE_CODIGO = re.compile(r'^[A-Za-z0-9._-]{1,40}$')
+_RE_ASIN = re.compile(r'^[A-Z0-9]{10}$')
+_RE_EAN = re.compile(r'^[0-9]{1,14}$')
+
+
+def motivo_fila_invalida(f):
+    """None si la fila cumple los CHECK de osma_packs_cola; si no, el motivo (una palabra, para contar). Puro."""
+    def positivo(x, tope):
+        try:
+            v = Decimal(str(x))
+        except Exception:
+            return False
+        return v > 0 and v < tope
+    if not _RE_CODIGO.match(str(f.get('codigo_osma') or '')):
+        return 'codigo'
+    if not str(f.get('nombre_osma') or '').strip():
+        return 'nombre'
+    eans = f.get('eans') or []
+    if not (1 <= len(eans) <= 4) or not all(_RE_EAN.match(str(e)) for e in eans):
+        return 'eans'
+    if not _RE_ASIN.match(str(f.get('asin_ref') or '')):
+        return 'asin_ref'
+    if f.get('factor_ref') is not None and not (isinstance(f['factor_ref'], int) and f['factor_ref'] >= 1):
+        return 'factor_ref'
+    if not str(f.get('marca') or '').strip() or f.get('marca_origen') not in ('csv', 'amz_ficha', 'keepa_escaparate'):
+        return 'marca'
+    if not str(f.get('titulo_ref') or '').strip() or f.get('titulo_origen') not in ('csv', 'amz_ficha', 'keepa_escaparate', 'productos'):
+        return 'titulo'
+    if not positivo(f.get('pa_unidad'), Decimal('1e8')):
+        return 'pa_unidad'
+    if not positivo(f.get('price_net'), Decimal('1e7')):
+        return 'price_net'
+    if f.get('puerta') not in PUERTAS_COLA + (None,) or not (f.get('puerta') or f.get('nuestra')):
+        return 'puerta'
+    return None
+
+
 def encolar(sb, pasada, run_id, imprimir=print):
-    """Paso 1: la cola de UN cruce de OSMA (el de este run). Devuelve cuantas familias."""
+    """Paso 1: la cola de UN cruce de OSMA (el de este run). Devuelve cuantas familias se han apuntado ahora.
+    (AN-2) La cola de un cruce se apunta ENTERA O NADA: UNA sola insercion (una sentencia, una transaccion en la base),
+    con las filas que cumplen los CHECK de la tabla (las que no, se saltan y se cuentan). Si el cruce ya tiene una cola
+    incompleta (de antes de esto), se COMPLETA con las que le faltan."""
     cruces = sb.table('escaner2_cruce').select('id,estado,pasada_id,run_id').eq('pasada_id', pasada).eq('estado', 'lista') \
         .order('creado_en', desc=True).execute().data or []
     mio = [c for c in cruces if run_id and str(c.get('run_id')) == str(run_id)] or ([] if run_id else cruces[:1])
@@ -602,9 +674,7 @@ def encolar(sb, pasada, run_id, imprimir=print):
     pas = (sb.table('escaner2_pasada').select('proveedor').eq('id', pasada).limit(1).execute().data or [{}])[0]
     if pas.get('proveedor') != eo.PROVEEDOR:
         raise FalloPacks('la pasada no es de OSMA: HEO no encola nada')
-    if sb.table('osma_packs_cola').select('id', count='exact').eq('cruce_id', cruce).limit(1).execute().count:
-        imprimir('>>> PACKS: este cruce ya tiene su cola; no se apunta otra vez.', flush=True)
-        return 0
+    ya = {x['codigo_osma'] for x in _todas(sb, 'osma_packs_cola', 'codigo_osma', 'codigo_osma', [('eq', 'cruce_id', cruce)])}
     M = e2.cargar_motor()
     barrido = json.loads(_descargar(sb, '%s/%s/barrido.json' % (eo.CARPETA, pasada)).decode('utf-8'))
     foto = _todas(sb, 'escaner2_foto', 'id,producto_heo,ean_original,ean_core,nombre,marca,precio_unidad,precio_catalogo,fin_de_vida',
@@ -614,25 +684,36 @@ def encolar(sb, pasada, run_id, imprimir=print):
     ruta, _subido = _csv_de_la_pasada(sb, pasada, M)
     csv_titulos, senales = senales_csv_de(ruta) if ruta else ({}, {})
     asins = sorted({r['asin'] for r in resultados if r.get('asin')} | {p['asin'] for p in productos if p.get('asin')})
-    amz = {}
-    keepa = {}
-    for i in range(0, len(asins), 200):
-        lote = asins[i:i + 200]
-        for x in sb.table('amz_ficha').select('asin,titulo,marca').eq('pais', PAIS).in_('asin', lote).execute().data or []:
+    amz, keepa = {}, {}
+    for i in range(0, len(asins), TROZO_IDS):
+        lote = asins[i:i + TROZO_IDS]
+        for x in _paginar(sb, 'amz_ficha', 'asin,titulo,marca', 'asin', [('eq', 'pais', PAIS)], ('asin', lote)):
             amz[x['asin']] = {'titulo': x.get('titulo'), 'marca': x.get('marca')}
-        for x in sb.table('keepa_escaparate').select('asin,titulo,marca').eq('dominio', 'es').in_('asin', lote).execute().data or []:
+        for x in _paginar(sb, 'keepa_escaparate', 'asin,titulo,marca', 'asin', [('eq', 'dominio', 'es')], ('asin', lote)):
             keepa[x['asin']] = {'titulo': x.get('titulo'), 'marca': x.get('marca')}
     filas, cuentas = familias_para_cola(cruce, foto, resultados, barrido.get('enlaces') or {}, productos, csv_titulos, senales, amz, keepa)
-    for i in range(0, len(filas), 500):
-        sb.table('osma_packs_cola').insert(filas[i:i + 500]).execute()
+    invalidas = {}
+    validas = []
+    for f in filas:
+        m = motivo_fila_invalida(f)
+        if m:
+            invalidas[m] = invalidas.get(m, 0) + 1
+        else:
+            validas.append(f)
+    nuevas = [f for f in validas if f['codigo_osma'] not in ya]
+    if nuevas:
+        # 🔑 UNA sola llamada: PostgREST la convierte en UNA sentencia INSERT (todas o ninguna).
+        sb.table('osma_packs_cola').insert(nuevas).execute()
     en_bd = sb.table('osma_packs_cola').select('id', count='exact').eq('cruce_id', cruce).limit(1).execute().count
-    imprimir('>>> PACKS: familias apuntadas %d (de las puertas d/e/f %d · nuestras %d; una puede ser las dos) · en la base %s · fuera: sin marca en '
-             'Amazon %d, sin título %d, sin precio %d, sin ASIN %d'
-             % (len(filas), cuentas['puertas'], cuentas['nuestras'], en_bd, cuentas['sin_marca'], cuentas['sin_titulo'],
+    imprimir('>>> PACKS: familias de este cruce %d (de las puertas d/e/f %d · nuestras %d; una puede ser las dos) · ya estaban %d · '
+             'apuntadas ahora %d · en la base %s · saltadas por no cumplir la tabla %d %s · fuera: sin marca en Amazon %d, '
+             'sin título %d, sin precio %d, sin ASIN %d'
+             % (len(filas), cuentas['puertas'], cuentas['nuestras'], len(ya), len(nuevas), en_bd, sum(invalidas.values()),
+                ' '.join('%s=%d' % kv for kv in sorted(invalidas.items())), cuentas['sin_marca'], cuentas['sin_titulo'],
                 cuentas['sin_precio'], cuentas['sin_asin']), flush=True)
-    if en_bd != len(filas):
+    if en_bd != len(ya) + len(nuevas):
         raise FalloPacks('la cola no quedó entera en la base')
-    return len(filas)
+    return len(nuevas)
 
 
 def _descargar(sb, ruta):
@@ -640,9 +721,88 @@ def _descargar(sb, ruta):
     return descargar_buzon(sb, BUCKET, ruta)
 
 
-def valorar_cruce(sb, cruce, run_id, ahora=None, imprimir=print, enviar=None, env=None):
-    """Paso 3: la valoracion de UN cruce, su Excel en la biblioteca y el Telegram. Devuelve la fila de osma_packs_excel."""
+# ═══════════════════════════════════════════════════════════════════════════════
+# 7 · (AN-2) QUÉ CRUCE SE VALORA SIN BOTON, Y LAS VENTAS DE KEEPA POR ASIN
+# ═══════════════════════════════════════════════════════════════════════════════
+CRUCES_A_MIRAR = 10
+
+
+def cruce_a_valorar(sb):
+    """(AN-2) El reloj de y 40 lanza la valoracion SIN cruce: el ULTIMO cruce de OSMA «lista» con cola, ninguna familia
+    pendiente y SIN NINGUN Excel de packs (tampoco uno quitado: si Fernando o Elena lo quitaron, el reloj no lo vuelve a
+    hacer; el boton si puede). None si no hay ninguno."""
+    pasadas = sb.table('escaner2_pasada').select('id').eq('proveedor', eo.PROVEEDOR).order('creado_en', desc=True) \
+        .limit(CRUCES_A_MIRAR).execute().data or []
+    if not pasadas:
+        return None
+    cruces = sb.table('escaner2_cruce').select('id,creado_en').eq('estado', 'lista').in_('pasada_id', [p['id'] for p in pasadas]) \
+        .order('creado_en', desc=True).limit(CRUCES_A_MIRAR).execute().data or []
+    for c in cruces:
+        cola = _todas(sb, 'osma_packs_cola', 'estado', 'id', [('eq', 'cruce_id', c['id'])])
+        if not cola or any(f['estado'] == 'pendiente' for f in cola):
+            continue
+        if sb.table('osma_packs_excel').select('id').eq('cruce_id', c['id']).limit(1).execute().data:
+            continue
+        return c['id']
+    return None
+
+
+def filas_keepa(productos, cruce, ahora):
+    """Los productos de Keepa (por ASIN, España) → las filas de `osma_packs_keepa`, con la MISMA lectura que las novedades
+    (`escaner2_novedades.ficha_de_keepa`: caidas de 30 dias, puesto actual y de 90 dias). Puro."""
+    from escaner2_novedades import ficha_de_keepa
+    filas = []
+    for p in productos or []:
+        fi = ficha_de_keepa(p)
+        if not fi.get('asin') or not _RE_ASIN.match(str(fi['asin'])):
+            continue
+        filas.append({'cruce_id': cruce, 'asin': fi['asin'], 'pais': PAIS, 'caidas_30d': fi['caidas_30d'], 'rank': fi['rank'],
+                      'rank_90d': fi['rank_90d'], 'titulo': (fi.get('titulo') or '')[:500] or None, 'consultada_en': ahora.isoformat()})
+    return filas
+
+
+def ventas_por_asin(sb, cruce, asins, ahora, env=None, keepa=None, imprimir=print):
+    """(AN-2) Las ventas de Keepa de los packs que no tienen otras guardadas: por ASIN, en España, con la via de las
+    novedades (stats=90, sin historial: ~1 token por ASIN) y la llave KEEPA_API_KEY de la v1; se GUARDAN en
+    osma_packs_keepa (pelicula). Respeta la reserva de tokens de las novedades (`nov_parametros.keepa_reserva` de HEO, la
+    misma llave): si no cabe, no pide. → (filas guardadas, tokens gastados, aviso o None). Nunca lanza."""
+    if not asins:
+        return [], 0, None
+    env = os.environ if env is None else env
+    k = keepa
+    try:
+        if k is None:
+            from escaner2_novedades import Keepa
+            k = Keepa(env.get('KEEPA_API_KEY'))
+        par =(sb.table('nov_parametros').select('keepa_reserva,keepa_tope_peticion').eq('proveedor', 'HEO').limit(1)
+               .execute().data or [{}])[0]
+        reserva = int(par.get('keepa_reserva') or 0)
+        tope = max(1, min(100, int(par.get('keepa_tope_peticion') or 100)))
+        saldo = k.leer_saldo()
+        if saldo - len(asins) < reserva:
+            return [], k.tokens, ('Keepa: no se piden las ventas de %d pack(s): con %d tokens se bajaría de la reserva de %d'
+                                  % (len(asins), saldo, reserva))
+        productos = []
+        for i in range(0, len(asins), tope):
+            productos += k.productos(PAIS, asins[i:i + tope], por='asin')
+        filas = filas_keepa(productos, cruce, ahora)
+        if filas:
+            sb.table('osma_packs_keepa').insert(filas).execute()
+        return filas, k.tokens, None
+    except Exception as ex:
+        return [], getattr(k, 'tokens', 0) or 0, \
+            'Keepa no respondió (%s): esos packs siguen sin ventas (VALORAR como mucho)' % type(ex).__name__
+
+
+def valorar_cruce(sb, cruce, run_id, ahora=None, imprimir=print, enviar=None, env=None, keepa=None):
+    """Paso 3: la valoracion de UN cruce, su Excel en la biblioteca y el Telegram. Devuelve la fila de osma_packs_excel.
+    (AN-2) Sin `cruce` (el reloj de y 40), el de `cruce_a_valorar`; si no hay ninguno, no hace nada (sin Telegram)."""
     ahora = ahora or datetime.now(timezone.utc)
+    if not cruce:
+        cruce = cruce_a_valorar(sb)
+        if not cruce:
+            imprimir('>>> PACKS: ningún cruce de OSMA con su cola entera buscada y sin Excel de packs: nada que valorar.', flush=True)
+            return None
     c = (sb.table('escaner2_cruce').select('id,estado,pasada_id').eq('id', cruce).limit(1).execute().data or [None])[0]
     if not c or c.get('estado') != 'lista':
         raise FalloPacks('el cruce no existe o no está «lista»')
@@ -660,7 +820,7 @@ def valorar_cruce(sb, cruce, run_id, ahora=None, imprimir=print, enviar=None, en
         raise FalloPacks('este cruce no tiene cola de packs')
     if any(f['estado'] == 'pendiente' for f in cola):
         raise FalloPacks('aún hay familias esperando la búsqueda en Amazon')
-    candidatos = _todas(sb, 'osma_packs_candidato', 'cola_id,asin,clase,porque,titulo,marca,eans,paquete,n_art,valor_ud,tipo_ud,'
+    candidatos = _todas(sb, 'osma_packs_candidato', 'id,cola_id,asin,clase,porque,titulo,marca,eans,paquete,n_art,valor_ud,tipo_ud,'
                         'tamano,rank,rank_categoria,resultado,precio,canal,ref_eur,fee_fba,error', 'id',
                         en=('cola_id', [f['id'] for f in cola]))
     par = (sb.table('escaner2_parametros').select('umbral_caidas_30d').eq('proveedor', eo.PROVEEDOR).limit(1).execute().data or [None])[0]
@@ -685,7 +845,22 @@ def valorar_cruce(sb, cruce, run_id, ahora=None, imprimir=print, enviar=None, en
                 csv_caidas = {'caidas': ex['caidas'], 'fecha': subido}
     except Exception as ex:
         avisos.append('No se pudo leer el CSV de la pasada para las ventas (%s): solo las de las novedades' % type(ex).__name__)
-    packs, cuentas = valorar(cola, candidatos, M, umbral, nov_keepa, csv_caidas, ahora)
+    candidatos_asin = sorted({x['asin'] for x in candidatos if x['clase'] in ('mismo', 'parecido')})
+    por_asin = _todas(sb, 'osma_packs_keepa', 'asin,caidas_30d,consultada_en', 'consultada_en',
+                      [('eq', 'pais', PAIS), ('gte', 'consultada_en', desde)], en=('asin', candidatos_asin))
+    packs, cuentas = valorar(cola, candidatos, M, umbral, nov_keepa, csv_caidas, ahora, por_asin)
+    # (AN-2) Los packs que siguen SIN ventas: se piden a Keepa por ASIN (y se guardan), y se valora otra vez.
+    faltan = sorted({p['c']['asin'] for p in packs if p['caidas'] is None})
+    nuevas, tokens, aviso_keepa = ventas_por_asin(sb, cruce, faltan, ahora, env=env, keepa=keepa, imprimir=imprimir)
+    if aviso_keepa:
+        avisos.append(aviso_keepa)
+    if faltan:
+        avisos.append('Ventas de Keepa por ASIN: %d pack(s) sin ventas guardadas · traídas %d (con caídas %d) · tokens gastados %d'
+                      % (len(faltan), len(nuevas), sum(1 for f in nuevas if f['caidas_30d'] is not None), tokens))
+    if nuevas:
+        packs, cuentas = valorar(cola, candidatos, M, umbral, nov_keepa, csv_caidas, ahora, por_asin + nuevas)
+    imprimir('>>> PACKS: ventas de Keepa por ASIN · sin ventas antes %d · traídas %d · tokens gastados %d%s'
+             % (len(faltan), len(nuevas), tokens, ' · AVISO: Keepa no se pudo usar' if aviso_keepa else ''), flush=True)
     barrido = json.loads(_descargar(sb, '%s/%s/barrido.json' % (eo.CARPETA, pasada)).decode('utf-8'))
     from zoneinfo import ZoneInfo
     sello = ahora.astimezone(ZoneInfo('Europe/Madrid')).strftime('%Y%m%d_%H%M')
@@ -733,7 +908,8 @@ def main(argv=None):
             encolar(sb, pasada, run_id)
         else:
             cruce = (os.environ.get('CRUCE') or '').strip().lower()
-            if not re.fullmatch(uuid_ok, cruce):
+            # (AN-2) Sin cruce: el reloj de y 40 (busca el que toca; si no hay ninguno, sale en verde sin hacer nada).
+            if cruce and not re.fullmatch(uuid_ok, cruce):
                 raise FalloPacks('el cruce no es un id válido')
             valorar_cruce(sb, cruce, run_id)
     except FalloPacks as ex:

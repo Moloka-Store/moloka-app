@@ -1,15 +1,21 @@
 # ============================================================
 # Moloka - Escaner 2 · PACKS DE OSMA EN AMAZON: LA VALORACION (encargo AN, plano Y, tramo 7, 03-oct-2026)
 #
-# Lo dispara el boton «Valorar packs» de la v2 (Escaneo PRO · pestaña OSMA), con el MISMO mecanismo que el cruce
-# (workflow_dispatch con GH_TOKEN desde el servidor de la v2), cuando el cartero de la v2 ya ha buscado en Amazon todas
-# las familias que dejo en cola el cruce (escaner2-osma-cruce.yml, su ultimo paso). Valora cada pack con la formula del
-# viejo, deja «Escaner2_OSMA_Packs_<AAAAMMDD_HHMM>.xlsx» en la biblioteca (osma_packs_excel) y avisa por Telegram.
+# (AN-2) Lo lanza SOLO el reloj de cron-job.org, cada hora a y 40 (lo crea Fernando, copiando el de «Disponibilidad
+# OSMA» y cambiando solo el fichero del workflow): POST
+#   https://api.github.com/repos/Moloka-Store/moloka-app/actions/workflows/escaner2-osma-packs.yml/dispatches
+# con cuerpo {"ref":"main"} (SIN input): busca el ultimo cruce de OSMA con su cola entera buscada por el cartero de la v2
+# (a y 20) y sin Excel de packs; si no hay ninguno, sale en VERDE sin hacer nada y sin Telegram. El boton «Valorar packs»
+# de la v2 (pestaña OSMA) es el atajo manual: lo lanza con el cruce (input `cruce`).
+# Valora cada pack con la formula del viejo (y, si un pack no tiene ventas guardadas, las pide a Keepa por ASIN, ~1 token
+# cada uno, con la llave de siempre), deja «Escaner2_OSMA_Packs_<AAAAMMDD_HHMM>.xlsx» en la biblioteca (osma_packs_excel)
+# y avisa por Telegram.
 #
 # 🔴 REPO PUBLICO: el programa SOLO imprime estados y recuentos; nada de precios, EAN, ASIN ni nombres.
-# 🔒 Cero Amazon y cero tokens de Keepa: lee lo que guardo el cartero (osma_packs_candidato) y las ventas ya guardadas.
-# 🔒 Ningun secreto nuevo: la llave de servicio de Supabase y el Telegram de siempre.
-# >>> SIN RELOJ <<<  Solo cuando se pulsa el boton (o a mano desde Actions).
+# 🔒 Cero Amazon: lee lo que guardo el cartero (osma_packs_candidato). Keepa, solo para los packs sin ventas (por ASIN,
+#    respetando la reserva de tokens de las novedades); los tokens gastados salen en el registro (solo el numero).
+# 🔒 Ningun secreto nuevo: la llave de servicio de Supabase, KEEPA_API_KEY y el Telegram de siempre.
+# >>> EL RELOJ ES cron-job.org (a y 40) <<<  Sin horario de GitHub.
 # ============================================================
 name: Moloka - Escaner 2 · Packs de OSMA en Amazon
 
@@ -17,9 +23,10 @@ on:
   workflow_dispatch:
     inputs:
       cruce:
-        description: 'id del cruce de OSMA (escaner2_cruce.id) cuyos packs se valoran'
+        description: 'id del cruce de OSMA (escaner2_cruce.id) cuyos packs se valoran; vacío = el último con su cola entera buscada'
         type: string
-        required: true
+        required: false
+        default: ''
 
 # 🔒 El mismo grupo que el barrido y el cruce de OSMA: de uno en uno.
 concurrency:
@@ -52,5 +59,6 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           TELEGRAM_TOKEN:       ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+          KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}
           CRUCE:                ${{ inputs.cruce }}
         run: python -u escaner2_osma_packs.py valorar
