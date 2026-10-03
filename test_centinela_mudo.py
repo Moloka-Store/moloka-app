@@ -667,9 +667,9 @@ def correr(caso, ruta=None):
 _ok = correr('al_dia')
 eq('(C) [al_dia] 🔴 el run sale VERDE (exit 0)', _ok['codigo'], 0)
 eq('(C) [al_dia] 🔴 y NO se manda ningun Telegram', _ok['telegrams'], 0)
-eq('(C) [al_dia] las SEIS lineas del informe estan en el log', _ok['lineas'], 6)
+eq('(C) [al_dia] las CINCO lineas del informe estan en el log', _ok['lineas'], len(HORARIOS))
 eq('(C) [al_dia] con su linea de conforme',
-   'CENTINELA OK: los 6 directores han escrito dentro de su plazo.' in _ok['salida'], True)
+   'CENTINELA OK: los %d directores han escrito dentro de su plazo.' % len(HORARIOS) in _ok['salida'], True)
 eq('(C) [al_dia] y la marca no se toca', _ok['marca'], {})
 
 _mudo = correr('mudo')
@@ -682,8 +682,8 @@ eq('(C) [mudo] 🔴 y el aviso dice DESDE CUANDO, no solo que esta mudo',
     and 'última:' in _mudo['texto']), True)
 eq('(C) [mudo] …y NO nombra a los que estan al dia',
    ('HEO' in _mudo['texto'], 'TCG' in _mudo['texto']), (False, False))
-eq('(C) [mudo] las SEIS lineas siguen estando: tambien las de los que hablan',
-   _mudo['lineas'], 6)
+eq('(C) [mudo] las CINCO lineas siguen estando: tambien las de los que hablan',
+   _mudo['lineas'], len(HORARIOS))
 eq('(C) [mudo] 🔴 la marca queda escrita con la fecha de hoy',
    _mudo['marca'], {'DBLINE': _mudo['hoy']})
 
@@ -691,8 +691,8 @@ _ileg = correr('ilegible')
 eq('(C) [ilegible] 🔴 el run sale en ROJO (exit 1)', _ileg['codigo'], 1)
 eq('(C) [ilegible] 🔴 y el log dice que no se pudo leer',
    'no se pudo leer' in _ileg['salida'], True)
-eq('(C) [ilegible] los seis salen como SIN DATO, no como al dia',
-   _ileg['salida'].count('SIN DATO'), 6)
+eq('(C) [ilegible] los cinco salen como SIN DATO, no como al dia',
+   _ileg['salida'].count('SIN DATO'), len(HORARIOS))
 eq('(C) [ilegible] y se avisa por Telegram: un centinela ciego no puede callarse',
    _ileg['telegrams'], 1)
 
@@ -704,7 +704,7 @@ eq('(C) [ya_avisado] 🔴 pero el run sigue ROJO: lo que se calla es el movil',
    _ya['codigo'], 1)
 eq('(C) [ya_avisado] y el log lo dice, con nombre',
    'ya avisados hoy (no se repite el Telegram): DBLINE' in _ya['salida'], True)
-eq('(C) [ya_avisado] las seis lineas siguen en el log', _ya['lineas'], 6)
+eq('(C) [ya_avisado] las cinco lineas siguen en el log', _ya['lineas'], len(HORARIOS))
 
 _ayer = correr('ayer')
 eq('(C) [ayer] 🔴 con la marca de AYER vuelve a avisar', _ayer['telegrams'], 1)
@@ -734,7 +734,7 @@ _AL_DIA = {p: 'al dia' for p in HORARIOS}
 
 _foto = correr('foto_hoy')
 eq('(C) [foto_hoy] 🔴 con la foto de PRODUCCION de hoy, nada en rojo (exit 0)', _foto['codigo'], 0)
-eq('(C) [foto_hoy] 🔴 los seis al dia, HEO y OSMA incluidos', _foto['veredicto'], _AL_DIA)
+eq('(C) [foto_hoy] 🔴 los cinco al dia, HEO y OSMA incluidos', _foto['veredicto'], _AL_DIA)
 eq('(C) [foto_hoy] cero Telegram', _foto['telegrams'], 0)
 eq('(C) [foto_hoy] y el log dice DE DONDE sale la fecha de HEO y de OSMA',
    [bool(re.search(r'^  %s .*fuente disp_pasada$' % p, _foto['salida'], re.M))
