@@ -1,0 +1,64 @@
+# ============================================================
+# Moloka - Escaner 2 · PACKS DE OSMA EN AMAZON: LA VALORACION (encargo AN, plano Y, tramo 7, 03-oct-2026)
+#
+# (AN-2) Lo lanza SOLO el reloj de cron-job.org, cada hora a y 40 (lo crea Fernando, copiando el de «Disponibilidad
+# OSMA» y cambiando solo el fichero del workflow): POST
+#   https://api.github.com/repos/Moloka-Store/moloka-app/actions/workflows/escaner2-osma-packs.yml/dispatches
+# con cuerpo {"ref":"main"} (SIN input): busca el ultimo cruce de OSMA con su cola entera buscada por el cartero de la v2
+# (a y 20) y sin Excel de packs; si no hay ninguno, sale en VERDE sin hacer nada y sin Telegram. El boton «Valorar packs»
+# de la v2 (pestaña OSMA) es el atajo manual: lo lanza con el cruce (input `cruce`).
+# Valora cada pack con la formula del viejo (y, si un pack no tiene ventas guardadas, las pide a Keepa por ASIN, ~1 token
+# cada uno, con la llave de siempre), deja «Escaner2_OSMA_Packs_<AAAAMMDD_HHMM>.xlsx» en la biblioteca (osma_packs_excel)
+# y avisa por Telegram.
+#
+# 🔴 REPO PUBLICO: el programa SOLO imprime estados y recuentos; nada de precios, EAN, ASIN ni nombres.
+# 🔒 Cero Amazon: lee lo que guardo el cartero (osma_packs_candidato). Keepa, solo para los packs sin ventas (por ASIN,
+#    respetando la reserva de tokens de las novedades); los tokens gastados salen en el registro (solo el numero).
+# 🔒 Ningun secreto nuevo: la llave de servicio de Supabase, KEEPA_API_KEY y el Telegram de siempre.
+# >>> EL RELOJ ES cron-job.org (a y 40) <<<  Sin horario de GitHub.
+# ============================================================
+name: Moloka - Escaner 2 · Packs de OSMA en Amazon
+
+on:
+  workflow_dispatch:
+    inputs:
+      cruce:
+        description: 'id del cruce de OSMA (escaner2_cruce.id) cuyos packs se valoran; vacío = el último con su cola entera buscada'
+        type: string
+        required: false
+        default: ''
+
+# 🔒 El mismo grupo que el barrido y el cruce de OSMA: de uno en uno.
+concurrency:
+  group: escaner2-osma-pro
+  cancel-in-progress: false
+
+jobs:
+  valorar:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        # Las mismas versiones FIJADAS que el cruce de OSMA (y requests, para el Telegram de siempre).
+        run: pip install supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13 requests==2.34.2
+
+      - name: Valorar los packs y dejar el Excel
+        timeout-minutes: 10
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          TELEGRAM_TOKEN:       ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+          KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}
+          CRUCE:                ${{ inputs.cruce }}
+        run: python -u escaner2_osma_packs.py valorar

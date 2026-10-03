@@ -413,6 +413,13 @@ jobs:
       - name: 25 septendecies bis) test_escaner2_osma_pro.py
         run: python -u test_escaner2_osma_pro.py
 
+      # (Encargo AN, 03-oct-2026) Los packs de OSMA que existen en Amazon y no vendemos: la cola, el N del pack contra el
+      # suelto, la valoracion con la formula del viejo, el Excel (columnas del Análisis de OSMA y el Resumen vivo), la
+      # lista del proximo barrido y los dos programas contra una base de mentira.
+      # (El nombre NO contiene «escaner2_osma_packs.py»: el detector de la llave de servicio busca el programa en el run.)
+      - name: 25 septendecies ter) test_escaner2_packs_osma.py
+        run: python -u test_escaner2_packs_osma.py
+
       # (Encadenado de Keepa, 1-oct-2026) El job `encadenar` de procesar-keepa-escaparate.yml: el titulo de la
       # corrida igual en el YAML y en el codigo; el job por estructura (tras `procesar`, solo en aplicar, exito o
       # fallo, continue-on-error, actions: write solo en el); la decision con el buzon, las cargas y las corridas
@@ -478,6 +485,7 @@ jobs:
             test_escaner2_ficha_compartida.py
             test_escaner2_osma_disponibilidad.py
             test_escaner2_osma_pro.py
+            test_escaner2_packs_osma.py
             test_encadenar_keepa.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve

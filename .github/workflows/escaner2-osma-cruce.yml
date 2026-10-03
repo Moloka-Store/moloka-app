@@ -49,6 +49,19 @@ jobs:
           PASADA:               ${{ inputs.pasada }}
         run: python -u escaner2_osma_cruce.py
 
+      # (Encargo AN, 03-oct-2026) EL ULTIMO PASO, DETRAS DEL CRUCE Y SIN TOCAR NADA DE LO QUE PRODUCE NI SU EXCEL: apunta
+      # en osma_packs_cola las familias que el cartero de la v2 buscara en Amazon (los packs que no vendemos). Solo si el
+      # cruce ha salido bien; si este paso falla, el run sale rojo y el cruce se queda «lista» (el rescate solo toca lo que
+      # sigue «cruzando»).
+      - name: Apuntar la cola de packs de Amazon
+        if: success()
+        timeout-minutes: 5
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PASADA:               ${{ inputs.pasada }}
+        run: python -u escaner2_osma_packs.py encolar
+
       - name: Rescate · si el run ha fallado, la fila de este run queda 'fallida'
         if: failure() || cancelled()
         env:
