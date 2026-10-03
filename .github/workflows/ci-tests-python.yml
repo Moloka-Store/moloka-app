@@ -485,6 +485,7 @@ jobs:
             test_escaner2_ficha_compartida.py
             test_escaner2_osma_disponibilidad.py
             test_escaner2_osma_pro.py
+            test_escaner2_packs_osma.py
             test_encadenar_keepa.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
