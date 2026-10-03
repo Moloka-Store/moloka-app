@@ -185,6 +185,9 @@ PROGRAMAS = [
     #    cruce tambien (el IVA de la ficha y el factor de nuestros packs); los dos corren desatendidos.
     ('escaner2_osma_barrido.py',   'solo-servicio',         1),   # escaner2-osma-barrido
     ('escaner2_osma_cruce.py',     'solo-servicio',         1),   # escaner2-osma-cruce
+    # 🆕 03-oct-2026 (encargo AN, packs de OSMA en Amazon): lee `productos` al apuntar la cola (nuestras fichas) y al
+    #    valorar (el IVA de la ficha). Lo lanzan DOS pasos: el último del cruce de OSMA y el de su workflow.
+    ('escaner2_osma_packs.py',     'solo-servicio',         2),   # escaner2-osma-cruce (encolar) + escaner2-osma-packs
 ]
 
 
@@ -614,7 +617,7 @@ for _script, _forma, _esperados in PROGRAMAS:
 
 eq('(B) 🔴 ningun paso lanza ninguno de estos programas sin la llave de servicio',
    _incumplen, [])
-eq('(D) …y en total se han mirado los CATORCE pasos que existen, no cero', _total, 14)
+eq('(D) …y en total se han mirado los DIECISÉIS pasos que existen, no cero (los dos de los packs de OSMA, encargo AN)', _total, 16)
 
 # (C) la otra direccion: un paso que lanza el escaner sin la llave tiene que
 # salir en la lista. Este es el estado exacto de `director-dbline.yml` ayer.
