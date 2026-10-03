@@ -3,8 +3,11 @@
 # Ubicacion: .github/workflows/centinela-escaner.yml
 #
 # QUE HACE: lanza centinela_escaner.py, que mira la ULTIMA escritura de cada
-# director en `escaner_memoria` y avisa por TELEGRAM si alguno lleva mas horas
-# calladas que su umbral. Sale en ROJO cuando avisa.
+# proveedor y avisa por TELEGRAM si alguno lleva mas horas calladas que su umbral.
+# Sale en ROJO cuando avisa. DBLINE, OCIOSTOCK y TCG se miran en `escaner_memoria`;
+# HEO y OSMA (escaner 2, desde el 03-oct-2026) en la ultima pasada 'aplicada' de
+# `disp_pasada`. El cron NO cambio: ver la tabla de ventanas en el .py, que el banco
+# cruza con este cron.
 #
 # POR QUE: el 9-sep-2026 DBLine dejo de escribir a las 10:31 UTC y OcioStock a
 # las 15:01; no se supo hasta el 10-sep por la tarde. Dos dias. El run de cada
@@ -62,7 +65,7 @@ jobs:
       - name: Instalar dependencias
         run: pip install supabase requests
 
-      - name: Mirar la ultima escritura de cada director
+      - name: Mirar la ultima escritura de cada proveedor
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}

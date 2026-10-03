@@ -3,9 +3,15 @@
 # ============================================================
 # MOLOKA - CENTINELA DEL PROVEEDOR MUDO
 # ------------------------------------------------------------
-# QUE VIGILA: la ULTIMA escritura de cada director en `escaner_memoria`. Si un
-# proveedor lleva mas horas que su umbral sin escribir, avisa por Telegram y el
-# run sale en ROJO.
+# QUE VIGILA: la ULTIMA escritura de cada proveedor. Si uno lleva mas horas que su
+# umbral sin escribir, avisa por Telegram y el run sale en ROJO.
+#   - DBLINE, OCIOSTOCK y TCG (escaner viejo): el MAXIMO de `fecha` en
+#     `escaner_memoria`.
+#   - HEO y OSMA (escaner 2, desde el 03-oct-2026): la ultima pasada 'aplicada'
+#     de `disp_pasada` (`terminada_en`). El director viejo de HEO se apago a
+#     proposito el 01-oct y `escaner_memoria` ya no se mueve para HEO ni para OSMA:
+#     mirarla daria MUDO para siempre, y mirarla es mirar el sitio equivocado.
+#     Cada fila de HORARIOS dice su `fuente`.
 #
 # CUANDO MIRA: 06:00, 10:00, 14:00 y 18:00 UTC. Cuatro pasadas, ninguna de noche
 # -- el porque, y por que el hueco nocturno no retrasa nada, esta en el cron de
@@ -57,12 +63,54 @@ from datetime import datetime, timedelta, timezone
 #   -----------+----------------------+---------+-------------+-------------+----
 #   TCG        | 06-16, todos los dias|   ~6    |   18,00 h   |   18,00 h   | 22
 #   DBLINE     | 06-11, L a S         |   ~4    |   44,00 h   |   23,00 h   | 26
-#   HEO        | 05-13, L a S         |   ~4    |   40,13 h   |   22,03 h   | 26
 #   OCIOSTOCK  | 07-15, L a S         |   ~5    |   40,00 h   |   18,00 h   | 22
+#   (HEO y OSMA: tabla propia, mas abajo; ya no salen de `escaner_memoria`.)
 #
-# Con esas cuatro X, en los 28 dias medidos NO habria saltado ni un aviso falso:
+# Con esas X, en los 28 dias medidos NO habria saltado ni un aviso falso:
 # ningun hueco descontado llego a la X de su proveedor (DBLine tuvo 2 por encima
-# de 22 h y ninguno de 24; HEO, 1; OcioStock y TCG, ninguno de mas de 18).
+# de 22 h y ninguno de 24; OcioStock y TCG, ninguno de mas de 18).
+#
+# 🆕 HEO Y OSMA EN EL ESCANER 2 (03-oct-2026). Medido el 03-oct a las 13:3x (Madrid)
+#    en `disp_pasada`, estado 'aplicada' -- la PELICULA del escaner 2, una fila por
+#    pasada --, y contrastado con `disp_parametros` (el horario que usa la base).
+#    🔴 LA PELICULA ES CORTA y hay que decirlo: HEO solo tiene 4,5 dias (desde el
+#    29-sep) y OSMA 2 (desde el 01-oct). No son las cuatro semanas del 10-sep: donde
+#    el dato no llega, la cifra sale del horario de `disp_parametros` y esta marcada.
+#
+#    HEO  · 55 'aplicadas' del 29-sep 09:03 UTC al 03-oct 07:05 UTC. Una por hora, a
+#           los :05-:06 (terminada_en), de 06:06 a 19:06 UTC (08-21 h Madrid en
+#           verano), de lunes a viernes: huecos medidos de 1 h y, de noche (19:06 a
+#           06:06), de 10,99 a 11,02 h en cuatro noches. Sabado 03-oct: 06:06 y 07:06
+#           UTC (08 y 09 h Madrid), como dice `disp_parametros.horario_finde`.
+#           LO QUE NO ESTA MEDIDO: las noches del sabado y del domingo (el primer
+#           domingo es el 04-oct). Salen del horario: ultima pasada del fin de
+#           semana a las 09:06 Madrid, primera del dia siguiente a las 08:06 = 23 h.
+#           HEO SI trabaja el domingo (a diferencia del escaner viejo, que lo
+#           descansaba): NO se descuenta ningun dia, y la X es la del hueco de fin de
+#           semana (23 h) + 3 h = 26 h. Repasar con la pelicula del primer fin de
+#           semana (lunes 05-oct).
+#    OSMA · UNA pasada al dia, 07:15 Madrid (05:15 UTC en verano), de lunes a viernes.
+#           Medido: 2 'aplicadas' (01-oct 12:01 UTC, una prueba con Fernando delante,
+#           y 02-oct 05:15 UTC) y una 'rechazada' del 01-oct (fichero ya aplicado).
+#           Con dos pasadas no hay cadencia que medir: el hueco normal es de 24 h
+#           (un dia habil al siguiente; el viernes al lunes salen 72 h de reloj y
+#           24 h sin sabado ni domingo) y viene de `horario_laborables=[7]`,
+#           `horario_minuto=15`, `horario_finde=[]` y `horario_margen_min=30`. X = 24 +
+#           2 h de margen = 26 h: la pasada de las 06:00 UTC (45 min despues de la
+#           esperada) no avisa, y la de las 10:00 UTC si, si no ha habido pasada ese
+#           dia (28,7 h).
+#
+#      proveedor | fuente           | franja (UTC)       | hueco mayor | descontando | X
+#      ----------+------------------+--------------------+-------------+-------------+----
+#      HEO       | disp_pasada      | 06-19, todos       |  23,00 h *  |  (ninguno)  | 26
+#      OSMA      | disp_pasada      | 05, L a V          |  24,00 h *  |  sab y dom  | 26
+#      (* derivado del horario, no medido en la pelicula: ver arriba.)
+#
+#    Por que no se pone la X mas baja para HEO (11 h medidas + margen): porque el
+#    fin de semana HEO calla 23 h de por si y una X de 14 daria un aviso falso cada
+#    sabado y cada domingo. Se paga con una deteccion lenta de entre semana (26 h);
+#    el aviso rapido (dos pasadas horarias falladas) ya lo calcula la base en
+#    `v_disp_frescura.avisar`, que hoy solo lee Reponer y no manda Telegram.
 #
 # 🔬 Y DE AQUI SALE EL RELOJ DEL CENTINELA (06/10/14/18 UTC). La franja en la que
 #    cada uno escribe, mas su X, da la ventana en la que su plazo puede vencerse.
@@ -73,8 +121,22 @@ from datetime import datetime, timedelta, timezone
 #      -----------+---------------+------+----------------------+--------+-------------
 #      TCG        | 06-16         | 22 h |   04:00 y 14:00      |  ≤ 4 h |   ≤ 26 h
 #      DBLINE     | 06-11         | 26 h |   08:00 y 13:00      |  ≤ 4 h |   ≤ 30 h
-#      HEO        | 05-13         | 26 h |   07:00 y 15:00      |  ≤ 4 h |   ≤ 30 h
 #      OCIOSTOCK  | 07-15         | 22 h |   05:00 y 13:00      |  ≤ 4 h |   ≤ 26 h
+#      OSMA       | 05 (una)      | 26 h |   07:00 y 07:00      |  ≤ 3 h |   ≤ 29 h
+#      HEO        | 06-19         | 26 h |   08:00 y 21:00      | ≤ 12 h |   ≤ 38 h  <- ver abajo
+#
+#    🔴 HEO ES LA EXCEPCION y se dice: escribe 13 h seguidas (06-19 UTC), asi que su
+#       plazo puede vencerse en CUALQUIER hora entre las 08:00 y las 21:00 UTC, una
+#       ventana de 13 h que no cabe en las 11 h (04:00-15:00) de las otras. Los
+#       vencimientos de 08:00 a 18:00 se avisan en 4 h como siempre; los de 18:00 a
+#       21:00 caen en el hueco de noche del cron y esperan a la pasada de las 06:00
+#       UTC (hasta 12 h): a proposito, porque un Telegram a las 22:00 UTC (00:00 en
+#       Madrid) no lo puede atender nadie y es justo el "aviso a deshora" que el
+#       cron esta hecho para no dar. Si Cowork prefiere una quinta pasada a las 22:00
+#       UTC, es una linea en el cron y el banco lo comprueba. En invierno (UTC+1) la
+#       franja de HEO y de OSMA se corre 1 h hacia delante, y la demora no empeora.
+#       El banco marca a HEO con `ventana_ancha` y le exige <= 12 h (y <= 4 h en la
+#       parte diurna), no le quita la comprobacion.
 #
 #    Con un domingo por medio la ventana se corre al lunes (el reloj descontado
 #    esta parado el domingo entero) y cae entre las 05:00 y las 15:00 UTC del
@@ -103,15 +165,25 @@ from datetime import datetime, timedelta, timezone
 # UTC, y no son adorno: de ellas sale la ventana en la que su plazo puede
 # vencerse, y de esa ventana sale a que horas tiene sentido que el centinela
 # mire. El banco lo comprueba contra el cron del workflow.
+# `fuente` dice DE DONDE sale la fecha: 'escaner_memoria' (el MAXIMO de `fecha`) o
+# 'disp_pasada' (la ultima pasada 'aplicada'). `descansa_sabado` descuenta ademas
+# los sabados (OSMA: de lunes a viernes). `ventana_ancha` (solo HEO): ver arriba.
 HORARIOS = {
-    'TCG':       {'umbral_h': 22, 'descansa_domingo': False, 'medido_h': 18.00,
+    'TCG':       {'fuente': 'escaner_memoria', 'umbral_h': 22, 'descansa_domingo': False,
+                  'descansa_sabado': False, 'medido_h': 18.00,
                   'primera_h': 6, 'ultima_h': 16, 'dias': 'todos los dias'},
-    'DBLINE':    {'umbral_h': 26, 'descansa_domingo': True, 'medido_h': 23.00,
+    'DBLINE':    {'fuente': 'escaner_memoria', 'umbral_h': 26, 'descansa_domingo': True,
+                  'descansa_sabado': False, 'medido_h': 23.00,
                   'primera_h': 6, 'ultima_h': 11, 'dias': 'L a S'},
-    'HEO':       {'umbral_h': 26, 'descansa_domingo': True, 'medido_h': 22.03,
-                  'primera_h': 5, 'ultima_h': 13, 'dias': 'L a S'},
-    'OCIOSTOCK': {'umbral_h': 22, 'descansa_domingo': True, 'medido_h': 18.00,
+    'HEO':       {'fuente': 'disp_pasada', 'umbral_h': 26, 'descansa_domingo': False,
+                  'descansa_sabado': False, 'medido_h': 23.00, 'ventana_ancha': True,
+                  'primera_h': 6, 'ultima_h': 19, 'dias': 'todos los dias'},
+    'OCIOSTOCK': {'fuente': 'escaner_memoria', 'umbral_h': 22, 'descansa_domingo': True,
+                  'descansa_sabado': False, 'medido_h': 18.00,
                   'primera_h': 7, 'ultima_h': 15, 'dias': 'L a S'},
+    'OSMA':      {'fuente': 'disp_pasada', 'umbral_h': 26, 'descansa_domingo': True,
+                  'descansa_sabado': True, 'medido_h': 24.00,
+                  'primera_h': 5, 'ultima_h': 5, 'dias': 'L a V (una pasada, 07:15 Madrid)'},
 }
 
 # ============================================================
@@ -148,8 +220,9 @@ MARCA_RUTA = 'centinela/ultimo_aviso.json'
 # por texto) y las EJECUTA con las fechas del apagon de verdad.
 # ============================================================
 
-def horas_en_domingo(desde, hasta):
-    """Cuantas de las horas del intervalo [desde, hasta) caen en domingo (UTC).
+def horas_en_dia(desde, hasta, dia_semana):
+    """Cuantas de las horas del intervalo [desde, hasta) caen en ese dia de la
+    semana (UTC; weekday(): lunes 0 ... sabado 5, domingo 6).
 
     Se recorre tramo a tramo por dias, no hora a hora: asi un hueco de tres
     semanas se cuenta igual de bien y sin dar vueltas."""
@@ -161,25 +234,35 @@ def horas_en_domingo(desde, hasta):
         siguiente_dia = (tramo_ini + timedelta(days=1)).replace(
             hour=0, minute=0, second=0, microsecond=0)
         tramo_fin = min(siguiente_dia, hasta)
-        if tramo_ini.weekday() == 6:                    # 6 = domingo
+        if tramo_ini.weekday() == dia_semana:
             total += (tramo_fin - tramo_ini).total_seconds() / 3600.0
         tramo_ini = tramo_fin
     return total
 
 
-def horas_de_silencio(ultima, ahora, descansa_domingo):
+def horas_en_domingo(desde, hasta):
+    """Cuantas de las horas del intervalo [desde, hasta) caen en domingo (UTC)."""
+    return horas_en_dia(desde, hasta, 6)                # 6 = domingo
+
+
+def horas_de_silencio(ultima, ahora, descansa_domingo, descansa_sabado=False):
     """Horas que lleva callado un proveedor, en SU calendario.
 
     Al que no trabaja los domingos no se le cuentan las horas del domingo: si se
     le contaran, el umbral tendria que subir a 50 h para aguantar el
     sabado-a-lunes, y con 50 h de margen un apagon de verdad se pasa dos dias sin
-    que nadie lo note. Que es lo que paso."""
+    que nadie lo note. Que es lo que paso. Al que tampoco trabaja los sabados
+    (OSMA: de lunes a viernes) se le descuentan tambien: su viernes-a-lunes son
+    72 h de reloj y 24 h de las suyas."""
     if ahora <= ultima:
         return 0.0
     brutas = (ahora - ultima).total_seconds() / 3600.0
-    if not descansa_domingo:
-        return brutas
-    return max(brutas - horas_en_domingo(ultima, ahora), 0.0)
+    descuento = 0.0
+    if descansa_domingo:
+        descuento += horas_en_domingo(ultima, ahora)
+    if descansa_sabado:
+        descuento += horas_en_dia(ultima, ahora, 5)     # 5 = sabado
+    return max(brutas - descuento, 0.0)
 
 
 def esta_mudo(horas, umbral_h):
@@ -196,6 +279,8 @@ def franja_de(cfg):
     Sale de las MISMAS cifras que usa el banco para comprobar el cron. Si se
     escribiera a mano en un campo aparte, un dia diria una cosa y el calculo
     otra, y el aviso mentiria sobre el horario justo del que se queja."""
+    if cfg['primera_h'] == cfg['ultima_h']:             # una sola pasada al dia
+        return '%02d UTC, %s' % (cfg['primera_h'], cfg['dias'])
     return '%02d-%02d UTC, %s' % (cfg['primera_h'], cfg['ultima_h'], cfg['dias'])
 
 
@@ -234,8 +319,9 @@ def linea_de_aviso(fila):
               % (fila['proveedor'], fila['brutas'],
                  fila['ultima'].strftime('%Y-%m-%d %H:%M')))
     if fila['brutas'] - fila['horas'] > 0.05:
-        plazo = ('%.0f h sin contar los domingos, que es lo que se compara con su plazo '
-                 'de %d h. ' % (fila['horas'], fila['umbral']))
+        plazo = ('%.0f h sin contar %s, que es lo que se compara con su plazo '
+                 'de %d h. ' % (fila['horas'], fila.get('descontado', 'los domingos'),
+                                fila['umbral']))
     else:
         plazo = 'Su plazo son %d h. ' % fila['umbral']
     return cabeza + plazo + 'Horario: %s.' % fila['franja']
@@ -280,6 +366,47 @@ def escribir_marca(sb, marca):
 
 
 # ============================================================
+# DE DONDE SALE LA FECHA: UNA FUENTE POR PROVEEDOR
+# ============================================================
+def _fecha(valor):
+    return datetime.fromisoformat(str(valor).replace('Z', '+00:00'))
+
+
+def ultima_escritura(sb, proveedor, fuente):
+    """Devuelve (ultima, motivo): la fecha UTC de la ultima escritura de ese
+    proveedor segun su `fuente`, o (None, por_que_no_hay). Si no se puede leer,
+    LANZA: quien llama lo apunta como fallo de lectura (no saber no es estar bien).
+
+    'escaner_memoria': el MAXIMO de `fecha` (el escaner viejo).
+    'disp_pasada': la ultima pasada 'aplicada' del escaner 2 (`terminada_en`).
+       🔴 SOLO 'aplicada': una pasada 'rechazada' o 'fallida' es el escaner 2
+       hablando pero SIN haber escrito, que es justo el silencio que se vigila.
+       Se piden unas filas y se coge el maximo aqui, no `limit(1)`: ordenado en
+       descendente Postgres pone los NULL primero, y un `terminada_en` vacio no es
+       una fecha."""
+    if fuente == 'disp_pasada':
+        res = (sb.table('disp_pasada')
+                 .select('terminada_en')
+                 .eq('proveedor', proveedor)
+                 .eq('estado', 'aplicada')
+                 .order('terminada_en', desc=True)
+                 .limit(20).execute())
+        fechas = [_fecha(r['terminada_en']) for r in (res.data or [])
+                  if r.get('terminada_en')]
+        if not fechas:
+            return None, 'ni una pasada aplicada en disp_pasada'
+        return max(fechas), None
+    res = (sb.table('escaner_memoria')
+             .select('fecha')
+             .eq('proveedor', proveedor)
+             .order('fecha', desc=True)
+             .limit(1).execute())
+    if res.data:
+        return _fecha(res.data[0]['fecha']), None
+    return None, 'ni una fila en escaner_memoria'
+
+
+# ============================================================
 # EL CENTINELA
 # ============================================================
 def main():
@@ -303,25 +430,20 @@ def main():
         cfg = HORARIOS[proveedor]
         ultima, motivo = None, None
         try:
-            res = (sb.table('escaner_memoria')
-                     .select('fecha')
-                     .eq('proveedor', proveedor)
-                     .order('fecha', desc=True)
-                     .limit(1).execute())
-            if res.data:
-                ultima = datetime.fromisoformat(str(res.data[0]['fecha']).replace('Z', '+00:00'))
-            else:
-                motivo = 'ni una fila en escaner_memoria'
+            ultima, motivo = ultima_escritura(sb, proveedor, cfg['fuente'])
         except Exception as ex:
             motivo = 'no se pudo leer: %s' % ex
             fallo_lectura = True
 
         horas = None if ultima is None else horas_de_silencio(
-            ultima, ahora, cfg['descansa_domingo'])
+            ultima, ahora, cfg['descansa_domingo'], cfg['descansa_sabado'])
         brutas = None if ultima is None else (ahora - ultima).total_seconds() / 3600.0
         filas.append({'proveedor': proveedor, 'ultima': ultima, 'horas': horas,
                       'brutas': brutas, 'umbral': cfg['umbral_h'], 'motivo': motivo,
-                      'mudo': esta_mudo(horas, cfg['umbral_h']), 'franja': franja_de(cfg)})
+                      'mudo': esta_mudo(horas, cfg['umbral_h']), 'franja': franja_de(cfg),
+                      'fuente': cfg['fuente'],
+                      'descontado': ('los sábados y domingos' if cfg['descansa_sabado']
+                                     else 'los domingos')})
 
     # 🔴 LOS CUATRO SIEMPRE AL LOG, hablen o callen. Misma disciplina que el
     #    blindaje anti-vaciado del escaner: un centinela que solo escribe cuando
@@ -329,13 +451,14 @@ def main():
     #    todos al dia" de "no llego a mirar".
     for f in filas:
         if f['ultima'] is None:
-            print('  %-10s SIN DATO (%s) | umbral %d h -> MUDO'
-                  % (f['proveedor'], f['motivo'], f['umbral']))
+            print('  %-10s SIN DATO (%s) | umbral %d h -> MUDO | fuente %s'
+                  % (f['proveedor'], f['motivo'], f['umbral'], f['fuente']))
         else:
             print('  %-10s ultima %s UTC | silencio %5.1f h (bruto %5.1f) | umbral %d h -> %s'
+                  ' | fuente %s'
                   % (f['proveedor'], f['ultima'].strftime('%Y-%m-%d %H:%M'),
                      f['horas'], f['brutas'], f['umbral'],
-                     'MUDO' if f['mudo'] else 'al dia'))
+                     'MUDO' if f['mudo'] else 'al dia', f['fuente']))
 
     mudos = [f for f in filas if f['mudo']]
     if not mudos:
@@ -361,6 +484,12 @@ def main():
     lineas += [linea_de_aviso(f) for f in mudos if f['proveedor'] in a_avisar]
     lineas.append('Mira el run del director en Actions: si sale verde y la fecha no se '
                   'mueve, es que escribe en el vacío.')
+    del_escaner2 = [f['proveedor'] for f in mudos
+                    if f['proveedor'] in a_avisar and f['fuente'] == 'disp_pasada']
+    if del_escaner2:
+        lineas.append('%s es del escáner 2: la fecha es la de la última pasada aplicada '
+                      '(disp_pasada), y el reloj es cron-job.org, no GitHub.'
+                      % ', '.join(del_escaner2))
     texto = '\n'.join(lineas)
 
     tg_token = os.environ.get('TELEGRAM_TOKEN')
