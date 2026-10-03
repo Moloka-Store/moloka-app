@@ -1,0 +1,56 @@
+# ============================================================
+# Moloka - Escaner 2 · PACKS DE OSMA EN AMAZON: LA VALORACION (encargo AN, plano Y, tramo 7, 03-oct-2026)
+#
+# Lo dispara el boton «Valorar packs» de la v2 (Escaneo PRO · pestaña OSMA), con el MISMO mecanismo que el cruce
+# (workflow_dispatch con GH_TOKEN desde el servidor de la v2), cuando el cartero de la v2 ya ha buscado en Amazon todas
+# las familias que dejo en cola el cruce (escaner2-osma-cruce.yml, su ultimo paso). Valora cada pack con la formula del
+# viejo, deja «Escaner2_OSMA_Packs_<AAAAMMDD_HHMM>.xlsx» en la biblioteca (osma_packs_excel) y avisa por Telegram.
+#
+# 🔴 REPO PUBLICO: el programa SOLO imprime estados y recuentos; nada de precios, EAN, ASIN ni nombres.
+# 🔒 Cero Amazon y cero tokens de Keepa: lee lo que guardo el cartero (osma_packs_candidato) y las ventas ya guardadas.
+# 🔒 Ningun secreto nuevo: la llave de servicio de Supabase y el Telegram de siempre.
+# >>> SIN RELOJ <<<  Solo cuando se pulsa el boton (o a mano desde Actions).
+# ============================================================
+name: Moloka - Escaner 2 · Packs de OSMA en Amazon
+
+on:
+  workflow_dispatch:
+    inputs:
+      cruce:
+        description: 'id del cruce de OSMA (escaner2_cruce.id) cuyos packs se valoran'
+        type: string
+        required: true
+
+# 🔒 El mismo grupo que el barrido y el cruce de OSMA: de uno en uno.
+concurrency:
+  group: escaner2-osma-pro
+  cancel-in-progress: false
+
+jobs:
+  valorar:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        # Las mismas versiones FIJADAS que el cruce de OSMA (y requests, para el Telegram de siempre).
+        run: pip install supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13 requests==2.34.2
+
+      - name: Valorar los packs y dejar el Excel
+        timeout-minutes: 10
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          TELEGRAM_TOKEN:       ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+          CRUCE:                ${{ inputs.cruce }}
+        run: python -u escaner2_osma_packs.py valorar

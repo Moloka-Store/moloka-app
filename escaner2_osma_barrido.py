@@ -19,14 +19,16 @@ QUE HACE, EN ORDEN:
   6. guarda la foto en `escaner2_foto` y las listas de las puertas previas en `escaner2_apartado`, y lo CUENTA en la
      base;
   7. deja en el almacen cerrado `escaner2`: `osma/<pasada>/eans.txt` (LA lista, encargo AG2: los EAN de OSMA y el
-     EAN de nuestra ficha de cada codigo enlazado que esta en la foto, uno por linea, sin repetir) y `barrido.json`
+     EAN de nuestra ficha de cada codigo enlazado que esta en la foto, uno por linea, sin repetir; y desde el encargo AN,
+     detras, los EAN de los packs de Amazon que encontro el cartero en el ultimo PRO) y `barrido.json`
      (de que descarga sale, el porte, los enlaces y el EAN de cada ficha: lo que el cruce necesita para decidir igual);
   8. cierra la pasada en 'esperando_csv' (n_tandas = 1: una lista, un CSV del Visualizador, el de España) o en
      'fallida' con el motivo.
 
 🔴 REPO PUBLICO: LOS REGISTROS LOS VE CUALQUIERA. Solo se imprimen estados y recuentos: NUNCA precios, EAN, ASIN,
    nombres, codigos de articulo ni el texto de un error (va a `escaner2_pasada.motivo_fallo`: la base es privada).
-🔒 SOLO ESCRIBE `escaner2_pasada`, `escaner2_foto`, `escaner2_apartado` y `escaner2/osma/<pasada>/`. Ni disp_*, ni
+🔒 SOLO ESCRIBE `escaner2_pasada`, `escaner2_foto`, `escaner2_apartado` y `escaner2/osma/<pasada>/` (y LEE, desde el
+   encargo AN, osma_packs_cola y osma_packs_candidato). Ni disp_*, ni
    productos, ni codigos_proveedor, ni v_escaner_fuente, ni escaner_memoria.
 🔒 LA LLAVE DE SERVICIO, O NO SE CORRE: sin ella aborta antes de crear ningun cliente.
 """
@@ -186,6 +188,13 @@ def barrer(pasada):
     # (AG2) UNA lista: los EAN de OSMA + el EAN de nuestra ficha de cada codigo enlazado de la foto, sin repetir.
     lista, eans_fichas = eo.lista_para_keepa_osma(foto, enlaces, M)
     n_fichas_nuevos = len(lista) - len(e2.lista_para_keepa(foto))
+    # (AN, 03-oct-2026) Y DETRAS, los EAN de los packs de Amazon que encontro el cartero en el ultimo PRO de OSMA, para que
+    # el Visualizador traiga sus ventas: con ellas, la valoracion de los packs puede llegar a COMPRAR. Si no se pueden leer
+    # (las tablas aun no existen, o fallan), la lista sale como siempre y barrido.json lo dice.
+    eans_packs, sin_ean_packs, aviso_packs = packs_para_la_lista(lista, M)
+    lista = lista + eans_packs
+    print(f">>> PACKS en la lista: {len(eans_packs)} EAN de packs de Amazon encontrados · sin EAN {sin_ean_packs}"
+          + (' · AVISO: no se pudieron leer' if aviso_packs else ''), flush=True)
     if len(lista) > eo.TOPE_LISTA:
         raise Fallo('la lista tiene %d códigos y el Visualizador admite %d' % (len(lista), eo.TOPE_LISTA), recuentos)
     if len(lista) > eo.AVISO_LISTA:
@@ -223,6 +232,7 @@ def barrer(pasada):
         'enlaces': {c: e for c, e in enlaces.items() if c in en_foto},
         'eans_fichas': eans_fichas, 'n_eans_fichas_nuevos': n_fichas_nuevos, 'n_lista': len(lista),
         'avisos': avisos_enl, 'porte_comprobado': comprobadas,
+        'n_eans_packs': len(eans_packs), 'aviso_packs': aviso_packs,
     }
     sb.storage.from_(BUCKET).upload(f'{base}/barrido.json', json.dumps(sidecar, ensure_ascii=False, default=str)
                                     .encode('utf-8'), {'content-type': 'application/json', 'upsert': 'true'})
@@ -233,6 +243,25 @@ def barrer(pasada):
     for p in e2.PUERTAS_PREVIAS:
         cierre['p_' + p] = previas[p]
     return cierre, len(lista), n_fichas_nuevos
+
+
+def packs_para_la_lista(lista, M):
+    """(AN) Los EAN de los packs encontrados en el ULTIMO cruce de OSMA con familias buscadas → (eans, sin_ean, aviso).
+    Lee `osma_packs_cola` y `osma_packs_candidato` (SOLO LECTURA). Nunca tumba el barrido: si falla, ([], 0, motivo)."""
+    import escaner2_osma_packs as op
+    try:
+        ult = (sb.table('osma_packs_cola').select('cruce_id,buscada_en').eq('estado', 'buscada')
+               .order('buscada_en', desc=True).limit(1).execute().data or [])
+        if not ult:
+            return [], 0, None
+        ids = [x['id'] for x in _todas('osma_packs_cola', 'id', 'id', cruce_id=ult[0]['cruce_id'])]
+        cands = []
+        for i in range(0, len(ids), 100):
+            cands += sb.table('osma_packs_candidato').select('clase,eans').in_('cola_id', ids[i:i + 100]).execute().data or []
+        nuevos, sin_ean = op.eans_de_packs(cands, lista, M)
+        return nuevos, sin_ean, None
+    except Exception as ex:
+        return [], 0, type(ex).__name__
 
 
 if __name__ == '__main__':
