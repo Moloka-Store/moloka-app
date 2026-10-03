@@ -761,20 +761,19 @@ def filas_keepa(productos, cruce, ahora):
     return filas
 
 
-def ventas_por_asin(sb, cruce, asins, ahora, env=None, keepa=None, imprimir=print):
+def ventas_por_asin(sb, cruce, asins, ahora, keepa=None, imprimir=print):
     """(AN-2) Las ventas de Keepa de los packs que no tienen otras guardadas: por ASIN, en España, con la via de las
-    novedades (stats=90, sin historial: ~1 token por ASIN) y la llave KEEPA_API_KEY de la v1; se GUARDAN en
-    osma_packs_keepa (pelicula). Respeta la reserva de tokens de las novedades (`nov_parametros.keepa_reserva` de HEO, la
-    misma llave): si no cabe, no pide. → (filas guardadas, tokens gastados, aviso o None). Nunca lanza."""
+    novedades (stats=90, sin historial: ~1 token por ASIN) y la llave KEEPA_API_KEY de la v1 (el cliente lo crea `main`,
+    detras de la guarda de la llave de servicio); se GUARDAN en osma_packs_keepa (pelicula). Respeta la reserva de tokens
+    de las novedades (`nov_parametros.keepa_reserva` de HEO, la misma llave): si no cabe, no pide.
+    → (filas guardadas, tokens gastados, aviso o None). Nunca lanza."""
     if not asins:
         return [], 0, None
-    env = os.environ if env is None else env
     k = keepa
+    if k is None:
+        return [], 0, 'Keepa: sin cliente en esta corrida; esos packs siguen sin ventas (VALORAR como mucho)'
     try:
-        if k is None:
-            from escaner2_novedades import Keepa
-            k = Keepa(env.get('KEEPA_API_KEY'))
-        par =(sb.table('nov_parametros').select('keepa_reserva,keepa_tope_peticion').eq('proveedor', 'HEO').limit(1)
+        par = (sb.table('nov_parametros').select('keepa_reserva,keepa_tope_peticion').eq('proveedor', 'HEO').limit(1)
                .execute().data or [{}])[0]
         reserva = int(par.get('keepa_reserva') or 0)
         tope = max(1, min(100, int(par.get('keepa_tope_peticion') or 100)))
@@ -851,7 +850,7 @@ def valorar_cruce(sb, cruce, run_id, ahora=None, imprimir=print, enviar=None, en
     packs, cuentas = valorar(cola, candidatos, M, umbral, nov_keepa, csv_caidas, ahora, por_asin)
     # (AN-2) Los packs que siguen SIN ventas: se piden a Keepa por ASIN (y se guardan), y se valora otra vez.
     faltan = sorted({p['c']['asin'] for p in packs if p['caidas'] is None})
-    nuevas, tokens, aviso_keepa = ventas_por_asin(sb, cruce, faltan, ahora, env=env, keepa=keepa, imprimir=imprimir)
+    nuevas, tokens, aviso_keepa = ventas_por_asin(sb, cruce, faltan, ahora, keepa=keepa, imprimir=imprimir)
     if aviso_keepa:
         avisos.append(aviso_keepa)
     if faltan:
@@ -911,7 +910,9 @@ def main(argv=None):
             # (AN-2) Sin cruce: el reloj de y 40 (busca el que toca; si no hay ninguno, sale en verde sin hacer nada).
             if cruce and not re.fullmatch(uuid_ok, cruce):
                 raise FalloPacks('el cruce no es un id válido')
-            valorar_cruce(sb, cruce, run_id)
+            # (AN-2) El cliente de Keepa nace AQUI, detras de la guarda de la llave de servicio (como el de la base).
+            from escaner2_novedades import Keepa
+            valorar_cruce(sb, cruce, run_id, keepa=Keepa(os.environ.get('KEEPA_API_KEY')))
     except FalloPacks as ex:
         print('ESCANER2_NO_EJECUTADO: %s' % ex)
         sys.exit(1)
