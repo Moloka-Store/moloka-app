@@ -31,7 +31,8 @@ LO PROPIO DE OSMA:
      dificil venderlas en Pan EU»). La lista lleva los EAN de OSMA del filtro + el EAN de NUESTRA ficha de cada
      codigo enlazado que esta en la foto, sin repetir (`lista_para_keepa_osma`). La ficha cuyo EAN no conoce Keepa
      NO se rescata (el Lenor 18459, medido el 02-oct-2026): se dice en el Resumen, calculado en cada pasada con
-     keepa_escaparate (`fuera_de_keepa`). Ya no hay lista de ASIN.
+     keepa_escaparate (`fuera_de_keepa`). (Mapa de OSMA, 04-oct-2026) Y una segunda lista, SOLO de ASIN: la del mapa
+     fijo (punto 10).
   4. EL CRUCE POR CODIGO: el articulo de OSMA de un codigo enlazado (codigos_proveedor, lista CERRADA de 20) se
      decide con SUS fichas (las de su familia que traiga el CSV), no con lo que diga el EAN nuevo de OSMA. Una fila
      del CSV con el EAN de una ficha enlazada es de la fila de ESE codigo; la misma ficha por los dos caminos: una,
@@ -47,6 +48,10 @@ LO PROPIO DE OSMA:
      de «Análisis» como formulas que apuntan a ellas, y la columna «Precio OSMA sin porte (€)» al final. La base no se
      toca (disp_parametros, la puerta comun y Reponer siguen con su pedido).
   9. (AM) «Análisis» pinta solo los paises que se calculan cuando es uno (OSMA: ES); HEO sigue con sus cuatro.
+ 10. (Mapa de OSMA, Fernando, 04-oct-2026) EL MAPA FIJO `osma_mapa_ficha` (codigo OSMA → ASIN → unidades), hecho a
+     mano: sus ASIN van en una lista aparte (modo «ASIN» del Visualizador), cada ficha se valora con SU coste
+     (unidades × precio × (1 + porte)) y sale en el Excel con su marca al final; lo nuestro agotado en OSMA, en su
+     hoja. Ver la seccion 4 ter. Sustituye a la busqueda automatica de packs del encargo AN, retirada.
 """
 import io
 import re
@@ -560,7 +565,7 @@ def candidatos_osma(fila, datos, por_asin, enlace, asins_enlazados, M, ean_ficha
 
 
 def decidir_osma(fila, cands_por_pais, caidas_por_pais, params, M, eleccion, compartidas, enlace, factores,
-                 caminos=None, apartadas=None, senales_pack=None):
+                 caminos=None, apartadas=None, senales_pack=None, mapa_codigo=None, pct=None):
     """La puerta de UNA fila de OSMA con las reglas de compra del PRO de HEO (`escaner2_motor.decidir`, sin
     tocarlas), y lo propio de OSMA alrededor:
       · fila enlazada: el IVA (y «En mi BD») se leen de NUESTRA ficha (su EAN), no del EAN nuevo de OSMA;
@@ -570,14 +575,21 @@ def decidir_osma(fila, cands_por_pais, caidas_por_pais, params, M, eleccion, com
         señales de `senales_pack`: {pais: {asin: señal}} de `senales_pack_csv`): con pack, igual que el nuestro
         (N × precio y se decide otra vez); con «posible pack», la fila nunca es COMPRAR (baja a VALORAR);
       · el detalle dice por donde llego la ficha y lo apartado.
+      · (Mapa de OSMA, Fernando, 04-oct-2026) si el ASIN que sale esta en el MAPA de este codigo (`mapa_codigo`:
+        {asin: unidades}), MANDAN LAS UNIDADES DEL MAPA, sobre nuestro factor y sobre las señales del AM (que ni se
+        miran), y el coste es el del mapa (`pa_mapa` con `pct`, un solo redondeo).
     Devuelve el resultado de `decidir` con 'factor', 'pa' (el coste con el que se ha calculado), 'pack' (None,
-    'nuestro' o 'amazon') y 'pack_amazon' (el veredicto, o None si no se ha mirado)."""
+    'nuestro', 'amazon' o 'mapa') y 'pack_amazon' (el veredicto, o None si no se ha mirado)."""
     calc = dict(fila, ean_core=str(enlace['ean_ficha']).strip()) if (enlace and enlace.get('ean_ficha')) else dict(fila)
     r = e2.decidir(calc, cands_por_pais, caidas_por_pais, params, M, eleccion, compartidas)
     factor = (factores or {}).get(r.get('asin'), 1) if r.get('asin') else 1
     pack = 'nuestro' if factor > 1 else None
+    del_mapa = (mapa_codigo or {}).get(r.get('asin')) if r.get('asin') else None
+    if del_mapa is not None:
+        factor, pack = del_mapa, ('mapa' if del_mapa > 1 else None)
     pack_amz = None
-    if factor == 1 and senales_pack is not None and r.get('asin') and r['puerta'] in e2.PUERTAS_ANALISIS:
+    if (del_mapa is None and factor == 1 and senales_pack is not None and r.get('asin')
+            and r['puerta'] in e2.PUERTAS_ANALISIS):
         senal = next((senales_pack[p][r['asin']] for p in params['paises_calculo']
                       if r['asin'] in (senales_pack.get(p) or {})), None)
         pack_amz = factor_pack_amazon(senal, cantidad_osma(fila.get('nombre')))
@@ -585,7 +597,10 @@ def decidir_osma(fila, cands_por_pais, caidas_por_pais, params, M, eleccion, com
             factor, pack = pack_amz['factor'], 'amazon'
     pa = fila['precio_unidad']
     if factor > 1 and pa is not None:
-        pa = float((_dec(pa) * factor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+        if pack == 'mapa' and fila.get('precio_catalogo') is not None:
+            pa = pa_mapa(fila['precio_catalogo'], factor, pct)
+        else:
+            pa = float((_dec(pa) * factor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
         r2 = e2.decidir(dict(calc, precio_unidad=pa), cands_por_pais, caidas_por_pais, params, M, eleccion, compartidas)
         if r2.get('asin') != r.get('asin'):
             raise FalloOsma('la ficha elegida cambia con el coste del pack (%s → %s): no debería'
@@ -616,6 +631,9 @@ def decidir_osma(fila, cands_por_pais, caidas_por_pais, params, M, eleccion, com
 
 def texto_pack(factor, precio, pa, pack):
     """«pack de 3: coste 3 × 2,13 € = 6,39 €» (nuestro) o «pack de 48 en Amazon: coste 48 × 0,32 € = 15,36 €»."""
+    if pack == 'mapa':
+        # Sin «N × precio con porte»: el del mapa redondea una vez, al final (2 × 1,599 × 1,067276 = 3,41, no 2 × 1,71).
+        return 'pack de %d del mapa: coste %d × precio de OSMA × (1 + porte) = %s €' % (factor, factor, _coma(pa))
     return 'pack de %d%s: coste %d × %s € = %s €' % (factor, ' en Amazon' if pack == 'amazon' else '', factor,
                                                      _coma(precio), _coma(pa))
 
@@ -861,6 +879,238 @@ def factor_pack_amazon(senal, cant):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# 4 ter · (Mapa de OSMA, Fernando, 04-oct-2026) EL MAPA FIJO: CODIGO OSMA → ASIN → UNIDADES
+# ═══════════════════════════════════════════════════════════════════════════════
+# El catalogo de OSMA es estable: en vez de buscar packs en Amazon cada vez, Cowork hace a mano un MAPA
+# (`osma_mapa_ficha`, migracion 20261004113000 de la v2) con las fichas de Amazon de cada codigo de OSMA y cuantas
+# unidades de OSMA lleva cada una (el Lenor 18459: B014DGG0OQ ×1, B07HCJQ45L ×2, B0794VHRVZ ×1). El PRO lo usa como
+# lista ADICIONAL de fichas a valorar, sin tocar nada de lo de siempre (la foto, las puertas, el cuadre):
+#   · BARRIDO: los ASIN del mapa de los codigos DISPONIBLES en la descarga van a `asins.txt`, una lista aparte que se
+#     pega en el Visualizador de España en el modo «ASIN» (mezclados con los EAN, Keepa los descarta sin avisar). Los
+#     codigos del mapa AGOTADOS en la descarga no van a Keepa: van a la hoja «Nuestros agotados en OSMA».
+#   · CRUCE: cada fila del CSV de ASIN es del codigo y las unidades que dice el MAPA, nunca de lo que diga su EAN (la
+#     ficha de un pack lleva su propio EAN). Coste = unidades × precio de OSMA × (1 + porte), redondeado al final
+#     (Lenor 2 × 1,599 × 1,067276 = 3,41). La rentabilidad, la de siempre (`escaner2_motor.decidir`, sin tocarla).
+#   · EXCEL: las fichas del mapa que se venden salen en «Análisis» como una fila mas, con la marca en una columna NUEVA AL
+#     FINAL («Ficha del mapa»: hay quien lee por letra); si su ASIN ya estaba en una fila normal, MANDA la del mapa y la
+#     normal no sale en «Análisis» (no se duplica; la base y el cuadre no cambian). Todas, en «Puertas».
+COLUMNA_MAPA = 'Ficha del mapa'
+ANCHO_MAPA = 24
+HOJA_AGOTADOS = 'Nuestros agotados en OSMA'
+TEXTO_AGOTADO = 'agotado en OSMA'
+COLUMNAS_AGOTADOS = ['Código OSMA', 'Nombre OSMA', 'ASIN', 'Nuestra ficha', 'Unidades por ficha', 'Precio OSMA (€)',
+                     'Estado']
+# El CSV de ASIN se reconoce por su contenido: casi todos sus ASIN estan en la lista del mapa (el de EAN trae miles que no).
+PARTE_CSV_MAPA = 0.8
+
+
+def mapa_de_la_descarga(mapa, filas):
+    """Las filas de `osma_mapa_ficha` de los codigos que estan en la descarga → (disponibles, agotados, codigos, fuera).
+    `disponibles`/`agotados`: [{'codigo', 'asin', 'unidades', 'es_nuestra'}], por codigo y ASIN; `codigos`: {codigo:
+    {'nombre', 'precio_catalogo', 'ean_original', 'ean_core', 'fin_de_vida', 'disponible'}} de la descarga; `fuera`:
+    cuantas filas del mapa son de un codigo que la descarga no trae. Puro.
+    `mapa`: filas de osma_mapa_ficha; `filas`: disp_estado de OSMA vistas en la ultima pasada aplicada."""
+    por_cod = {str(f.get('producto_prov')): f for f in filas or []}
+    disponibles, agotados, codigos, fuera = [], [], {}, 0
+    for m in sorted(mapa or [], key=lambda x: (_clave_codigo(x.get('codigo_osma')), str(x.get('asin') or ''))):
+        c = str(m.get('codigo_osma') or '').strip()
+        f = por_cod.get(c)
+        if f is None:
+            fuera += 1
+            continue
+        fila = {'codigo': c, 'asin': str(m['asin']).strip(), 'unidades': int(m['unidades']),
+                'es_nuestra': bool(m.get('es_nuestra'))}
+        (disponibles if f.get('disponible') else agotados).append(fila)
+        codigos[c] = {'nombre': f.get('nombre') or '', 'precio_catalogo': _num(f.get('precio_unidad')),
+                      'ean_original': str(f.get('ean_original') or '').strip(),
+                      'ean_core': str(f.get('ean_core') or '').strip(), 'fin_de_vida': bool(f.get('fin_de_vida')),
+                      'disponible': bool(f.get('disponible'))}
+    return disponibles, agotados, codigos, fuera
+
+
+def lista_asin_mapa(disponibles):
+    """La lista de ASIN para el Visualizador (modo «ASIN»): los del mapa de los codigos disponibles, sin repetir."""
+    return list(dict.fromkeys(m['asin'] for m in disponibles or []))
+
+
+def pa_mapa(precio, unidades, pct):
+    """El coste de una ficha del mapa: unidades × precio de OSMA × (1 + porte), redondeado a 2 decimales UNA vez, al
+    final (Fernando, 04-oct-2026: Lenor pack de 2 = 2 × 1,599 × 1,067276 = 3,41). Sin porte, unidades × precio."""
+    if precio is None:
+        return None
+    v = _dec(precio) * int(unidades) * (1 + (_dec(pct) if pct is not None else 0))
+    return float(v.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+
+
+def es_csv_del_mapa(asins_csv, asins_mapa):
+    """¿Es este CSV el de la lista de ASIN del mapa? Si casi todos sus ASIN (`PARTE_CSV_MAPA`) son del mapa."""
+    asins_csv, asins_mapa = set(asins_csv or ()), set(asins_mapa or ())
+    if not asins_csv or not asins_mapa:
+        return False
+    return len(asins_csv & asins_mapa) >= PARTE_CSV_MAPA * len(asins_csv)
+
+
+def leer_csv_mapa(rutas, pro):
+    """El CSV de la lista de ASIN, leido con el MISMO lector del Escaner Pro (`leer_csv_visualizador`, sin tocarlo) pero
+    por ASIN: en una copia temporal, la columna de los EAN lleva el ASIN de la fila. Asi cada ficha sale igual que en
+    el CSV de EAN, y una ficha sin EAN en Keepa (la de un pack) tampoco se pierde. → {asin: registro}, y el mas
+    nuevo manda (`rutas` del mas nuevo al mas viejo, como el cruce)."""
+    import csv
+    import tempfile
+    col_ean, col_asin = pro.CSV_COLS['ean'], pro.CSV_COLS['asin']
+    copias = []
+    for ruta in ([rutas] if isinstance(rutas, str) else rutas):
+        with open(ruta, encoding='utf-8-sig', newline='') as fh:
+            filas = list(csv.reader(fh))
+        if not filas or col_asin not in filas[0]:
+            continue
+        cab = filas[0]
+        i_asin = cab.index(col_asin)
+        if col_ean not in cab:
+            cab = cab + [col_ean]
+        i_ean = cab.index(col_ean)
+        fd, copia = tempfile.mkstemp(suffix='.csv')
+        with open(fd, 'w', encoding='utf-8', newline='') as fh:
+            w = csv.writer(fh)
+            w.writerow(cab)
+            for fila in filas[1:]:
+                fila = fila + [''] * (len(cab) - len(fila))
+                fila[i_ean] = fila[i_asin].strip()
+                w.writerow(fila)
+        copias.append(copia)
+    salida = {}
+    for recs in (pro.leer_csv_visualizador(copias) if copias else {}).values():
+        for r in recs:
+            if r.get('asin') and r['asin'] not in salida:
+                salida[r['asin']] = r
+    return salida
+
+
+def texto_mapa(unidades):
+    """La marca de la columna «Ficha del mapa»."""
+    return 'pack ×%d (ficha del mapa)' % unidades if unidades > 1 else 'ficha del mapa'
+
+
+def _coma3(x):
+    return '—' if x is None else ('%.3f' % x).replace('.', ',')
+
+
+def valorar_mapa(disponibles, codigos, por_asin_mapa, por_asin_csv, caidas_por_pais, params, usados, M, compartidas,
+                 pct, fichas_nuestras):
+    """Cada fila del mapa de un codigo disponible, valorada con las reglas de compra del PRO (`escaner2_motor.decidir`,
+    sin tocarlas) y SU coste (`pa_mapa`) → [resultado de `decidir` + lo del mapa]. Puro.
+      · la ficha, por su ASIN: la del CSV de ASIN (`por_asin_mapa`: {pais: {asin: registro}}) y, si no la trae, la del
+        CSV de EAN (`por_asin_csv`, igual); nunca por un EAN;
+      · el IVA (y «En mi BD»), de NUESTRA ficha si el ASIN es nuestro (`fichas_nuestras`: {asin: {'ean', 'nombre'}});
+        si no, del EAN de OSMA.
+    `usados`: los paises con CSV; `pct`: el porte (Decimal o texto) del barrido."""
+    salida = []
+    for m in disponibles or []:
+        cod = codigos.get(m['codigo']) or {}
+        ficha = (fichas_nuestras or {}).get(m['asin'])
+        core = str((ficha or {}).get('ean') or '').strip() or cod.get('ean_core') or ''
+        pa = pa_mapa(cod.get('precio_catalogo'), m['unidades'], pct)
+        cands, fuente = {}, None
+        for p in usados:
+            rec = ((por_asin_mapa or {}).get(p) or {}).get(m['asin'])
+            if rec is not None:
+                fuente = fuente or 'asin'
+            else:
+                rec = ((por_asin_csv or {}).get(p) or {}).get(m['asin'])
+                if rec is not None:
+                    fuente = fuente or 'ean'
+            cands[p] = [rec] if rec is not None else []
+        r = e2.decidir({'nombre': cod.get('nombre') or '', 'ean_core': core, 'precio_unidad': pa}, cands,
+                       caidas_por_pais, params, M, None, compartidas)
+        coste = '%d × %s € × (1 + porte) = %s €' % (m['unidades'], _coma3(cod.get('precio_catalogo')), _coma(pa))
+        detalle = 'Ficha del mapa (código %s, %d ud de OSMA en la ficha; coste %s)%s · %s' % (
+            m['codigo'], m['unidades'], coste, '' if fuente else ' · ningún CSV la trae', r['detalle'])
+        salida.append(dict(r, detalle=detalle, codigo=m['codigo'], asin_mapa=m['asin'], unidades=m['unidades'],
+                           es_nuestra=m['es_nuestra'], nuestra=ficha is not None, pa=pa,
+                           precio_catalogo=cod.get('precio_catalogo'), nombre_osma=cod.get('nombre') or '',
+                           ean_original=cod.get('ean_original') or '', ean_core=core,
+                           fin_de_vida=bool(cod.get('fin_de_vida')), fuente=fuente, coste=coste,
+                           marca_mapa=texto_mapa(m['unidades'])))
+    return salida
+
+
+def agotados_nuestros(agotados, codigos, fichas_nuestras):
+    """La hoja «Nuestros agotados en OSMA» (Fernando, 04-oct-2026): una fila por cada fila del mapa de un codigo NO
+    disponible en la descarga del dia que tengamos a la venta (el ASIN en `productos`, vivo, o `es_nuestra` en el
+    mapa). Sin Keepa ni margen: que no se esconda (el Dr. Beckmann 2346, B003U1NE40). Puro."""
+    filas = []
+    for m in agotados or []:
+        ficha = (fichas_nuestras or {}).get(m['asin'])
+        if ficha is None and not m.get('es_nuestra'):
+            continue
+        cod = codigos.get(m['codigo']) or {}
+        filas.append([m['codigo'], cod.get('nombre') or '', m['asin'], (ficha or {}).get('nombre') or '—',
+                      m['unidades'], cod.get('precio_catalogo'), TEXTO_AGOTADO])
+    return filas
+
+
+def fichas_nuestras_de(productos):
+    """{asin: {'ean', 'nombre'}} de nuestras fichas vivas (activas, no chase, con ASIN; el chase nunca lleva ASIN)."""
+    salida = {}
+    for p in productos or []:
+        if _ficha_viva(p) and p['asin'] not in salida:
+            salida[p['asin']] = {'ean': p.get('ean'), 'nombre': p.get('nombre') or ''}
+    return salida
+
+
+def filas_mapa_excel(mapa):
+    """Las fichas del mapa que se venden (puertas d, e y f), como filas de la foto y resultados para las hojas del viejo
+    → (foto, resultados). Cada una con su id propio ('mapa:<codigo>:<asin>'), el EAN de OSMA en la columna EAN (o el
+    ASIN, si el codigo no tiene EAN), el coste del mapa ya calculado y «PA (€)» vivo como el de UNA unidad sobre
+    «unidades × precio sin porte» (asi da lo mismo que `pa_mapa`, con un solo redondeo)."""
+    foto, resultados = [], []
+    for r in mapa or []:
+        if r['puerta'] not in e2.PUERTAS_ANALISIS:
+            continue
+        fid = 'mapa:%s:%s' % (r['codigo'], r['asin_mapa'])
+        foto.append({
+            'id': fid, 'producto_heo': r['codigo'], 'ean_original': r['ean_original'] or r['asin_mapa'],
+            'ean_core': r['ean_core'], 'nombre': '%s · %s' % (r['nombre_osma'], r['marca_mapa']), 'marca': '',
+            'precio_catalogo': r['precio_catalogo'], 'precio_unidad': r['pa'], 'fin_de_vida': r['fin_de_vida'],
+            'aviso_caja': 'coste del mapa: %s' % r['coste'], 'asin': r['asin_mapa'], '_factor': 1,
+            '_sin_porte': (None if r['precio_catalogo'] is None
+                           else float(_dec(r['precio_catalogo']) * r['unidades'])),
+            '_mapa': r['marca_mapa']})
+        resultados.append(dict(r, foto_id=fid, id=fid, fichas=None, compartida={}, eleccion=None,
+                               pack=None, pack_amazon=None, factor=1))
+    return foto, resultados
+
+
+def poner_columna_mapa(wb, foto_excel):
+    """«Ficha del mapa» detras de la ultima columna de «Análisis» (columna nueva → al final, SIEMPRE), fila a fila por
+    (EAN, ASIN), con la marca de las filas del mapa. Alarga la tabla. Devuelve cuantas filas."""
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.table import TableColumn
+    ws = wb['Análisis']
+    cab = [c.value for c in ws[1]]
+    i_ean, i_asin = cab.index('EAN'), cab.index('ASIN')
+    col = len(cab) + 1
+    ws.cell(row=1, column=col, value=COLUMNA_MAPA).font = Font(bold=True)
+    ws.column_dimensions[get_column_letter(col)].width = ANCHO_MAPA
+    marcas = {(str(f['ean_original']), f.get('asin')): f['_mapa'] for f in foto_excel if f.get('_mapa')}
+    n = 0
+    for fila in range(2, ws.max_row + 1):
+        m = marcas.get((str(ws.cell(row=fila, column=i_ean + 1).value), ws.cell(row=fila, column=i_asin + 1).value))
+        if m:
+            ws.cell(row=fila, column=col, value=m)
+            n += 1
+    for tabla in ws.tables.values():
+        ini, fin = tabla.ref.split(':')
+        tabla.ref = '%s:%s%s' % (ini, get_column_letter(col), re.sub(r'^[A-Z]+', '', fin))
+        if tabla.tableColumns:
+            tabla.tableColumns.append(TableColumn(id=len(tabla.tableColumns) + 1, name=COLUMNA_MAPA))
+        if tabla.autoFilter is not None:
+            tabla.autoFilter.ref = tabla.ref
+    return n
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # 5 · EL EXCEL: EL DEL ESCANER 2 DE HEO, CON UN SOLO AÑADIDO
 # ═══════════════════════════════════════════════════════════════════════════════
 def foto_para_excel(foto, resultados, enlaces):
@@ -886,12 +1136,16 @@ def foto_para_excel(foto, resultados, enlaces):
         if factor > 1:
             g['precio_unidad'] = r['pa']
             g['nombre'] = '%s · pack de %d%s (%d × %s €)' % (f.get('nombre') or '', factor,
-                                                           ' en Amazon' if r.get('pack') == 'amazon' else '', factor,
+                                                           {'amazon': ' en Amazon', 'mapa': ' del mapa'}.get(
+                                                               r.get('pack'), ''), factor,
                                                            _coma(f['precio_unidad']))
             # (AM) «Coherencia caja», que en OSMA iba vacia: el pack, nuestro o de Amazon.
             g['aviso_caja'] = texto_pack(factor, f['precio_unidad'], r['pa'], r.get('pack'))
         elif (r.get('pack_amazon') or {}).get('estado') == PACK_DUDOSO:
             g['aviso_caja'] = '%s (%s)' % (TEXTO_POSIBLE_PACK, r['pack_amazon']['senales'])
+        # (Mapa de OSMA) El ASIN de la fila: con el EAN, la llave de cada fila de «Análisis» (una ficha del mapa puede
+        # llevar el mismo EAN de OSMA que la fila normal de su código).
+        g['asin'] = r.get('asin')
         salida.append(g)
     return salida
 
@@ -903,18 +1157,30 @@ def paises_de_la_hoja(params, M):
     return [p for p in M.PAISES if p in calc] if len(calc) == 1 else list(M.PAISES)
 
 
-def excel_como_el_viejo_osma(foto_excel, resultados, apartados, M, eleccion=None, paises=None):
+def excel_como_el_viejo_osma(foto_excel, resultados, apartados, M, eleccion=None, paises=None, mapa=None):
     """Las hojas del viejo con SU codigo (la Celda 9, `escaner2_motor.escribir_celda9`) y la columna «Ficha
     compartida», como el PRO de HEO (`escaner2_motor.excel_como_el_viejo`), con `PROVEEDOR` = 'OSMA': la Celda 9
     solo escribe «Chase_manual» para HEO (son los Funko chase sin ASIN), igual que hacia el escaner viejo con
     OSMA. Y DETRAS de todo, en «Análisis», la columna «No habrá más» y (AM) «Precio OSMA sin porte (€)», con «PA (€)»
-    y «Decisión» vivas (`poner_pedido_vivo`). (AM) `paises`: los de `paises_de_la_hoja`."""
+    y «Decisión» vivas (`poner_pedido_vivo`). (AM) `paises`: los de `paises_de_la_hoja`.
+    (Mapa de OSMA) `mapa` = (resultados de las fichas del mapa que se venden, ASIN de TODAS las fichas del mapa
+    valoradas): sus filas entran en «Análisis» con las de siempre y ordenadas igual (por margen en ES); la fila normal
+    cuyo ASIN es del mapa no sale (manda la del mapa). Detras de todo, la columna «Ficha del mapa»."""
+    res_mapa, asins_mapa = mapa or ([], set())
     datos = e2.datos_como_el_viejo(foto_excel, resultados, apartados, M, eleccion)
+    if res_mapa or asins_mapa:
+        extra = e2.datos_como_el_viejo(foto_excel, res_mapa, [], M, None)['registros']
+        regs = [x for x in datos['registros'] if x['asin'] not in asins_mapa] + extra
+        regs.sort(key=lambda x: x['_margen_es'] if x['_margen_es'] is not None else -10 ** 9, reverse=True)
+        datos['registros'] = regs
+        for x in extra:
+            datos['cotejo_info'].setdefault(x['ean'], {'veredicto': None, 'detalle': None})
     datos['PROVEEDOR'] = PROVEEDOR
     wb = e2.escribir_celda9(datos, M, paises=paises)
     e2.poner_columna_ficha_compartida(wb, foto_excel, resultados)
     poner_columna_no_habra_mas(wb, foto_excel)
-    poner_pedido_vivo(wb, foto_excel, resultados)
+    poner_pedido_vivo(wb, foto_excel, list(resultados) + list(res_mapa))
+    poner_columna_mapa(wb, foto_excel)
     return wb
 
 
@@ -957,16 +1223,21 @@ def poner_pedido_vivo(wb, foto_excel, resultados):
     from openpyxl.worksheet.table import TableColumn
     ws = wb['Análisis']
     cab = [c.value for c in ws[1]]
-    i = {n: cab.index(n) + 1 for n in ('EAN', 'PA (€)', 'Beneficio (€)', 'Margen', 'Decisión')}
+    i = {n: cab.index(n) + 1 for n in ('EAN', 'ASIN', 'PA (€)', 'Beneficio (€)', 'Margen', 'Decisión')}
     col = len(cab) + 1
     letra = get_column_letter(col)
     ws.cell(row=1, column=col, value=COLUMNA_SIN_PORTE).font = Font(bold=True)
     ws.column_dimensions[letra].width = ANCHO_SIN_PORTE
-    por_ean = {str(f['ean_original']): f for f in foto_excel}
+    # (Mapa de OSMA) Cada fila, por (EAN, ASIN): la ficha del mapa y la fila normal de su código pueden compartir EAN.
+    por_clave = {(str(f['ean_original']), f.get('asin')): f for f in foto_excel}
+    por_ean = {}
+    for f in foto_excel:
+        por_ean.setdefault(str(f['ean_original']), f)
     por_foto = {r['foto_id']: r for r in resultados}
     n = 0
     for fila in range(2, ws.max_row + 1):
-        f = por_ean[str(ws.cell(row=fila, column=i['EAN']).value)]
+        ean = str(ws.cell(row=fila, column=i['EAN']).value)
+        f = por_clave.get((ean, ws.cell(row=fila, column=i['ASIN']).value)) or por_ean[ean]
         r = por_foto.get(f['id']) or {}
         if f.get('_sin_porte') is None:
             continue
@@ -1035,12 +1306,19 @@ def escribir_excel(foto, resultados, apartados, M, info):
     """El Excel del cruce de OSMA: DELANTE las hojas del viejo (`excel_como_el_viejo_osma`), DETRAS las del escaner 2
     con los mismos nombres y columnas que el de HEO (Resumen, Comparación, Varias fichas, Puertas y Puertas previas).
     «Comparación» va con su cabecera y sin filas: el escaner viejo no tiene escaneos de OSMA con que comparar
-    (escaner_resultados, medido el 02-oct-2026). Solo lo calculado: aqui no se decide nada. → bytes."""
+    (escaner_resultados, medido el 02-oct-2026). Solo lo calculado: aqui no se decide nada. → bytes.
+    (Mapa de OSMA) `info['mapa']`: las fichas del mapa valoradas (`valorar_mapa`), que entran en «Análisis» (las que se
+    venden) y en «Puertas» (todas) con la marca al final; `info['agotados']`: las filas de la hoja «Nuestros agotados en
+    OSMA» (`agotados_nuestros`), la ULTIMA del libro."""
     from openpyxl.styles import Font
     por_foto = {f['id']: f for f in foto}
-    foto_excel = foto_para_excel(foto, resultados, info['enlaces'])
+    mapa = info.get('mapa') or []
+    asins_mapa = {r['asin_mapa'] for r in mapa}
+    foto_mapa, res_mapa = filas_mapa_excel(mapa)
+    foto_excel = foto_para_excel(foto, resultados, info['enlaces']) + foto_mapa
     wb = excel_como_el_viejo_osma(foto_excel, resultados, apartados, M, eleccion=info.get('eleccion'),
-                                  paises=paises_de_la_hoja(info['params'], M))
+                                  paises=paises_de_la_hoja(info['params'], M), mapa=(res_mapa, asins_mapa))
+    sustituidas = [r for r in resultados if r['puerta'] in e2.PUERTAS_ANALISIS and r.get('asin') in asins_mapa]
 
     def hoja(nombre, cabecera, filas, anchos=None):
         ws = wb.create_sheet(nombre)
@@ -1063,7 +1341,8 @@ def escribir_excel(foto, resultados, apartados, M, info):
     from openpyxl.utils import get_column_letter
     l_pais, l_dec = (get_column_letter(cab_an.index(n) + 1) for n in ('País', 'Decisión'))
     pais_cuenta = 'ES'
-    en_hoja = [r for r in resultados if r['puerta'] in e2.PUERTAS_ANALISIS]
+    # (Mapa de OSMA) Lo que pinta «Análisis»: las filas de siempre menos las que sustituye el mapa, y las del mapa.
+    en_hoja = [r for r in resultados if r['puerta'] in e2.PUERTAS_ANALISIS and r.get('asin') not in asins_mapa] + res_mapa
     pasada_dec = {d: sum(1 for r in en_hoja if ((r.get('paises') or {}).get(pais_cuenta) or {}).get('decision') == d)
                   for d in ('COMPRAR', 'VALORAR')}
     vivas = {d: "=COUNTIFS('Análisis'!$%s:$%s,\"%s\",'Análisis'!$%s:$%s,\"%s\")"
@@ -1105,6 +1384,13 @@ def escribir_excel(foto, resultados, apartados, M, info):
                  ['Fichas nuestras que quedan fuera: Keepa no conoce su EAN (no se rescatan)',
                   texto_fuera_de_keepa(info.get('fuera_keepa'))],
                  ['Packs nuestros valorados como unidades × precio', info.get('n_packs', 0)],
+                 ['Fichas del mapa (código OSMA → ASIN → unidades), de códigos disponibles',
+                  '%d valoradas (%d por el CSV de ASIN, %d por el de EAN, %d sin dato) · %d en «Análisis» · %d filas '
+                  'normales sustituidas por la del mapa' % (
+                      len(mapa), sum(1 for r in mapa if r.get('fuente') == 'asin'),
+                      sum(1 for r in mapa if r.get('fuente') == 'ean'), sum(1 for r in mapa if not r.get('fuente')),
+                      len(res_mapa), len(sustituidas))],
+                 [HOJA_AGOTADOS, '%d (hoja al final del libro)' % len(info.get('agotados') or [])],
                  ['Catálogo de OSMA (descarga)', info['n_crudo']]]
     filas_res += [['Puerta previa · %s' % NOMBRE_PREVIA[x], info['previas'][x]] for x in e2.PUERTAS_PREVIAS]
     filas_res += [['Entradas (filas de la foto)', info['n_entradas']]]
@@ -1141,16 +1427,23 @@ def escribir_excel(foto, resultados, apartados, M, info):
     hoja('Varias fichas', ['EAN', 'Nombre OSMA', 'País', 'ASIN', 'Título Amazon', 'Puesto', 'Caídas 30 d',
                            'Precio venta (€)'], varias, {'A': 15, 'B': 50, 'E': 60})
 
-    hoja('Puertas', COLUMNAS_PUERTAS,
+    # (Mapa de OSMA) Detras de las de siempre, TODAS las fichas del mapa, con su marca en una columna nueva al final.
+    hoja('Puertas', COLUMNAS_PUERTAS + [COLUMNA_MAPA],
          [[por_foto[r['foto_id']]['ean_original'], por_foto[r['foto_id']]['nombre'], por_foto[r['foto_id']]['marca'],
            r.get('pa', por_foto[r['foto_id']]['precio_unidad']), '%s · %s' % (r['puerta'], e2.NOMBRE_PUERTA[r['puerta']]),
-           r['motivo'], r['detalle'], None, None, None, None, None] for r in resultados],
-         {'A': 15, 'B': 55, 'C': 16, 'E': 24, 'F': 16, 'G': 70, 'H': 26})
+           r['motivo'], r['detalle'], None, None, None, None, None, None] for r in resultados]
+         + [[r['ean_original'] or r['asin_mapa'], r['nombre_osma'], None, r['pa'],
+             '%s · %s' % (r['puerta'], e2.NOMBRE_PUERTA[r['puerta']]), r['motivo'], r['detalle'], None, None, None, None,
+             None, '%s · %s' % (r['marca_mapa'], r['asin_mapa'])] for r in mapa],
+         {'A': 15, 'B': 55, 'C': 16, 'E': 24, 'F': 16, 'G': 70, 'H': 26, 'M': 36})
 
     hoja('Puertas previas', ['EAN tal como vino', 'Nombre', 'Marca', 'Precio catálogo (€)', 'Puerta previa', 'Detalle'],
          [[a['ean_original'], a['nombre'], a['marca'], a['precio_catalogo'],
            NOMBRE_PREVIA.get(a['motivo'], a['motivo']), a['detalle']] for a in apartados],
          {'A': 18, 'B': 55, 'C': 16, 'E': 32, 'F': 80})
+
+    # (Mapa de OSMA, Fernando, 04-oct-2026) La ULTIMA hoja: lo nuestro que OSMA tiene agotado hoy, que no se esconda.
+    hoja(HOJA_AGOTADOS, COLUMNAS_AGOTADOS, info.get('agotados') or [], {'A': 12, 'B': 50, 'C': 14, 'D': 50, 'G': 18})
     salida = io.BytesIO()
     wb.save(salida)
     return salida.getvalue()
