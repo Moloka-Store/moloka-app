@@ -18,6 +18,10 @@
 # 🔒 SOLO TOCA disp_pasada, disp_lectura, la funcion disp_aplicar_pasada, lee disp_parametros, y escribe
 #    en el almacen escaner2 en osma/ultimo/. La migracion 20261001124000_disp_osma_en_sombra.sql de
 #    moloka-app-v2 tiene que estar APLICADA antes de que corra (si no, no hay fila de OSMA y no abre).
+# 🆕 04-oct-2026 · DESPUES de aplicar (solo si se aplica) y con la misma sesion, lee la fecha de vuelta de los
+#    agotados de OSMA que alimentan una ficha nuestra (escaner2_osma_fecha_vuelta.py: 2 s entre peticiones, 40
+#    como mucho, parada en seco al primer 403/429) y la escribe en disp_estado.fecha_vuelta / fecha_vuelta_leida_en.
+#    La migracion 20261004180000_disp_osma_fecha_vuelta.sql de moloka-app-v2 tiene que estar APLICADA antes.
 #
 # >>> SIN RELOJ, A PROPOSITO <<<  Se lanza a mano desde Actions. El reloj es cron-job.org (un `schedule:`
 #     de GitHub llega horas tarde en esta cuenta) y lo pone Fernando: TODOS LOS DIAS a las 07:15 de Madrid
@@ -33,6 +37,18 @@ name: Moloka - Escaner 2 · Disponibilidad OSMA
 
 on:
   workflow_dispatch:
+    # 🆕 04-oct-2026 · Las fechas de vuelta (paso 9). cron-job.org manda {"ref":"main"} sin inputs → 'pasada', lo de
+    #    siempre. A mano: 'solo_fechas' repasa las fechas contra la última foto aplicada (entra, no baja el Excel ni
+    #    abre pasada) y 'solo_fechas_sin_escribir' hace lo mismo sin tocar la base (solo recuentos en el registro).
+    inputs:
+      modo:
+        description: 'pasada (la de cada día) · solo_fechas · solo_fechas_sin_escribir'
+        type: choice
+        default: pasada
+        options:
+          - pasada
+          - solo_fechas
+          - solo_fechas_sin_escribir
 
 # 🔒 GRUPO PROPIO: no comparte credenciales con HEO. Nunca dos pasadas de OSMA a la vez con el mismo
 #    usuario. Sin cancelar lo que esta en curso (un pendiente nuevo cancela al pendiente anterior, no al
@@ -91,7 +107,15 @@ jobs:
           OSMA_USER:            ${{ secrets.OSMA_USER }}
           OSMA_PASS:            ${{ secrets.OSMA_PASS }}
           PYTHONIOENCODING:     utf-8
-        run: python -u escaner2_osma_disponibilidad.py
+          # 🔒 El modo entra por el entorno y se traduce con un `case`: nunca se pega el input en la orden.
+          MODO:                 ${{ inputs.modo || 'pasada' }}
+        run: |
+          case "$MODO" in
+            pasada)                   python -u escaner2_osma_disponibilidad.py ;;
+            solo_fechas)              python -u escaner2_osma_disponibilidad.py --solo-fechas ;;
+            solo_fechas_sin_escribir) python -u escaner2_osma_disponibilidad.py --solo-fechas --sin-escribir ;;
+            *) echo "OSMA_NO_EJECUTADA: modo desconocido"; exit 1 ;;
+          esac
 
       # 🔴 SI EL RUN MUERE A MEDIAS, LA PASADA NO SE QUEDA 'leyendo' PARA SIEMPRE. Solo si los secretos
       #    estaban (si no, no hay pasada que rescatar ni se toca la base).
