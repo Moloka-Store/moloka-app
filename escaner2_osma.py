@@ -479,14 +479,18 @@ def _codigos_keepa(fila):
     return {k for k in (ean_norm(x) for x in re.split(r'[^0-9]+', texto)) if k}
 
 
-def fuera_de_keepa(enlaces, eans_fichas, keepa, dominios):
+def fuera_de_keepa(enlaces, eans_fichas, keepa, dominios, mapa_por_codigo=None):
     """(AG2) Nuestras fichas de los codigos de la foto que la lista NO puede traer porque Keepa no conoce su EAN:
     NO se rescatan (Fernando, 02-oct-2026). Se calcula en cada cruce con keepa_escaparate (FOTO: se dice su fecha),
     en los paises del cruce (`dominios`, en minusculas: 'es'). → {'fuera': [(codigo, asin, por que)],
     'sin_dato': [(codigo, asin)], 'fecha': la mas reciente de las filas miradas}.
       · el codigo sin EAN en la ficha → fuera ('la ficha no tiene EAN');
       · la ficha con fila en keepa_escaparate en algun pais del cruce y en NINGUNO lista nuestro EAN → fuera;
-      · sin fila en ningun pais del cruce → 'sin_dato' (no se sabe: se dice aparte, no se da por fuera)."""
+      · sin fila en ningun pais del cruce → 'sin_dato' (no se sabe: se dice aparte, no se da por fuera).
+    (Mapa de OSMA, Cowork 04-oct-2026) Una ficha que el MAPA ya valora para ese codigo (`mapa_por_codigo`: {codigo:
+    {asin: unidades}}, el mapa de los codigos disponibles) no queda fuera: entra por su ASIN en la lista del mapa. No se
+    mira ni se lista (el Lenor 18459: B014DGG0OQ y B07HCJQ45L)."""
+    mapa_por_codigo = mapa_por_codigo or {}
     por_asin = {}
     for k in keepa or []:
         if str(k.get('dominio') or '').lower() in dominios:
@@ -495,6 +499,8 @@ def fuera_de_keepa(enlaces, eans_fichas, keepa, dominios):
     for c in sorted(enlaces, key=_clave_codigo):
         clave = ean_norm(eans_fichas.get(c))
         for a in enlaces[c]['asins']:
+            if a in (mapa_por_codigo.get(c) or {}):
+                continue
             filas = por_asin.get(a) or []
             fechas += [str(k['fecha_foto']) for k in filas if k.get('fecha_foto')]
             if not clave:
