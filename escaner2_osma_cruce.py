@@ -268,11 +268,16 @@ def cruzar(cruce, params, pasada):
     # (AG2) Las fichas nuestras que la lista no puede traer (Keepa no conoce su EAN): NO se rescatan, se dicen. Con
     # keepa_escaparate de los paises de este cruce, leido ahora (cajon FOTO: va con su fecha).
     dominios = {p.lower() for p in usados}
+    # (Mapa de OSMA, 04-oct-2026) Sus unidades por codigo: mandan sobre los packs (tambien en la fila de siempre), y las
+    # fichas que el mapa valora no se cuentan como «fuera» de Keepa (entran por su ASIN).
+    mapa_por_codigo = {}
+    for m in mapa_disp:
+        mapa_por_codigo.setdefault(m['codigo'], {})[m['asin']] = int(m['unidades'])
     try:
         keepa = [k for a in sorted(asins_enlazados)
                  for k in _todas('keepa_escaparate', 'asin,dominio,ean_keepa_crudo,upc_keepa,fecha_foto', 'dominio',
                                  asin=a)]
-        fuera_keepa = eo.fuera_de_keepa(enlaces, eans_fichas, keepa, dominios)
+        fuera_keepa = eo.fuera_de_keepa(enlaces, eans_fichas, keepa, dominios, mapa_por_codigo)
         print(f"KEEPA: fichas nuestras de la foto {len(asins_enlazados)} · fuera porque Keepa no conoce su EAN "
               f"{len(fuera_keepa['fuera'])} · sin fila en keepa_escaparate {len(fuera_keepa['sin_dato'])}", flush=True)
     except Exception as ex:
@@ -281,12 +286,9 @@ def cruzar(cruce, params, pasada):
         avisos.append(f'No se pudo mirar en keepa_escaparate qué fichas nuestras quedan fuera ({type(ex).__name__})')
         print(f'!!! keepa_escaparate no se pudo leer ({type(ex).__name__})', flush=True)
 
-    # (Mapa de OSMA, 04-oct-2026) Lo del mapa: sus unidades por codigo (mandan sobre los packs, tambien en la fila de
-    # siempre), el CSV de ASIN leido por ASIN, y sus caidas (las del CSV de ASIN delante: es el de esas fichas).
+    # (Mapa de OSMA, 04-oct-2026) Lo del mapa: el CSV de ASIN leido por ASIN, y sus caidas (las del CSV de ASIN
+    # delante: es el de esas fichas). Sus unidades por codigo (`mapa_por_codigo`), arriba.
     pct = (barrido.get('porte') or {}).get('pct')
-    mapa_por_codigo = {}
-    for m in mapa_disp:
-        mapa_por_codigo.setdefault(m['codigo'], {})[m['asin']] = int(m['unidades'])
     por_asin_mapa = {p: eo.leer_csv_mapa(rutas_mapa[p], pro) for p in usados if p in rutas_mapa}
     caidas_val = {p: dict(caidas_por_pais.get(p) or {}, **(caidas_mapa.get(p) or {}))
                   for p in set(caidas_por_pais) | set(caidas_mapa)}

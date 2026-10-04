@@ -347,6 +347,22 @@ eq('A4 · …una ficha sin EAN, fuera; y la línea del Resumen lo dice todo, con
     '18459 · B014DGG0OQ: Keepa no conoce el EAN 8001090747723 de la ficha (ES) | 18459 · B07HCJQ45L: Keepa no conoce '
     'el EAN 8001090747723 de la ficha (ES) | sin fila en keepa_escaparate (no se sabe): 1929 · B0C9T9RZT3 '
     '(keepa_escaparate del 2026-10-02)'))
+# (Mapa de OSMA, Cowork 04-oct-2026) El PRO del 04-oct listaba como «fuera» las dos fichas del Lenor, que entran por el
+# mapa. Con el mapa de su código, no se listan; si no queda ninguna, «ninguna». El mapa es POR CÓDIGO: el mismo ASIN en el
+# mapa de otro código no las saca.
+_FKM = eo.fuera_de_keepa(_ENL_FOTO, EANS_FICHAS, KEEPA, {'es'},
+                         {'18459': {'B014DGG0OQ': 1, 'B07HCJQ45L': 2}, '4213': {'B001PASC5E': 1}})
+eq('🔴 A4 · (Mapa de OSMA) las fichas que el mapa ya valora NO salen como «fuera»: el Lenor desaparece de la línea, que '
+   'dice «ninguna» (y la Corega, sin fila, sigue «no se sabe»)',
+   (_FKM['fuera'], _FKM['sin_dato'], eo.texto_fuera_de_keepa(_FKM)),
+   ([], [('1929', 'B0C9T9RZT3')],
+    'ninguna | sin fila en keepa_escaparate (no se sabe): 1929 · B0C9T9RZT3 (keepa_escaparate del —)'))
+eq('A4 · (Mapa de OSMA) …solo las del mapa de SU código: con el pack de 2 en el mapa del 18459, el suelto sigue fuera; con '
+   'esos ASIN en el mapa de otro código, los dos siguen fuera',
+   ([x[1] for x in eo.fuera_de_keepa(_ENL_FOTO, EANS_FICHAS, KEEPA, {'es'}, {'18459': {'B07HCJQ45L': 2}})['fuera']],
+    [x[1] for x in eo.fuera_de_keepa(_ENL_FOTO, EANS_FICHAS, KEEPA, {'es'},
+                                     {'99999': {'B014DGG0OQ': 1, 'B07HCJQ45L': 2}})['fuera']]),
+   (['B014DGG0OQ'], ['B014DGG0OQ', 'B07HCJQ45L']))
 
 print('A5 · las fichas de cada artículo, con UN CSV')
 _r = lambda asin, t='': {'asin': asin, 'titulo': t, 'buybox': 10.0, 'es_fba': True, 'nuevo': 10.0, 'compct': 15.0,  # noqa: E731
@@ -942,9 +958,12 @@ eq('🔴 B2 · el Resumen dice el porte (una vez), los países, los códigos y e
     _resu.get('Fichas nuestras que quedan fuera: Keepa no conoce su EAN (no se rescatan)'),
     _resu.get('Packs nuestros valorados como unidades × precio')),
    ('168,19 € de la factura 3c3f364c (2026-08-21) ÷ pedido previsto 2500,00 € = 6,73 %', 'ES', 'ES',
-    '3 códigos · 3 EAN de nuestras fichas (1 que no traía ya OSMA)', eo.texto_fuera_de_keepa(FK), 1))
-eq('B2 · …y la línea de las fichas fuera nombra el Lenor', '18459 · B014DGG0OQ' in str(
-    _resu.get('Fichas nuestras que quedan fuera: Keepa no conoce su EAN (no se rescatan)')), True)
+    '3 códigos · 3 EAN de nuestras fichas (1 que no traía ya OSMA)', eo.texto_fuera_de_keepa(_FKM), 1))
+eq('🔴 B2 · (Mapa de OSMA) …y la línea de las fichas fuera ya NO nombra el Lenor (sus dos fichas entran por el mapa): '
+   '«ninguna»',
+   ('18459 · B014DGG0OQ' in str(_resu.get('Fichas nuestras que quedan fuera: Keepa no conoce su EAN (no se rescatan)')),
+    str(_resu.get('Fichas nuestras que quedan fuera: Keepa no conoce su EAN (no se rescatan)')).startswith('ninguna')),
+   (False, True))
 eq('B2 · «Puertas previas» con los nombres de OSMA', sorted({r[4] for r in list(_wb['Puertas previas'].iter_rows(
     values_only=True))[1:]}), sorted(['Sin marca', 'EAN con forma rara o de relleno', 'Mismo EAN que otro artículo de OSMA']))
 
