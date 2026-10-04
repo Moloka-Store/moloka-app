@@ -564,6 +564,44 @@ eq('A9 · 🔴 los umbrales de la fórmula son la frontera de decision_de del vi
     _dec_viejo(eo.UMBRAL_VALORAR / 100), _dec_viejo(eo.UMBRAL_VALORAR / 100 - 1e-6)],
    ['COMPRAR', 'VALORAR', 'VALORAR', 'NO COMPRAR'])
 
+print('A10 · (Mapa de OSMA, 04-oct-2026) el mapa fijo: código OSMA → ASIN → unidades')
+eq('A10 · 🔴 el Lenor pack de 2 (18459, B07HCJQ45L): PA = 2 × 1,599 × (1 + 168,19/2.500) = 3,41, con UN redondeo al '
+   'final (con el porte como Decimal o como el texto de barrido.json); el suelto 1,71; sin porte 3,20',
+   (eo.pa_mapa(1.599, 2, po['pct']), eo.pa_mapa(1.599, 2, str(po['pct'])), eo.pa_mapa(1.599, 1, po['pct']),
+    eo.pa_mapa(1.599, 2, None)), (3.41, 3.41, 1.71, 3.2))
+_EST_MAPA = ESTADO + [d('2346', ean13('400845500000'), 2.299, 'DR. BECKMANN', disponible=False,
+                        nombre='Dr. Beckmann Fleckstift Express 9ml')]
+_MAPA = [{'codigo_osma': '18459', 'asin': 'B07HCJQ45L', 'unidades': 2, 'es_nuestra': True},
+         {'codigo_osma': '18459', 'asin': 'B014DGG0OQ', 'unidades': 1, 'es_nuestra': True},
+         {'codigo_osma': '2346', 'asin': 'B003U1NE40', 'unidades': 1, 'es_nuestra': True},
+         {'codigo_osma': '7003', 'asin': 'B0OTRO0001', 'unidades': 1, 'es_nuestra': False},
+         {'codigo_osma': '55555', 'asin': 'B0FUERA001', 'unidades': 1, 'es_nuestra': False}]
+_md, _ma, _mc, _mf = eo.mapa_de_la_descarga(_MAPA, _EST_MAPA)
+eq('A10 · el mapa contra la descarga: disponibles (a la lista de ASIN), agotados (a su hoja) y el código que la descarga '
+   'no trae (se cuenta)',
+   ([(m['codigo'], m['asin'], m['unidades']) for m in _md], [(m['codigo'], m['asin']) for m in _ma], _mf,
+    eo.lista_asin_mapa(_md), _mc['2346']['precio_catalogo'], _mc['2346']['disponible']),
+   ([('18459', 'B014DGG0OQ', 1), ('18459', 'B07HCJQ45L', 2)], [('2346', 'B003U1NE40'), ('7003', 'B0OTRO0001')], 1,
+    ['B014DGG0OQ', 'B07HCJQ45L'], 2.299, False))
+eq('A10 · 🔴 el Dr. Beckmann 2346, agotado y nuestro: sale en su hoja con «agotado en OSMA», sin Keepa ni margen; el '
+   'agotado que no es nuestro, no',
+   eo.agotados_nuestros(_ma, _mc, eo.fichas_nuestras_de(PRODUCTOS)),
+   [['2346', 'Dr. Beckmann Fleckstift Express 9ml', 'B003U1NE40', '—', 1, 2.299, 'agotado en OSMA']])
+eq('A10 · el CSV de la lista de ASIN se reconoce por sus ASIN (casi todos del mapa); el de EAN, no',
+   [eo.es_csv_del_mapa({'B07HCJQ45L': 27, 'B014DGG0OQ': 28}, ['B014DGG0OQ', 'B07HCJQ45L']),
+    eo.es_csv_del_mapa({'B001PASC5E': 1, 'B0NUEVA001': 1, 'B0C9T9RZT3': 1, 'B014DGG0OQ': 1}, ['B014DGG0OQ']),
+    eo.es_csv_del_mapa({}, ['B014DGG0OQ']), eo.es_csv_del_mapa({'B07HCJQ45L': 1}, [])], [True, False, False, False])
+_rm = eo.decidir_osma(_prot, _cands, _caidas, _params, M, None, {}, None, FACTORES, mapa_codigo={'B01GIE0QSM': 2},
+                      pct=po['pct'])
+eq('A10 · 🔴 con el ASIN en el mapa de su código, MANDAN LAS UNIDADES DEL MAPA (2, no nuestro pack de 3), las señales de '
+   'Amazon ni se miran, y el coste es el del mapa (2 × 1,999 × 1,067276 = 4,27)',
+   (_rm['factor'], _rm['pack'], _rm['pa'], _rm['paises']['ES']['pa'], _rm['pack_amazon'],
+    'pack de 2 del mapa: coste 2 × precio de OSMA × (1 + porte) = 4,27 €' in _rm['detalle']),
+   (2, 'mapa', 4.27, 4.27, None, True))
+eq('A10 · …y con el mapa de otro ASIN, todo como siempre (nuestro pack de 3, 6,39)',
+   [eo.decidir_osma(_prot, _cands, _caidas, _params, M, None, {}, None, FACTORES, mapa_codigo={'B0OTRO0001': 1},
+                    pct=po['pct'])[k] for k in ('factor', 'pa')], [3, 6.39])
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PARTE B · LOS DOS PROGRAMAS, DE PUNTA A PUNTA
@@ -599,7 +637,17 @@ PUERTA = [{'proveedor': 'OSMA', 'ean': '4002448039440', 'es_case': False, 'pa': 
           {'proveedor': 'OSMA', 'ean': '4001499961472', 'es_case': False, 'pa': 1.81, 'presente': False},
           {'proveedor': 'HEO', 'ean': '889698000000', 'es_case': False, 'pa': 9.99, 'presente': True}]
 SEMBRADAS = ('disp_pasada', 'disp_estado', 'disp_fuente', 'disp_parametros', 'facturas', 'codigos_proveedor',
-             'productos', 'v_escaner_fuente', 'inventario_fba', 'keepa_escaparate')
+             'productos', 'v_escaner_fuente', 'inventario_fba', 'keepa_escaparate', 'osma_mapa_ficha')
+# (Mapa de OSMA) El mapa fijo: el Lenor 18459 con sus tres fichas (el pack de 2 incluido), el Kukident por su ficha
+# (también la trae el CSV de EAN: manda la del mapa), la Frosch 1056 agotada y nuestra (a su hoja) y un agotado que no
+# es nuestro (fuera de la hoja).
+MAPA_BD = [{'codigo_osma': '18459', 'asin': 'B014DGG0OQ', 'unidades': 1, 'es_nuestra': True},
+           {'codigo_osma': '18459', 'asin': 'B07HCJQ45L', 'unidades': 2, 'es_nuestra': True},
+           {'codigo_osma': '18459', 'asin': 'B0794VHRVZ', 'unidades': 1, 'es_nuestra': False},
+           {'codigo_osma': '4213', 'asin': 'B001PASC5E', 'unidades': 1, 'es_nuestra': True},
+           {'codigo_osma': '1056', 'asin': 'B0BCPP43YN', 'unidades': 1, 'es_nuestra': False},
+           {'codigo_osma': '7003', 'asin': 'B0OTRO0001', 'unidades': 1, 'es_nuestra': False}]
+ASINS_MAPA = ['B001PASC5E', 'B014DGG0OQ', 'B0794VHRVZ', 'B07HCJQ45L']
 
 
 def estado_inicial(escena):
@@ -637,6 +685,7 @@ def estado_inicial(escena):
         'v_escaner_fuente': puerta,
         'inventario_fba': [],
         'keepa_escaparate': json.loads(json.dumps(KEEPA)),
+        'osma_mapa_ficha': json.loads(json.dumps(MAPA_BD)),
     }, 'storage': {}}
 
 
@@ -671,11 +720,16 @@ eq('B2 · 🔴 la pasada: OSMA, modo todas, esperando_csv, crudo 11 = previas 6 
    ('OSMA', 'todas', 'esperando_csv', 11, 5, 6, 1, 6, 'osma/%s/eans.txt' % pas['id']))
 _alm = bd['storage']['escaner2']
 _txt = lambda k: base64.b64decode(_alm[k]).decode('utf-8')  # noqa: E731
-eq('🔴 B2 · en el almacén cerrado, LA lista (los 5 EAN de OSMA + el de la ficha de la Corega) y n_eans_lista = 6; '
-   'ni asins.txt',
+eq('🔴 B2 · en el almacén cerrado, LA lista de EAN (los 5 EAN de OSMA + el de la ficha de la Corega), n_eans_lista = 6, '
+   'y (Mapa de OSMA) asins.txt aparte',
    (_txt('osma/%s/eans.txt' % pas['id']).split('\n'), pas['n_eans_lista'],
     sorted(k.split('/')[-1] for k in _alm if k.startswith('osma/%s/' % pas['id']))),
-   (LISTA, 6, ['barrido.json', 'eans.txt']))
+   (LISTA, 6, ['asins.txt', 'barrido.json', 'eans.txt']))
+eq('🔴 B2 · (Mapa de OSMA) asins.txt: los ASIN del mapa de los códigos DISPONIBLES (Kukident y Lenor), sin los agotados; '
+   'y barrido.json lleva los agotados para su hoja',
+   (_txt('osma/%s/asins.txt' % pas['id']).split('\n'),
+    [(m['codigo'], m['asin']) for m in json.loads(_txt('osma/%s/barrido.json' % pas['id']))['mapa']['agotados']]),
+   (ASINS_MAPA, [('1056', 'B0BCPP43YN'), ('7003', 'B0OTRO0001')]))
 _sc = json.loads(_txt('osma/%s/barrido.json' % pas['id']))
 eq('B2 · barrido.json: de qué descarga sale, el porte comprobado en 4 filas de la puerta común, los 3 enlaces de la foto '
    'y el EAN de cada ficha (1 que OSMA no traía)',
@@ -706,6 +760,24 @@ _alm[_carpeta + '20261002-090000-KeepaExport-2026-10-02-VisualizadorDeProductos.
     base64.b64encode(csv_real('es', _filas_es)).decode()
 _alm[_carpeta + '20261002-090100-KeepaExport-2026-10-02-VisualizadorDeProductos (1).csv'] = \
     base64.b64encode(csv_real('fr', _filas_es)).decode()
+# (Mapa de OSMA) Y el CSV de la lista de ASIN (modo «ASIN» del Visualizador): el pack de 2 del Lenor SIN EAN en Keepa (el
+# lector por EAN lo perdería), el suelto nuestro con el EAN de OSMA, el otro suelto y el Kukident (también en el de EAN).
+_filas_asin = [('B014DGG0OQ', '8001090747723', '28', '6.95', 'Lenor toallitas secadora Aprilfrisch 34'),
+               ('B07HCJQ45L', '', '27', '12.95', 'Lenor toallitas secadora pack 2 x 34'),
+               ('B0794VHRVZ', '8001090747723', '17', '6.49', 'Lenor toallitas secadora 34'),
+               ('B001PASC5E', '4002448039440', '30', '12.95', 'Kukident Active Plus 99 Tabletas')]
+_alm[_carpeta + '20261002-090200-KeepaExport-2026-10-02-VisualizadorDeProductos (2).csv'] = \
+    base64.b64encode(csv_real('es', _filas_asin)).decode()
+_ruta_m = os.path.join(tempfile.mkdtemp(prefix='e2osma_m_'), 'asin.csv')
+with open(_ruta_m, 'wb') as _fh:
+    _fh.write(csv_real('es', _filas_asin))
+_por_asin_m = eo.leer_csv_mapa(_ruta_m, pro)
+_por_ean_v = pro.leer_csv_visualizador(_ruta_m)
+eq('A10 · (Mapa de OSMA) el CSV de ASIN, leído por ASIN con el lector del Pro sin tocar: trae el pack sin EAN (que el '
+   'lector por EAN pierde) y cada ficha sale IGUAL que por EAN',
+   (sorted(_por_asin_m), 'B07HCJQ45L' in {r['asin'] for rs in _por_ean_v.values() for r in rs},
+    _por_asin_m['B0794VHRVZ'] == next(r for r in _por_ean_v[pro.norm('8001090747723')] if r['asin'] == 'B0794VHRVZ')),
+   (sorted(ASINS_MAPA), False, True))
 bd.pop('programa', None)
 json.dump(bd, open(ruta, 'w', encoding='utf-8'), default=str)
 cod2, log2 = correr(ruta, 'escaner2_osma_cruce.py', {'SUPABASE_SERVICE_KEY': 'svc-de-mentira', 'PASADA': pas['id'],
@@ -719,9 +791,10 @@ eq('B2 · 🔴 el cruce: lista, cuadra, catálogo 11 = previas 6 + 5 puertas, co
    (cr['estado'], cr['cuadra'], cr['n_crudo'], cr['n_previas'], cr['n_entradas'], sum(cr['n_' + x] for x in 'abcdef'),
     cr['paises_filtro'], cr['paises_calculo'], cr['paises_usados']),
    ('lista', True, 11, 6, 5, 5, ['ES'], ['ES'], ['ES']))
-eq('🔴 B2 · los CSV: el de ES cuenta; el de FR se ignora y se avisa',
-   (sorted((f['pais'], f['usado']) for f in cr['ficheros']), 'CSV de FR ignorado' in (cr['aviso'] or '')),
-   ([('ES', True), ('FR', False)], True))
+eq('🔴 B2 · los CSV: el de EAN y (Mapa de OSMA) el de ASIN, de ES, cuentan, cada uno por su lista; el de FR se ignora y '
+   'se avisa',
+   (sorted((f['pais'], f['usado'], f.get('lista')) for f in cr['ficheros']), 'CSV de FR ignorado' in (cr['aviso'] or '')),
+   ([('ES', True, 'asin'), ('ES', True, 'ean'), ('FR', False, 'ean')], True))
 eq('B2 · y solo se calcula ES: ninguna cuenta de otro país',
    sorted({p['pais'] for p in T['escaner2_resultado_pais'] if p['cruce_id'] == cr['id']}), ['ES'])
 _res = {f['producto_heo']: r for r in T['escaner2_resultado_ean'] for f in T['escaner2_foto'] if f['id'] == r['foto_id']}
@@ -748,12 +821,13 @@ from openpyxl import load_workbook  # noqa: E402
 _bytes = base64.b64decode(_alm[_xl[0]])
 _wb = load_workbook(io.BytesIO(_bytes))
 HOJAS_VIEJO = ['Análisis', 'Descartados', 'Ambiguos', 'Sin_rank', 'Precio por lote']
-HOJAS_E2 = ['Resumen', 'Comparación', 'Varias fichas', 'Puertas', 'Puertas previas']
+HOJAS_E2 = ['Resumen', 'Comparación', 'Varias fichas', 'Puertas', 'Puertas previas', eo.HOJA_AGOTADOS]
 eq('B2 · las hojas del PRO de HEO, en su orden (sin «Chase_manual»: es de los Funko chase de HEO)',
    _wb.sheetnames, HOJAS_VIEJO + HOJAS_E2)
 _cab = [c.value for c in _wb['Análisis'][1]]
 eq('B2 · «Análisis»: las columnas del PRO de HEO y, AL FINAL, «No habrá más» y (AM) «Precio OSMA sin porte (€)»',
-   _cab, e2.columnas_analisis() + [e2.COLUMNA_FICHA_COMPARTIDA, eo.COLUMNA_NO_HABRA_MAS, eo.COLUMNA_SIN_PORTE])
+   _cab, e2.columnas_analisis() + [e2.COLUMNA_FICHA_COMPARTIDA, eo.COLUMNA_NO_HABRA_MAS, eo.COLUMNA_SIN_PORTE,
+                                   eo.COLUMNA_MAPA])
 import escaner2_desvios as DV  # noqa: E402
 import escaner2_huella_excel as HU  # noqa: E402
 _REF = HU.sin_columnas(json.load(open(os.path.join(AQUI, 'huella_excel_viejo_heo.json'), encoding='utf-8')),
@@ -761,6 +835,7 @@ _REF = HU.sin_columnas(json.load(open(os.path.join(AQUI, 'huella_excel_viejo_heo
 _REF = HU.con_columna_al_final(_REF, e2.COLUMNA_FICHA_COMPARTIDA, e2.ANCHO_FICHA_COMPARTIDA)
 _REF = HU.con_columna_al_final(_REF, eo.COLUMNA_NO_HABRA_MAS, eo.ANCHO_NO_HABRA_MAS)
 _REF = HU.con_columna_al_final(_REF, eo.COLUMNA_SIN_PORTE, eo.ANCHO_SIN_PORTE)
+_REF = HU.con_columna_al_final(_REF, eo.COLUMNA_MAPA, eo.ANCHO_MAPA)
 # (AM) Las dos únicas fórmulas nuevas de «Análisis», escritas a mano en R1C1 (la huella pone «k» en cada número): «PA (€)»
 # (la de una unidad y la de un pack) apunta a «Precio OSMA sin porte (€)» y a las celdas con nombre del Resumen, y
 # «Decisión» (la normal y la del posible pack) al «Margen» de su fila. Ninguna otra.
@@ -803,10 +878,40 @@ eq('B2 · «no habrá más» en la fila del descatalogado (Nivea) y en ninguna o
    sorted((r[_i['EAN']], r[_i[eo.COLUMNA_NO_HABRA_MAS]]) for r in _filas if r[_i[eo.COLUMNA_NO_HABRA_MAS]]),
    [(EAN_NORMAL, 'no habrá más')])
 # (AM) OSMA calcula un solo país: «Análisis» pinta solo ES, una fila por artículo que se vende (HEO sigue con cuatro).
-eq('🔴 B2 · «Análisis»: solo ES, una fila por artículo de las puertas d, e y f, todas con su cuenta',
-   (sorted({r[_cab.index('País')] for r in _filas}), len(_filas),
+# (Mapa de OSMA) Las fichas del mapa, de «Puertas» (van todas allí, con su marca en la última columna).
+_pu = list(_wb['Puertas'].iter_rows(values_only=True))
+_pu_mapa = [r for r in _pu[1:] if r[-1]]
+_def_bd = [r for r in T['escaner2_resultado_ean'] if r['cruce_id'] == cr['id'] and r['puerta'] in 'def']
+_sustituidas = [r for r in _def_bd if r['asin'] in ASINS_MAPA]
+_mapa_def = [r for r in _pu_mapa if r[4][0] in 'def']
+eq('🔴 B2 · «Análisis»: solo ES; las filas de las puertas d, e y f MENOS las que sustituye el mapa (el Kukident) MÁS las '
+   'fichas del mapa que se venden; todas con su cuenta',
+   (sorted({r[_cab.index('País')] for r in _filas}), len(_filas), [r['asin'] for r in _sustituidas],
     all(r[_cab.index('Decisión')] != 'Sin datos' for r in _filas)),
-   (['ES'], sum(1 for r in T['escaner2_resultado_ean'] if r['cruce_id'] == cr['id'] and r['puerta'] in 'def'), True))
+   (['ES'], len(_def_bd) - len(_sustituidas) + len(_mapa_def), ['B001PASC5E'], True))
+eq('🔴 B2 · (Mapa de OSMA) «Puertas»: las 4 fichas del mapa de códigos disponibles, con su marca al final; el pack de 2 '
+   'del Lenor con PA 3,41 (2 × 1,599 × 1,067276, un redondeo)',
+   (_pu[0][-1], sorted(r[-1] for r in _pu_mapa), next(r[3] for r in _pu_mapa if 'B07HCJQ45L' in r[-1])),
+   (eo.COLUMNA_MAPA, sorted(['ficha del mapa · B001PASC5E', 'ficha del mapa · B014DGG0OQ', 'ficha del mapa · B0794VHRVZ',
+                             'pack ×2 (ficha del mapa) · B07HCJQ45L']), 3.41))
+_i_mapa = _cab.index(eo.COLUMNA_MAPA)
+_lenor2 = [(n, r) for n, r in enumerate(_filas, 2) if r[_i['ASIN']] == 'B07HCJQ45L']
+eq('🔴 B2 · (Mapa de OSMA) en «Análisis», el Lenor pack de 2: UNA fila, su marca al final, «PA (€)» viva sobre 2 × 1,599 '
+   'sin porte (que con el porte del Resumen da 3,41) y el nombre lo dice',
+   (len(_lenor2), _lenor2[0][1][_i_mapa], _lenor2[0][1][_i['PA (€)']], _lenor2[0][1][_i[eo.COLUMNA_SIN_PORTE]],
+    round(_lenor2[0][1][_i[eo.COLUMNA_SIN_PORTE]] * (1 + 168.19 / 2500), 2), _lenor2[0][1][_i['Nombre']])
+   if _lenor2 else None,
+   (1, 'pack ×2 (ficha del mapa)', eo.formula_pa(_l_sin, _lenor2[0][0], 1) if _lenor2 else None, 3.198, 3.41,
+    'Lenor Trocknertücher Aprilfrisch 34er · pack ×2 (ficha del mapa)'))
+eq('B2 · (Mapa de OSMA) el Kukident sale UNA vez en «Análisis», como ficha del mapa (manda la del mapa)',
+   [r[_i_mapa] for r in _filas if r[_i['ASIN']] == 'B001PASC5E'], ['ficha del mapa'])
+_ag = list(_wb[eo.HOJA_AGOTADOS].iter_rows(values_only=True))
+eq('🔴 B2 · (Mapa de OSMA) la ÚLTIMA hoja, «Nuestros agotados en OSMA»: la Frosch 1056 (nuestra por productos, aunque el '
+   'mapa no la marque), con «agotado en OSMA»; el agotado que no es nuestro, no',
+   (_wb.sheetnames[-1], [list(r) for r in _ag]),
+   (eo.HOJA_AGOTADOS, [eo.COLUMNAS_AGOTADOS, ['1056', 'Artículo 1056', 'B0BCPP43YN',
+                                               'Limpiador de ducha y baño Frosch Citrus 500 ml', 1, 1.699,
+                                               'agotado en OSMA']]))
 _ws_res = _wb['Resumen']
 _resu = {r[0]: r[1] for r in _ws_res.iter_rows(values_only=True)}
 _l_dec = _wb['Análisis'].cell(row=1, column=_i['Decisión'] + 1).column_letter
@@ -824,9 +929,11 @@ eq('🔴 B2 · (AM) COMPRAR y VALORAR de ES, por fórmula (contando «Decisión�
     _resu.get('Packs de Amazon detectados')),
    ([['Recuento en ES', 'con el pedido de arriba (fórmula)', 'en la pasada'],
      ['COMPRAR', "=COUNTIFS('Análisis'!$%s:$%s,\"ES\",'Análisis'!$%s:$%s,\"COMPRAR\")"
-      % (_l_pais, _l_pais, _l_dec, _l_dec), cr['n_f']],
+      % (_l_pais, _l_pais, _l_dec, _l_dec),
+      cr['n_f'] - sum(1 for r in _sustituidas if r['puerta'] == 'f') + sum(1 for r in _mapa_def if r[4][0] == 'f')],
      ['VALORAR', "=COUNTIFS('Análisis'!$%s:$%s,\"ES\",'Análisis'!$%s:$%s,\"VALORAR\")"
-      % (_l_pais, _l_pais, _l_dec, _l_dec), cr['n_e']]],
+      % (_l_pais, _l_pais, _l_dec, _l_dec),
+      cr['n_e'] - sum(1 for r in _sustituidas if r['puerta'] == 'e') + sum(1 for r in _mapa_def if r[4][0] == 'e')]],
     'con el pedido de la pasada', '1 multiplicados · 0 dudosos a VALORAR'))
 eq('🔴 B2 · el Resumen dice el porte (una vez), los países, los códigos y el EAN de sus fichas, las fichas que quedan '
    'fuera (calculadas con keepa_escaparate) y los packs',

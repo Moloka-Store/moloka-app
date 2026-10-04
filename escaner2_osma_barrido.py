@@ -19,16 +19,17 @@ QUE HACE, EN ORDEN:
   6. guarda la foto en `escaner2_foto` y las listas de las puertas previas en `escaner2_apartado`, y lo CUENTA en la
      base;
   7. deja en el almacen cerrado `escaner2`: `osma/<pasada>/eans.txt` (LA lista, encargo AG2: los EAN de OSMA y el
-     EAN de nuestra ficha de cada codigo enlazado que esta en la foto, uno por linea, sin repetir; y desde el encargo AN,
-     detras, los EAN de los packs de Amazon que encontro el cartero en el ultimo PRO) y `barrido.json`
+     EAN de nuestra ficha de cada codigo enlazado que esta en la foto, uno por linea, sin repetir) y `barrido.json`
      (de que descarga sale, el porte, los enlaces y el EAN de cada ficha: lo que el cruce necesita para decidir igual);
+     y (Mapa de OSMA, 04-oct-2026) `asins.txt`, la lista APARTE de los ASIN del mapa fijo `osma_mapa_ficha` de los
+     codigos disponibles (modo «ASIN» del Visualizador), y en `barrido.json` las filas del mapa y sus codigos;
   8. cierra la pasada en 'esperando_csv' (n_tandas = 1: una lista, un CSV del Visualizador, el de España) o en
      'fallida' con el motivo.
 
 🔴 REPO PUBLICO: LOS REGISTROS LOS VE CUALQUIERA. Solo se imprimen estados y recuentos: NUNCA precios, EAN, ASIN,
    nombres, codigos de articulo ni el texto de un error (va a `escaner2_pasada.motivo_fallo`: la base es privada).
 🔒 SOLO ESCRIBE `escaner2_pasada`, `escaner2_foto`, `escaner2_apartado` y `escaner2/osma/<pasada>/` (y LEE, desde el
-   encargo AN, osma_packs_cola y osma_packs_candidato). Ni disp_*, ni
+   mapa de OSMA, osma_mapa_ficha). Ni disp_*, ni
    productos, ni codigos_proveedor, ni v_escaner_fuente, ni escaner_memoria.
 🔒 LA LLAVE DE SERVICIO, O NO SE CORRE: sin ella aborta antes de crear ningun cliente.
 """
@@ -188,25 +189,24 @@ def barrer(pasada):
     # (AG2) UNA lista: los EAN de OSMA + el EAN de nuestra ficha de cada codigo enlazado de la foto, sin repetir.
     lista, eans_fichas = eo.lista_para_keepa_osma(foto, enlaces, M)
     n_fichas_nuevos = len(lista) - len(e2.lista_para_keepa(foto))
-    # (AN, 03-oct-2026) Y DETRAS, los EAN de los packs de Amazon que encontro el cartero en el ultimo PRO de OSMA, para que
-    # el Visualizador traiga sus ventas: con ellas, la valoracion de los packs puede llegar a COMPRAR. Si no se pueden leer
-    # (las tablas aun no existen, o fallan), la lista sale como siempre y barrido.json lo dice.
-    eans_packs, sin_ean_packs, aviso_packs = packs_para_la_lista(lista, M)
-    # (AN-2) Respetando el tope del Visualizador: si no caben todos, se recortan LOS DE PACK (nunca los de OSMA) y
-    # barrido.json lo dice. Por los packs el barrido no falla nunca.
-    import escaner2_osma_packs as op
-    eans_packs, recortados = op.recortar_al_tope(lista, eans_packs, eo.TOPE_LISTA)
-    if recortados:
-        aviso_packs = (aviso_packs + ' · ' if aviso_packs else '') + \
-            '%d EAN de packs no caben en la lista (tope %d del Visualizador): van en el próximo' % (recortados, eo.TOPE_LISTA)
-    lista = lista + eans_packs
-    print(f">>> PACKS en la lista: {len(eans_packs)} EAN de packs de Amazon encontrados · sin EAN {sin_ean_packs} · "
-          f"recortados por el tope {recortados}" + (' · AVISO: no se pudieron leer' if aviso_packs and not recortados else ''),
-          flush=True)
     if len(lista) > eo.TOPE_LISTA:
         raise Fallo('la lista tiene %d códigos y el Visualizador admite %d' % (len(lista), eo.TOPE_LISTA), recuentos)
     if len(lista) > eo.AVISO_LISTA:
         print(f"AVISO: la lista pasa de {eo.AVISO_LISTA} ({len(lista)})", flush=True)
+
+    # (Mapa de OSMA, Fernando, 04-oct-2026) EL MAPA FIJO: los ASIN de los codigos DISPONIBLES en la descarga, en una
+    # lista APARTE (el Visualizador descarta un ASIN metido en una lista de EAN); los AGOTADOS, para su hoja del Excel.
+    # Si no se puede leer, el barrido sigue como siempre y el Resumen del Excel lo dice (via barrido.json).
+    try:
+        mapa = leer_mapa()
+        aviso_mapa = None
+    except Exception as ex:
+        mapa, aviso_mapa = [], 'no se pudo leer osma_mapa_ficha (%s): este PRO va sin las fichas del mapa' % type(ex).__name__
+    mapa_disp, mapa_agot, mapa_codigos, mapa_fuera = eo.mapa_de_la_descarga(mapa, filas)
+    lista_asin = eo.lista_asin_mapa(mapa_disp)
+    print(f">>> MAPA: {len(mapa)} filas · de códigos disponibles {len(mapa_disp)} ({len(lista_asin)} ASIN en su lista) · "
+          f"de agotados {len(mapa_agot)} · de códigos que la descarga no trae {mapa_fuera}"
+          + (' · AVISO: no se pudo leer' if aviso_mapa else ''), flush=True)
 
     # ── 5 · La foto y las listas de las puertas previas, en la base, y CONTADAS ─────────────────
     filas_foto = []
@@ -233,6 +233,8 @@ def barrer(pasada):
     base = f'{eo.CARPETA}/{pasada}'
     texto = {'content-type': 'text/plain; charset=utf-8', 'upsert': 'true'}
     sb.storage.from_(BUCKET).upload(f'{base}/eans.txt', '\n'.join(lista).encode('utf-8'), texto)
+    # (Mapa de OSMA) Siempre, aunque vaya vacia: la v2 la lee para saber si espera uno o dos CSV.
+    sb.storage.from_(BUCKET).upload(f'{base}/asins.txt', '\n'.join(lista_asin).encode('utf-8'), texto)
     en_foto = {f['producto_heo'] for f in foto}
     sidecar = {
         'pasada': pasada, 'disp_pasada': ult['id'], 'descarga_en': ult.get('terminada_en') or ult.get('creada_en'),
@@ -240,7 +242,9 @@ def barrer(pasada):
         'enlaces': {c: e for c, e in enlaces.items() if c in en_foto},
         'eans_fichas': eans_fichas, 'n_eans_fichas_nuevos': n_fichas_nuevos, 'n_lista': len(lista),
         'avisos': avisos_enl, 'porte_comprobado': comprobadas,
-        'n_eans_packs': len(eans_packs), 'n_eans_packs_recortados': recortados, 'aviso_packs': aviso_packs,
+        # (Mapa de OSMA) Lo que el cruce necesita para valorar las fichas del mapa igual que se barrieron.
+        'mapa': {'disponibles': mapa_disp, 'agotados': mapa_agot, 'codigos': mapa_codigos, 'fuera': mapa_fuera,
+                 'n_lista_asin': len(lista_asin), 'aviso': aviso_mapa},
     }
     sb.storage.from_(BUCKET).upload(f'{base}/barrido.json', json.dumps(sidecar, ensure_ascii=False, default=str)
                                     .encode('utf-8'), {'content-type': 'application/json', 'upsert': 'true'})
@@ -253,31 +257,17 @@ def barrer(pasada):
     return cierre, len(lista), n_fichas_nuevos
 
 
-def packs_para_la_lista(lista, M):
-    """(AN) Los EAN de los packs encontrados en el ULTIMO cruce de OSMA con familias buscadas → (eans, sin_ean, aviso).
-    Lee `osma_packs_cola` y `osma_packs_candidato` (SOLO LECTURA). Nunca tumba el barrido: si falla, ([], 0, motivo)."""
-    import escaner2_osma_packs as op
-    try:
-        ult = (sb.table('osma_packs_cola').select('cruce_id,buscada_en').eq('estado', 'buscada')
-               .order('buscada_en', desc=True).limit(1).execute().data or [])
-        if not ult:
-            return [], 0, None
-        ids = [x['id'] for x in _todas('osma_packs_cola', 'id', 'id', cruce_id=ult[0]['cruce_id'])]
-        cands = []
-        # (AN-2) Por TROZOS de ids (una URL con cientos de uuid no cabe) y cada trozo PAGINADO (la API corta en 1.000 filas).
-        for i in range(0, len(ids), 100):
-            desde = 0
-            while True:
-                pagina = (sb.table('osma_packs_candidato').select('clase,eans').in_('cola_id', ids[i:i + 100])
-                          .order('id').range(desde, desde + 999).execute().data or [])
-                cands += pagina
-                if len(pagina) < 1000:
-                    break
-                desde += 1000
-        nuevos, sin_ean = op.eans_de_packs(cands, lista, M)
-        return nuevos, sin_ean, None
-    except Exception as ex:
-        return [], 0, type(ex).__name__
+def leer_mapa():
+    """(Mapa de OSMA) `osma_mapa_ficha` entera (SOLO LECTURA; la llave de servicio es la unica que la lee), paginando de
+    1.000 en 1.000 por su llave (codigo, ASIN)."""
+    salida, desde = [], 0
+    while True:
+        pagina = (sb.table('osma_mapa_ficha').select('codigo_osma,asin,unidades,es_nuestra').order('codigo_osma')
+                  .order('asin').range(desde, desde + 999).execute().data or [])
+        salida.extend(pagina)
+        if len(pagina) < 1000:
+            return salida
+        desde += 1000
 
 
 if __name__ == '__main__':

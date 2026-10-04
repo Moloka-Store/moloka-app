@@ -21,6 +21,11 @@ QUE HACE, EN ORDEN:
   6. deja el Excel en `escaner2/osma/<pasada>/<cruce>/Escaner2_OSMA_<sello>.xlsx` (el formato del PRO de HEO con
      la columna «No habrá más»), que la biblioteca de escaneos enseña como OSMA.
   No hay comparacion con el escaner viejo: el viejo no tiene escaneos de OSMA.
+  (Mapa de OSMA, Fernando, 04-oct-2026) Y el MAPA FIJO (`osma_mapa_ficha`, via barrido.json): el CSV de la lista de
+  ASIN se reconoce por sus ASIN y va APARTE (no entra en el cruce por EAN); cada ficha del mapa se valora por su ASIN
+  con SU coste (unidades × precio × (1 + porte)) y sale en el Excel con su marca; si el ASIN de la fila de siempre
+  esta en el mapa de su codigo, mandan las unidades del mapa. Las fichas del mapa NO son filas de la foto: ni entran
+  en el cuadre ni se guardan en la base. Lo nuestro agotado en OSMA va a la ultima hoja del Excel.
 
 🔴 REPO PUBLICO: LOS REGISTROS LOS VE CUALQUIERA. Solo estados, recuentos y el nombre de los CSV que sube Fernando;
    NUNCA precios, EAN, ASIN, nombres de producto ni el texto de un error (va a `escaner2_cruce.motivo_fallo`).
@@ -164,6 +169,13 @@ def cruzar(cruce, params, pasada):
     asins_enlazados = {a for e in enlaces.values() for a in e['asins']}
     if not set(eans_fichas) <= set(enlaces):
         raise Fallo('barrido.json no es coherente: hay EAN de fichas de códigos que no están en los enlaces')
+    # (Mapa de OSMA, 04-oct-2026) Las filas del mapa fijo que dejo el barrido (una pasada de antes del mapa no trae).
+    mapa_b = barrido.get('mapa') or {}
+    mapa_disp, mapa_agot = mapa_b.get('disponibles') or [], mapa_b.get('agotados') or []
+    mapa_codigos = mapa_b.get('codigos') or {}
+    asins_lista_mapa = eo.lista_asin_mapa(mapa_disp)
+    if mapa_b.get('aviso'):
+        avisos.append('Mapa de OSMA: ' + mapa_b['aviso'])
 
     # ── 1 · Los CSV subidos: el pais de cada uno ───────────────────────────────────────────
     carpeta = f'{base}/csv'
@@ -172,6 +184,9 @@ def cruzar(cruce, params, pasada):
         raise Fallo('no hay ningún CSV subido para esta pasada')
     tmp = tempfile.mkdtemp(prefix='escaner2_osma_')
     ficheros, errores, rutas, caidas_por_pais, fichas_por_pais, sin_ficha, fecha_datos = [], [], {}, {}, {}, {}, None
+    # (Mapa de OSMA) El CSV de la lista de ASIN va APARTE: sus filas son de las fichas del mapa y no entran en el cruce
+    # por EAN de siempre (la ficha de un pack lleva su propio EAN: se colgaria de quien no es).
+    rutas_mapa, caidas_mapa = {}, {}
     # 🔑 EL MAS RECIENTE MANDA (el nombre empieza por el sello de la subida), como en HEO.
     for o in sorted(objetos, key=lambda x: x['name'], reverse=True):
         datos = descargar_buzon(sb, BUCKET, f"{carpeta}/{o['name']}")
@@ -189,13 +204,20 @@ def cruzar(cruce, params, pasada):
                              'error': str(err), 'subido': subido})
             continue
         usado = ex['pais'] in params['paises_calculo']
+        del_mapa = usado and eo.es_csv_del_mapa(ex['caidas'], asins_lista_mapa)
         ficheros.append({'nombre': o['name'], 'pais': ex['pais'], 'filas': ex['filas'], 'usado': usado,
                          'fuente_pais': ex['fuente_pais'], 'choques_caidas': ex['choques_caidas'], 'error': None,
-                         'subido': subido})
-        print(f"    CSV {o['name']}: {ex['pais']} · {ex['filas']} filas" + ('' if usado else ' → IGNORADO'), flush=True)
+                         'subido': subido, 'lista': 'asin' if del_mapa else 'ean'})
+        print(f"    CSV {o['name']}: {ex['pais']} · {ex['filas']} filas" + ('' if usado else ' → IGNORADO')
+              + (' · el de la lista de ASIN del mapa' if del_mapa else ''), flush=True)
         if not usado:
             avisos.append(f"CSV de {ex['pais']} ignorado ({o['name']}): OSMA se cruza solo en "
                           f"{', '.join(params['paises_calculo'])}")
+            continue
+        if del_mapa:
+            rutas_mapa.setdefault(ex['pais'], []).append(ruta)
+            for asin, v in ex['caidas'].items():
+                caidas_mapa.setdefault(ex['pais'], {}).setdefault(asin, v)
             continue
         rutas.setdefault(ex['pais'], []).append(ruta)
         for asin, v in ex['caidas'].items():
@@ -207,6 +229,9 @@ def cruzar(cruce, params, pasada):
         if subido and (fecha_datos is None or subido < fecha_datos):
             fecha_datos = subido
     usados = [p for p in params['paises_calculo'] if p in rutas]
+    if asins_lista_mapa and not rutas_mapa:
+        avisos.append('Falta el CSV de la lista de ASIN del mapa (%d ASIN): las fichas del mapa se valoran solo si el '
+                      'CSV de EAN las trae' % len(asins_lista_mapa))
     if not usados:
         raise Fallo('ningún CSV es de %s' % ' ni de '.join(params['paises_calculo'])
                     + ((' · CSV que no se pueden usar → ' + ' | '.join(errores)) if errores else ''))
@@ -256,6 +281,17 @@ def cruzar(cruce, params, pasada):
         avisos.append(f'No se pudo mirar en keepa_escaparate qué fichas nuestras quedan fuera ({type(ex).__name__})')
         print(f'!!! keepa_escaparate no se pudo leer ({type(ex).__name__})', flush=True)
 
+    # (Mapa de OSMA, 04-oct-2026) Lo del mapa: sus unidades por codigo (mandan sobre los packs, tambien en la fila de
+    # siempre), el CSV de ASIN leido por ASIN, y sus caidas (las del CSV de ASIN delante: es el de esas fichas).
+    pct = (barrido.get('porte') or {}).get('pct')
+    mapa_por_codigo = {}
+    for m in mapa_disp:
+        mapa_por_codigo.setdefault(m['codigo'], {})[m['asin']] = int(m['unidades'])
+    por_asin_mapa = {p: eo.leer_csv_mapa(rutas_mapa[p], pro) for p in usados if p in rutas_mapa}
+    caidas_val = {p: dict(caidas_por_pais.get(p) or {}, **(caidas_mapa.get(p) or {}))
+                  for p in set(caidas_por_pais) | set(caidas_mapa)}
+    fichas_nuestras = eo.fichas_nuestras_de(productos)
+
     # ── 3 · Las puertas ────────────────────────────────────────────────────────────────────
     apartados = _todas('escaner2_apartado', 'ean_original,nombre,marca,precio_catalogo,motivo,detalle,producto_heo',
                        'id', pasada_id=PASADA)
@@ -270,12 +306,22 @@ def cruzar(cruce, params, pasada):
             cands[p], caminos[p], apartadas[p] = eo.candidatos_osma(
                 f, datos[p], por_asin[p], enlace, asins_enlazados, M, eans_fichas.get(f['producto_heo']), ids_fichas[p])
         r = eo.decidir_osma(f, cands, caidas_por_pais, params, M, eleccion, compartidas, enlace, factores,
-                            caminos, apartadas, senales_pack)
+                            caminos, apartadas, senales_pack, mapa_por_codigo.get(f['producto_heo']), pct)
         n_codigo += 'codigo' in caminos.values()
         n_packs += r['pack'] == 'nuestro'
         r['foto_id'], r['id'] = f['id'], str(uuid.uuid4())
         resultados.append(r)
     cq = e2.cuadre([f['id'] for f in foto], resultados)
+    # (Mapa de OSMA) Las fichas del mapa, valoradas aparte: NO son filas de la foto ni entran en el cuadre ni en la base;
+    # van al Excel. Y lo nuestro agotado en OSMA, a su hoja.
+    mapa_res = eo.valorar_mapa(mapa_disp, mapa_codigos, por_asin_mapa, por_asin, caidas_val, params, usados, M,
+                               compartidas, pct, fichas_nuestras)
+    agotados = eo.agotados_nuestros(mapa_agot, mapa_codigos, fichas_nuestras)
+    print(f"MAPA: fichas valoradas {len(mapa_res)} (por el CSV de ASIN {sum(1 for r in mapa_res if r['fuente'] == 'asin')}"
+          f", por el de EAN {sum(1 for r in mapa_res if r['fuente'] == 'ean')}, sin dato "
+          f"{sum(1 for r in mapa_res if not r['fuente'])}) · se venden "
+          f"{sum(1 for r in mapa_res if r['puerta'] in e2.PUERTAS_ANALISIS)} · nuestros agotados en OSMA {len(agotados)}",
+          flush=True)
     n_pack_amz = {x: sum(1 for r in resultados if (r.get('pack_amazon') or {}).get('estado') == x)
                   for x in (eo.PACK_SI, eo.PACK_DUDOSO)}
     print(f"POR CÓDIGO: {n_codigo} artículo(s) decididos con nuestra ficha · packs nuestros {n_packs} · packs de "
@@ -345,7 +391,7 @@ def cruzar(cruce, params, pasada):
             'enlaces': enlaces, 'enlaces_foto': list(enlaces), 'eans_fichas': eans_fichas,
             'n_eans_fichas_nuevos': barrido.get('n_eans_fichas_nuevos'), 'fuera_keepa': fuera_keepa, 'n_packs': n_packs,
             'porte': barrido.get('porte'), 'descarga_en': barrido.get('descarga_en'),
-            'disp_pasada': barrido.get('disp_pasada')})
+            'disp_pasada': barrido.get('disp_pasada'), 'mapa': mapa_res, 'agotados': agotados})
         sb.storage.from_(BUCKET).upload(ruta, contenido, {
             'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'upsert': 'true'})
     except Exception as ex:
