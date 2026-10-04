@@ -37,6 +37,12 @@ QUE HACE, EN ORDEN (el esqueleto de escaner2_heo_disponibilidad.py, con la desca
      ruta FIJA, `osma/ultimo/osma_articles.xlsx` (se pisa cada dia: Fernando, 01-oct-2026, «con tener la
      ultima foto ya me valdría de sobre»). Un fichero rechazado o roto no pisa la ultima copia buena. Si la
      subida falla, la pasada sigue aplicada (no se toca) y el run sale en ROJO con una linea que lo dice.
+  9. (04-oct-2026) SOLO SI HA QUEDADO 'aplicada', y con la MISMA sesion: las FECHAS DE VUELTA de los agotados de
+     OSMA que alimentan una ficha nuestra (escaner2_osma_fecha_vuelta.py: su cabecera dice cuales, como y con que
+     frenos — 2 s entre peticiones, 40 como mucho, parada en seco al primer 403/429). Borra la de los que vuelven
+     a estar disponibles. Si falla, la pasada sigue aplicada y la copia guardada; el run sale en ROJO diciendolo.
+     Fernando, 04-oct-2026: «que reponer identifique que un producto de OSMA no esta disponible hoy pero lo
+     estará pronto y lo enseñe».
 
 🔴 REPO PUBLICO: LOS REGISTROS DE EJECUCION LOS VE CUALQUIERA. Este programa SOLO imprime estados y
    recuentos (filas, aplicadas, motivos que escribe el mismo). NUNCA: precios, stock, nombres o codigos de
@@ -49,12 +55,16 @@ QUE HACE, EN ORDEN (el esqueleto de escaner2_heo_disponibilidad.py, con la desca
    hasta que Fernando lo pase a 'disp'. Este programa no lo toca.
 🔒 SOLO TOCA: `disp_pasada`, `disp_lectura`, la funcion `disp_aplicar_pasada`, y para LEER `disp_parametros`;
    y el almacen `escaner2` en `osma/ultimo/`. Ni escaner_memoria, ni escaner2_*, ni productos. Cero Keepa, cero
-   Amazon.
+   Amazon. El paso 9 (otro fichero) escribe ADEMAS las dos columnas fecha_vuelta y fecha_vuelta_leida_en de
+   `disp_estado`, y lee codigos_proveedor, productos y osma_mapa_ficha.
 🔒 SIN LOS SECRETOS, NO SE CORRE: sin OSMA_USER/OSMA_PASS (o sin la base) aborta antes de abrir ninguna
    pasada ni ningun cliente.
 
 Uso:  python escaner2_osma_disponibilidad.py            (la pasada)
       python escaner2_osma_disponibilidad.py --rescate  (ultimo paso del workflow si el run fallo)
+      python escaner2_osma_disponibilidad.py --solo-fechas [--sin-escribir]
+            (solo el paso 9, contra la ultima foto aplicada: entra, no baja el Excel ni abre pasada; con
+             --sin-escribir no toca la base y solo imprime los recuentos)
 """
 import io
 import os
@@ -634,11 +644,60 @@ def pasada(sb, sesion, usuario, clave, run_id, ahora=None):
         print(f"OSMA_COPIA_NO_GUARDADA: la pasada {pid} está aplicada (no se toca); la copia del Excel no se ha "
               f"guardado ({type(ex).__name__}).", flush=True)
         codigo = 1  # la copia no se ha guardado: que se vea
+    # 🔑 LAS FECHAS DE VUELTA (04-oct-2026), SOLO DE UNA PASADA APLICADA y con la misma sesión. Si fallan, la
+    #    pasada sigue aplicada y la copia guardada: no se toca nada de lo de arriba.
+    codigo = max(codigo, fechas_de_vuelta(sb, sesion, ahora or _ahora(), escribir=True))
     if fila.get('caida_aceptada'):
         print(f"CAIDA_ACEPTADA: la pasada {pid} se ha aplicado como NUEVA REFERENCIA tras varios rechazos estables por "
               f"el freno del 90 %: hay que mirar si OSMA ha caído de verdad.", flush=True)
         return 1
     return codigo
+
+
+def inicio_del_dia_de_madrid(t):
+    """Las 00:00 del día de Madrid de `t`, como instante UTC."""
+    local = hora_de_madrid(t)
+    desfase = local - t.astimezone(timezone.utc).replace(tzinfo=None)
+    return (local.replace(hour=0, minute=0, second=0, microsecond=0) - desfase).replace(tzinfo=timezone.utc)
+
+
+def fechas_de_vuelta(sb, sesion, ahora, escribir):
+    """El repaso de escaner2_osma_fecha_vuelta.py. Devuelve el código de salida: 1 si la web ha parado (403/429 o
+    sin sesión), si ninguna ficha abierta se ha podido leer (la web ha cambiado) o si algo revienta."""
+    import escaner2_osma_fecha_vuelta as fv
+    try:
+        cuentas, parada = fv.repasar(sb, sesion, inicio_del_dia_de_madrid(ahora), escribir=escribir)
+    except Exception as ex:
+        # 🔴 REPO PÚBLICO: solo el tipo (el texto puede llevar una fila de la base o una URL).
+        print(f"OSMA_FECHAS_NO_LEIDAS: el repaso de las fechas de vuelta ha fallado ({type(ex).__name__}); la foto "
+              f"no se toca.", flush=True)
+        return 1
+    print(fv.resumen(cuentas, escribir), flush=True)
+    if parada:
+        print(f"OSMA_FECHAS_PARADAS: {parada}; no se ha reintentado y quedan {cuentas['sin_turno']} sin leer (mañana).",
+              flush=True)
+        return 1
+    if cuentas['abiertas'] and not (cuentas['con_fecha'] + cuentas['sin_fecha'] + cuentas['fecha_rara']):
+        print("OSMA_FECHAS_WEB_CAMBIADA: ninguna ficha abierta se ha podido leer (sin el bloque del producto, en otro "
+              "idioma o de otro artículo); no se ha escrito ninguna fecha.", flush=True)
+        return 1
+    return 0
+
+
+def solo_fechas(sb, sesion, usuario, clave, escribir):
+    """--solo-fechas: entra y repasa las fechas contra la ÚLTIMA foto aplicada de OSMA, sin bajar el Excel ni
+    abrir pasada. Con --sin-escribir no toca la base (ni borra ni apunta): solo los recuentos."""
+    ult = (sb.table('disp_pasada').select('id').eq('proveedor', PROVEEDOR).eq('estado', 'aplicada')
+             .order('creada_en', desc=True).limit(1).execute().data or [])
+    if not ult:
+        abortar('no hay ninguna pasada de OSMA aplicada: no hay foto sobre la que leer fechas')
+    try:
+        entrar(sesion, usuario, clave)
+    except Rechazo as ex:
+        abortar(ex.motivo)
+    print(">>> Entrada en la web de OSMA: aceptada (solo fechas"
+          + ("" if escribir else ", sin escribir") + ").", flush=True)
+    return fechas_de_vuelta(sb, sesion, _ahora(), escribir)
 
 
 def guardar_copia(sb, contenido):
@@ -662,8 +721,9 @@ def rescatar(sb, run_id):
 
 def principal(argv):
     rescate = argv == ['--rescate']
-    if argv not in ([], ['--rescate']):
-        abortar('uso: escaner2_osma_disponibilidad.py [--rescate]')
+    fechas = argv[:1] == ['--solo-fechas']
+    if argv not in ([], ['--rescate'], ['--solo-fechas'], ['--solo-fechas', '--sin-escribir']):
+        abortar('uso: escaner2_osma_disponibilidad.py [--rescate | --solo-fechas [--sin-escribir]]')
     if not rescate and not (os.environ.get('OSMA_USER') and os.environ.get('OSMA_PASS')):
         abortar('faltan OSMA_USER/OSMA_PASS (secretos del repo); no se abre ninguna pasada')
     if not (os.environ.get('SUPABASE_URL') and os.environ.get('SUPABASE_SERVICE_KEY')):
@@ -680,6 +740,8 @@ def principal(argv):
     import requests
     sesion = requests.Session()
     sesion.headers['User-Agent'] = AGENTE
+    if fechas:
+        return solo_fechas(sb, sesion, os.environ['OSMA_USER'], os.environ['OSMA_PASS'], escribir='--sin-escribir' not in argv)
     return pasada(sb, sesion, os.environ['OSMA_USER'], os.environ['OSMA_PASS'], run_id)
 
 

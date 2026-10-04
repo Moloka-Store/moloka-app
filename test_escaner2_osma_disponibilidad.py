@@ -254,6 +254,18 @@ class _Consulta:
     def limit(self, *_a):
         return self
 
+    # 🆕 04-oct-2026 · lo que usa el repaso de las fechas de vuelta (paso 9). Aquí devuelve vacío: su banco es
+    #    test_escaner2_osma_fecha_vuelta.py.
+    def range(self, *_a):
+        return self
+
+    @property
+    def not_(self):
+        return self
+
+    def is_(self, *_a):
+        return self
+
     def execute(self):
         b = self.base
         b.ops.append((self.tabla, self.accion, dict(self.filtros)))
@@ -439,6 +451,10 @@ def comprobar(programa, decir):
     chk('(A) …en lotes de 500, y UNA llamada a disp_aplicar_pasada',
         (base.lotes, [r[0] for r in base.rpcs]), ([500, 500, 500, 500, 500, 100], ['disp_aplicar_pasada']))
     chk('(A) …sin fila en disp_lectura al acabar (es de paso)', base.lectura, [])
+    chk('(A) …y DESPUÉS de aplicar y de la copia, el repaso de las fechas de vuelta (paso 9), que lo dice',
+        ([o[0] for o in base.ops if o[0] in ('rpc', 'storage', 'disp_estado')][:3], 'FECHAS DE VUELTA' in out,
+         'OSMA_FECHAS' in out),
+        (['rpc', 'storage', 'disp_estado'], True, False))
 
     # La conversión, fila a fila, con la base que no aplica (para ver lo subido).
     base_ver = Base()
@@ -492,6 +508,8 @@ def comprobar(programa, decir):
             (cod, p.get('estado'), texto in (p.get('motivo') or ''), texto in out), (cod_esperado, estado, True, True))
         chk('(B) %s: ni una fila en la base, ni llamada a la función, ni copia' % nombre,
             (base.rpcs, base.lectura, base.subidas), ([], [], []))
+        chk('(B) %s: ni fechas de vuelta (solo tras una pasada aplicada)' % nombre,
+            ([o for o in base.ops if o[0] == 'disp_estado'], 'FECHAS DE VUELTA' in out), ([], False))
     # Lo que no es un xlsx no se guarda en el almacén.
     cod, out, base, web, ses, _ = correr(programa, web=Web(fichero=b'<html>' + HTML_SECRETO.encode() + b'</html>'))
     chk('(B) lo que no es un xlsx no se guarda en el almacén', base.subidas, [])
