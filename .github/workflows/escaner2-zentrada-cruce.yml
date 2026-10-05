@@ -1,0 +1,58 @@
+# ============================================================
+# Moloka - Escaner 2 · CRUCE DEL ESCANEO PRO DE ZENTRADA con los CSV del Visualizador (encargo de la tarjeta de
+# Zentrada, 05-oct-2026)
+#
+# Lo dispara la v2 (Escaneo PRO · tarjeta de Zentrada) cuando el buzon de Keepa tiene sus CSV de España: el de la lista
+# de EAN y, si la pasada la trae, el de la lista de ASIN. Decide cada EAN con las reglas de compra del PRO (el corte de
+# ventas, los paises de escaner2_parametros, la ficha compartida y la formula de rentabilidad del viejo, sin tocar),
+# con el coste de la oferta mas barata que se puede pedir; cuadra contra la base y deja el Excel, que la biblioteca de
+# escaneos enseña como Zentrada.
+#
+# 🔴 REPO PUBLICO: el programa SOLO imprime estados, recuentos y el nombre de los CSV subidos.
+# 🔒 CERO tokens de Keepa y cero llamadas a Amazon ni a Zentrada: todo sale de los CSV y del barrido.
+# ============================================================
+name: Moloka - Escaner 2 · Cruce Zentrada
+
+on:
+  workflow_dispatch:
+    inputs:
+      pasada:
+        description: 'id de la pasada de Zentrada (escaner2_pasada.id) que se cruza con los CSV subidos'
+        type: string
+        required: true
+
+concurrency:
+  group: escaner2-zentrada-pro
+  cancel-in-progress: false
+
+jobs:
+  cruzar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        # Las mismas versiones FIJADAS que los cruces de HEO y OSMA.
+        run: pip install supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13
+
+      - name: Cruzar los CSV con la foto
+        timeout-minutes: 25
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PASADA:               ${{ inputs.pasada }}
+        run: python -u escaner2_zentrada_cruce.py
+
+      - name: Rescate · si el run ha fallado, la fila de este run queda 'fallida'
+        if: failure() || cancelled()
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python -u escaner2_rescate.py cruce

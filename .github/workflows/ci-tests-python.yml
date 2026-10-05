@@ -420,6 +420,15 @@ jobs:
       - name: 25 septendecies bis) test_escaner2_osma_pro.py
         run: python -u test_escaner2_osma_pro.py
 
+      # (Tarjeta de Zentrada, 5-oct-2026) El Escaneo PRO de Zentrada (escaner2_zentrada*.py): las guardas del Excel que deja
+      # Cowork (hojas, cabeceras, Leido de 2 dias como mucho, 100 ofertas, llaves, precio 0 en una que se puede pedir), los
+      # EAN sin ceros a la izquierda, la foto (la oferta mas barata que se puede pedir, crudo = previas + foto), la hoja
+      # Fichas como mapa fijo, y los dos programas de punta a punta con un Excel INVENTADO y la cabecera real del
+      # Visualizador: el Excel con lo de la compra al final, los COMPRAR por origen, el registro sin un EAN ni un precio,
+      # y sin guardas no hay pasada.
+      - name: 25 septendecies quater) test_escaner2_zentrada_pro.py
+        run: python -u test_escaner2_zentrada_pro.py
+
       # (Encadenado de Keepa, 1-oct-2026) El job `encadenar` de procesar-keepa-escaparate.yml: el titulo de la
       # corrida igual en el YAML y en el codigo; el job por estructura (tras `procesar`, solo en aplicar, exito o
       # fallo, continue-on-error, actions: write solo en el); la decision con el buzon, las cargas y las corridas
@@ -486,6 +495,7 @@ jobs:
             test_escaner2_osma_disponibilidad.py
             test_escaner2_osma_fecha_vuelta.py
             test_escaner2_osma_pro.py
+            test_escaner2_zentrada_pro.py
             test_encadenar_keepa.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
