@@ -1,0 +1,62 @@
+# ============================================================
+# Moloka - Escaner 2 · BARRIDO DEL ESCANEO PRO DE ZENTRADA (encargo de la tarjeta de Zentrada, 05-oct-2026)
+#
+# Lo dispara la v2 (moloka-app-v2, Escaneo PRO · tarjeta de Zentrada) cuando Fernando suelta el Excel del dia, con el
+# mismo mecanismo que HEO y OSMA (workflow_dispatch con GH_TOKEN) y el input `pasada`: la v2 ya ha pasado las guardas y
+# ha dejado el Excel en `escaner2/zentrada/<pasada>/`. El programa le pasa OTRA VEZ las guardas (si falla una, no hay
+# pasada), construye la FOTO (una fila por EAN, con su oferta mas barata que se puede pedir) y deja en el almacen
+# cerrado las dos listas para el Visualizador de España: la de EAN y la de ASIN de la hoja «Fichas».
+#
+# 🔴 NINGUN PROGRAMA LLAMA A ZENTRADA.COM: lo bloquea. El Excel lo hace Cowork con la sesion de Moloka.
+# 🔴 REPO PUBLICO: este registro lo ve cualquiera. El programa SOLO imprime estados y recuentos.
+# 🔒 Cero tokens de Keepa, cero Amazon: solo la llave de servicio de Supabase.
+# >>> SIN RELOJ <<<  Solo cuando se suelta el Excel (o a mano desde Actions, con el id de una pasada que aun no existe).
+# ============================================================
+name: Moloka - Escaner 2 · Barrido Zentrada
+
+on:
+  workflow_dispatch:
+    inputs:
+      pasada:
+        description: 'id de la pasada de Zentrada que se crea (la carpeta escaner2/zentrada/<id>/ con el Excel)'
+        type: string
+        required: true
+
+# 🔒 Barrido y cruce de Zentrada, de uno en uno (el cruce lee la foto que el barrido deja). Grupo PROPIO: no espera a
+#    HEO ni a OSMA.
+concurrency:
+  group: escaner2-zentrada-pro
+  cancel-in-progress: false
+
+jobs:
+  barrer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        # Las mismas versiones FIJADAS que los barridos de HEO y OSMA.
+        run: pip install supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13
+
+      - name: Del Excel de Zentrada a la foto y las listas
+        timeout-minutes: 15
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PASADA:               ${{ inputs.pasada }}
+        run: python -u escaner2_zentrada_barrido.py
+
+      # 🔴 SI EL RUN MUERE A MEDIAS, LA PASADA NO SE QUEDA COLGADA en 'descargando'.
+      - name: Rescate · si el run ha fallado, la pasada de este run queda 'fallida'
+        if: failure() || cancelled()
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python -u escaner2_rescate.py pasada
