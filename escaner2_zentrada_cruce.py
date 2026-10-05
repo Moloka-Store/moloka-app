@@ -222,6 +222,9 @@ def cruzar(cruce, params, pasada):
                           f'{", ".join(x for x in params["paises_filtro"] if x in usados) or "ningún país"}')
     datos = {p: pro.leer_csv_visualizador(rutas[p]) for p in usados}
     por_asin = {p: ez.indice_por_asin(datos[p]) for p in usados}
+    # (AM, copiada de OSMA) Las señales de pack de cada ASIN (numero de articulos, contenido, tamaño, paquete y titulo),
+    # del mismo CSV de EAN.
+    senales_pack = {p: ez.senales_pack_csv(rutas[p]) for p in usados}
     compartidas = e2.fichas_compartidas(fichas_por_pais)
     for p, fs in sin_ficha.items():
         avisos.append('Sin ASIN padre/variaciones/puesto en %s (%s): ahí no se detecta la ficha compartida'
@@ -255,8 +258,8 @@ def cruzar(cruce, params, pasada):
     for f in foto:
         cands = {p: e2.candidatos(f, datos[p]) for p in usados}
         r = ez.decidir_zentrada(f, cands, caidas_por_pais, params, M, eleccion, compartidas,
-                                mapa_ean.get(ez.ean_norm(f['ean_core'])))
-        n_packs += r['factor'] > 1
+                                mapa_ean.get(ez.ean_norm(f['ean_core'])), senales_pack)
+        n_packs += r['pack'] == 'fichas'
         r['foto_id'], r['id'] = f['id'], str(uuid.uuid4())
         resultados.append(r)
     cq = e2.cuadre([f['id'] for f in foto], resultados)
@@ -267,6 +270,10 @@ def cruzar(cruce, params, pasada):
           f"{sum(1 for r in mapa_res if not r['fuente'])}) · se venden "
           f"{sum(1 for r in mapa_res if r['puerta'] in e2.PUERTAS_ANALISIS)} · packs de «Fichas» en la fila de siempre "
           f"{n_packs} · nuestros agotados en Zentrada {len(agotados)}", flush=True)
+    n_pack_amz = {x: sum(1 for r in resultados if (r.get('pack_amazon') or {}).get('estado') == x)
+                  for x in (ez.PACK_SI, ez.PACK_DUDOSO)}
+    print(f"PACKS DE AMAZON: multiplicados {n_pack_amz[ez.PACK_SI]} · posibles packs {n_pack_amz[ez.PACK_DUDOSO]}",
+          flush=True)
 
     filas_ean, filas_pais = [], []
     for r in resultados:

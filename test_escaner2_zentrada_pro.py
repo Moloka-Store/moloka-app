@@ -221,6 +221,7 @@ RELLENO = [ean13('8410000%05d' % i) for i in range(95)]
 ASIN_UNO, ASIN_UPC, ASIN_COMP = 'B0ZUNO0001', 'B0ZUPC0002', 'B0ZCOM0003'
 ASIN_PACK2, ASIN_SUELTA, ASIN_PACK3 = 'B0ZPCK0004', 'B0ZSUE0005', 'B0ZPCK0006'
 ASIN_AGOT, ASIN_SIN = 'B0ZAGO0007', 'B0ZSIN0008'
+ASIN_AM24, ASIN_AM1 = 'B0ZAMZ0024', 'B0ZAMZ0001'
 
 
 def leido_madrid(delta=timedelta(0)):
@@ -247,7 +248,9 @@ def ofertas_buenas(leido):
              oferta('', 'Mayorista Beta', 'B-0', 1.0),
              oferta(E_DUP, 'Mayorista Gamma', 'G-11', 6.0, mix=False),
              oferta(E_DUP.lstrip('0'), 'Mayorista Delta', 'D-11', 6.0)]
-    filas += [oferta(e, 'Mayorista Relleno', 'R-%d' % i, 1.0) for i, e in enumerate(RELLENO)]
+    # (AM) Dos de relleno son golosinas de 45 g: Keepa las casa con un multipack (ver los CSV de B2).
+    filas += [oferta(e, 'Mayorista Relleno', 'R-%d' % i, 1.0, nombre=('Golosina R-%d 45g' % i) if i < 2 else None)
+              for i, e in enumerate(RELLENO)]
     return [f[:-1] + [leido] for f in filas]
 
 
@@ -394,6 +397,37 @@ eq('A5 · 🔴 con el pack de 3: coste 3 × 1,50 = 4,50 → VALORAR (sin él, 1,
    (_r1['factor'], _r1['pa'], _r1['paises']['ES']['pa'], _r1['puerta'], _r0['puerta'],
     'pack de 3 de «Fichas»: coste 3 × 1,500 € = 4,50 €' in _r1['detalle']), (3, 4.5, 4.5, 'e', 'f', True))
 
+print('A6 · (AM) los packs de Amazon, con la regla de OSMA copiada')
+_fg = dict(_f[ez.ean_norm(RELLENO[0])], id='g', nombre='Golosina R-0 45g')
+_rg = dict(_rec, asin='B0ZAMZ0024', titulo='Golosinas 24 x 45 g')
+
+
+def _sen(**k):
+    return {'ES': {'B0ZAMZ0024': dict({'n_art': '', 'valor_ud': '', 'tipo_ud': '', 'paquete': '', 'tamano': '',
+                                       'titulo': 'Golosinas 24 x 45 g'}, **k)}}
+
+
+def _dec(sen, mapa=None):
+    return ez.decidir_zentrada(_fg, {'ES': [_rg]}, {'ES': {'B0ZAMZ0024': 30}}, _params, M, None, {}, mapa, sen)
+
+
+_a = _dec(_sen(tamano='45 g (Paquete de 24)'))
+eq('A6 · 🔴 tamaño «45 g (Paquete de 24)» y título «24 x 45 g» (dos señales): coste 24 × 1,00 = 24,00, NO COMPRAR; sin el '
+   'AM salía COMPRAR con el coste de una', (_a['pack'], _a['factor'], _a['pa'], _a['puerta'], _dec(None)['puerta']),
+   ('amazon', 24, 24.0, 'd', 'f'))
+_b = _dec(_sen(tamano='45 g (Paquete de 24)', titulo='Golosinas'))
+eq('A6 · 🔴 con UNA sola señal: no se multiplica, y de COMPRAR baja a VALORAR con «posible pack en Amazon: revisar»',
+   (_b['factor'], _b['pa'], _b['puerta'], _b['pack_amazon']['estado'], ez.TEXTO_POSIBLE_PACK in _b['detalle']),
+   (1, 1.0, 'e', ez.PACK_DUDOSO, True))
+_c = _dec(_sen(tamano='45 g (Paquete de 24)'), {'B0ZAMZ0024': 1})
+_d = _dec(_sen(tamano='45 g (Paquete de 24)'), {'B0ZAMZ0024': 3})
+eq('A6 · 🔴 con el ASIN en «Fichas», mandan sus unidades y Amazon ni se mira (1 → 1,00; 3 → 3,00)',
+   [(_c['factor'], _c['pa'], _c['pack_amazon']), (_d['factor'], _d['pa'], _d['pack'], _d['pack_amazon'])],
+   [(1, 1.0, None), (3, 3.0, 'fichas', None)])
+eq('A6 · el nombre de Zentrada: «45g» es la medida; «24er» un recuento; sin nada, una unidad',
+   [ez.cantidad_zentrada('Golosina R-0 45g')['medida'], ez.cantidad_zentrada('Gummibärchen 24er')['n'],
+    ez.cantidad_zentrada('Producto R-9')['texto']], [(45.0, 'g'), 24, 'sin cantidad: 1 unidad'])
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PARTE B · LOS DOS PROGRAMAS, DE PUNTA A PUNTA
@@ -411,12 +445,12 @@ def csv_real(pais, filas):
     w = csv.writer(buf)
     w.writerow(CABECERA)
     ix = {h: i for i, h in enumerate(CABECERA)}
-    for asin, eans, caidas, precio, titulo in filas:
+    for asin, eans, caidas, precio, titulo, *extra in filas:
         fila = [''] * len(CABECERA)
         for h, v in ((C['asin'], asin), (COL_PAIS, pais), ('Título', titulo), (C['ean'], eans),
                      (C['rank'], '9000'), (C['rank90'], '11000'), (COL_CAIDAS, caidas), (C['buybox'], precio),
                      (C['es_fba'], 'yes'), (C['nuevo'], precio), (C['fba'], '3.10'), (C['compct'], '15.01 %'),
-                     (C['nvar'], ''), (COL_PADRE, '')):
+                     (C['nvar'], ''), (COL_PADRE, '')) + tuple((extra[0] if extra else {}).items()):
             fila[ix[h]] = v
         w.writerow(fila)
     return ('\ufeff' + buf.getvalue()).encode('utf-8')
@@ -495,7 +529,14 @@ _filas_es = [(ASIN_UNO, E_UNO, '30', '12.95', 'Producto Uno'),
              (ASIN_UPC, E_UPC, '25', '12.95', 'Producto G-2'),
              (ASIN_COMP, E_COMP, '20', '12.95', 'Producto A-3'),
              (ASIN_SUELTA, E_FICHA, '30', '9.95', 'Producto D-4'),
-             (ASIN_PACK3, E_PACK, '30', '12.95', 'Producto D-6 pack de 3')]
+             # 🔑 Amazon dice que el pack de 3 de «Fichas» lleva 6 (dos señales): mandan las unidades de «Fichas».
+             (ASIN_PACK3, E_PACK, '30', '12.95', 'Producto D-6 pack de 3', {'Número de artículos': '6',
+                                                                            'Paquete: Cantidad': '6'}),
+             # (AM) La golosina de 45 g en un multipack de 24, dicho por TRES señales (tamaño, recuento y título)…
+             (ASIN_AM24, RELLENO[0], '30', '12.95', 'Golosinas 24 x 45 g', {'Tamaño': '45 g (Paquete de 24)',
+                                                                           'Número de artículos': '24'}),
+             # …y la otra, con UNA sola (el tamaño): posible pack.
+             (ASIN_AM1, RELLENO[1], '30', '12.95', 'Golosinas surtidas', {'Tamaño': '45 g (Paquete de 24)'})]
 _filas_asin = [(ASIN_PACK2, '', '15', '16.95', 'Producto D-4 pack de 2'),
                (ASIN_SUELTA, E_FICHA, '30', '9.95', 'Producto D-4'),
                (ASIN_PACK3, E_PACK, '30', '12.95', 'Producto D-6 pack de 3')]
@@ -531,7 +572,18 @@ eq('B2 · la de la competencia: VALORAR (4,80)', (_res[E_COMP]['puerta'], _pais[
 eq('B2 · 🔴 Keepa cae por EAN en el pack de 3 de «Fichas»: coste 4,50 y VALORAR (con 1,50 sería COMPRAR)',
    (_res[E_PACK]['asin'], _res[E_PACK]['puerta'], _pais[_res[E_PACK]['id']]['pa']), (ASIN_PACK3, 'e', 4.5))
 eq('B2 · los de relleno y el duplicado no están en Keepa: puerta a',
-   sorted({_res[e]['puerta'] for e in RELLENO + [E_DUP.lstrip('0')]}), ['a'])
+   sorted({_res[e]['puerta'] for e in RELLENO[2:] + [E_DUP.lstrip('0')]}), ['a'])
+_am24, _am1 = _res[RELLENO[0]], _res[RELLENO[1]]
+eq('🔴 B2 · (AM) la golosina de 45 g en un multipack de 24 (tres señales): coste 24 × 1,00 = 24,00 y deja de ser COMPRAR '
+   '(puerta d); el detalle dice el pack y sus señales',
+   (_am24['asin'], _am24['puerta'], _pais[_am24['id']]['pa'],
+    'pack de 24 en Amazon: coste 24 × 1,000 € = 24,00 €' in _am24['detalle'], 'señales: Zentrada 45 g' in _am24['detalle']),
+   (ASIN_AM24, 'd', 24.0, True, True))
+eq('🔴 B2 · (AM) la de UNA sola señal: no se multiplica (1,00) y nunca es COMPRAR: VALORAR, con «posible pack en Amazon: '
+   'revisar»', (_am1['puerta'], _pais[_am1['id']]['pa'], _pais[_am1['id']]['decision'],
+                'posible pack en Amazon: revisar' in _am1['detalle']), ('e', 1.0, 'VALORAR', True))
+eq('B2 · (AM) …y el pack de 3 de «Fichas», aunque Amazon diga 6: mandan las de «Fichas» (4,50), no se multiplica dos veces',
+   (_pais[_res[E_PACK]['id']]['pa'], 'en Amazon' in _res[E_PACK]['detalle']), (4.5, False))
 
 _xl = [k for k in _alm if k.startswith('zentrada/%s/%s/Escaner2_ZENTRADA_' % (PASADA, cr['id']))]
 eq('B2 · el Excel, en su carpeta y con su nombre (el que guarda el cruce)', (len(_xl), cr['ruta_excel'] == _xl[0]),
@@ -572,12 +624,21 @@ eq('B2 · el UPC sale con el número de Zentrada en la columna EAN', (E_UPC_ZEN,
 
 _resu = {r[0]: r[1] for r in _wb['Resumen'].iter_rows(values_only=True)}
 # COMPRAR en «Análisis»: E_UNO (nuestro, top 300), E_UPC (top 300), la suelta y el pack de 2 de E_FICHA (competidor,
-# top 300). VALORAR: la de la competencia y el pack de 3.
-eq('🔴 B2 · el Resumen: COMPRAR 4 y VALORAR 2 en ES; por origen nuestro 1, competidor 2, top 300 4; y SOLO del top 300, 1',
+# top 300). VALORAR: la de la competencia, el pack de 3 y (AM) la golosina de una sola señal. La de tres señales, NO COMPRAR.
+eq('🔴 B2 · el Resumen: COMPRAR 4 y VALORAR 3 en ES; por origen nuestro 1, competidor 2, top 300 4; y SOLO del top 300, 1',
    [_resu.get(k) for k in ('COMPRAR en ES (en «Análisis»)', 'VALORAR en ES (en «Análisis»)', 'COMPRAR · origen «nuestro»',
                            'COMPRAR · origen «competidor»', 'COMPRAR · origen «top 300»',
                            'COMPRAR que vienen SOLO del top 300 (ni nuestro ni competidor)')],
-   [4, 2, 1, 2, 4, 1])
+   [4, 3, 1, 2, 4, 1])
+eq('B2 · (AM) el Resumen cuenta los packs de Amazon, como el de OSMA',
+   _resu.get('Packs de Amazon detectados (la regla AM de OSMA)'), '1 multiplicados · 1 dudosos a VALORAR')
+_g24 = _por[(RELLENO[0], ASIN_AM24)]
+_g1 = _por[(RELLENO[1], ASIN_AM1)]
+eq('B2 · (AM) en «Análisis»: la de 24 con PA 24,00, NO COMPRAR y el pack en el nombre y en «Coherencia caja»; la dudosa, '
+   'VALORAR con el aviso en «Coherencia caja»',
+   (_g24[_ix['PA (€)']], _g24[_ix['Decisión']], 'pack de 24 en Amazon' in _g24[_ix['Nombre']],
+    _g24[_ix['Coherencia caja']], _g1[_ix['Decisión']], str(_g1[_ix['Coherencia caja']]).startswith(ez.TEXTO_POSIBLE_PACK)),
+   (24.0, 'NO COMPRAR', True, 'pack de 24 en Amazon: coste 24 × 1,000 € = 24,00 €', 'VALORAR', True))
 eq('B2 · …y el coste dicho en llano, el Excel de origen con su lectura, y el cuadre',
    (_resu.get('Coste de cada EAN'), str(_resu.get('Excel de Zentrada')).startswith(NOMBRE_EXCEL + ' · leído 20'),
     _resu.get('Cuadra'), _resu.get('Ofertas de Zentrada (el Excel)')),
@@ -598,7 +659,8 @@ eq('B2 · «Puertas»: las 101 de la foto y las 3 fichas de «Fichas» con su ma
 print('B3 · 🔴 el registro (repo PÚBLICO) no lleva ni un EAN, ASIN, precio ni nombre')
 _prohibido = [E_UNO, E_UPC, E_UPC_ZEN, E_COMP, E_FICHA, E_PACK, E_AGOT, E_SIN, E_DUP, ASIN_UNO, ASIN_UPC, ASIN_COMP,
               ASIN_PACK2, ASIN_SUELTA, ASIN_PACK3, ASIN_AGOT, ASIN_SIN, '12.95', '4.8', '2.5', 'Mayorista', 'Producto Uno',
-              'Producto D-4', 'Producto B-7', 'Producto sin oferta']
+              'Producto D-4', 'Producto B-7', 'Producto sin oferta', ASIN_AM24, ASIN_AM1, RELLENO[0], RELLENO[1],
+              'Golosina']
 eq('B3 · ni en el barrido ni en el cruce (si sale algo, la línea que lo lleva)',
    [(x, [ln for ln in (log + log2).splitlines() if x in ln][:2]) for x in _prohibido if x in log or x in log2], [])
 
