@@ -424,6 +424,16 @@ _d = _dec(_sen(tamano='45 g (Paquete de 24)'), {'B0ZAMZ0024': 3})
 eq('A6 · 🔴 con el ASIN en «Fichas», mandan sus unidades y Amazon ni se mira (1 → 1,00; 3 → 3,00)',
    [(_c['factor'], _c['pa'], _c['pack_amazon']), (_d['factor'], _d['pa'], _d['pack'], _d['pack_amazon'])],
    [(1, 1.0, None), (3, 3.0, 'fichas', None)])
+_fh = dict(_fg, nombre='Golosina R-0 48g')
+_h = ez.decidir_zentrada(_fh, {'ES': [_rg]}, {'ES': {'B0ZAMZ0024': 30}}, _params, M, None, {}, None,
+                         _sen(tamano='45 g (Paquete de 24)', valor_ud='1080', tipo_ud='gramo', titulo='Golosinas'))
+eq('A6 · 🔴 (2 bis, solo Zentrada; el Haribo real) «48g» en Zentrada y 1.080 g en Amazon: dos señales que dan 22,5, que no '
+   'es entero → no se multiplica, pero nunca COMPRAR: VALORAR con «posible pack en Amazon: revisar»',
+   (_h['factor'], _h['pa'], _h['puerta'], _h['pack_amazon']['estado'], 'tamaño «45 g (Paquete de 24)» → 22,5' in _h['detalle']),
+   (1, 1.0, 'e', ez.PACK_DUDOSO, True))
+_n = ez.factor_pack_amazon({'n_art': '', 'valor_ud': '50', 'tipo_ud': 'gramo', 'paquete': '', 'tamano': '', 'titulo': ''},
+                           ez.cantidad_zentrada('Golosina 48g'))
+eq('A6 · …y 50 g contra 48 g (1,04: el mismo artículo, con otra medida) sigue sin ser pack', _n['estado'], ez.PACK_NO)
 eq('A6 · el nombre de Zentrada: «45g» es la medida; «24er» un recuento; sin nada, una unidad',
    [ez.cantidad_zentrada('Golosina R-0 45g')['medida'], ez.cantidad_zentrada('Gummibärchen 24er')['n'],
     ez.cantidad_zentrada('Producto R-9')['texto']], [(45.0, 'g'), 24, 'sin cantidad: 1 unidad'])

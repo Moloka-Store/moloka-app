@@ -632,6 +632,10 @@ def precios_sin_pedir(ofertas):
 #      ASIN lleva justo lo que vende Zentrada: no es pack, diga lo que diga el recuento (el set de Adidas: 100 + 250 ml =
 #      350 ml, aunque Amazon diga «6 artículos»).
 #   2. Si ninguna lectura da 2 o más: no es pack.
+#   2 bis. 🆕 SOLO EN ZENTRADA (Fernando, 05-oct-2026), y antes que el 2: si una lectura de CONTENIDO o TAMAÑO contra
+#      una medida LEIDA en el nombre da 1,5 o más SIN ser entero (`UMBRAL_NO_ENTERO`), es «posible pack»: nunca COMPRAR.
+#      Caso real: el Haribo ruleta Mega es «48g» en Zentrada y «45 g (Paquete de 24)» = 1080 g en Amazon → 22,5; con la
+#      regla de OSMA tal cual salía «no es pack» y COMPRAR con el coste de UNO. No multiplica nada: solo avisa.
 #   3. Se MULTIPLICA por N si todas las lecturas dan N (un entero ≥ 2), vienen de DOS señales distintas como poco, y
 #      el nombre de Zentrada se ha leido sin ambigüedad.
 #   4. Si no (una sola señal, o señales que se contradicen, o el nombre de Zentrada con dos cantidades distintas): NO se
@@ -646,6 +650,8 @@ PACK_SI, PACK_DUDOSO, PACK_NO = 'pack', 'dudoso', 'no'
 # Lo que se admite como «el mismo numero» (58,33 ml × 6 = 349,98 ml frente a 350 ml).
 TOLERANCIA_PACK = 0.02
 TEXTO_POSIBLE_PACK = 'posible pack en Amazon: revisar'
+# (2 bis, solo Zentrada) Una lectura de contenido o tamaño de 1,5 o más que no es entera: posible pack.
+UMBRAL_NO_ENTERO = 1.5
 
 # Unidades, a g, ml o 'ud' (recuento). Lo que no esta aqui (cm, metro, onzas…) no es una cantidad que se compare.
 _UNIDAD = {'ml': ('ml', 1), 'mililitro': ('ml', 1), 'millilitro': ('ml', 1), 'milliliter': ('ml', 1),
@@ -823,6 +829,10 @@ def factor_pack_amazon(senal, cant):
     if totales and all(_entero_pack(x['valor']) == 1 for x in totales):
         return no
     packs = [x for x in lecturas if (_entero_pack(x['valor']) or 0) >= 2]
+    # (2 bis, solo Zentrada) Contenido o tamaño de 1,5 o más que no es entero: posible pack, nunca COMPRAR.
+    raros = [x for x in totales if x['valor'] >= UMBRAL_NO_ENTERO and _entero_pack(x['valor']) is None]
+    if not packs and raros:
+        return {'estado': PACK_DUDOSO, 'factor': 1, 'senales': texto}
     if not packs:
         return no
     ns = {_entero_pack(x['valor']) for x in packs}
