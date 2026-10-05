@@ -419,7 +419,7 @@ def csv_real(pais, filas):
                      (C['nvar'], ''), (COL_PADRE, '')):
             fila[ix[h]] = v
         w.writerow(fila)
-    return ('﻿' + buf.getvalue()).encode('utf-8')
+    return ('\ufeff' + buf.getvalue()).encode('utf-8')
 
 
 PASADA = '00000000-0000-4000-8000-00000000c0de'
