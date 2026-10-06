@@ -15,9 +15,11 @@
   y entonces el dump arrastra dueños y ACL, con lo que eso implica al restaurar en otro proyecto), o
   que el restore aplique al terminar un guion de permisos propio y **medido**. Sin cerrar desde el
   9-ago-2026.
+  🕰️ *Histórico: la base de pruebas (staging) se jubiló el 30-sep-2026; lo que sigue es de cuando existía.*
   🔬 **YA NO ES HIPOTÉTICO: medido el 10-ago en staging, recién restaurado.** `v_velocidad_ventas` y
   `v_producto_amazon` tenían ahí `anon=arwdDxtm`, y en producción las dos tienen `authenticated=r`
   sin `anon`. La restauración las devolvió abiertas, exactamente como dice el párrafo de arriba.
+  🕰️ *Histórico: lo de ensayar en staging vale hasta el 30-sep-2026, que se jubiló; lo que sigue vigente es la conclusión práctica del final: el ACL se verifica en producción, después de aplicar.*
   🔒 **Y de ahí sale una REGLA para cualquier migración que se ensaye:** *un test de ACL en staging
   NO prueba nada sobre producción.* Staging viene del dump sin privilegios, así que sus ACL son los
   de Supabase por defecto, no los de prod. La ÚNICA excepción es el objeto que crea la propia
@@ -33,7 +35,7 @@
   imprime en cada ejecución cuántos `setval` trae el dump, para que el agujero se vea. Es otro
   diseño y merece su propio PR.
 - ⚠️ **PENDIENTE — el simulacro no compara las RESTRICCIONES, y son las que deciden si un ensayo vale.**
-  Lo que importa de un índice no es el índice: es la **garantía**. Si staging admite un duplicado que
+  🕰️ *Histórico: el simulacro restauraba en staging hasta el 30-sep-2026; hoy lo hace en una base desechable.* Lo que importa de un índice no es el índice: es la **garantía**. Si staging admite un duplicado que
   producción rechaza, un ensayo sale verde y la migración revienta al aplicarla de verdad — que es
   exactamente el agujero que el simulacro existe para cerrar. Y las garantías viven en
   `pg_constraint` (PK, UNIQUE, FK, CHECK), con nombre, y en el dump como `ADD CONSTRAINT`:
@@ -61,7 +63,7 @@
   | `monitor_recomendaciones` | 2 políticas `anon` | **anon** | leer y ACTUALIZAR |
   | `monitor_analisis` · `monitor_doctrina` · `monitor_reponibilidad_manual` | — | — | ✅ RLS y 0 políticas: cerradas |
 
-  `monitor_reglas` son **las 21 reglas del trackeador**: la doctrina de precios de la casa, expuesta a
+  `monitor_reglas` son **las reglas del trackeador antiguo; ya no son la forma de decidir precios**, expuestas a
   un `DELETE` anónimo. La clave publicable viaja en el JavaScript de la app por diseño, así que esto
   no es teórico.
 
@@ -87,7 +89,9 @@
   📌 **Y cerrarlas NO se decide aquí: está APARCADO hasta jubilar la v1**, junto con `productos` y
   `escaner_memoria`. Decisión cerrada de Fernando; este apartado la registra, no la reabre.
 
-  ⚠️ El trackeador sigue **parado desde el 11-jul-2026** (última ejecución de los dos workflows).
+  ⚠️ Medido el 6-oct-2026 en Actions: los dos workflows (`Moloka - Trackeador`, `tracker-app.yml`, y
+  `Moloka - Cerebro Trackeador`, `tracker-cerebro.yml`) siguen **activos** y su última ejecución, con
+  éxito, es del **11-jul-2026** (16:11 y 16:12 UTC); no hay ninguna posterior.
   Cuando se retome, el día que se toque esto: primero se comprueba que arranca con la de servicio,
   y solo DESPUÉS se quitan las políticas de `anon`. En ese orden, nunca al revés.
   ⚠️ Y `productos` sigue con **455 filas legibles por `anon`** (§6 ya lo señalaba): mismo frente.
