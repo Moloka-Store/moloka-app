@@ -14,7 +14,7 @@ Cada uno responde **una** pregunta y son universos distintos:
 | **INVENTARIO_FBA** | El informe de gestión de inventario FBA. Nació por **lo que viene DE CAMINO**, que es lo que nadie más contesta. Relevó a SALUD_FBA el 23-ago | ¿Cuánto hay en tránsito? |
 | **PANEU_APTOS** | La dimensión Pan-EU. Es película: cambia en horas | ¿Qué me deja Amazon? |
 | **LEDGER** | El EXTRACTO de UNIDADES. Libro append, no foto | ¿De dónde salió y a dónde fue? |
-| **TRANSACCIONES** | El EXTRACTO de EUROS. Uno por marketplace (ES/IT/FR/DE) | ¿Cuánto he cobrado y qué me han cobrado? |
+| **TRANSACCIONES** | El EXTRACTO de EUROS. Uno por marketplace. El extracto cargado a mano (`transacciones_movimientos`) trae ES/IT/FR/DE y ninguna fila de NL/BE; las liquidaciones guardadas (`amz_liquidacion_linea`) cubren ES/IT/FR/DE/NL/BE (ES desde el 23-jun-2026, IT/FR/DE desde el 25-jun, NL desde el 20-ago, BE solo una, del 24-sep; medido el 6-oct-2026) | ¿Cuánto he cobrado y qué me han cobrado? |
 | **CUSTOM_ANALYTICS** | La DEMANDA por ASIN (visitas, sesiones, conversión). **Contador acumulado**: cada carga apila UNA LECTURA (**Película de lecturas**, §1.6) | ¿Cuánta gente lo mira? |
 | **ALL_LISTINGS** | La identidad (ASIN/SKU) | ¿Qué tengo listado? |
 | **KEEPA (CSV)** | Mercado, fotos, competencia | ¿Qué pasa fuera? |
