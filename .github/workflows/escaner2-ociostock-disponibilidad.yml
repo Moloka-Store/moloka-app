@@ -1,0 +1,94 @@
+# ============================================================
+# Moloka - Escaner 2 · DISPONIBILIDAD DE OCIOSTOCK (encargo OC2, pieza (a) del plano de OC1, 07-oct-2026)
+#
+# Baja el catalogo ENTERO de OcioStock (el fichero del secreto OCIOSTOCK_FEED_URL, el mismo que usa el director
+# viejo), deja en la base lo que tiene OcioStock ahora (disp_estado) y lo que ha cambiado (disp_cambio), con la
+# MISMA funcion que HEO y OSMA (disp_aplicar_pasada), con las ocho reglas de lectura de escaner2_ociostock.py.
+# EN SOMBRA: OcioStock no tiene fila en disp_fuente; Reponer y el Trackeador siguen leyendo la memoria del escaner
+# viejo, que sigue corriendo. Sin Keepa y sin Amazon.
+#
+# 🔴 REPO PUBLICO: este registro lo ve cualquiera. El programa SOLO imprime estados y recuentos; nada de la URL del
+#    fichero (lleva el token del enlace), cabeceras, precios, stock, nombres ni EAN (lo comprueba
+#    test_escaner2_ociostock.py).
+#
+# 🔒 SOLO TOCA disp_pasada, disp_lectura, la funcion disp_aplicar_pasada, y lee disp_parametros. La migracion
+#    20261007113000_disp_ociostock_en_sombra.sql de moloka-app-v2 tiene que estar APLICADA antes de que corra (si no,
+#    no hay fila de OCIOSTOCK en disp_parametros ni columnas de la huella y del escalon, y no abre).
+#
+# >>> SIN RELOJ, A PROPOSITO <<<  Se lanza a mano desde Actions. El reloj es cron-job.org (un `schedule:` de GitHub
+#     llega horas tarde en esta cuenta) y lo dan de alta Fernando y Cowork: una pasada a las 09:00 de Madrid y dos
+#     comprobaciones a las 13:00 y a las 17:00, LOS SIETE DIAS (OcioStock rehace el fichero cada noche). Las
+#     comprobaciones con el mismo fichero salen en verde con OCIOSTOCK_AL_DIA (la pasada se cierra 'rechazada'
+#     «al día», que no cuenta en ningun sitio).
+#     La tarea: POST https://api.github.com/repos/Moloka-Store/moloka-app/actions/workflows/escaner2-ociostock-disponibilidad.yml/dispatches
+#     con cuerpo {"ref":"main"} y las mismas cabeceras que el job de OSMA.
+# ============================================================
+name: Moloka - Escaner 2 · Disponibilidad OcioStock
+
+on:
+  workflow_dispatch:
+
+# 🔒 GRUPO PROPIO: nunca dos pasadas de OcioStock a la vez. Sin cancelar lo que esta en curso (un pendiente nuevo
+#    cancela al pendiente anterior, no al que corre).
+concurrency:
+  group: escaner2-ociostock
+  cancel-in-progress: false
+
+jobs:
+  leer:
+    runs-on: ubuntu-24.04
+    # Solo leer el repo: todo lo demas lo hace con la llave de servicio de Supabase.
+    permissions:
+      contents: read
+    # Un CSV de ~73 MB y ~30.000 filas: unos minutos.
+    timeout-minutes: 20
+    steps:
+      # 🔴 PRIMERO, LOS SECRETOS: sin ellos, rojo aqui y sin tocar la base (el rescate tampoco corre).
+      - name: Comprobar los secretos
+        id: secretos
+        env:
+          OCIOSTOCK_FEED_URL:   ${{ secrets.OCIOSTOCK_FEED_URL }}
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          if [ -z "$OCIOSTOCK_FEED_URL" ]; then
+            echo "::error title=Faltan secretos::falta OCIOSTOCK_FEED_URL en los secretos de moloka-app; no se abre ninguna pasada"
+            exit 1
+          fi
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_KEY" ]; then
+            echo "::error title=Faltan secretos::faltan SUPABASE_URL/SUPABASE_SERVICE_KEY; no se abre ninguna pasada"
+            exit 1
+          fi
+          echo "secretos: presentes"
+
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        # Las mismas versiones FIJADAS que la pasada de OSMA (requests: el fichero · supabase: la base).
+        run: pip install --quiet supabase==2.31.0 requests==2.34.2
+
+      - name: Leer OcioStock y aplicar la pasada
+        # El tope va en el PASO (15 min), no solo en el job (20): si se agota, el rescate corre.
+        timeout-minutes: 15
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          OCIOSTOCK_FEED_URL:   ${{ secrets.OCIOSTOCK_FEED_URL }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_ociostock_disponibilidad.py
+
+      # 🔴 SI EL RUN MUERE A MEDIAS, LA PASADA NO SE QUEDA 'leyendo' PARA SIEMPRE. Solo si los secretos estaban
+      #    (si no, no hay pasada que rescatar ni se toca la base).
+      - name: Rescate · si el run ha fallado, la pasada de este run queda 'fallida'
+        if: (failure() || cancelled()) && steps.secretos.outcome == 'success'
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_ociostock_disponibilidad.py --rescate

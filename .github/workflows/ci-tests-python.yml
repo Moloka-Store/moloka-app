@@ -429,6 +429,15 @@ jobs:
       - name: 25 septendecies quater) test_escaner2_zentrada_pro.py
         run: python -u test_escaner2_zentrada_pro.py
 
+      # (Encargo OC2, 7-oct-2026) La foto de disponibilidad de OcioStock (escaner2_ociostock*.py): las ocho reglas de
+      # lectura con datos INVENTADOS (EAN base y su cola, GTIN-14, caja de 6 por « C6» o FUNKO «5 + 1» y no por la «c»
+      # pegada, chase suelto solo en FUNKO con los dos casos que comparten EAN con fichas nuestras, preventa fuera,
+      # unitario, escalon y PA = × 0,99 sin el filtro del 50 %); la pasada entera contra una descarga y una base de
+      # mentira (aplica, gzip, «al día» en verde, y lo que no aplica dice por que); el registro sin la URL ni su token;
+      # y dieciseis mutantes lo ponen en rojo.
+      - name: 25 septendecies quinquies) test_escaner2_ociostock.py
+        run: python -u test_escaner2_ociostock.py
+
       # (Encadenado de Keepa, 1-oct-2026) El job `encadenar` de procesar-keepa-escaparate.yml: el titulo de la
       # corrida igual en el YAML y en el codigo; el job por estructura (tras `procesar`, solo en aplicar, exito o
       # fallo, continue-on-error, actions: write solo en el); la decision con el buzon, las cargas y las corridas
@@ -496,6 +505,7 @@ jobs:
             test_escaner2_osma_fecha_vuelta.py
             test_escaner2_osma_pro.py
             test_escaner2_zentrada_pro.py
+            test_escaner2_ociostock.py
             test_encadenar_keepa.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
