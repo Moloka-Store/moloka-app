@@ -1006,6 +1006,49 @@ with _ctx.redirect_stdout(_buf):
 eq('(O5) 🔒 …y una valoración entera de OcioStock con él no suelta ni el EAN, ni el ASIN, ni el nombre',
    [c for c in ('889698100299', 'B0LISTA001', 'Figura 9') if c in _buf.getvalue()], [])
 
+
+def correr_cuentas_oc(entorno, base):
+    """(Encargo OC4) escaner2_ociostock_novedades_cuentas.py entero (runpy), con `supabase` de mentira."""
+    import runpy
+    import types as _types
+    falso = _types.ModuleType('supabase')
+    falso.create_client = lambda url, llave: base
+    guardado, viejo_env = sys.modules.get('supabase'), {k: os.environ.get(k) for k in entorno}
+    sys.modules['supabase'] = falso
+    os.environ.update(entorno)
+    viejo_argv, sys.argv = sys.argv, ['escaner2_ociostock_novedades_cuentas.py']
+    buf, codigo = _io.StringIO(), 0
+    try:
+        with _ctx.redirect_stdout(buf):
+            try:
+                runpy.run_path(os.path.join(AQUI, 'escaner2_ociostock_novedades_cuentas.py'), run_name='__main__')
+            except SystemExit as e:
+                codigo = e.code if isinstance(e.code, int) else (0 if e.code is None else 1)
+    finally:
+        sys.argv = viejo_argv
+        for k, v in viejo_env.items():
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        if guardado is None:
+            sys.modules.pop('supabase', None)
+        else:
+            sys.modules['supabase'] = guardado
+    return codigo, buf.getvalue()
+
+
+_ENT = {'SUPABASE_URL': 'https://base.example.test', 'SUPABASE_SERVICE_KEY': 'LLAVE-SERVICIO', 'KEEPA_API_KEY': ''}
+b_mano = con_ociostock(Base(valorar=False))
+cod_mano, out_mano = correr_cuentas_oc(dict(_ENT, NOVEDADES_PASADA='0C400000-0000-0000-0000-000000000001'), b_mano)
+b_mano2 = con_ociostock(Base())
+cod_mal, out_mal = correr_cuentas_oc(dict(_ENT, NOVEDADES_PASADA="x'); drop table y; --"), b_mano2)
+b_mano3 = con_ociostock(Base())
+cod_cu, out_cu = correr_cuentas_oc(dict(_ENT, NOVEDADES_PASADA=''), b_mano3)
+eq('(O6) (encargo OC4) a mano, con NOVEDADES_PASADA: la selección y la valoración de ESA pasada (en minúsculas), verde; con '
+   'algo que no es un uuid, ROJO sin tocar la base; vacía, las cuentas de siempre',
+   (cod_mano, b_mano.llamadas('nov_seleccionar_pasada'), [n for n, _p in b_mano.rpcs], cod_mal, b_mano2.rpcs, b_mano2.ops,
+    'NOVEDADES_CUENTAS_NO_EJECUTADAS' in out_mal, cod_cu, [n for n, _p in b_mano3.rpcs]),
+   (0, [{'p_pasada': '0c400000-0000-0000-0000-000000000001'}], ['nov_seleccionar_pasada', 'nov_cerrar_valoracion'], 1, [], [],
+    True, 0, []))
+
 print()
 if fallos:
     print('ROJO: %d fallo(s): %s' % (len(fallos), '; '.join(fallos)))

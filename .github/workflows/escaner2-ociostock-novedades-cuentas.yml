@@ -16,11 +16,20 @@
 #     cartero). La tarea: POST
 #     https://api.github.com/repos/Moloka-Store/moloka-app/actions/workflows/escaner2-ociostock-novedades-cuentas.yml/dispatches
 #     con cuerpo {"ref":"main"} y las mismas cabeceras que ya usan los directores.
+#
+# 🆕 A MANO, LAS NOVEDADES DE UNA PASADA: con la entrada `pasada` (el id de una pasada aplicada de OcioStock), en vez
+#    de las cuentas, la seleccion y la valoracion de esa pasada (lo mismo que hace la foto tras aplicar). El reloj no
+#    la manda: vacia, las cuentas de siempre.
 # ============================================================
 name: Moloka - Escaner 2 · Novedades OcioStock · cuentas
 
 on:
   workflow_dispatch:
+    inputs:
+      pasada:
+        description: 'Opcional: el id (uuid) de una pasada APLICADA de OcioStock para sacar y valorar sus novedades a mano. Vacío: las cuentas sueltas.'
+        required: false
+        default: ''
 
 # 🔒 EL MISMO GRUPO QUE LA FOTO DE OCIOSTOCK, sin cancelar lo que esta en curso: una cuenta suelta no corre a la vez
 #    que la pasada (las dos cuentan las «lista»). Si la pasada tarda, esta queda PENDIENTE y corre al acabar.
@@ -58,5 +67,7 @@ jobs:
           # 🔑 El aviso, como los directores (los mismos secretos). Sin ellos, no se manda y la corrida sigue.
           TELEGRAM_TOKEN:       ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+          # La pasada de la entrada, por el entorno (nunca pegada en la orden); el programa exige que sea un uuid.
+          NOVEDADES_PASADA:     ${{ inputs.pasada }}
           PYTHONIOENCODING:     utf-8
         run: python -u escaner2_ociostock_novedades_cuentas.py
