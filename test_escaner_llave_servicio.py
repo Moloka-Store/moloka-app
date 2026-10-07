@@ -187,6 +187,9 @@ PROGRAMAS = [
     #    cruce tambien (el IVA de la ficha y el factor de nuestros packs); los dos corren desatendidos.
     ('escaner2_osma_barrido.py',   'solo-servicio',         1),   # escaner2-osma-barrido
     ('escaner2_osma_cruce.py',     'solo-servicio',         1),   # escaner2-osma-cruce
+    # 🆕 07-oct-2026 (encargo OC3, Escaneo PRO de OcioStock): el cruce lee `productos` (el IVA de la ficha), como el de
+    #    HEO, y corre desatendido.
+    ('escaner2_ociostock_cruce.py', 'solo-servicio',        1),   # escaner2-ociostock-cruce
 ]
 
 
@@ -616,8 +619,8 @@ for _script, _forma, _esperados in PROGRAMAS:
 
 eq('(B) 🔴 ningun paso lanza ninguno de estos programas sin la llave de servicio',
    _incumplen, [])
-# (Encargo OC4, 07-oct-2026) +1: el paso de las cuentas de las novedades de OcioStock.
-eq('(D) …y en total se han mirado los QUINCE pasos que existen, no cero', _total, 15)
+# (OC3) +1, el cruce de OcioStock · (Encargo OC4, 07-oct-2026) +1, el paso de las cuentas de las novedades de OcioStock.
+eq('(D) …y en total se han mirado los DIECISÉIS pasos que existen, no cero', _total, 16)
 
 # (C) la otra direccion: un paso que lanza el escaner sin la llave tiene que
 # salir en la lista. Este es el estado exacto de `director-dbline.yml` ayer.

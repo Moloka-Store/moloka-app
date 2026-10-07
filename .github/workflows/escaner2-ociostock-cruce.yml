@@ -1,0 +1,59 @@
+# ============================================================
+# Moloka - Escaner 2 · CRUCE DEL ESCANEO PRO DE OCIOSTOCK con los CSV del Visualizador (encargo OC3, 07-oct-2026)
+#
+# Lo dispara la v2 (Escaneo PRO · tarjeta OcioStock) cuando el buzon de Keepa tiene los CUATRO CSV (ES, IT, FR, DE).
+# Decide cada EAN con las reglas de compra del PRO de HEO (el corte de ventas, los paises de escaner2_parametros, la
+# ficha compartida y la formula de rentabilidad del viejo, sin tocar) con el PA de OcioStock (el escalon mas barato
+# × 0,99); cuadra contra la base y deja el Excel del PRO de HEO con «Uds. escalón» y «Precio unidad» al final de
+# «Análisis», que la biblioteca de escaneos enseña como OcioStock.
+#
+# 🔴 REPO PUBLICO: el programa SOLO imprime estados, recuentos y el nombre de los CSV subidos.
+# 🔒 CERO tokens de Keepa y cero llamadas a Amazon: todo sale de los CSV.
+# ============================================================
+name: Moloka - Escaner 2 · Cruce OcioStock
+
+on:
+  workflow_dispatch:
+    inputs:
+      pasada:
+        description: 'id de la pasada de OcioStock (escaner2_pasada.id) que se cruza con los CSV subidos'
+        type: string
+        required: true
+
+concurrency:
+  group: escaner2-ociostock-pro
+  cancel-in-progress: false
+
+jobs:
+  cruzar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        # Las mismas versiones FIJADAS que el cruce de HEO.
+        run: pip install supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13
+
+      - name: Cruzar los CSV con la foto
+        # El tope en el PASO (25 min), no solo en el job (30): si se agota, el rescate de abajo tiene tiempo.
+        timeout-minutes: 25
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PASADA:               ${{ inputs.pasada }}
+        run: python -u escaner2_ociostock_cruce.py
+
+      # 🔴 SI EL RUN MUERE A MEDIAS, EL CRUCE NO SE QUEDA COLGADO en 'cruzando'.
+      - name: Rescate · si el run ha fallado, la fila de este run queda 'fallida'
+        if: failure() || cancelled()
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python -u escaner2_rescate.py cruce
