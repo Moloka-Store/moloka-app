@@ -38,6 +38,11 @@ QUE PRUEBA:
   (T) EL TELEGRAM (añadido 3), con el formato del viejo: con COMPRAR, sin COMPRAR (no se manda), avalancha, incompleto;
       sin claves no manda y no falla; si Telegram falla, la corrida sigue; la llave no sale.
   (A) LA AVALANCHA: mas de 100 novedades en la pasada → el Excel se abre con el aviso arriba, y el Telegram lo dice.
+  (O) (encargo OC4) OCIOSTOCK por el mismo camino, con `proveedor=`: Keepa solo para SU cola (nov_keepa con su proveedor),
+      sus parametros y su foto; su Excel en ociostock/novedades/ con «Uds. escalón» y «Precio unidad» al final (HEO,
+      sin ellas); su Telegram «Novedades OcioStock Funko»; la seleccion + valoracion de una pasada
+      (`novedades_tras_la_pasada`, que apunta el fallo de la seleccion como la foto de HEO); y el registro discreto (ni
+      EAN, ni ASIN, ni el texto de un error). Datos inventados.
 """
 import ast
 import json
@@ -91,6 +96,10 @@ class _Q:
         self.accion = 'delete'
         return self
 
+    def upsert(self, fila, **opciones):
+        self.accion, self.fila, self.opciones = 'upsert', fila, opciones
+        return self
+
     def eq(self, c, v):
         self.filtros.append(lambda r: r.get(c) == v)
         return self
@@ -124,6 +133,9 @@ class _Q:
                 raise RuntimeError('la base de mentira falla al insertar en %s' % self.tabla)
             self.base.tablas.setdefault(self.tabla, []).append(dict(self.fila, consultada_en=iso(self.base.reloj())))
             return types.SimpleNamespace(data=[self.fila])
+        if self.accion == 'upsert':
+            self.base.tablas.setdefault(self.tabla, []).append(dict(self.fila, _opciones=self.opciones))
+            return types.SimpleNamespace(data=[self.fila])
         filas = [r for r in self.base.leer(self.tabla) if all(f(r) for f in self.filtros)]
         if self.orden:
             c, desc = self.orden
@@ -140,6 +152,7 @@ class Base:
                  valoraciones=(), productos=None, fallan=()):
         self.ops, self.rpcs, self.fallan, self.subidos = [], [], set(fallan), []
         self.reloj = lambda: AHORA
+        self.seleccion = {'estado': 'hecha', 'novedades': 0, 'subidas_fuera': 0, 'marca_parecida': 0}
         self.tablas = {
             'nov_parametros': [{'proveedor': 'HEO', 'marca': 'Funko', 'valorar': valorar, 'keepa_reserva': 20,
                                 'keepa_tope_peticion': 3, 'keepa_horas_nuevo': 360, 'keepa_dias_precio': 15, 'escaneo_pro_dias': 15}],
@@ -211,6 +224,8 @@ class Base:
                     return types.SimpleNamespace(data={'estado': 'valorada'})
                 if nombre == 'nov_cerrar_valoracion':
                     return types.SimpleNamespace(data={'estado': params['p_datos']['estado']})
+                if nombre == 'nov_seleccionar_pasada':
+                    return types.SimpleNamespace(data=dict(base.seleccion, pasada=params['p_pasada']))
                 raise RuntimeError('función inesperada %s' % nombre)
         return _Llamada()
 
@@ -861,20 +876,135 @@ for nodo in ast.walk(arbol):
         escrituras.add((nodo.value.args[0].value if nodo.value.args and isinstance(nodo.value.args[0], ast.Constant) else '?', nodo.attr))
 leidas = {c.value for n in ast.walk(arbol) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ('_todas', '_en_trozos')
           for c in n.args[1:2] if isinstance(c, ast.Constant)}
-eq('(K) lee lo suyo: parámetros, la cola, las novedades y sus filas, la caché, la foto de HEO, productos y el Escaneo PRO',
+eq('(K) lee lo suyo: parámetros, la cola, las novedades y sus filas, la caché, la foto, productos y el Escaneo PRO (y nov_pasada, '
+   'solo para apuntar una selección que falla: encargo OC4)',
    sorted(tablas | leidas), sorted({'nov_parametros', 'escaner2_parametros', 'nov_keepa', 'escaner2_cruce', 'nov_cola', 'nov_novedad',
                                     'productos', 'disp_estado', 'nov_valoracion', 'escaner2_foto', 'escaner2_resultado_ean',
-                                    'escaner2_resultado_pais', 'nov_excel'}))
-eq('(K) 🔒 y solo ESCRIBE insertando en nov_keepa (la película de Keepa) y en nov_excel (el Excel, encargo V): ni update, ni upsert, ni delete',
-   escrituras, {('nov_keepa', 'insert'), ('nov_excel', 'insert')})
+                                    'escaner2_resultado_pais', 'nov_excel', 'nov_pasada'}))
+eq('(K) 🔒 y solo ESCRIBE insertando en nov_keepa (la película de Keepa) y en nov_excel (el Excel, encargo V); y (encargo OC4) el '
+   'apunte de una selección que falla en nov_pasada, como la foto de HEO (upsert que no pisa): ni update, ni delete',
+   escrituras, {('nov_keepa', 'insert'), ('nov_excel', 'insert'), ('nov_pasada', 'upsert')})
+_upserts = [n for n in ast.walk(arbol) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == 'upsert']
+eq('(K) 🔒 …y ese upsert NO pisa lo que hubiera (ignore_duplicates=True, por pasada_id)',
+   [sorted((k.arg, k.value.value) for k in u.keywords if isinstance(k.value, ast.Constant)) for u in _upserts],
+   [[('ignore_duplicates', True), ('on_conflict', 'pasada_id')]])
 _fuente_sin_comentarios = '\n'.join(l.split('#', 1)[0] for l in open(os.path.join(AQUI, 'escaner2_novedades.py'), encoding='utf-8').read().split('\n'))
 eq('(K) 🔒 (encargo V) el Excel NO va a escaner_resultados ni al buzón `informes` del viejo (sus Excel los leen otros programas)',
    ['escaner_resultados' in _fuente_sin_comentarios.split('"""', 2)[-1], "'informes'" in _fuente_sin_comentarios], [False, False])
-eq('(K) …el resto, por las funciones de la base: guardar Keepa, guardar la cuenta y cerrar', sorted(funciones),
-   ['nov_cerrar_valoracion', 'nov_guardar_cuenta', 'nov_guardar_keepa'])
+eq('(K) …el resto, por las funciones de la base: guardar Keepa, guardar la cuenta y cerrar (y, encargo OC4, seleccionar)',
+   sorted(funciones), ['nov_cerrar_valoracion', 'nov_guardar_cuenta', 'nov_guardar_keepa', 'nov_seleccionar_pasada'])
+# (Encargo OC4) Las cuentas sueltas de OcioStock: el MISMO solo_cuentas, con su proveedor y el registro discreto; y en
+# rojo dicen cuántos avisos, no su texto.
+with open(os.path.join(AQUI, 'escaner2_ociostock_novedades_cuentas.py'), encoding='utf-8') as fh:
+    _fuente_oc = fh.read()
+_llamadas_oc = [n for n in ast.walk(ast.parse(_fuente_oc)) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr == 'solo_cuentas']
+eq('(K) (encargo OC4) las cuentas de OcioStock: solo_cuentas con proveedor=OCIOSTOCK y el registro discreto, y sin el texto de los avisos',
+   ([sorted((k.arg, ast.unparse(k.value)) for k in n.keywords if k.arg in ('proveedor', 'imprimir')) for n in _llamadas_oc],
+    "res.get('avisos') or res}" in _fuente_oc),
+   ([[('imprimir', 'nv.imprimir_discreto'), ('proveedor', "'OCIOSTOCK'")]], False))
 eq('(K) 🔒 ni Amazon ni el escáner viejo: ni sellingpartnerapi, ni escaner_memoria, ni una llave de disparo',
    any(s in open(os.path.join(AQUI, 'escaner2_novedades.py'), encoding='utf-8').read()
        for s in ('sellingpartnerapi', 'escaner_memoria', 'dispatches', 'GH_TOKEN')), False)
+
+# ── (O) (encargo OC4) OCIOSTOCK POR EL MISMO CAMINO ──────────────────────────────────────────
+def con_ociostock(base, novedades_oc=(), valoraciones_oc=(), escalon=None):
+    """La base de mentira con OcioStock al lado de HEO: su fila de parámetros, la del escáner 2, sus novedades y su foto."""
+    base.tablas['nov_parametros'].append({'proveedor': 'OCIOSTOCK', 'marca': 'FUNKO', 'valorar': True, 'keepa_reserva': 20,
+                                          'keepa_tope_peticion': 3, 'keepa_horas_nuevo': 360, 'keepa_dias_precio': 15,
+                                          'escaneo_pro_dias': 15})
+    base.tablas['escaner2_parametros'].append({'proveedor': 'OCIOSTOCK', 'umbral_caidas_30d': 6,
+                                               'paises_filtro': ['ES', 'IT', 'FR', 'DE'], 'paises_calculo': ['ES', 'IT', 'FR', 'DE']})
+    for n in novedades_oc:
+        base.tablas['nov_novedad'].append(dict(n, proveedor='OCIOSTOCK', **(escalon or {}).get(n['id'], {})))
+        base.tablas['disp_estado'].append({'proveedor': 'OCIOSTOCK', 'producto_prov': n['producto_prov'], 'ean_core': n['ean_norm'],
+                                           'ean_norm': n['ean_norm'], 'nombre': n['nombre'], 'disponible': True, 'ausencias': 0,
+                                           'es_chase': n['es_chase'], 'precio_catalogo': n['precio_ahora']})
+    base.tablas['nov_valoracion'] += [dict(v) for v in valoraciones_oc]
+    return base
+
+
+def correr_oc(base, keepa=None, env=None, imprimir=None):
+    salida = []
+    ok_, res_ = nv.valorar_pasada(base, 'PASADA-OC', keepa_llave=LLAVE, http=keepa or KeepaFalso(), dormir=lambda s: None,
+                                  ahora=lambda: AHORA, imprimir=imprimir or (lambda *a, **k: salida.append(' '.join(str(x) for x in a))),
+                                  run_id='36700000009', env=env if env is not None else {}, post=post_falso, proveedor='OCIOSTOCK')
+    return ok_, res_, '\n'.join(salida)
+
+
+# (O1) La cola de OcioStock y la de HEO, juntas en la base: con proveedor='OCIOSTOCK', solo la suya va a Keepa.
+nov_oc = dict(novedad(21, 'nuevo', ean='889698100211'), id='oc-21', producto_prov='OC00021')
+# 🔑 Con el interruptor de HEO APAGADO: si OcioStock leyera la fila de HEO, no valoraría nada.
+b = con_ociostock(Base(valorar=False, novedades=[novedad(1)]), [nov_oc])
+k = KeepaFalso(productos={(None, '889698100211'): [prod('B0OCIO0021', caidas=20)], (None, '889698100002'): [prod('B0HEO00001')]})
+ok, res, txt = correr_oc(b, k)
+eq('(O1) con proveedor=OCIOSTOCK (y HEO apagado): Keepa SOLO para la cola de OcioStock, en sus 4 países, y la de HEO ni se toca',
+   (len(k.de_producto()), all('889698100211' in str(c) for _d, c in k.de_producto()), [x['proveedor'] for x in b.tablas['nov_keepa']],
+    [p['p_novedad'] for p in b.llamadas('nov_guardar_keepa')], [n['estado'] for n in b.tablas['nov_novedad']], ok),
+   (4, True, ['OCIOSTOCK'] * 4, ['oc-21'], ['pendiente', 'espera_amazon'], True))
+eq('(O1) …sus parámetros son los suyos (FUNKO; umbral 6 en los cuatro países), no los de HEO',
+   (nv.leer_parametros(b, 'OCIOSTOCK')['marca'], nv.leer_params_escaner2(b, 'OCIOSTOCK'), nv.leer_parametros(b)['marca']),
+   ('FUNKO', {'umbral': 6, 'paises_filtro': ['ES', 'IT', 'FR', 'DE'], 'paises_calculo': ['ES', 'IT', 'FR', 'DE']}, 'Funko'))
+
+# (O2) Una de OcioStock «lista» que sale COMPRAR: su Excel en ociostock/novedades/, con las dos columnas del escalón al final.
+VALS_OC = [dict(v, novedad_id='oc-29') for v in VALS_COMPRA]
+nov_oc9 = dict(novedad(9, estado='lista'), id='oc-29', producto_prov='OC00029', ean_norm='889698100299')
+b = con_ociostock(Base(), [nov_oc9], VALS_OC, escalon={'oc-29': {'uds_escalon': 12, 'precio_unidad': 10.0}})
+ok, res, txt = correr_oc(b, KeepaFalso())
+eq('(O2) 🔑 el Excel de OcioStock: en ociostock/novedades/<día>/, Novedades_OCIOSTOCK_Funko_<hora de Madrid>, y su fila en '
+   'nov_excel con SU proveedor',
+   ([ruta for _c, ruta, _x, _o in b.subidos], [(x['proveedor'], x['ruta_excel'], x['pasada_id']) for x in b.tablas['nov_excel']], ok),
+   (['ociostock/novedades/2026-09-29/Novedades_OCIOSTOCK_Funko_2026-09-29_2005.xlsx'],
+    [('OCIOSTOCK', 'ociostock/novedades/2026-09-29/Novedades_OCIOSTOCK_Funko_2026-09-29_2005.xlsx', 'PASADA-OC')], True))
+hoja = [list(r) for r in load_workbook(_io.BytesIO(b.subidos[0][2]))['Novedades'].iter_rows(values_only=True)]
+eq('(O2) …la hoja «Novedades» lleva AL FINAL «Uds. escalón» y «Precio unidad», con lo que guardó la selección',
+   (hoja[0][-2:], hoja[1][-2:], hoja[0][:len(hoja[0]) - 2][-1]), (['Uds. escalón', 'Precio unidad'], [12, 10.0], 'Por qué'))
+b = Base(novedades=[novedad(9, estado='lista')], valoraciones=VALS_COMPRA)
+correr(b, KeepaFalso())
+cab_heo = [list(r) for r in load_workbook(_io.BytesIO(b.subidos[0][2]))['Novedades'].iter_rows(values_only=True)][0]
+eq('(O2) …y el de HEO, sin ellas (acaba en «Por qué», como hasta hoy)', cab_heo[-1], 'Por qué')
+
+# (O3) El Telegram, con su nombre.
+eq('(O3) el Telegram dice «Novedades OcioStock Funko» (y el de HEO, como siempre)',
+   (nv.mensaje_telegram([v_compra(1)], proveedor='OCIOSTOCK').split('\n')[0], nv.mensaje_telegram([v_compra(1)]).split('\n')[0],
+    'OcioStock Funko' in nv.mensaje_telegram([], avalancha=150, proveedor='OCIOSTOCK')),
+   ('🟢 <b>Novedades OcioStock Funko</b>: 1 para COMPRAR', '🟢 <b>Novedades HEO Funko</b>: 1 para COMPRAR', True))
+
+# (O4) La selección + valoración de una pasada (la foto de OcioStock la llama tras aplicar).
+b = con_ociostock(Base())
+b.seleccion = {'estado': 'hecha', 'novedades': 3, 'subidas_fuera': 1, 'marca_parecida': 2}
+ok, sel = nv.novedades_tras_la_pasada(b, 'PASADA-OC', 'OCIOSTOCK', keepa_llave=LLAVE, imprimir=lambda *a, **k: None,
+                                      http=KeepaFalso(), dormir=lambda s: None, ahora=lambda: AHORA, env={}, post=post_falso)
+eq('(O4) selección de la pasada y su valoración, de OcioStock: lo que devuelve la base (con el vigía) y la valoración cerrada',
+   (ok, sel['marca_parecida'], [n for n, _p in b.rpcs], b.llamadas('nov_seleccionar_pasada'), cierre(b)['estado']),
+   (True, 2, ['nov_seleccionar_pasada', 'nov_cerrar_valoracion'], [{'p_pasada': 'PASADA-OC'}], 'hecha'))
+b = con_ociostock(Base(fallan={'nov_seleccionar_pasada'}))
+ok, sel = nv.novedades_tras_la_pasada(b, 'PASADA-OC', 'OCIOSTOCK', imprimir=lambda *a, **k: None)
+eq('(O4) 🔴 si la selección falla: no se valora, se apunta en nov_pasada (fallida, sin pisar) y ROJO',
+   (ok, sel, [n for n, _p in b.rpcs], [(x['pasada_id'], x['proveedor'], x['estado'], x['_opciones']) for x in b.tablas['nov_pasada']]),
+   (False, None, ['nov_seleccionar_pasada'],
+    [('PASADA-OC', 'OCIOSTOCK', 'fallida', {'on_conflict': 'pasada_id', 'ignore_duplicates': True})]))
+
+# (O5) El registro discreto: ni EAN, ni ASIN, ni el texto de un error.
+import contextlib as _ctx
+_buf = _io.StringIO()
+with _ctx.redirect_stdout(_buf):
+    nv.imprimir_discreto('    cuenta 889698100299 (B0LISTA001): COMPRAR en ES', flush=True)
+    nv.imprimir_discreto('    nuevo 889698100211 (keepa): espera_amazon', flush=True)
+    nv.imprimir_discreto('>>> EXCEL DE NOVEDADES: ociostock/novedades/2026-09-29/x.xlsx (1 valoradas, 1 COMPRAR)', flush=True)
+    nv.imprimir_discreto('    AVISO: la cuenta de oc-29 falló: APIError: Failing row contains (OC00029, 889698100299, 7.92)', flush=True)
+    nv.imprimir_discreto('NOVEDADES_VALORACION_SIN_CERRAR: APIError: Failing row contains (7.92)', flush=True)
+_txt = _buf.getvalue()
+eq('(O5) 🔒 el registro discreto: las «>>>» tal cual; de un aviso o un fallo, solo la cabeza; las de cada producto, nada',
+   _txt.splitlines(), ['>>> EXCEL DE NOVEDADES: ociostock/novedades/2026-09-29/x.xlsx (1 valoradas, 1 COMPRAR)',
+                       '    AVISO: (el detalle no sale en el registro público)',
+                       '    NOVEDADES_VALORACION_SIN_CERRAR: (el detalle no sale en el registro público)'])
+b = con_ociostock(Base(), [nov_oc9], VALS_OC, escalon={'oc-29': {'uds_escalon': 12, 'precio_unidad': 10.0}})
+_buf = _io.StringIO()
+with _ctx.redirect_stdout(_buf):
+    correr_oc(b, KeepaFalso(), imprimir=nv.imprimir_discreto)
+eq('(O5) 🔒 …y una valoración entera de OcioStock con él no suelta ni el EAN, ni el ASIN, ni el nombre',
+   [c for c in ('889698100299', 'B0LISTA001', 'Figura 9') if c in _buf.getvalue()], [])
 
 print()
 if fallos:

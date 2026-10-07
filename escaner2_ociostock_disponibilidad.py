@@ -22,7 +22,15 @@ QUE HACE, EN ORDEN (el esqueleto de escaner2_osma_disponibilidad.py, con la desc
   5. convierte cada fila con las ocho reglas de escaner2_ociostock.py, sube las filas a `disp_lectura` en lotes de
      500 y deja en la pasada sus recuentos (declarado = llegados = filas del fichero: OcioStock no tiene «tres
      endpoints»; la integridad la dan las guardas del paso 4) y el maximo de `fecha_ultima_modificacion`;
-  6. llama a `disp_aplicar_pasada` (la funcion comun) y relee la pasada en la base: lo que vale es lo que hay alli.
+  6. llama a `disp_aplicar_pasada` (la funcion comun) y relee la pasada en la base: lo que vale es lo que hay alli;
+  7. 🆕 (encargo OC4, 07-oct-2026) LAS NOVEDADES DE FUNKO: con la pasada APLICADA (no «al día», no rechazada), como paso
+     aparte, `escaner2_novedades.novedades_tras_la_pasada(proveedor='OCIOSTOCK')`: la seleccion en la base
+     (nov_seleccionar_pasada: entra, pasa a disponible o BAJA su precio_pa; sin preventas ni chase sueltos) y su
+     valoracion (Keepa con KEEPA_API_KEY, la misma llave y saldo que HEO; Amazon lo pone el cartero de la v2; el Excel,
+     si hay un COMPRAR, y el Telegram con TELEGRAM_TOKEN/TELEGRAM_CHAT_ID). Si falla, la pasada sigue aplicada y el run
+     sale en ROJO al final; el vigia de la marca (algo que se parece a FUNKO sin serlo), tambien ROJO. Con el
+     interruptor apagado (nov_parametros.valorar de OCIOSTOCK), cero llamadas a Keepa. Las cuentas que llegan despues
+     del cartero las hace escaner2_ociostock_novedades_cuentas.py.
 
 🔴 REPO PUBLICO: LOS REGISTROS DE EJECUCION LOS VE CUALQUIERA. Este programa SOLO imprime estados y recuentos. NUNCA:
    la URL del fichero (lleva el token del enlace), cabeceras, precios, stock, nombres, codigos o EAN, ni el texto de un
@@ -33,7 +41,9 @@ QUE HACE, EN ORDEN (el esqueleto de escaner2_osma_disponibilidad.py, con la desc
 🔑 EN SOMBRA: OcioStock NO tiene fila en `disp_fuente`; Reponer y el Trackeador siguen leyendo la memoria del escaner
    viejo, que sigue corriendo como siempre. Este programa no lo toca.
 🔒 SOLO TOCA: `disp_pasada`, `disp_lectura`, la funcion `disp_aplicar_pasada`, y para LEER `disp_parametros`. Ni
-   escaner_memoria, ni reglas_director, ni escaner2_*, ni productos. Cero Keepa, cero Amazon.
+   escaner_memoria, ni reglas_director, ni escaner2_*, ni productos. Cero Amazon. (Encargo OC4) Las novedades van por
+   escaner2_novedades.py (nov_*, Keepa, el Excel y el Telegram), con su registro DISCRETO (`imprimir_discreto`: ni EAN,
+   ni ASIN, ni el texto de un error, que queda en nov_pasada.valoracion_motivo).
 🔒 SIN LOS SECRETOS, NO SE CORRE: sin OCIOSTOCK_FEED_URL (o sin la base) aborta antes de abrir ninguna pasada.
 
 Uso:  python escaner2_ociostock_disponibilidad.py            (la pasada)
@@ -204,11 +214,37 @@ def pasada(sb, sesion, url, run_id):
         return 1
     print(f">>> PASADA APLICADA: {fila.get('n_en_catalogo')} productos de OcioStock en el catálogo, "
           f"{fila.get('n_disponibles_estado')} disponibles.", flush=True)
+    codigo = 0
     if fila.get('caida_aceptada'):
         print(f"CAIDA_ACEPTADA: la pasada {pid} se ha aplicado como NUEVA REFERENCIA tras varios rechazos estables por "
               f"el freno del 90 %: hay que mirar si OcioStock ha caído de verdad.", flush=True)
-        return 1
-    return 0
+        codigo = 1
+    # 7 · LAS NOVEDADES DE FUNKO (encargo OC4): paso aparte con la pasada ya aplicada; no lanza nunca. Si falla, ROJO al final.
+    if not novedades(sb, pid, run_id):
+        codigo = 1
+    return codigo
+
+
+def novedades(sb, pid, run_id):
+    """Las novedades de Funko de la pasada aplicada `pid` (encargo OC4). NUNCA LANZA. Devuelve True si todo fue bien
+    (sin el vigia de la marca). 🔴 Repo publico: el registro, discreto (solo estados y recuentos)."""
+    try:
+        import escaner2_novedades as nv
+        ok, seleccion = nv.novedades_tras_la_pasada(sb, pid, PROVEEDOR, keepa_llave=os.environ.get('KEEPA_API_KEY'),
+                                                    imprimir=nv.imprimir_discreto, run_id=run_id or None)
+    except Exception as ex:
+        print(f"OCIOSTOCK_NOVEDADES_NO_HECHAS: la pasada {pid} sigue aplicada; las novedades han fallado antes de poder "
+              f"apuntarse ({type(ex).__name__})", flush=True)
+        return False
+    marca_parecida = (seleccion or {}).get('marca_parecida') or 0
+    if marca_parecida:
+        print(f"MARCA_PARECIDA: {marca_parecida} producto(s) de OcioStock tienen una marca que se parece a FUNKO y no es "
+              f"ella: si OcioStock cambia la grafía, las novedades de Funko se quedarían a cero en silencio "
+              f"(nov_pasada.n_marca_parecida de la pasada {pid}).", flush=True)
+    if not ok:
+        print(f"OCIOSTOCK_NOVEDADES_EN_ROJO: la pasada {pid} sigue aplicada; las novedades no han salido bien (el detalle, "
+              f"en nov_pasada de esa pasada).", flush=True)
+    return ok and not marca_parecida
 
 
 def rescatar(sb, run_id):

@@ -5,7 +5,14 @@
 # viejo), deja en la base lo que tiene OcioStock ahora (disp_estado) y lo que ha cambiado (disp_cambio), con la
 # MISMA funcion que HEO y OSMA (disp_aplicar_pasada), con las ocho reglas de lectura de escaner2_ociostock.py.
 # EN SOMBRA: OcioStock no tiene fila en disp_fuente; Reponer y el Trackeador siguen leyendo la memoria del escaner
-# viejo, que sigue corriendo. Sin Keepa y sin Amazon.
+# viejo, que sigue corriendo. Sin Amazon.
+#
+# 🆕 NOVEDADES DE FUNKO (encargo OC4, 07-oct-2026): tras una pasada APLICADA, la seleccion de sus novedades de Funko
+#    y su valoracion (escaner2_novedades.py, como HEO): Keepa con KEEPA_API_KEY (la misma llave y saldo que HEO y el
+#    director viejo), el Excel en la biblioteca si sale algun COMPRAR y el Telegram (TELEGRAM_TOKEN/TELEGRAM_CHAT_ID).
+#    Con el interruptor de la base apagado (nov_parametros.valorar de OCIOSTOCK), cero llamadas a Keepa. Amazon (precio
+#    y tarifa) lo pone el cartero de la v2 (a y 20) y las cuentas de despues, escaner2-ociostock-novedades-cuentas.yml.
+#    El registro de las novedades es DISCRETO (ni EAN, ni ASIN, ni el texto de un error).
 #
 # 🔴 REPO PUBLICO: este registro lo ve cualquiera. El programa SOLO imprime estados y recuentos; nada de la URL del
 #    fichero (lleva el token del enlace), cabeceras, precios, stock, nombres ni EAN (lo comprueba
@@ -13,7 +20,9 @@
 #
 # 🔒 SOLO TOCA disp_pasada, disp_lectura, la funcion disp_aplicar_pasada, y lee disp_parametros. La migracion
 #    20261007113000_disp_ociostock_en_sombra.sql de moloka-app-v2 tiene que estar APLICADA antes de que corra (si no,
-#    no hay fila de OCIOSTOCK en disp_parametros ni columnas de la huella y del escalon, y no abre).
+#    no hay fila de OCIOSTOCK en disp_parametros ni columnas de la huella y del escalon, y no abre). Las novedades: la
+#    20261007140000_nov_novedades_ociostock.sql (sin ella no hay fila de OCIOSTOCK en nov_parametros: la seleccion
+#    falla, se apunta y el run sale en rojo con la pasada aplicada).
 #
 # >>> SIN RELOJ, A PROPOSITO <<<  Se lanza a mano desde Actions. El reloj es cron-job.org (un `schedule:` de GitHub
 #     llega horas tarde en esta cuenta) y lo dan de alta Fernando y Cowork: una pasada a las 09:00 de Madrid y dos
@@ -70,8 +79,9 @@ jobs:
           python-version: '3.11'
 
       - name: Instalar dependencias
-        # Las mismas versiones FIJADAS que la pasada de OSMA (requests: el fichero · supabase: la base).
-        run: pip install --quiet supabase==2.31.0 requests==2.34.2
+        # Las mismas versiones FIJADAS que la pasada de OSMA (requests: el fichero y Keepa · supabase: la base) y, para el
+        # Excel de novedades (encargo OC4), el openpyxl de la foto de HEO.
+        run: pip install --quiet supabase==2.31.0 requests==2.34.2 openpyxl==3.1.5
 
       - name: Leer OcioStock y aplicar la pasada
         # El tope va en el PASO (15 min), no solo en el job (20): si se agota, el rescate corre.
@@ -80,6 +90,11 @@ jobs:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           OCIOSTOCK_FEED_URL:   ${{ secrets.OCIOSTOCK_FEED_URL }}
+          # 🔑 Solo para valorar las novedades (encargo OC4). Con el interruptor apagado no se usa.
+          KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}
+          # 🔑 El aviso de novedades, como el de HEO. Solo en este paso; no en el rescate.
+          TELEGRAM_TOKEN:       ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
           PYTHONIOENCODING:     utf-8
         run: python -u escaner2_ociostock_disponibilidad.py
 

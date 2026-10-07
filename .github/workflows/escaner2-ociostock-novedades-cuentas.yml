@@ -1,0 +1,62 @@
+# ============================================================
+# Moloka - Escaner 2 · NOVEDADES DE OCIOSTOCK: LAS CUENTAS (encargo OC4, 07-oct-2026)
+#
+# El molde: escaner2-heo-novedades-cuentas.yml. La cuenta de las novedades de Funko de OcioStock que ya estan
+# «lista» (el cartero de novedades de la v2, a y 20, les dio precio y tarifa de Amazon tras sus reintentos), con el
+# RESPALDO de Keepa del momento para los paises en que Amazon fallo, su Excel en la biblioteca de escaneos si alguna
+# sale COMPRAR y su Telegram (escaner2_ociostock_novedades_cuentas.py -> escaner2_novedades.solo_cuentas con
+# proveedor='OCIOSTOCK'). SIN las ventas de Keepa, SIN bajar el fichero y sin tocar nov_pasada. Con el interruptor
+# de la base apagado (nov_parametros.valorar de OCIOSTOCK), no hace nada y sale verde.
+#
+# 🔴 REPO PUBLICO: el registro solo dice estados y recuentos (ni EAN, ni ASIN, ni el texto de un error).
+#
+# >>> SIN RELOJ, A PROPOSITO <<<  Se lanza a mano desde Actions. El reloj es cron-job.org y lo crean Fernando y
+#     Cowork (no este PR): a y 45, de 09 a 13, los siete dias (la pasada de OcioStock es a las 09:00; el cartero, a
+#     y 20, con 4 reintentos de 2 min; los paises «pendiente» se vuelven a pedir en las corridas siguientes del
+#     cartero). La tarea: POST
+#     https://api.github.com/repos/Moloka-Store/moloka-app/actions/workflows/escaner2-ociostock-novedades-cuentas.yml/dispatches
+#     con cuerpo {"ref":"main"} y las mismas cabeceras que ya usan los directores.
+# ============================================================
+name: Moloka - Escaner 2 · Novedades OcioStock · cuentas
+
+on:
+  workflow_dispatch:
+
+# 🔒 EL MISMO GRUPO QUE LA FOTO DE OCIOSTOCK, sin cancelar lo que esta en curso: una cuenta suelta no corre a la vez
+#    que la pasada (las dos cuentan las «lista»). Si la pasada tarda, esta queda PENDIENTE y corre al acabar.
+concurrency:
+  group: escaner2-ociostock
+  cancel-in-progress: false
+
+jobs:
+  cuentas:
+    runs-on: ubuntu-24.04
+    # Solo leer el repo: lo demas lo hace con la llave de servicio de Supabase.
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        # Las mismas versiones FIJADAS que las cuentas de HEO (supabase: base · requests: Keepa y Telegram · openpyxl: el Excel).
+        run: pip install supabase==2.31.0 requests==2.34.2 openpyxl==3.1.5
+
+      - name: Contar las novedades listas, dejar su Excel y avisar
+        timeout-minutes: 8
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          # 🔑 Solo el respaldo de los paises en que Amazon fallo (3 tokens por ASIN y pais, sin cruzar la reserva).
+          KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}
+          # 🔑 El aviso, como los directores (los mismos secretos). Sin ellos, no se manda y la corrida sigue.
+          TELEGRAM_TOKEN:       ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_ociostock_novedades_cuentas.py
