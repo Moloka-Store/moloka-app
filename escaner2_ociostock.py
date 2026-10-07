@@ -20,7 +20,8 @@ QUE ES EL FICHERO (parte OC1 del 07-oct-2026, medido sobre el del dia): el catal
      `norm` del viejo). Con menos de 9 cifras entra con la regla 'ean_forma_rara' y sin EAN de cruce.
      SIN EAN (el campo vacio o sin ninguna cifra delante): se CUENTA (`n_sin_gtin`) y NO entra.
   3. CAJA DE 6: el sufijo EXACTO « C6», o marca FUNKO con «5 + 1» en el nombre. Su precio es POR FIGURA y NO se
-     divide: el fichero ya lo trae dividido (la web, ficha 183510: «7,99 €/ud» y «CAJA/BOX 6 ud. 47,94€»).
+     divide: el fichero ya lo trae dividido (en la web, la caja de 6 vale 6 veces el precio por unidad del
+     fichero; p. ej., inventado: 10,00 €/ud y caja de 6 a 60,00 €).
      🔴 La «c» pegada al EAN NO es caja en OcioStock (34 peluches «surtido» de Disney, Marvel, Play by Play…), aunque
      el `partir_ean` del viejo la leeria como caja de TCG. Una caja «5 + 1» es caja CON chase (5 figuras y 1 chase):
      sale con `es_chase` true, como la caja con chase de HEO; una « C6» sin «5 + 1», sin chase (no se sabe que lo
@@ -37,8 +38,8 @@ QUE ES EL FICHERO (parte OC1 del 07-oct-2026, medido sobre el del dia): el catal
      usa el viejo); (b) `precio_escalon` = el minimo entre ese y todos los importes de `txt_precios_volumen`, con
      `uds_escalon` = las unidades desde las que vale (1 si gana el unitario; a igual precio, el de menos unidades);
      (c) `precio_pa` = (b) × 0,99 (Fernando: «El 1% es descuento por pagar por trasnferencia, cosa que siempre
-     hacemos»). SIN el filtro del 50 % del viejo (`MIN_RATIO_LOTE`): Cowork leyo en la web 15 de los 17 escalones de
-     menos de la mitad y son reales. Porte 0 (portes gratis desde 99 € + IVA).
+     hacemos»). SIN el filtro del 50 % del viejo (`MIN_RATIO_LOTE`): los escalones de menos de la mitad del unitario
+     se comprobaron en la web y son reales. Porte 0 (Fernando: los portes, «siempre gratis»).
   7. SUELTA Y CAJA DEL MISMO EAN BASE: en la foto quedan las dos (cada una con su `id_producto`). Elegir la de menor
      PA, marcada «caja de 6», es de quien lea (pieza 4 del plano), no de la foto.
   8. CADA PASADA GUARDA el md5, los bytes y el maximo de `fecha_ultima_modificacion` del fichero (`huella`).
