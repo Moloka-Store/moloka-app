@@ -23,6 +23,10 @@ QUE PRUEBA:
   (E) Por estructura: el programa solo nombra disp_pasada, disp_lectura, disp_parametros y disp_aplicar_pasada; el
       workflow solo se lanza a mano, con grupo propio, los secretos en el primer paso y el rescate solo si estaban.
   (F) 🔴 LA MITAD ROJA: mutantes de las reglas y de la pasada; el banco se tiene que poner ROJO con cada uno.
+  (G) (encargo OC4) LAS NOVEDADES tras la pasada aplicada: la seleccion de ESA pasada y su valoracion (con el interruptor
+      apagado, solo se cierra); si la seleccion falla, la pasada sigue aplicada, se apunta y ROJO, sin soltar el texto
+      del error; el vigia de la marca, ROJO («al día» o rechazada: ni se piden, lo dicen los casos de (B)). Y el workflow da a ese paso la llave de
+      Keepa y la del Telegram, y no al rescate.
 """
 import ast
 import contextlib
@@ -326,6 +330,10 @@ class _Consulta:
         self.accion = 'select'
         return self
 
+    def upsert(self, d, **_k):
+        self.accion, self.datos = 'upsert', d
+        return self
+
     def eq(self, col, val):
         self.filtros[col] = val
         return self
@@ -360,6 +368,11 @@ class _Consulta:
                          and p.get('proveedor') == self.filtros.get('proveedor')]
         elif self.tabla == 'disp_parametros' and self.accion == 'select':
             r = [{'crudo_minimo': b.minimo}]
+        elif self.tabla == 'nov_parametros' and self.accion == 'select':
+            # (encargo OC4) El interruptor de las novedades de OcioStock, APAGADO: la valoración solo se cierra.
+            r = [{'proveedor': 'OCIOSTOCK', 'marca': 'FUNKO', 'valorar': False}]
+        elif self.tabla == 'nov_pasada' and self.accion == 'upsert':
+            b.nov_pasada.append(self.datos)
         elif self.tabla == 'disp_lectura':
             if self.accion == 'insert':
                 if b.falla_lectura:
@@ -373,9 +386,10 @@ class _Consulta:
 
 
 class Base:
-    def __init__(self, minimo=1000, ultima_md5=None, falla_lectura=False):
+    def __init__(self, minimo=1000, ultima_md5=None, falla_lectura=False, falla_seleccion=False, marca_parecida=0):
         self.minimo, self.ultima_md5, self.falla_lectura = minimo, ultima_md5, falla_lectura
-        self.ops, self.pasadas, self.lectura, self.lotes, self.rpcs = [], {}, [], [], []
+        self.falla_seleccion, self.marca_parecida = falla_seleccion, marca_parecida
+        self.ops, self.pasadas, self.lectura, self.lotes, self.rpcs, self.nov_pasada = [], {}, [], [], [], []
 
     def table(self, nombre):
         return _Consulta(self, nombre)
@@ -387,6 +401,14 @@ class Base:
             def execute(self):
                 base.rpcs.append((nombre, params))
                 base.ops.append(('rpc', nombre, {}))
+                if nombre == 'nov_seleccionar_pasada':
+                    # (encargo OC4) La selección de la base, imitada: falla con un texto que lleva la URL y un precio.
+                    if base.falla_seleccion:
+                        raise RuntimeError(f"APIError: Failing row contains ({FILA_BASE}, 4999999000001, 10.00) · {URL}")
+                    return types.SimpleNamespace(data={'pasada': params['p_pasada'], 'estado': 'hecha', 'novedades': 0,
+                                                       'subidas_fuera': 0, 'marca_parecida': base.marca_parecida})
+                if nombre == 'nov_cerrar_valoracion':
+                    return types.SimpleNamespace(data={'pasada': params['p_pasada'], 'estado': params['p_datos']['estado']})
                 p = base.pasadas[params['p_pasada']]
                 leidas = [x for x in base.lectura if x['pasada_id'] == p['id']]
                 if p.get('n_leidas') == len(leidas) and p.get('n_crudo') == p.get('n_sin_gtin', 0) + len(leidas):
@@ -479,8 +501,10 @@ def comprobar(programa, decir):
     decir('(B) …la huella: md5, bytes, Last-Modified, ETag y el máximo de fecha_ultima_modificacion',
           tuple(p.get(k) for k in ('fichero_md5', 'fichero_bytes', 'http_last_modified', 'http_etag', 'fichero_fecha_max')),
           (hashlib.md5(web.fichero).hexdigest(), len(web.fichero), LAST_MODIFIED, ETAG, '2026-10-07 03:00:00'))
-    decir('(B) …en lotes de 500 y UNA llamada a disp_aplicar_pasada; disp_lectura vacía al acabar',
-          (base.lotes, [r[0] for r in base.rpcs], base.lectura), ([500, 500, 80], ['disp_aplicar_pasada'], []))
+    decir('(B) …en lotes de 500 y UNA llamada a disp_aplicar_pasada; disp_lectura vacía al acabar; y (encargo OC4) después, '
+          'la selección de las novedades de ESA pasada y el cierre de su valoración (interruptor apagado)',
+          (base.lotes, [r[0] for r in base.rpcs], base.lectura, [r[1].get('p_pasada') for r in base.rpcs[1:]]),
+          ([500, 500, 80], ['disp_aplicar_pasada', 'nov_seleccionar_pasada', 'nov_cerrar_valoracion'], [], [p.get('id')] * 2))
     decir('(B) …las cuentas de las reglas, en el registro',
           all(s in out for s in ('chase sueltos %d' % e['n_chase_suelto'], 'cajas de 6 %d' % e['n_cajas'],
                                  'con stock %d' % e['n_preventa_con_stock'])), True)
@@ -538,6 +562,19 @@ def comprobar(programa, decir):
               (cod_x, px.get('estado'), palabra in motivos[nombre], base_x.rpcs, base_x.lectura, 'OCIOSTOCK_NO_APLICADA' in out_x),
               (1, estado, True, [], [], True))
 
+    # (G) (encargo OC4) las novedades tras la pasada
+    cod_n, out_n, base_n, _w, _s, _c = correr(programa, base=Base(falla_seleccion=True))
+    salidas['la selección de novedades falla'] = out_n
+    pn = pasada_de(base_n)
+    decir('(G) 🔴 la selección de novedades falla: la pasada SIGUE aplicada, se apunta en nov_pasada (fallida), no se valora y ROJO',
+          (cod_n, pn.get('estado'), [(x.get('pasada_id'), x.get('proveedor'), x.get('estado')) for x in base_n.nov_pasada],
+           [r[0] for r in base_n.rpcs], 'OCIOSTOCK_NOVEDADES_EN_ROJO' in out_n),
+          (1, 'aplicada', [(pn.get('id'), 'OCIOSTOCK', 'fallida')], ['disp_aplicar_pasada', 'nov_seleccionar_pasada'], True))
+    cod_m, out_m, base_m, _w, _s, _c = correr(programa, base=Base(marca_parecida=3))
+    salidas['vigía de la marca'] = out_m
+    decir('(G) 🔴 el vigía de la marca (3 que se parecen a FUNKO): la pasada aplicada, las novedades hechas, y ROJO',
+          (cod_m, pasada_de(base_m).get('estado'), 'MARCA_PARECIDA: 3 producto(s)' in out_m), (1, 'aplicada', True))
+
     # (C) el registro no suelta datos
     for nombre, out_x in salidas.items():
         decir('(C) 🔴 el registro de «%s» no suelta la URL, su token, nombres, EAN, precios ni cabeceras' % nombre,
@@ -591,6 +628,16 @@ eq('(E) …los secretos, en el primer paso; el rescate, el último y solo si est
    ('secretos', True, "(failure() || cancelled()) && steps.secretos.outcome == 'success'", True))
 eq('(E) …y el secreto del fichero solo llega al paso que lo usa (y al de comprobar)',
    [i for i, s in enumerate(pasos) if 'OCIOSTOCK_FEED_URL' in (s.get('env') or {})], [0, 4])
+eq('(E) (encargo OC4) la llave de Keepa y la del Telegram, SOLO al paso de la pasada (no al rescate ni a los secretos); y openpyxl',
+   ([i for i, s in enumerate(pasos) if {'KEEPA_API_KEY', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID'} & set(s.get('env') or {})],
+    sorted(k for k in pasos[4]['env'] if k in ('KEEPA_API_KEY', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID')), 'openpyxl==' in pasos[3]['run']),
+   ([4], ['KEEPA_API_KEY', 'TELEGRAM_CHAT_ID', 'TELEGRAM_TOKEN'], True))
+_llamadas_nv = [n for n in ast.walk(ast.parse(open(PROGRAMA, encoding='utf-8').read())) if isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Attribute) and n.func.attr == 'novedades_tras_la_pasada']
+eq('(E) (encargo OC4) las novedades, por escaner2_novedades (ninguna tabla nov_ en este programa) y con el registro DISCRETO',
+   [(n.args[2].id if len(n.args) > 2 and isinstance(n.args[2], ast.Name) else None,
+     [ast.unparse(k.value) for k in n.keywords if k.arg == 'imprimir']) for n in _llamadas_nv],
+   [('PROVEEDOR', ['nv.imprimir_discreto'])])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -627,6 +674,9 @@ MUTANTES_PASADA = [
     ('el motivo sin limpiar', "limpio(f'{type(ex).__name__}: {ex}', url)", "f'{type(ex).__name__}: {ex}'"),
     ('sin mínimo de filas', "        if n < minimo:", "        if False:"),
     ('sin la huella', "        sb.table('disp_pasada').update(huella).eq('id', pid).execute()\n", ''),
+    ('sin novedades (encargo OC4)', "    if not novedades(sb, pid, run_id):\n        codigo = 1\n", ''),
+    ('las novedades sin registro discreto', "imprimir=nv.imprimir_discreto", "imprimir=print"),
+    ('el vigía callado', "    return ok and not marca_parecida", "    return ok"),
 ]
 with tempfile.TemporaryDirectory() as tmp:
     for nombre, antes, despues in MUTANTES_REGLAS:

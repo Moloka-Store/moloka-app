@@ -181,6 +181,8 @@ PROGRAMAS = [
     # 🆕 30-sep-2026 (encargo V): las cuentas sueltas de las novedades de Funko leen `productos` (el IVA de la
     #    ficha, con escaner2_novedades.cuentas) y corren desatendidas en escaner2-heo-novedades-cuentas.yml.
     ('escaner2_heo_novedades_cuentas.py', 'solo-servicio',  1),   # escaner2-heo-novedades-cuentas
+    # 🆕 07-oct-2026 (encargo OC4): las de OcioStock, igual (el mismo modulo con proveedor='OCIOSTOCK').
+    ('escaner2_ociostock_novedades_cuentas.py', 'solo-servicio', 1),   # escaner2-ociostock-novedades-cuentas
     # 🆕 02-oct-2026 (encargo AG, Escaneo PRO de OSMA): el barrido lee `productos` (los enlaces por código) y el
     #    cruce tambien (el IVA de la ficha y el factor de nuestros packs); los dos corren desatendidos.
     ('escaner2_osma_barrido.py',   'solo-servicio',         1),   # escaner2-osma-barrido
@@ -617,7 +619,8 @@ for _script, _forma, _esperados in PROGRAMAS:
 
 eq('(B) 🔴 ningun paso lanza ninguno de estos programas sin la llave de servicio',
    _incumplen, [])
-eq('(D) …y en total se han mirado los QUINCE pasos que existen, no cero', _total, 15)   # (OC3) +1, el cruce de OcioStock
+# (OC3) +1, el cruce de OcioStock · (Encargo OC4, 07-oct-2026) +1, el paso de las cuentas de las novedades de OcioStock.
+eq('(D) …y en total se han mirado los DIECISÉIS pasos que existen, no cero', _total, 16)
 
 # (C) la otra direccion: un paso que lanza el escaner sin la llave tiene que
 # salir en la lista. Este es el estado exacto de `director-dbline.yml` ayer.
