@@ -265,7 +265,9 @@ def _tramos_de(producto):
 
 def poner_escalones(filas, productos_crudos, precios_crudos, M):
     """Rellena en cada fila de disp_lectura `precio_escalon`, `uds_escalon` y `precio_pa` con el tramo MAS BARATO de
-    HEO, y devuelve sus cuentas {n_con_tramo, n_escalon_gana, n_tramos_raros, n_tramos_dudosos, n_sin_precio}.
+    HEO, y devuelve sus cuentas {n_con_tramo, n_escalon_gana, n_propio_y_tramo, n_tramos_raros, n_tramos_dudosos,
+    n_sin_precio}. `n_propio_y_tramo` = con precio de hoy por debajo de la base Y tramo: los que dependen de si HEO
+    acumula los dos (pregunta de Fernando a HEO).
     Modifica `filas` (solo esas tres claves).
 
     La regla (encargo H1):
@@ -294,7 +296,8 @@ def poner_escalones(filas, productos_crudos, precios_crudos, M):
     bases = {_texto(p.get('productNumber')): _decimal((p.get('basePricePerUnit') or {}).get('amount')
                                                       if isinstance(p.get('basePricePerUnit'), dict) else None)
              for p in precios_crudos or []}
-    c = {'n_con_tramo': 0, 'n_escalon_gana': 0, 'n_tramos_raros': 0, 'n_tramos_dudosos': 0, 'n_sin_precio': 0}
+    c = {'n_con_tramo': 0, 'n_escalon_gana': 0, 'n_propio_y_tramo': 0, 'n_tramos_raros': 0, 'n_tramos_dudosos': 0,
+         'n_sin_precio': 0}
     for f in filas:
         pn = f['producto_prov']
         validos = tramos.get(pn) or []
@@ -308,6 +311,7 @@ def poner_escalones(filas, productos_crudos, precios_crudos, M):
         base = bases.get(pn)
         if validos and base is not None and base > 0:
             q, pct = min(validos, key=lambda t: (-t[1], t[0]))
+            c['n_propio_y_tramo'] += _decimal(f['precio_catalogo']) < base
             tramo = (base * (Decimal(100) - pct) / Decimal(100)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             if tramo < _decimal(f['precio_catalogo']):
                 divisor = (f.get('uds_caja') or M.UNIDADES_CASE_TCG) if (f['es_caja'] and perfil.get('precio_caja6') == 'caja') else 1

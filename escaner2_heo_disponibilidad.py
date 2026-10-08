@@ -207,7 +207,7 @@ def poner_escalones(dp, filas, crudos, M):
     try:
         c = dp.poner_escalones(filas, crudos['catalog/products'], crudos['catalog/prices'], M)
         print(f">>> TRAMOS (en sombra, nadie los lee): {c['n_con_tramo']} productos con tramo · el tramo gana en "
-              f"{c['n_escalon_gana']} · tramos raros ignorados {c['n_tramos_raros']} · repetidos con tramos distintos "
+              f"{c['n_escalon_gana']} · con descuento propio y tramo {c['n_propio_y_tramo']} · tramos raros ignorados {c['n_tramos_raros']} · repetidos con tramos distintos "
               f"(vacíos) {c['n_tramos_dudosos']} · sin precio (vacíos) {c['n_sin_precio']}", flush=True)
         return True
     except Exception as ex:

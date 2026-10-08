@@ -419,7 +419,8 @@ eq('(P) tramos raros (0 %, 100 %, 0 uds, sin %): se ignoran → el precio de hoy
 eq('(P) 🔴 repetido con tramos DISTINTOS: las tres vacías (no se adivina cuál vale)', _esc(_pp['P10']), (None, None, None))
 eq('(P) repetido con tramos iguales: vale', _esc(_pp['P11']), (9.0, 10, 9.0))
 eq('(P) las cuentas: con tramo, gana el tramo, raros, dudosos y sin precio', _cp,
-   {'n_con_tramo': 9, 'n_escalon_gana': 6, 'n_tramos_raros': 4, 'n_tramos_dudosos': 1, 'n_sin_precio': 1})
+   {'n_con_tramo': 9, 'n_escalon_gana': 6, 'n_propio_y_tramo': 2, 'n_tramos_raros': 4, 'n_tramos_dudosos': 1,
+    'n_sin_precio': 1})
 eq('(P) 🔒 la regla de la base: en cada fila, las tres llenas o las tres vacías',
    all((f['precio_escalon'] is None) == (f['uds_escalon'] is None) == (f['precio_pa'] is None) for f in _filas_p), True)
 eq('(P) …y solo toca esas tres claves (el resto de la fila, como venía)',
@@ -812,10 +813,12 @@ import re as _re
 _linea_tramos = [l for l in texto_con.splitlines() if l.startswith('>>> TRAMOS')]
 eq('(P) 🔒 en el log, SOLO recuentos (el repo es público): ni un importe',
    [bool(_re.fullmatch(r'>>> TRAMOS \(en sombra, nadie los lee\): \d+ productos con tramo · el tramo gana en \d+ · '
+                       r'con descuento propio y tramo \d+ · '
                        r'tramos raros ignorados \d+ · repetidos con tramos distintos \(vacíos\) \d+ · sin precio \(vacíos\) \d+',
                        l)) for l in _linea_tramos], [True])
-eq('(P) …y son los de este banco: 3 con tramo, gana en 2', 'con tramo · el tramo gana en 2' in texto_con and
-   '3 productos con tramo' in texto_con, True)
+eq('(P) …y son los de este banco: 3 con tramo, gana en 2, y 1 con descuento propio y tramo (UG00001)',
+   'con tramo · el tramo gana en 2 · con descuento propio y tramo 1 ·' in texto_con and '3 productos con tramo' in texto_con,
+   True)
 # 🔴 Si los tramos FALLAN, la pasada se aplica igual con las tres vacías, y el run acaba en ROJO al final.
 _poner_de_verdad = dp.poner_escalones
 dp.poner_escalones = lambda *a, **k: (_ for _ in ()).throw(RuntimeError('tramos de mentira que fallan'))
