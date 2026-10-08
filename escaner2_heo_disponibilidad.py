@@ -24,6 +24,10 @@ QUE HACE, EN ORDEN:
      (`escaner2_disponibilidad.construir_disponibilidad`): TODAS las marcas, disponibles y NO, cada una
      marcada si vino sin dato de disponibilidad o de precio. Los sin GTIN (~1.155) los quita la
      descarga heredada y solo se cuentan;
+     🆕 3 bis (encargo H1, 8-oct-2026): LOS TRAMOS, EN SOMBRA. Con la lista cruda de products (la misma, sin pedir
+     nada nuevo a HEO), cada fila con precio lleva `precio_escalon`, `uds_escalon` y `precio_pa` con el tramo mas
+     barato (`escaner2_disponibilidad.poner_escalones`). Nadie los lee todavia para HEO. Si falla, van vacios, la
+     pasada sigue y el run acaba en ROJO al final;
   4. sube las filas a `disp_lectura` en lotes y deja en la pasada sus recuentos;
   5. llama a `disp_aplicar_pasada`, la funcion de la base que, de una vez: pasa el blindaje
      anti-vaciado, apunta los cambios contra el estado de antes, marca lo que falta y cuadra. Si la
@@ -195,6 +199,25 @@ def valorar_novedades(pasada, seleccion=None):
         return False
 
 
+def poner_escalones(dp, filas, crudos, M):
+    """LOS TRAMOS DE HEO, EN SOMBRA (encargo H1, 8-oct-2026): `dp.poner_escalones` rellena precio_escalon, uds_escalon
+    y precio_pa de cada fila con el tramo mas barato. 🔴 PASO QUE NO TUMBA LA PASADA: si falla, las tres columnas van
+    VACIAS en todas las filas (la base admite las tres vacias), la pasada se sube y se aplica igual, y el run acaba en
+    ROJO al final. En el log, solo recuentos: el repo es publico. Devuelve True si salio bien."""
+    try:
+        c = dp.poner_escalones(filas, crudos['catalog/products'], crudos['catalog/prices'], M)
+        print(f">>> TRAMOS (en sombra, nadie los lee): {c['n_con_tramo']} productos con tramo · el tramo gana en "
+              f"{c['n_escalon_gana']} · con descuento propio y tramo {c['n_propio_y_tramo']} · tramos raros ignorados {c['n_tramos_raros']} · repetidos con tramos distintos "
+              f"(vacíos) {c['n_tramos_dudosos']} · sin precio (vacíos) {c['n_sin_precio']}", flush=True)
+        return True
+    except Exception as ex:
+        for f in filas:
+            f.update(precio_escalon=None, uds_escalon=None, precio_pa=None)
+        print(f"ESCALONES_NO_CALCULADOS: los tramos han fallado y van vacíos; la pasada sigue: {type(ex).__name__}",
+              flush=True)
+        return False
+
+
 def main():
     import escaner2_motor as e2
     import escaner2_disponibilidad as dp
@@ -262,6 +285,10 @@ def main():
               f"sin dato de disponibilidad {cuentas['n_sin_dato_disponibilidad']}, de precio {cuentas['n_sin_dato_precio']} · "
               f"con regla del escáner 2 {cuentas['por_regla']}", flush=True)
 
+        # 2 bis · 🆕 LOS TRAMOS, EN SOMBRA (encargo H1): las tres columnas de OC2 con el tramo mas barato, de la lista
+        #     cruda de products que ya se bajo. No cambia nada de lo que se sube ni de como se aplica, y no lanza.
+        escalones_ok = poner_escalones(dp, filas, crudos, M)
+
         # 3 · Lo leido, a la base, en lotes; y los recuentos en la pasada. La base los contrasta.
         for i in range(0, len(filas), LOTE):
             sb.table('disp_lectura').insert([dict(f, pasada_id=pasada) for f in filas[i:i + LOTE]]).execute()
@@ -313,6 +340,9 @@ def main():
               f"Todo lo demás de la pasada está aplicado.", flush=True)
         rojo = True
     if not novedades_ok or not valoracion_ok:
+        rojo = True
+    if not escalones_ok:
+        # (Encargo H1) La pasada esta aplicada con las tres columnas vacias; los tramos hay que mirarlos.
         rojo = True
     if rojo:
         sys.exit(1)

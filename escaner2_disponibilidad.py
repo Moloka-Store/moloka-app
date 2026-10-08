@@ -48,6 +48,7 @@ base, ni reloj.
    crudo = sin GTIN + leidas + repetidos, y la tolerancia se mide sobre los distintos.
 """
 import re
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 import escaner2_motor as e2
 
@@ -228,6 +229,96 @@ def construir_disponibilidad(filas_heo, chase_heo, M, *, con_precio, con_disponi
         raise LecturaInvalida('descargar_heo devolvió %d productos y salen %d filas más %d repetidas'
                               % (n_devueltos, cuentas['n_leidas'], n_duplicados_filas))
     return filas, cuentas
+
+
+# 🆕 LOS TRAMOS DE HEO, EN SOMBRA (encargo H1, 8-oct-2026). Fernando, 8-oct: «siempre hay que calcular con el tramo mas
+#    barato». HEO los da en `/catalog/products` → `prices.scaledDiscounts[]` = {quantity, discount: {amount}}, con
+#    `amount` en % (medido en el encargo T: los 1.784 con tramo, todos <= 100; un caso real dio el pvd al
+#    centimo). El programa ya baja ese listado (la lista cruda de `_paginar`): no hay peticion nueva ni se
+#    toca la heredada. Se rellenan las tres columnas de OC2 (`precio_escalon`, `uds_escalon`, `precio_pa`) como en
+#    OcioStock, pero NADIE las lee para HEO todavia: v_escaner_fuente solo usa `precio_pa` en OCIOSTOCK y
+#    nov_parametros de HEO dice `precio_unidad`. Esto es solo guardar.
+def _decimal(v):
+    try:
+        d = Decimal(str(v).replace(',', '.').strip())
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+    return d if d.is_finite() else None
+
+
+def _tramos_de(producto):
+    """(validos, raros) de un producto del listado crudo de products: validos = [(uds, pct)] con 0 < pct < 100 y uds
+    entero >= 1; raros = cuantos traia que no lo son (se ignoran y se cuentan: un tramo raro no tumba la pasada de
+    disponibilidad, que es la que dice que hay en HEO)."""
+    lista = ((producto or {}).get('prices') or {}).get('scaledDiscounts') or []
+    validos, raros = [], 0
+    for t in lista if isinstance(lista, list) else [None]:
+        t = t if isinstance(t, dict) else {}
+        pct = _decimal((t.get('discount') or {}).get('amount') if isinstance(t.get('discount'), dict) else None)
+        q = t.get('quantity')
+        if pct is None or not (0 < pct < 100) or isinstance(q, bool) or not isinstance(q, int) or q < 1:
+            raros += 1
+        else:
+            validos.append((q, pct))
+    return validos, raros
+
+
+def poner_escalones(filas, productos_crudos, precios_crudos, M):
+    """Rellena en cada fila de disp_lectura `precio_escalon`, `uds_escalon` y `precio_pa` con el tramo MAS BARATO de
+    HEO, y devuelve sus cuentas {n_con_tramo, n_escalon_gana, n_propio_y_tramo, n_tramos_raros, n_tramos_dudosos,
+    n_sin_precio}. `n_propio_y_tramo` = con precio de hoy por debajo de la base Y tramo: los que dependen de si HEO
+    acumula los dos (pregunta de Fernando a HEO).
+    Modifica `filas` (solo esas tres claves).
+
+    La regla (encargo H1):
+      · `precio_escalon` = el MENOR entre el precio de hoy (`precio_unidad`: el descontado, como siempre) y el precio
+        BASE (`basePricePerUnit` de /catalog/prices, el mismo registro del que sale el de hoy) × (1 − el MAYOR % de sus
+        tramos), redondeado al centimo. 🔴 SIN ACUMULAR: el % va sobre la base, nunca sobre el ya rebajado (no se sabe
+        si HEO lo acumula); con descuento propio y tramo, gana el menor de los dos;
+      · `uds_escalon` = las unidades del tramo que gana (a igual %, el de menos unidades), o 1 si gana el de hoy (a
+        igual precio, el de hoy); en una caja son las unidades que pide HEO, es decir, CAJAS;
+      · `precio_pa` = `precio_escalon` (en HEO no consta descuento por transferencia);
+      · en las cajas, POR UNIDAD como `precio_unidad`: el tramo se calcula sobre el precio de la caja y se divide entre
+        las MISMAS unidades;
+      · sin precio de hoy, las tres vacias (la regla de la base: las tres llenas o las tres vacias).
+    🔴 Un producto que el listado trae repetido con TRAMOS DISTINTOS no sabe cual es su tramo: sus tres columnas se
+    quedan VACIAS y se cuenta (`n_tramos_dudosos`). No se tumba la pasada: esto va en sombra y la pasada es la que dice
+    que hay en HEO; lo que se sube y se aplica es exactamente lo de antes."""
+    perfil = M.PERFILES[e2.PROVEEDOR]
+    tramos, raros_por, dudosos = {}, {}, set()
+    for x in productos_crudos or []:
+        pn = _texto(x.get('productNumber'))
+        t = _tramos_de(x)
+        if pn in tramos and tramos[pn] != t[0]:
+            dudosos.add(pn)
+        tramos.setdefault(pn, t[0])
+        raros_por.setdefault(pn, t[1])
+    bases = {_texto(p.get('productNumber')): _decimal((p.get('basePricePerUnit') or {}).get('amount')
+                                                      if isinstance(p.get('basePricePerUnit'), dict) else None)
+             for p in precios_crudos or []}
+    c = {'n_con_tramo': 0, 'n_escalon_gana': 0, 'n_propio_y_tramo': 0, 'n_tramos_raros': 0, 'n_tramos_dudosos': 0,
+         'n_sin_precio': 0}
+    for f in filas:
+        pn = f['producto_prov']
+        validos = tramos.get(pn) or []
+        c['n_tramos_raros'] += raros_por.get(pn) or 0
+        c['n_con_tramo'] += bool(validos)
+        if f.get('precio_unidad') is None or f.get('precio_catalogo') is None or pn in dudosos:
+            f.update(precio_escalon=None, uds_escalon=None, precio_pa=None)
+            c['n_tramos_dudosos' if pn in dudosos else 'n_sin_precio'] += 1
+            continue
+        escalon, uds = f['precio_unidad'], 1
+        base = bases.get(pn)
+        if validos and base is not None and base > 0:
+            q, pct = min(validos, key=lambda t: (-t[1], t[0]))
+            c['n_propio_y_tramo'] += _decimal(f['precio_catalogo']) < base
+            tramo = (base * (Decimal(100) - pct) / Decimal(100)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            if tramo < _decimal(f['precio_catalogo']):
+                divisor = (f.get('uds_caja') or M.UNIDADES_CASE_TCG) if (f['es_caja'] and perfil.get('precio_caja6') == 'caja') else 1
+                escalon, uds = float(tramo) / divisor, q
+                c['n_escalon_gana'] += 1
+        f.update(precio_escalon=escalon, uds_escalon=uds, precio_pa=escalon)
+    return c
 
 
 def recuentos_del_log(texto):

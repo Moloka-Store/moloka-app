@@ -365,6 +365,76 @@ eq('(L) sin GTIN desde el listado crudo: 2 productos (S y T), 4 copias (lo que c
                              [{'producto_heo': 'B'}]), (2, 4))
 eq('(L) …y en el catálogo de prueba: el sin GTIN, 1 y 1', dp.sin_gtin_de_los_crudos(NUMEROS, FILAS, CHASE), (1, 1))
 
+# ── (P) LOS TRAMOS DE HEO, EN SOMBRA (encargo H1, 8-oct-2026) ────────────────────────────────
+# Precios inventados y redondos. Una fila de disp_lectura de mentira, con lo que lee poner_escalones.
+def _fp(pn, hoy, es_caja=False, uds_caja=None):
+    pu = None if hoy is None else (hoy / (uds_caja or 6) if es_caja else hoy)
+    return {'producto_prov': pn, 'precio_catalogo': hoy, 'precio_unidad': pu, 'es_caja': es_caja,
+            'uds_caja': uds_caja if es_caja else None}
+
+
+def _pc(pn, *tramos):
+    """Un producto del listado crudo de products con sus tramos (uds, %)."""
+    return {'productNumber': pn, 'prices': {'scaledDiscounts': [{'quantity': q, 'discount': {'amount': a}} for q, a in tramos]}}
+
+
+def _pb(pn, base):
+    return {'productNumber': pn, 'basePricePerUnit': {'amount': base}}
+
+
+def _esc(f):
+    # .get: si la pasada no los pone, el assert sale en rojo con su nombre (y no un KeyError del banco).
+    return (None if f.get('precio_escalon') is None else round(f['precio_escalon'], 6), f.get('uds_escalon', 'FALTA'),
+            None if f.get('precio_pa') is None else round(f['precio_pa'], 6))
+
+
+_filas_p = [_fp('P1', 10.0), _fp('P2', 10.0), _fp('P3', 8.5), _fp('P4', 9.5), _fp('P5', 10.0), _fp('P6', 4.99),
+            _fp('P7', 60.0, es_caja=True, uds_caja=6), _fp('P8', None), _fp('P9', 10.0), _fp('P10', 10.0), _fp('P11', 10.0)]
+_prods_p = [{'productNumber': 'P1', 'prices': {'scaledDiscounts': []}},            # sin tramos
+            _pc('P2', (10, 10)),                                                  # 10 % desde 10 sobre la base
+            _pc('P3', (10, 10)),                                                  # descuento propio (8,50) y tramo: gana el propio
+            _pc('P4', (10, 10)),                                                  # descuento propio (9,50) y tramo: gana el tramo
+            _pc('P5', (6, 5), (12, 10), (24, 10)),                                # el MAYOR %; a igual %, el de menos uds
+            _pc('P6', (6, 10)),                                                   # redondeo al céntimo: 4,99 × 0,90 = 4,491 → 4,49
+            _pc('P7', (2, 10)),                                                   # caja de 6: el tramo, por unidad
+            _pc('P8', (10, 10)),                                                  # sin precio de hoy: las tres vacías
+            _pc('P9', (10, 0), (5, 100), (0, 10), (3, None)),                    # tramos raros: se ignoran y se cuentan
+            _pc('P10', (10, 10)), _pc('P10', (12, 10)),                          # repetido con tramos DISTINTOS: vacías
+            _pc('P11', (10, 10)), _pc('P11', (10, 10))]                          # repetido con tramos iguales: vale
+_precios_p = [_pb('P1', 10.0), _pb('P2', 10.0), _pb('P3', 10.0), _pb('P4', 10.0), _pb('P5', 10.0), _pb('P6', 4.99),
+              _pb('P7', 60.0), _pb('P9', 10.0), _pb('P10', 10.0), _pb('P11', 10.0)]
+_cp = dp.poner_escalones(_filas_p, _prods_p, _precios_p, M)
+_pp = {f['producto_prov']: f for f in _filas_p}
+eq('(P) sin tramos: uds 1 y el precio de hoy (y precio_pa igual)', _esc(_pp['P1']), (10.0, 1, 10.0))
+eq('(P) con tramo: el % sobre el precio base (10 × 0,90 = 9), desde 10 uds', _esc(_pp['P2']), (9.0, 10, 9.0))
+eq('(P) 🔴 descuento propio (8,50) y tramo del 10 %: gana el propio, SIN acumular (no 7,65)', _esc(_pp['P3']), (8.5, 1, 8.5))
+eq('(P) 🔴 descuento propio (9,50) y tramo del 10 %: gana el tramo sobre la BASE (9), SIN acumular (no 8,55)',
+   _esc(_pp['P4']), (9.0, 10, 9.0))
+eq('(P) varios tramos: el MAYOR % y, a igual %, el de menos unidades (12, no 24)', _esc(_pp['P5']), (9.0, 12, 9.0))
+eq('(P) al céntimo, redondeando: 4,99 × 0,90 = 4,491 → 4,49', _esc(_pp['P6']), (4.49, 6, 4.49))
+eq('(P) caja de 6 a 60: el tramo sobre la caja (54) y por unidad como precio_unidad (9), desde 2 (cajas)',
+   (_esc(_pp['P7']), _pp['P7']['precio_unidad']), ((9.0, 2, 9.0), 10.0))
+eq('(P) sin precio de hoy: las tres vacías', _esc(_pp['P8']), (None, None, None))
+eq('(P) tramos raros (0 %, 100 %, 0 uds, sin %): se ignoran → el precio de hoy, uds 1', _esc(_pp['P9']), (10.0, 1, 10.0))
+eq('(P) 🔴 repetido con tramos DISTINTOS: las tres vacías (no se adivina cuál vale)', _esc(_pp['P10']), (None, None, None))
+eq('(P) repetido con tramos iguales: vale', _esc(_pp['P11']), (9.0, 10, 9.0))
+eq('(P) las cuentas: con tramo, gana el tramo, raros, dudosos y sin precio', _cp,
+   {'n_con_tramo': 9, 'n_escalon_gana': 6, 'n_propio_y_tramo': 2, 'n_tramos_raros': 4, 'n_tramos_dudosos': 1,
+    'n_sin_precio': 1})
+eq('(P) 🔒 la regla de la base: en cada fila, las tres llenas o las tres vacías',
+   all((f['precio_escalon'] is None) == (f['uds_escalon'] is None) == (f['precio_pa'] is None) for f in _filas_p), True)
+eq('(P) …y solo toca esas tres claves (el resto de la fila, como venía)',
+   [sorted(set(f) - {'precio_escalon', 'uds_escalon', 'precio_pa'}) for f in _filas_p[:1]],
+   [sorted(_fp('P1', 10.0))])
+# Sin base en /catalog/prices (no llegó o vino sin importe): el tramo no se puede calcular → el de hoy.
+_f_sinbase = [_fp('PB', 10.0)]
+dp.poner_escalones(_f_sinbase, [_pc('PB', (10, 10))], [{'productNumber': 'PB'}], M)
+eq('(P) sin precio base: el de hoy, uds 1', _esc(_f_sinbase[0]), (10.0, 1, 10.0))
+# El caso del encargo T, con números REDONDOS en lugar de los reales: base 5, 10 % desde 10 → 4,50.
+_f_caso = [_fp('UGD-DE-MENTIRA', 5.0)]
+dp.poner_escalones(_f_caso, [_pc('UGD-DE-MENTIRA', (10, 10), (10, 10))], [_pb('UGD-DE-MENTIRA', 5.0)], M)
+eq('(P) dos tramos iguales en el mismo producto (como trae HEO uno de verdad): 10 % desde 10', _esc(_f_caso[0]), (4.5, 10, 4.5))
+
 # ── (G) EL PROGRAMA Y EL WORKFLOW, POR ESTRUCTURA ────────────────────────────────────────
 AQUI = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(AQUI, 'escaner2_heo_disponibilidad.py'), encoding='utf-8') as fh:
@@ -514,7 +584,7 @@ class _BaseDeMentira:
 
 def correr_programa(disponibilidades_declaradas=None, sin_dispo=(), sin_precio=(), parametros=None, caida=False,
                     modulo_descarga=None, repetir=(), repetir_distinto=(), sin_gtin_copias=1, precio_repetido_distinto=(),
-                    fallan=(), estado_final=None, marca_parecida=0):
+                    fallan=(), estado_final=None, marca_parecida=0, tramos=None, bases=None):
     """El programa de verdad, importado con `supabase` y la descarga heredada cambiados por dobles. La
     descarga de mentira hace como la de verdad: pide cada endpoint a SU `_paginar` (buscándolo en su
     módulo en cada llamada), junta por número y dice en el log lo declarado y lo llegado. Los de
@@ -522,7 +592,8 @@ def correr_programa(disponibilidades_declaradas=None, sin_dispo=(), sin_precio=(
     heredada). Los de `repetir` vienen DOS veces en products (idénticos); los de `repetir_distinto`,
     dos veces y la segunda con otro nombre; el sin GTIN, `sin_gtin_copias` veces; y los de
     `precio_repetido_distinto`, dos veces en prices con otro importe. Lo declarado de products es lo
-    DISTINTO (como HEO)."""
+    DISTINTO (como HEO). (H1) `tramos` = {número: [(uds, %)]} van en products, como `prices.scaledDiscounts`, y
+    `bases` = {número: euros} en prices, como `basePricePerUnit`."""
     base = _BaseDeMentira()
     if parametros is not None:
         base.parametros = parametros
@@ -536,9 +607,19 @@ def correr_programa(disponibilidades_declaradas=None, sin_dispo=(), sin_precio=(
     falso_supabase.create_client = lambda url, llave: base
     falsa_descarga = types.ModuleType('escaner2_heredado_descarga')
     numeros = [f['productNumber'] for f in FILAS] + [c['producto_heo'] for c in CHASE]
-    listas = {'catalog/products': [{'productNumber': pn} for pn in numeros + list(repetir) + list(repetir_distinto)]
+    tramos, bases = tramos or {}, bases or {}
+
+    def _producto(pn):
+        if pn not in tramos:
+            return {'productNumber': pn}
+        return {'productNumber': pn, 'prices': {'scaledDiscounts': [{'quantity': q, 'discount': {'amount': a}}
+                                                                    for q, a in tramos[pn]]}}
+
+    def _precio_crudo(pn):
+        return {'productNumber': pn, **({'basePricePerUnit': {'amount': bases[pn]}} if pn in bases else {})}
+    listas = {'catalog/products': [_producto(pn) for pn in numeros + list(repetir) + list(repetir_distinto)]
                                   + [{'productNumber': 'SIN-GTIN'}] * sin_gtin_copias,
-              'catalog/prices': [{'productNumber': pn} for pn in numeros if pn not in sin_precio]
+              'catalog/prices': [_precio_crudo(pn) for pn in numeros if pn not in sin_precio]
                                 + [{'productNumber': pn, 'otro': 1} for pn in precio_repetido_distinto],
               'catalog/availabilities': [{'productNumber': pn} for pn in numeros if pn not in sin_dispo]}
     por_numero = {f['productNumber']: ('fila', f) for f in FILAS}
@@ -704,6 +785,54 @@ eq('(I) 🔴 una CAÍDA ACEPTADA: aplicada, pero el run en ROJO y con su aviso',
    (codigo, [o['datos'] for o in ops if o['tabla'] == 'rpc:disp_aplicar_pasada'], 'CAIDA_ACEPTADA: la pasada PASADA-1' in _texto,
     'PASADA APLICADA' in _texto), (1, [{'p_pasada': 'PASADA-1'}], True, True))
 
+# ── (P) LOS TRAMOS EN EL PROGRAMA ENTERO (encargo H1) ─────────────────────────────────────
+_TRAMOS_I = {'HAS0002': [(10, 10)], 'UG00001': [(6, 10)], 'FK67930': [(2, 10)]}
+_BASES_I = {'HAS0002': 21.0, 'UG00001': 6.0, 'FK67930': 48.0}
+ops_sin, codigo_sin, texto_sin = correr_programa()
+ops_con, codigo_con, texto_con = correr_programa(tramos=_TRAMOS_I, bases=_BASES_I)
+_lec_sin = {f['producto_prov']: f for o in _de(ops_sin, 'disp_lectura', 'insert') for f in o['datos']}
+_lec_con = {f['producto_prov']: f for o in _de(ops_con, 'disp_lectura', 'insert') for f in o['datos']}
+eq('(P) en el programa: sin tramos, toda fila con precio lleva las tres llenas con el de hoy y uds 1; sin precio, vacías',
+   sorted({(f.get('precio_escalon') == f['precio_unidad'] == f.get('precio_pa'), f.get('uds_escalon', 'FALTA'))
+           if f['precio_unidad'] is not None else _esc(f) for f in _lec_sin.values()}, key=str),
+   sorted({(True, 1)}, key=str))
+eq('(P) …con tramos: HAS0002 (21, 10 % desde 10) → 18,90; UG00001 (hoy 5, base 6, 10 %) se queda en 5; la caja FK67930 '
+   '(48 la caja de 6, 10 % desde 2) → 7,20 por unidad',
+   {pn: _esc(_lec_con[pn]) for pn in ('HAS0002', 'UG00001', 'FK67930')},
+   {'HAS0002': (18.9, 10, 18.9), 'UG00001': (5.0, 1, 5.0), 'FK67930': (7.2, 2, 7.2)})
+_quitar = lambda ops: [dict(o, datos=[{k: v for k, v in f.items() if k not in ('precio_escalon', 'uds_escalon', 'precio_pa')}
+                                      for f in o['datos']]) if (o['tabla'], o['accion']) == ('disp_lectura', 'insert') else o
+                       for o in ops]
+eq('(P) 🔒 EL BLINDAJE, IGUAL: con y sin tramos, la pasada hace EXACTAMENTE lo mismo (recuentos, llamadas a la base y '
+   'filas subidas) salvo las tres columnas nuevas, y termina igual',
+   (_quitar(ops_con) == _quitar(ops_sin), codigo_con, codigo_sin), (True, 0, 0))
+eq('(P) …y las tres columnas no van a la pasada (disp_pasada no las lleva en ningún guardado)',
+   any(k in o['datos'] for o in _de(ops_con, 'disp_pasada', 'update') for k in ('precio_escalon', 'uds_escalon', 'precio_pa')),
+   False)
+import re as _re
+_linea_tramos = [l for l in texto_con.splitlines() if l.startswith('>>> TRAMOS')]
+eq('(P) 🔒 en el log, SOLO recuentos (el repo es público): ni un importe',
+   [bool(_re.fullmatch(r'>>> TRAMOS \(en sombra, nadie los lee\): \d+ productos con tramo · el tramo gana en \d+ · '
+                       r'con descuento propio y tramo \d+ · '
+                       r'tramos raros ignorados \d+ · repetidos con tramos distintos \(vacíos\) \d+ · sin precio \(vacíos\) \d+',
+                       l)) for l in _linea_tramos], [True])
+eq('(P) …y son los de este banco: 3 con tramo, gana en 2, y 1 con descuento propio y tramo (UG00001)',
+   'con tramo · el tramo gana en 2 · con descuento propio y tramo 1 ·' in texto_con and '3 productos con tramo' in texto_con,
+   True)
+# 🔴 Si los tramos FALLAN, la pasada se aplica igual con las tres vacías, y el run acaba en ROJO al final.
+_poner_de_verdad = dp.poner_escalones
+dp.poner_escalones = lambda *a, **k: (_ for _ in ()).throw(RuntimeError('tramos de mentira que fallan'))
+try:
+    ops, codigo, _texto = correr_programa(tramos=_TRAMOS_I, bases=_BASES_I)
+finally:
+    dp.poner_escalones = _poner_de_verdad
+eq('(P) 🔴 si los tramos fallan: rojo AL FINAL, pero la pasada se sube, se aplica y se relee',
+   (codigo, [o['tabla'] for o in ops if o['tabla'] == 'rpc:disp_aplicar_pasada'], 'PASADA APLICADA' in _texto,
+    'ESCALONES_NO_CALCULADOS' in _texto), (1, ['rpc:disp_aplicar_pasada'], True, True))
+eq('(P) …con las tres columnas VACÍAS en todas las filas y lo demás igual que sin fallo',
+   ({_esc(f) for o in _de(ops, 'disp_lectura', 'insert') for f in o['datos']}, _quitar(ops) == _quitar(ops_sin)),
+   ({(None, None, None)}, True))
+
 # ── (M) LAS NOVEDADES DE FUNKO, UN PASO APARTE (encargo H, tramo 1) ─────────────────────────
 ops, codigo, _texto = correr_programa(fallan={('rpc:nov_seleccionar_pasada', 'rpc')})
 eq('(M) 🔴 si la selección de novedades FALLA: el run acaba en ROJO…', codigo, 1)
@@ -821,7 +950,10 @@ def _dispo(pn):
     return {'productNumber': pn, 'availableToOrder': True, 'availabilityState': 'AVAILABLE', 'availability': 'GREEN'}
 
 
-PAGINAS = {'catalog/products': [_prod('R1', 'Figura uno', 'Hasbro', '5010993999990'), _prod('R2', 'Figura dos', 'Hasbro', '5010993999991'),
+# (H1) R1 trae un tramo, como lo da HEO en products: 10 % desde 10 uds.
+_R1 = dict(_prod('R1', 'Figura uno', 'Hasbro', '5010993999990'),
+           prices={'basePricePerUnit': {'amount': 10.0}, 'scaledDiscounts': [{'quantity': 10, 'discount': {'amount': 10.0}}]})
+PAGINAS = {'catalog/products': [_R1, _prod('R2', 'Figura dos', 'Hasbro', '5010993999991'),
                                 _prod('R3', 'Figura tres w/Chase Surtido (6)', 'Funko', '889698862646'),
                                 _prod('R4', 'Figura sin código', 'Hasbro', '')],
            'catalog/prices': [_precio('R1', 10.0), _precio('R3', 60.0)],
@@ -853,6 +985,10 @@ recs = _de(ops, 'disp_pasada', 'update')[0]['datos']
 eq('(K) …los recuentos del log de la heredada: 4 productos, 2 precios, 2 disponibilidades, 1 sin GTIN',
    (recs['n_declarado'], recs['n_crudo'], recs['n_precios'], recs['n_disponibilidades'], recs['n_sin_gtin']), (4, 4, 2, 2, 1))
 eq('(K) …y su _paginar queda el de verdad', hd_real._paginar is _paginar_de_verdad, True)
+eq('(K) (H1) los tramos salen de la lista cruda de products de la heredada: R1 (10, 10 % desde 10) → 9 desde 10; '
+   'R2 sin precio, vacías; la caja R3 sin tramo, su precio por unidad y uds 1',
+   {p: _esc(f) for p, f in sorted(lectura.items())},
+   {'R1': (9.0, 10, 9.0), 'R2': (None, None, None), 'R3': (10.0, 1, 10.0)})
 
 # (K) con REPETIDOS en la heredada de verdad: R1 dos veces en products (idéntico) y en prices, y R4
 #     (sin GTIN) dos veces → se aplica con 2 repetidos de productos, 1 de precios, y sin GTIN 1.
