@@ -5,13 +5,16 @@
 # ------------------------------------------------------------
 # QUE VIGILA: la ULTIMA escritura de cada proveedor. Si uno lleva mas horas que su
 # umbral sin escribir, avisa por Telegram y el run sale en ROJO.
-#   - DBLINE, OCIOSTOCK y TCG (escaner viejo): el MAXIMO de `fecha` en
-#     `escaner_memoria`.
+#   - DBLINE y TCG (escaner viejo): el MAXIMO de `fecha` en `escaner_memoria`.
 #   - HEO y OSMA (escaner 2, desde el 03-oct-2026): la ultima pasada 'aplicada'
 #     de `disp_pasada` (`terminada_en`). El director viejo de HEO se apago a
 #     proposito el 01-oct y `escaner_memoria` ya no se mueve para HEO ni para OSMA:
 #     mirarla daria MUDO para siempre, y mirarla es mirar el sitio equivocado.
 #     Cada fila de HORARIOS dice su `fuente`.
+#   - OCIOSTOCK (escaner 2, encargo OC5, 07-oct-2026): tambien `disp_pasada`, la
+#     foto del catalogo entero. Su director viejo sigue en .github/workflows hasta
+#     que se apague, pero lo que leen Reponer y el Trackeador al pulsar el
+#     interruptor es la foto: el centinela vigila lo que se lee.
 #
 # CUANDO MIRA: 06:00, 10:00, 14:00 y 18:00 UTC. Cuatro pasadas, ninguna de noche
 # -- el porque, y por que el hueco nocturno no retrasa nada, esta en el cron de
@@ -64,7 +67,8 @@ from datetime import datetime, timedelta, timezone
 #   TCG        | 06-16, todos los dias|   ~6    |   18,00 h   |   18,00 h   | 22
 #   DBLINE     | 06-11, L a S         |   ~4    |   44,00 h   |   23,00 h   | 26
 #   OCIOSTOCK  | 07-15, L a S         |   ~5    |   40,00 h   |   18,00 h   | 22
-#   (HEO y OSMA: tabla propia, mas abajo; ya no salen de `escaner_memoria`.)
+#   (HEO, OSMA y, desde el 07-oct-2026, OCIOSTOCK: tabla propia, mas abajo; ya no
+#   salen de `escaner_memoria`. La fila de OCIOSTOCK de aqui es la del escaner viejo.)
 #
 # Con esas X, en los 28 dias medidos NO habria saltado ni un aviso falso:
 # ningun hueco descontado llego a la X de su proveedor (DBLine tuvo 2 por encima
@@ -104,7 +108,23 @@ from datetime import datetime, timedelta, timezone
 #      ----------+------------------+--------------------+-------------+-------------+----
 #      HEO       | disp_pasada      | 06-19, todos       |  23,00 h *  |  (ninguno)  | 26
 #      OSMA      | disp_pasada      | 05, L a V          |  24,00 h *  |  sab y dom  | 26
-#      (* derivado del horario, no medido en la pelicula: ver arriba.)
+#      OCIOSTOCK | disp_pasada      | 07, todos          |  24,00 h *  |  (ninguno)  | 26
+#      (* derivado del horario, no medido en la pelicula: ver arriba y abajo.)
+#
+# 🆕 OCIOSTOCK EN EL ESCANER 2 (07-oct-2026, encargo OC5). Medido el 07-oct a las
+#    15:02 UTC en `disp_pasada`: UNA sola 'aplicada' (10:50:59 UTC, la primera,
+#    lanzada a mano). 🔴 SIN PELICULA: la cifra sale del reloj, como OSMA el 03-oct.
+#    El reloj es cron-job.org (tarea 8598562, `12 9,13,17 * * *` Europe/Madrid,
+#    los siete dias). OcioStock rehace su fichero UNA vez por noche (38 dias del
+#    director viejo, parte OC1): la de las 09:12 Madrid (07:12 UTC en verano) se
+#    APLICA, y las de 13:12 y 17:12 encuentran el mismo fichero y se cierran
+#    'rechazada' «al dia», que aqui NO cuentan como escritura (no han escrito).
+#    Hueco normal: de una 09:12 a la del dia siguiente = 24 h, todos los dias
+#    (tambien sabado y domingo: el fichero se rehace las siete noches). X = 24 + 2
+#    = 26 h, como OSMA. Avisa, por tanto, si una mañana no se aplica fichero
+#    nuevo y la del dia siguiente tampoco ha llegado a las 09:12 + 2 h: que
+#    OcioStock no rehaga el fichero una noche no ha pasado en 38 dias, y si pasa
+#    es justo lo que hay que saber (Reponer veria el catalogo de ayer).
 #
 #    Por que no se pone la X mas baja para HEO (11 h medidas + margen): porque el
 #    fin de semana HEO calla 23 h de por si y una X de 14 daria un aviso falso cada
@@ -121,7 +141,7 @@ from datetime import datetime, timedelta, timezone
 #      -----------+---------------+------+----------------------+--------+-------------
 #      TCG        | 06-16         | 22 h |   04:00 y 14:00      |  ≤ 4 h |   ≤ 26 h
 #      DBLINE     | 06-11         | 26 h |   08:00 y 13:00      |  ≤ 4 h |   ≤ 30 h
-#      OCIOSTOCK  | 07-15         | 22 h |   05:00 y 13:00      |  ≤ 4 h |   ≤ 26 h
+#      OCIOSTOCK  | 07 (una)      | 26 h |   09:00 y 09:00      |  ≤ 1 h |   ≤ 27 h
 #      OSMA       | 05 (una)      | 26 h |   07:00 y 07:00      |  ≤ 3 h |   ≤ 29 h
 #      HEO        | 06-19         | 26 h |   08:00 y 21:00      | ≤ 12 h |   ≤ 38 h  <- ver abajo
 #
@@ -178,9 +198,9 @@ HORARIOS = {
     'HEO':       {'fuente': 'disp_pasada', 'umbral_h': 26, 'descansa_domingo': False,
                   'descansa_sabado': False, 'medido_h': 23.00, 'ventana_ancha': True,
                   'primera_h': 6, 'ultima_h': 19, 'dias': 'todos los dias'},
-    'OCIOSTOCK': {'fuente': 'escaner_memoria', 'umbral_h': 22, 'descansa_domingo': True,
-                  'descansa_sabado': False, 'medido_h': 18.00,
-                  'primera_h': 7, 'ultima_h': 15, 'dias': 'L a S'},
+    'OCIOSTOCK': {'fuente': 'disp_pasada', 'umbral_h': 26, 'descansa_domingo': False,
+                  'descansa_sabado': False, 'medido_h': 24.00,
+                  'primera_h': 7, 'ultima_h': 7, 'dias': 'todos los dias (una aplicada, 09:12 Madrid)'},
     'OSMA':      {'fuente': 'disp_pasada', 'umbral_h': 26, 'descansa_domingo': True,
                   'descansa_sabado': True, 'medido_h': 24.00,
                   'primera_h': 5, 'ultima_h': 5, 'dias': 'L a V (una pasada, 07:15 Madrid)'},

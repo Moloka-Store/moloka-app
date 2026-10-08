@@ -118,6 +118,11 @@ def _u(txt):
 
 
 def _escenario(ahora, memoria, disp):
+    # 🆕 07-oct-2026 (OC5): OCIOSTOCK tambien se vigila en `disp_pasada`. Un escenario
+    #    que no hable de OcioStock lo trae al dia (una 'aplicada' de hace 2 h), para que
+    #    no opine; los suyos lo ponen a mano.
+    disp = dict(disp)
+    disp.setdefault('OCIOSTOCK', [('aplicada', _u(ahora) - timedelta(hours=2))])
     return {'ahora': _u(ahora), 'memoria': memoria, 'disp': disp}
 
 
@@ -126,23 +131,28 @@ def _fresco(ahora, horas):
 
 
 def _tres_al_dia(ahora):
-    """DBLINE, OCIOSTOCK y TCG con 2 h de silencio: que no opinen en estos casos."""
+    """DBLINE, OCIOSTOCK y TCG con 2 h de silencio en escaner_memoria: que no opinen.
+    (Desde el 07-oct-2026 la de OCIOSTOCK es un señuelo: se le mira `disp_pasada`.)"""
     return {p: _fresco(ahora, 2) for p in ('DBLINE', 'OCIOSTOCK', 'TCG')}
 
 
-# LA FOTO DE VERDAD: produccion, sabado 03-oct-2026 a las 13:36 Madrid (11:36 UTC),
-# leida con SQL de solo lectura. HEO lleva dos dias sin tocar escaner_memoria (el
-# director viejo se apago el 01-oct) y OSMA lleva dos meses: de mirarlas ahi saldrian
-# MUDOS, y estan vivas en el escaner 2.
+# LA FOTO DE VERDAD: produccion, miercoles 07-oct-2026 a las 17:02 Madrid (15:02 UTC),
+# leida con SQL de solo lectura (conector de lectura, encargo OC5). HEO lleva seis dias
+# sin tocar escaner_memoria (el director viejo se apago el 01-oct) y OSMA dos meses: de
+# mirarlas ahi saldrian MUDOS, y estan vivas en el escaner 2. OCIOSTOCK tiene UNA pasada
+# aplicada de la foto (la primera, 10:50:59 UTC) y su director viejo sigue escribiendo
+# escaner_memoria (15:01 UTC): aqui los dos dicen «al dia», asi que la foto NO distingue
+# la fuente de OcioStock; eso lo prueban `ocio_jueves_10h` y su rotura (R).
+# (Hasta el 07-oct esta foto era la del sabado 03-oct, 11:36 UTC, sin pasadas de OcioStock.)
 _FOTO = _escenario(
-    '2026-10-03T11:36:00',
-    {'DBLINE': _u('2026-10-03T10:31:32'), 'OCIOSTOCK': _u('2026-10-03T11:01:17'),
-     'TCG': _u('2026-10-03T10:02:18'), 'HEO': _u('2026-10-01T05:34:35'),
+    '2026-10-07T15:02:52',
+    {'DBLINE': _u('2026-10-07T10:32:10'), 'OCIOSTOCK': _u('2026-10-07T15:01:31'),
+     'TCG': _u('2026-10-07T14:02:44'), 'HEO': _u('2026-10-01T05:34:35'),
      'OSMA': _u('2026-08-06T15:37:51')},
-    {'HEO': [('aplicada', _u('2026-10-03T07:05:51')), ('aplicada', _u('2026-10-03T06:06:04')),
-             ('fallida', _u('2026-09-30T13:05:54'))],
-     'OSMA': [('aplicada', _u('2026-10-02T05:15:46')), ('aplicada', _u('2026-10-01T12:01:54')),
-              ('rechazada', _u('2026-10-01T12:03:30'))]})
+    {'HEO': [('aplicada', _u('2026-10-07T14:06:29')), ('aplicada', _u('2026-10-07T13:06:24'))],
+     'OSMA': [('aplicada', _u('2026-10-07T05:15:56')), ('aplicada', _u('2026-10-06T05:16:31')),
+              ('aplicada', _u('2026-10-05T05:15:56'))],
+     'OCIOSTOCK': [('aplicada', _u('2026-10-07T10:50:59'))]})
 
 
 def _escenario_de(caso):
@@ -180,6 +190,26 @@ def _escenario_de(caso):
         return _escenario(a, _tres_al_dia(a),
                           {'HEO': [('aplicada', _fresco(a, 1))],
                            'OSMA': [('aplicada', _u('2026-10-09T05:15:46'))]})
+    # 🆕 OCIOSTOCK (07-oct-2026, OC5): una aplicada al dia, a las 09:12 Madrid (07:12 UTC).
+    # Jueves 8-oct: la del miercoles 07:13 UTC es la ultima aplicada; la de hoy 07:13 salio
+    # 'rechazada' (mismo fichero: «al dia», no cuenta). A las 09:00 UTC van 25,8 h: VERDE.
+    # A las 10:00 UTC, 26,8 h: ROJO. Señuelo: su escaner_memoria (el director viejo), fresco.
+    if caso in ('ocio_jueves_09h', 'ocio_jueves_10h'):
+        a = '2026-10-08T09:00:00' if caso == 'ocio_jueves_09h' else '2026-10-08T10:00:00'
+        m = _tres_al_dia(a)
+        m['OCIOSTOCK'] = _fresco(a, 1)
+        return _escenario(a, m, {'HEO': [('aplicada', _fresco(a, 1))],
+                                 'OSMA': [('aplicada', _u('2026-10-08T05:15:46'))],
+                                 'OCIOSTOCK': [('aplicada', _u('2026-10-07T07:13:00')),
+                                               ('rechazada', _u('2026-10-08T07:13:00'))]})
+    # Domingo 11-oct 10:00 UTC: OcioStock trabaja los siete dias. La ultima aplicada es la
+    # del sabado 07:13 UTC: 26,8 h, y el domingo NO se descuenta. ROJO.
+    if caso == 'ocio_domingo_10h':
+        a = '2026-10-11T10:00:00'
+        return _escenario(a, _tres_al_dia(a),
+                          {'HEO': [('aplicada', _fresco(a, 1))],
+                           'OSMA': [('aplicada', _u('2026-10-09T05:15:46'))],
+                           'OCIOSTOCK': [('aplicada', _u('2026-10-10T07:13:00'))]})
     return None
 
 
@@ -512,15 +542,23 @@ eq('(B) 🔴 y toda linea sin director es del escaner 2 (`disp_pasada`), no un d
    sorted(p for p in HORARIOS if p not in _directores and p not in _de_disp), [])
 eq('(B) 🔴 las fuentes son dos y se escriben bien (una fuente mal escrita leeria la otra)',
    sorted(set(c['fuente'] for c in HORARIOS.values())), ['disp_pasada', 'escaner_memoria'])
-eq('(B) 🔴 HEO y OSMA se vigilan en `disp_pasada` (el escaner viejo de HEO esta apagado)',
-   _de_disp, ['HEO', 'OSMA'])
-eq('(B) 🔴 DBLINE, OCIOSTOCK y TCG siguen EXACTAMENTE como estaban: `escaner_memoria`',
+# 🆕 07-oct-2026 (OC5): OCIOSTOCK pasa a `disp_pasada`. Su director viejo SIGUE en
+#    .github/workflows (director-ociostock.yml) y tiene su linea: la regla de arriba se
+#    cumple igual (todo director tiene linea; las lineas sin director son de disp_pasada).
+eq('(B) 🔴 HEO, OCIOSTOCK y OSMA se vigilan en `disp_pasada` (lo que leen Reponer y el Trackeador)',
+   _de_disp, ['HEO', 'OCIOSTOCK', 'OSMA'])
+eq('(B) 🔴 DBLINE y TCG siguen EXACTAMENTE como estaban: `escaner_memoria`',
    sorted(p for p in HORARIOS if HORARIOS[p]['fuente'] == 'escaner_memoria'),
-   ['DBLINE', 'OCIOSTOCK', 'TCG'])
-eq('(B) 🔴 …con sus plazos de siempre (22, 26 y 22 h) y el domingo descontado como antes',
+   ['DBLINE', 'TCG'])
+eq('(B) 🔴 …con sus plazos de siempre (26 y 22 h) y el domingo descontado como antes',
    [(p, HORARIOS[p]['umbral_h'], HORARIOS[p]['descansa_domingo'], HORARIOS[p]['descansa_sabado'])
-    for p in ('DBLINE', 'OCIOSTOCK', 'TCG')],
-   [('DBLINE', 26, True, False), ('OCIOSTOCK', 22, True, False), ('TCG', 22, False, False)])
+    for p in ('DBLINE', 'TCG')],
+   [('DBLINE', 26, True, False), ('TCG', 22, False, False)])
+eq('(B) 🔴 OCIOSTOCK: una aplicada al dia los siete dias -> 26 h y ningun dia descontado',
+   (HORARIOS['OCIOSTOCK']['umbral_h'], HORARIOS['OCIOSTOCK']['descansa_sabado'],
+    HORARIOS['OCIOSTOCK']['descansa_domingo']), (26, False, False))
+eq('(B) 🔴 …y su director viejo sigue existiendo y con linea (mientras no se apague)',
+   'OCIOSTOCK' in _directores and 'OCIOSTOCK' in HORARIOS, True)
 eq('(B) 🔴 OSMA: de lunes a viernes, el sabado Y el domingo no cuentan',
    (HORARIOS['OSMA']['descansa_sabado'], HORARIOS['OSMA']['descansa_domingo']), (True, True))
 eq('(B) 🔴 HEO trabaja los siete dias: no se le descuenta ninguno',
@@ -736,12 +774,30 @@ _foto = correr('foto_hoy')
 eq('(C) [foto_hoy] 🔴 con la foto de PRODUCCION de hoy, nada en rojo (exit 0)', _foto['codigo'], 0)
 eq('(C) [foto_hoy] 🔴 los cinco al dia, HEO y OSMA incluidos', _foto['veredicto'], _AL_DIA)
 eq('(C) [foto_hoy] cero Telegram', _foto['telegrams'], 0)
-eq('(C) [foto_hoy] y el log dice DE DONDE sale la fecha de HEO y de OSMA',
+eq('(C) [foto_hoy] y el log dice DE DONDE sale la fecha de HEO, OCIOSTOCK y OSMA',
    [bool(re.search(r'^  %s .*fuente disp_pasada$' % p, _foto['salida'], re.M))
-    for p in ('HEO', 'OSMA')], [True, True])
-eq('(C) [foto_hoy] …y la de los otros tres sigue siendo escaner_memoria',
+    for p in ('HEO', 'OCIOSTOCK', 'OSMA')], [True, True, True])
+eq('(C) [foto_hoy] …y la de los otros dos sigue siendo escaner_memoria',
    [bool(re.search(r'^  %s .*fuente escaner_memoria$' % p, _foto['salida'], re.M))
-    for p in ('DBLINE', 'OCIOSTOCK', 'TCG')], [True, True, True])
+    for p in ('DBLINE', 'TCG')], [True, True])
+eq('(C) [foto_hoy] 🔴 OCIOSTOCK lee SU pasada aplicada (10:50 UTC), no la memoria del viejo (15:01)',
+   bool(re.search(r'^  OCIOSTOCK +ultima 2026-10-07 10:50 UTC .*fuente disp_pasada$',
+                  _foto['salida'], re.M)), True)
+
+_oc9 = correr('ocio_jueves_09h')
+eq('(C) [ocio_jueves_09h] 🔴 OcioStock con 25,8 h y su pasada de hoy «al dia» (rechazada): VERDE',
+   (_oc9['codigo'], _oc9['telegrams'], _oc9['veredicto']), (0, 0, _AL_DIA))
+_oc10 = correr('ocio_jueves_10h')
+eq('(C) [ocio_jueves_10h] 🔴 …a las 10:00 UTC (26,8 h): ROJO y SOLO OCIOSTOCK',
+   (_oc10['codigo'], _oc10['veredicto']), (1, dict(_AL_DIA, OCIOSTOCK='MUDO')))
+eq('(C) [ocio_jueves_10h] 🔴 un Telegram que dice cuanto lleva y que es del escaner 2',
+   (_oc10['telegrams'], 'OCIOSTOCK' in _oc10['texto'], 'lleva 27 h sin escribir' in _oc10['texto'],
+    'disp_pasada' in _oc10['texto']), (1, True, True, True))
+eq('(C) [ocio_jueves_10h] 🔴 la \'rechazada\' de hoy NO cuenta, y su escaner_memoria FRESCO no lo salva',
+   _oc10['marca'], {'OCIOSTOCK': _oc10['hoy']})
+_ocd = correr('ocio_domingo_10h')
+eq('(C) [ocio_domingo_10h] 🔴 OcioStock trabaja el domingo: 26,8 h sin pasada un domingo es ROJO',
+   (_ocd['codigo'], _ocd['veredicto']), (1, dict(_AL_DIA, OCIOSTOCK='MUDO')))
 
 _heo30 = correr('heo_30h_martes')
 eq('(C) [heo_30h_martes] 🔴 HEO con 30 h sin pasada aplicada un martes: ROJO y SOLO HEO',
@@ -818,6 +874,22 @@ eq('(R) 🔴 OSMA mirado en escaner_memoria (06-ago): la foto de hoy se pone ROJ
 _r3 = correr('osma_sabado', ruta=estropeado(_osma_sin_sabado))
 eq('(R) 🔴 OSMA sin el descuento del sabado: el sabado de OSMA daria aviso falso (ROJO)',
    (_r3['codigo'], _r3['veredicto']['OSMA']), (1, 'MUDO'))
+def _ocio_a_memoria(tabla):
+    tabla['OCIOSTOCK']['fuente'] = 'escaner_memoria'
+
+
+def _ocio_descansa_domingo(tabla):
+    tabla['OCIOSTOCK']['descansa_domingo'] = True
+
+
+# 🆕 07-oct-2026 (OC5) · Las roturas de OcioStock, sobre SUS escenarios: en la foto de hoy
+#    las dos fuentes dicen «al dia» y una rotura ahi no se veria (ver el comentario de _FOTO).
+_r5 = correr('ocio_jueves_10h', ruta=estropeado(_ocio_a_memoria))
+eq('(R) 🔴 OCIOSTOCK mirado otra vez en escaner_memoria: el mudo del jueves sale VERDE (el banco lo caza)',
+   (_r5['codigo'], _r5['veredicto']['OCIOSTOCK']), (0, 'al dia'))
+_r6 = correr('ocio_domingo_10h', ruta=estropeado(_ocio_descansa_domingo))
+eq('(R) 🔴 OCIOSTOCK descontando el domingo: el mudo del domingo sale VERDE (el banco lo caza)',
+   (_r6['codigo'], _r6['veredicto']['OCIOSTOCK']), (0, 'al dia'))
 _r4 = correr('foto_hoy', ruta=estropeado(lambda t: None))
 eq('(R) …y la copia SIN estropear (control) sale verde: las roturas no son un banco roto',
    (_r4['codigo'], _r4['veredicto']), (0, _AL_DIA))
