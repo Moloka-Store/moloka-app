@@ -233,8 +233,8 @@ def construir_disponibilidad(filas_heo, chase_heo, M, *, con_precio, con_disponi
 
 # 🆕 LOS TRAMOS DE HEO, EN SOMBRA (encargo H1, 8-oct-2026). Fernando, 8-oct: «siempre hay que calcular con el tramo mas
 #    barato». HEO los da en `/catalog/products` → `prices.scaledDiscounts[]` = {quantity, discount: {amount}}, con
-#    `amount` en % (medido en el encargo T: los 1.784 con tramo, todos <= 100; el caso UGD020019, 10 % desde 10 uds,
-#    da el pvd al centimo). El programa ya baja ese listado (la lista cruda de `_paginar`): no hay peticion nueva ni se
+#    `amount` en % (medido en el encargo T: los 1.784 con tramo, todos <= 100; un caso real dio el pvd al
+#    centimo). El programa ya baja ese listado (la lista cruda de `_paginar`): no hay peticion nueva ni se
 #    toca la heredada. Se rellenan las tres columnas de OC2 (`precio_escalon`, `uds_escalon`, `precio_pa`) como en
 #    OcioStock, pero NADIE las lee para HEO todavia: v_escaner_fuente solo usa `precio_pa` en OCIOSTOCK y
 #    nov_parametros de HEO dice `precio_unidad`. Esto es solo guardar.
