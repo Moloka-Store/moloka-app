@@ -21,7 +21,7 @@ fila por producto (~18.700, ~12.500 con unidades).
      NEW con unidades entran (Fernando: «si que entren»). preorder = Note PRENOTAZIONE. Note se guarda tal cual.
   4. PRECIO: precio_catalogo = Prezzo; precio_unidad = Prezzo promo si es > 0 y su fin (solo el dia) es hoy o
      despues; si no, Prezzo (Fernando: «Calcula con el precio vigente de compra en cada momento»). en_oferta y
-     fin_oferta (solo el dia). Sin escalones, sin el 1 % de transferencia, sin cajas (es_caja false siempre).
+     fin_oferta (solo el dia). Promo > 0 sin fin: con Prezzo, y se cuenta (n_promo_sin_fin). Sin escalones, sin el 1 % de transferencia, sin cajas (es_caja false siempre).
   5. CHASE SUELTO: solo marca FUNKO (Publisher) con «chase» al final del nombre o entre parentesis, sin «w/» ni
      «with» → regla 'chase_suelto' y es_chase true (como OcioStock, regla 4). «w/Chase» es la figura normal.
   6. FECHAS: solo el dia (la hora que traen es la de la descarga y no significa nada).
@@ -97,6 +97,7 @@ def leer_excel(contenido):
         raise LecturaInvalida('el fichero no se abre como .xlsx') from None
     try:
         hoja = libro.worksheets[0]
+        hoja.reset_dimensions()  # (Cowork, 9-oct) una dimension mal declarada por el servidor no recorta columnas
         todas = [list(f) for f in hoja.iter_rows(values_only=True)]
     finally:
         libro.close()
@@ -163,7 +164,9 @@ def _chk13(cuerpo12):
 def ean_de_cruce(crudo):
     """(ean_core, regla) del EAN (regla 2): sin espacios; 12 o 13 cifras tal cual; 11 → '0' + crudo si es un UPC-A
     de 12 con su digito de control bien; lo demas (vacio incluido) → (None, 'ean_forma_rara')."""
-    if isinstance(crudo, int):
+    if isinstance(crudo, float) and crudo.is_integer():
+        crudo = int(crudo)  # (Cowork, 9-oct) un EAN numerico llega a veces como 4999999000016.0
+    if isinstance(crudo, int) and not isinstance(crudo, bool):
         crudo = str(crudo)
     s = re.sub(r'\s+', '', str(crudo or ''))
     if not s.isdigit() or not s.isascii():
@@ -192,7 +195,10 @@ def numero(v):
     if isinstance(v, bool):
         raise ValueError('no es un número')
     if isinstance(v, (int, float, Decimal)):
-        return Decimal(str(v))
+        d = Decimal(str(v))
+        if not d.is_finite():
+            raise ValueError('no es un número finito')  # (Cowork, 9-oct) NaN e Infinity, fuera
+        return d
     s = str(v).strip()
     if not s:
         return None
@@ -253,6 +259,7 @@ def convertir(contenido, hoy, min_filas=MIN_FILAS, min_disponibles=MIN_DISPONIBL
     """De los bytes del .xlsx a las filas de disp_lectura, UNA por codigo, con TODAS las marcas y disponibles o no.
     Devuelve (filas, cuentas). LecturaInvalida si la fila 1, la cabecera, la llave, un numero o una fecha de promo no
     se entienden, o si no llega a los minimos (se dicen los recuentos, no los valores)."""
+    hoy = solo_dia(hoy)  # (Cowork, 9-oct) si entra un datetime, solo su dia
     titulo, cabecera, crudas = leer_excel(contenido)
     fecha_catalogo = fecha_del_titulo(titulo)
     idioma = comprobar_cabecera(cabecera)
@@ -264,6 +271,7 @@ def convertir(contenido, hoy, min_filas=MIN_FILAS, min_disponibles=MIN_DISPONIBL
     c = {'n_crudo': len(crudas), 'n_leidas': 0, 'n_disponibles': 0, 'n_agotados': 0,
          'n_sin_dato_disponibilidad': 0, 'n_sin_dato_precio': 0, 'n_preventa': 0, 'n_preventa_con_stock': 0,
          'n_telefonare_disponibles': 0, 'n_new_disponibles': 0, 'n_en_oferta': 0, 'n_promo_caducada': 0,
+         'n_promo_sin_fin': 0,
          'n_chase_suelto': 0, 'n_chase_suelto_disponibles': 0, 'n_ean_forma_rara': 0, 'n_ean_11_upc': 0,
          'n_fecha_salida_rara': 0}
     por_marca = {k: {'filas': 0, 'disponibles': 0} for k in ['total'] + [k for k, _m in MARCAS_MEDIDAS]}
@@ -352,9 +360,10 @@ def convertir(contenido, hoy, min_filas=MIN_FILAS, min_disponibles=MIN_DISPONIBL
         c['n_new_disponibles'] += nota_up == 'NEW' and disponible
         c['n_en_oferta'] += en_oferta
         c['n_promo_caducada'] += (promo is not None and promo > 0 and fin is not None and fin < hoy)
+        c['n_promo_sin_fin'] += (promo is not None and promo > 0 and fin is None)  # se calcula con Prezzo
         c['n_chase_suelto'] += chase
         c['n_chase_suelto_disponibles'] += chase and disponible
-        c['n_ean_forma_rara'] += regla == 'ean_forma_rara'
+        c['n_ean_forma_rara'] += core is None  # (Cowork, 9-oct) por el EAN: un chase suelto con EAN raro tambien cuenta
         marca_up = (marca or '').upper()
         for clave, patron in [('total', '')] + list(MARCAS_MEDIDAS):
             if patron in marca_up:

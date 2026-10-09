@@ -244,6 +244,59 @@ except DB.LecturaInvalida as e:
     err = str(e)
 eq('fichero: no es un .xlsx → fallida', err, 'el fichero no se abre como .xlsx')
 
+# ── (9) Devolucion de Cowork del 9-oct-2026, un caso por punto ─────────────────────────────
+# 1. EAN que llega como float entero
+eq('cowork 1: EAN float entero = el int', DB.ean_de_cruce(4999999000016.0), ('4999999000016', None))
+eq('cowork 1: EAN float con decimales → forma rara', DB.ean_de_cruce(4999999000016.5), (None, 'ean_forma_rara'))
+# 2. n_ean_forma_rara cuenta por el EAN, no por la regla
+salida, c = leer([fila('E1', Publisher='FUNKO', Descrizione='POP Heroe Inventado Chase', EAN='  ')])
+eq('cowork 2: chase suelto con EAN raro cuenta en los dos', (c['n_chase_suelto'], c['n_ean_forma_rara'],
+                                                           salida[0]['regla'], salida[0]['ean_core']),
+   (1, 1, 'chase_suelto', None))
+# 3. promo > 0 sin fin: con Prezzo y contada
+salida, c = leer([fila('S1', **{'Prezzo (€)': 10.0, 'Prezzo promo (€)': 8.0}), fila('S2')])
+eq('cowork 3: promo sin fin → Prezzo, sin oferta', (por_codigo(salida)['S1']['precio_unidad'],
+                                                    por_codigo(salida)['S1']['en_oferta']), (10.0, False))
+eq('cowork 3: n_promo_sin_fin', c['n_promo_sin_fin'], 1)
+# 4. hoy como datetime
+salida, c = DB.convertir(excel([fila('T1', **{'Prezzo promo (€)': 8.0, 'Scadenza promo': datetime(2026, 1, 10, 0, 1)})]),
+                         datetime(2026, 1, 10, 18, 30), min_filas=1, min_disponibles=0)
+eq('cowork 4: hoy como datetime, sin TypeError y por el dia', (salida[0]['precio_unidad'], salida[0]['en_oferta']),
+   (8.0, True))
+# 5. NaN e Infinity no son numeros
+for nombre, val in (('NaN', float('nan')), ('Infinity', float('inf')), ('-Infinity', float('-inf')),
+                    ('Decimal NaN', DB.Decimal('NaN'))):
+    try:
+        DB.numero(val)
+        r = 'pasa'
+    except ValueError:
+        r = 'ValueError'
+    eq('cowork 5: numero(%s) → ValueError' % nombre, r, 'ValueError')
+# 6. una dimension mal declarada no recorta columnas
+import re as _re
+import zipfile as _zip
+
+
+def dimension_falsa(contenido, ref='A1:C3'):
+    ent, sal = _zip.ZipFile(io.BytesIO(contenido)), io.BytesIO()
+    with _zip.ZipFile(sal, 'w', _zip.ZIP_DEFLATED) as z:
+        for it in ent.infolist():
+            datos = ent.read(it.filename)
+            if it.filename == 'xl/worksheets/sheet1.xml':
+                datos, n = _re.subn(rb'<dimension ref="[^"]*"\s*/>', b'<dimension ref="%s"/>' % ref.encode(), datos)
+                assert n == 1
+            z.writestr(it, datos)
+    return sal.getvalue()
+
+
+falsa = dimension_falsa(excel([fila('R1'), fila('R2')]))
+try:
+    salida, c = DB.convertir(falsa, HOY, min_filas=1, min_disponibles=0)
+    r = (len(salida), c['idioma_cabecera'], salida[0]['precio_unidad'])
+except DB.LecturaInvalida as e:
+    r = str(e)
+eq('cowork 6: dimension declarada A1:C3 → se leen las 29 columnas y las filas', r, (2, 'it', 10.0))
+
 print()
 if fallos:
     print('ROJO: %d comprobación(es) fallida(s):' % len(fallos))
