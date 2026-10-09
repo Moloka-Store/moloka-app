@@ -53,6 +53,9 @@ QUE PRUEBA:
   (K) CON LA DESCARGA HEREDADA DE VERDAD (solo su `_get`, la red, cambiado por paginas en memoria, y
       un `requests` de mentira para importarla): el envoltorio de `_paginar` coge las listas que usa
       `descargar_catalogo_heo`, las filas suben marcadas y `_paginar` queda como estaba.
+  (Q) CON PRECIO TACHADO, SIN TRAMO (encargo H3, 9-oct-2026): con `strikePricePerUnit` > 0 en /catalog/prices, la fila
+      se guarda sin tramo (el precio de hoy, uds 1); vacio, null, 0 o negativo, el tramo como antes; en el programa
+      entero, solo cambian las tres columnas de esa fila, y el log da el recuento sin importes.
 """
 import ast
 import os
@@ -420,7 +423,7 @@ eq('(P) 🔴 repetido con tramos DISTINTOS: las tres vacías (no se adivina cuá
 eq('(P) repetido con tramos iguales: vale', _esc(_pp['P11']), (9.0, 10, 9.0))
 eq('(P) las cuentas: con tramo, gana el tramo, raros, dudosos y sin precio', _cp,
    {'n_con_tramo': 9, 'n_escalon_gana': 6, 'n_propio_y_tramo': 2, 'n_tramos_raros': 4, 'n_tramos_dudosos': 1,
-    'n_sin_precio': 1})
+    'n_sin_precio': 1, 'n_tachado_sin_tramo': 0})
 eq('(P) 🔒 la regla de la base: en cada fila, las tres llenas o las tres vacías',
    all((f['precio_escalon'] is None) == (f['uds_escalon'] is None) == (f['precio_pa'] is None) for f in _filas_p), True)
 eq('(P) …y solo toca esas tres claves (el resto de la fila, como venía)',
@@ -434,6 +437,62 @@ eq('(P) sin precio base: el de hoy, uds 1', _esc(_f_sinbase[0]), (10.0, 1, 10.0)
 _f_caso = [_fp('UGD-DE-MENTIRA', 5.0)]
 dp.poner_escalones(_f_caso, [_pc('UGD-DE-MENTIRA', (10, 10), (10, 10))], [_pb('UGD-DE-MENTIRA', 5.0)], M)
 eq('(P) dos tramos iguales en el mismo producto (como trae HEO uno de verdad): 10 % desde 10', _esc(_f_caso[0]), (4.5, 10, 4.5))
+
+# ── (Q) CON PRECIO TACHADO, SIN TRAMO (encargo H3, 9-oct-2026) ──────────────────────────────
+# Lo rebajado no tiene descuento por cantidad: si /catalog/prices trae `strikePricePerUnit` con importe > 0, el tramo
+# de la API no vale. Códigos e importes inventados: base 10 y 10 % desde 10 (→ 9) salvo que se diga otra cosa.
+def _pt(pn, base, strike=..., campo='strikePricePerUnit'):
+    """Un registro de /catalog/prices con su base y, si se da, el tachado tal cual (dict, None o lo que sea)."""
+    r = _pb(pn, base)
+    if strike is not ...:
+        r[campo] = strike
+    return r
+
+
+_filas_q = [_fp('Q1', 10.0), _fp('Q2', 10.0), _fp('Q3', 10.0), _fp('Q4', 10.0), _fp('Q5', 10.0), _fp('Q6', 10.0),
+            _fp('Q7', 10.0), _fp('Q8', 8.5), _fp('Q9', 10.0), _fp('Q10', 10.0), _fp('Q11', 60.0, es_caja=True, uds_caja=6),
+            _fp('Q12', 10.0), _fp('Q13', 10.0), _fp('Q14', None), _fp('Q15', 10.0)]
+_prods_q = [_pc(pn, (10, 10)) for pn in ('Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q10', 'Q12', 'Q13', 'Q14')] + [
+    {'productNumber': 'Q9', 'prices': {'scaledDiscounts': []}},                    # tachado y sin tramo
+    _pc('Q11', (2, 10)),                                                         # caja tachada
+    _pc('Q15', (10, 10)), _pc('Q15', (12, 10))]                                  # tachado y repetido con tramos distintos
+_precios_q = [_pt('Q1', 10.0, {'amount': 12.0, 'currencyIsoCode': 'EUR'}),      # tachado
+              _pt('Q2', 10.0),                                                   # sin la clave
+              _pt('Q3', 10.0, None),                                             # null
+              _pt('Q4', 10.0, {'amount': 0}),                                    # 0
+              _pt('Q5', 10.0, {'amount': None}),                                 # sin importe
+              _pt('Q6', 10.0, {'amount': '0,00'}),                               # 0 en texto
+              _pt('Q7', 10.0, {'amount': '12,50'}),                              # tachado en texto
+              _pt('Q8', 10.0, {'amount': 12.0}),                                 # tachado con descuento propio (8,50)
+              _pt('Q9', 10.0, {'amount': 12.0}),
+              _pt('Q10', 10.0, {'amount': 12.0}, campo='discountedStrikePricePerUnit'),  # otro campo: no cuenta
+              _pt('Q11', 60.0, {'amount': 72.0}),
+              _pt('Q12', 10.0, {'amount': 12.0}), _pt('Q12', 10.0),             # repetido: una copia tachada (la 1.ª)
+              _pt('Q13', 10.0, {'amount': -1}),                                  # negativo: no es > 0
+              _pt('Q14', 10.0, {'amount': 12.0}),                                # tachado y sin precio de hoy
+              _pt('Q15', 10.0, {'amount': 12.0})]
+_cq = dp.poner_escalones(_filas_q, _prods_q, _precios_q, M)
+_pq = {f['producto_prov']: f for f in _filas_q}
+eq('(Q) 🔴 con tachado > 0 y tramo: SIN tramo, el precio de hoy y uds 1 (no 9 desde 10)', _esc(_pq['Q1']), (10.0, 1, 10.0))
+eq('(Q) sin strikePricePerUnit y con tramo: el tramo, como hoy', _esc(_pq['Q2']), (9.0, 10, 9.0))
+eq('(Q) tachado null, 0, sin importe o «0,00»: como sin tachado, con su tramo',
+   [_esc(_pq[pn]) for pn in ('Q3', 'Q4', 'Q5', 'Q6')], [(9.0, 10, 9.0)] * 4)
+eq('(Q) tachado en texto con coma («12,50»): cuenta como tachado, sin tramo', _esc(_pq['Q7']), (10.0, 1, 10.0))
+eq('(Q) tachado con descuento propio (8,50): el de hoy, sin tramo', _esc(_pq['Q8']), (8.5, 1, 8.5))
+eq('(Q) tachado y sin tramo en la API: el de hoy, como cualquiera sin tramo', _esc(_pq['Q9']), (10.0, 1, 10.0))
+eq('(Q) el tachado es el de strikePricePerUnit: uno en discountedStrikePricePerUnit no quita el tramo',
+   _esc(_pq['Q10']), (9.0, 10, 9.0))
+eq('(Q) caja tachada: su precio por unidad de hoy (10) y uds 1, no el tramo (9 desde 2)', _esc(_pq['Q11']), (10.0, 1, 10.0))
+eq('(Q) repetido en precios con una copia tachada: sin tramo (lo prudente)', _esc(_pq['Q12']), (10.0, 1, 10.0))
+eq('(Q) tachado negativo: no es > 0, el tramo como hoy', _esc(_pq['Q13']), (9.0, 10, 9.0))
+eq('(Q) tachado y sin precio de hoy, o repetido con tramos distintos: las tres vacías, como antes',
+   [_esc(_pq[pn]) for pn in ('Q14', 'Q15')], [(None, None, None)] * 2)
+eq('(Q) las cuentas: 5 con tramo y tachado se guardan sin tramo (Q1, Q7, Q8, Q11, Q12; no Q9, sin tramo, ni Q14 y Q15, '
+   'vacías), el tramo gana en los 7 sin tachado, y Q8 (tachado) no cuenta como descuento propio y tramo',
+   _cq, {'n_con_tramo': 14, 'n_escalon_gana': 7, 'n_propio_y_tramo': 0, 'n_tramos_raros': 0, 'n_tramos_dudosos': 1,
+         'n_sin_precio': 1, 'n_tachado_sin_tramo': 5})
+eq('(Q) 🔒 la regla de la base, también con tachado: las tres llenas o las tres vacías',
+   all((f['precio_escalon'] is None) == (f['uds_escalon'] is None) == (f['precio_pa'] is None) for f in _filas_q), True)
 
 # ── (G) EL PROGRAMA Y EL WORKFLOW, POR ESTRUCTURA ────────────────────────────────────────
 AQUI = os.path.dirname(os.path.abspath(__file__))
@@ -584,7 +643,7 @@ class _BaseDeMentira:
 
 def correr_programa(disponibilidades_declaradas=None, sin_dispo=(), sin_precio=(), parametros=None, caida=False,
                     modulo_descarga=None, repetir=(), repetir_distinto=(), sin_gtin_copias=1, precio_repetido_distinto=(),
-                    fallan=(), estado_final=None, marca_parecida=0, tramos=None, bases=None):
+                    fallan=(), estado_final=None, marca_parecida=0, tramos=None, bases=None, tachados=None):
     """El programa de verdad, importado con `supabase` y la descarga heredada cambiados por dobles. La
     descarga de mentira hace como la de verdad: pide cada endpoint a SU `_paginar` (buscándolo en su
     módulo en cada llamada), junta por número y dice en el log lo declarado y lo llegado. Los de
@@ -593,7 +652,8 @@ def correr_programa(disponibilidades_declaradas=None, sin_dispo=(), sin_precio=(
     dos veces y la segunda con otro nombre; el sin GTIN, `sin_gtin_copias` veces; y los de
     `precio_repetido_distinto`, dos veces en prices con otro importe. Lo declarado de products es lo
     DISTINTO (como HEO). (H1) `tramos` = {número: [(uds, %)]} van en products, como `prices.scaledDiscounts`, y
-    `bases` = {número: euros} en prices, como `basePricePerUnit`."""
+    `bases` = {número: euros} en prices, como `basePricePerUnit`; (H3) `tachados` = {número: euros} en prices, como
+    `strikePricePerUnit`."""
     base = _BaseDeMentira()
     if parametros is not None:
         base.parametros = parametros
@@ -607,7 +667,7 @@ def correr_programa(disponibilidades_declaradas=None, sin_dispo=(), sin_precio=(
     falso_supabase.create_client = lambda url, llave: base
     falsa_descarga = types.ModuleType('escaner2_heredado_descarga')
     numeros = [f['productNumber'] for f in FILAS] + [c['producto_heo'] for c in CHASE]
-    tramos, bases = tramos or {}, bases or {}
+    tramos, bases, tachados = tramos or {}, bases or {}, tachados or {}
 
     def _producto(pn):
         if pn not in tramos:
@@ -616,7 +676,8 @@ def correr_programa(disponibilidades_declaradas=None, sin_dispo=(), sin_precio=(
                                                                     for q, a in tramos[pn]]}}
 
     def _precio_crudo(pn):
-        return {'productNumber': pn, **({'basePricePerUnit': {'amount': bases[pn]}} if pn in bases else {})}
+        return {'productNumber': pn, **({'basePricePerUnit': {'amount': bases[pn]}} if pn in bases else {}),
+                **({'strikePricePerUnit': {'amount': tachados[pn]}} if pn in tachados else {})}
     listas = {'catalog/products': [_producto(pn) for pn in numeros + list(repetir) + list(repetir_distinto)]
                                   + [{'productNumber': 'SIN-GTIN'}] * sin_gtin_copias,
               'catalog/prices': [_precio_crudo(pn) for pn in numeros if pn not in sin_precio]
@@ -814,11 +875,28 @@ _linea_tramos = [l for l in texto_con.splitlines() if l.startswith('>>> TRAMOS')
 eq('(P) 🔒 en el log, SOLO recuentos (el repo es público): ni un importe',
    [bool(_re.fullmatch(r'>>> TRAMOS \(en sombra, nadie los lee\): \d+ productos con tramo · el tramo gana en \d+ · '
                        r'con descuento propio y tramo \d+ · '
-                       r'tramos raros ignorados \d+ · repetidos con tramos distintos \(vacíos\) \d+ · sin precio \(vacíos\) \d+',
+                       r'tramos raros ignorados \d+ · repetidos con tramos distintos \(vacíos\) \d+ · sin precio \(vacíos\) \d+'
+                       r' · con precio tachado, sin tramo \d+',
                        l)) for l in _linea_tramos], [True])
 eq('(P) …y son los de este banco: 3 con tramo, gana en 2, y 1 con descuento propio y tramo (UG00001)',
    'con tramo · el tramo gana en 2 · con descuento propio y tramo 1 ·' in texto_con and '3 productos con tramo' in texto_con,
    True)
+
+# (Q) CON PRECIO TACHADO, EN EL PROGRAMA ENTERO (encargo H3): HAS0002 trae tramo y tachado → sin tramo, el de hoy (21).
+ops_tach, codigo_tach, texto_tach = correr_programa(tramos=_TRAMOS_I, bases=_BASES_I, tachados={'HAS0002': 25.0})
+_lec_tach = {f['producto_prov']: f for o in _de(ops_tach, 'disp_lectura', 'insert') for f in o['datos']}
+eq('(Q) en el programa: HAS0002 con tachado se queda en el de hoy (21) y uds 1 (con tramos y sin tachado iba a 18,90)',
+   (_esc(_lec_tach['HAS0002']), _esc(_lec_con['HAS0002'])), ((21.0, 1, 21.0), (18.9, 10, 18.9)))
+eq('(Q) …y todas las demás filas, igual que con tramos y sin tachado (la caja, con su tramo)',
+   ({pn: _esc(f) for pn, f in _lec_tach.items() if pn != 'HAS0002'} ==
+    {pn: _esc(f) for pn, f in _lec_con.items() if pn != 'HAS0002'},
+    sum(1 for pn, f in _lec_tach.items() if pn != 'HAS0002' and f.get('uds_escalon') not in (None, 1))), (True, 1))
+eq('(Q) 🔒 …y la pasada hace EXACTAMENTE lo mismo que sin tramos salvo las tres columnas, y termina igual',
+   (_quitar(ops_tach) == _quitar(ops_sin), codigo_tach), (True, 0))
+eq('(Q) …en el log, el recuento: 3 con tramo, gana en 1 (la caja), con precio tachado sin tramo 1',
+   ('3 productos con tramo · el tramo gana en 1 ·' in texto_tach, ' · con precio tachado, sin tramo 1' in texto_tach,
+    ' · con precio tachado, sin tramo 0' in texto_con), (True, True, True))
+eq('(Q) 🔒 …y el importe del tachado (25) no sale en el log', '25' in texto_tach, False)
 # 🔴 Si los tramos FALLAN, la pasada se aplica igual con las tres vacías, y el run acaba en ROJO al final.
 _poner_de_verdad = dp.poner_escalones
 dp.poner_escalones = lambda *a, **k: (_ for _ in ()).throw(RuntimeError('tramos de mentira que fallan'))
