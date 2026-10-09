@@ -1,0 +1,86 @@
+# ============================================================
+# Moloka - Escaner 2 · BARRIDO DEL ESCANEO PRO DE DBLINE (encargo DB3, 09-oct-2026; copiado del de OcioStock, OC3)
+#
+# Lo disparan los botones de la v2 (moloka-app-v2, Escaneo PRO · tarjeta DBLine), con el mismo mecanismo que HEO
+# (workflow_dispatch con GH_TOKEN). El input `modo` dice cual de los tres:
+#   marcas   · las marcas de la fila DBLINE de reglas_director, como el escaner viejo (y el valor si no llega nada);
+#   todas    · todas las marcas, solo lo que tiene unidades hoy, SIN leer reglas_director;
+#   elegidas · las marcas del selector de la v2 (input `marcas`, lista JSON), SIN leer reglas_director. El selector
+#              de DBLine no tiene casilla de ofertas: el input `ofertas` tiene que llegar a false.
+#
+# 🔴 LOS INPUTS VIAJAN POR `env:`, NUNCA DENTRO DE `run:` (como en el de HEO): por env llegan como texto y el programa
+#    los valida antes de abrir ningun cliente.
+#
+# NO entra en la web de DBLine ni baja su fichero: trabaja sobre la foto de disponibilidad que ya esta en la base
+# (escaner2-dbline-disponibilidad.yml). Construye la FOTO de la pasada (con unidades hoy, sin chase suelto, con su precio
+# vigente por unidad y la promo solo hasta su fin, un EAN con su codigo mas barato) y deja en el almacen cerrado `escaner2` la lista de EAN para los cuatro
+# Visualizadores de Keepa (ES, IT, FR, DE).
+#
+# 🔴 REPO PUBLICO: este registro lo ve cualquiera. El programa SOLO imprime estados y recuentos; nada de precios,
+#    EAN, nombres ni el texto de un error (va a la base, que es privada).
+# 🔒 Cero tokens de Keepa, cero Amazon, cero credenciales de DBLine: solo la llave de servicio de Supabase.
+# >>> SIN RELOJ <<<  Solo cuando se pulsa el boton (o a mano desde Actions).
+# ============================================================
+name: Moloka - Escaner 2 · Barrido DBLine
+
+on:
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: 'marcas (las de siempre), todas (todas las marcas) o elegidas (las del selector de la v2)'
+        type: choice
+        options: ['marcas', 'todas', 'elegidas']
+        default: 'marcas'
+        required: false
+      marcas:
+        description: 'Solo en el modo elegidas: la lista de marcas, en JSON (["Funko", "Pyramid"])'
+        type: string
+        default: ''
+        required: false
+      ofertas:
+        description: 'El selector de DBLine no tiene ofertas: dejar en false'
+        type: boolean
+        default: false
+        required: false
+
+# 🔒 Barrido y cruce de DBLine, de uno en uno (el cruce lee la foto que el barrido deja). Grupo PROPIO: no espera a
+#    HEO ni a la foto de disponibilidad (si coincide con ella, el barrido lo nota y falla con el motivo).
+concurrency:
+  group: escaner2-dbline-pro
+  cancel-in-progress: false
+
+jobs:
+  barrer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        # Las mismas versiones FIJADAS que el barrido de OSMA.
+        run: pip install supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13
+
+      - name: De la foto de DBLine a la pasada y la lista
+        # El tope en el PASO (15 min), no solo en el job (20): si se agota, el rescate de abajo tiene tiempo.
+        timeout-minutes: 15
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          MODO_BARRIDO:         ${{ inputs.modo }}
+          MARCAS_ELEGIDAS:      ${{ inputs.marcas }}
+          OFERTAS_ELEGIDAS:     ${{ inputs.ofertas }}
+        run: python -u escaner2_dbline_barrido.py
+
+      # 🔴 SI EL RUN MUERE A MEDIAS, LA PASADA NO SE QUEDA COLGADA en 'descargando'.
+      - name: Rescate · si el run ha fallado, la pasada de este run queda 'fallida'
+        if: failure() || cancelled()
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python -u escaner2_rescate.py pasada

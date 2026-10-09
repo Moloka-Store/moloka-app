@@ -447,6 +447,28 @@ jobs:
       - name: 25 septendecies sexies) test_escaner2_ociostock_pro.py
         run: python -u test_escaner2_ociostock_pro.py
 
+      # (Encargo DB2-A, 9-oct-2026) Las reglas de lectura del catalogo general de DBLine (escaner2_dbline.py, modulo
+      # puro) con un Excel INVENTADO de la misma forma que el real: la llave en la formula de «Codice/Link» contrastada
+      # con el enlace (vacia, repetida o que no casa: fallida), cabecera en italiano y en ingles, EAN con espacios y de
+      # 11 cifras, promo vigente y caducada, TELEFONARE y PRENOTAZIONE, «w/Chase» normal, huella por contenido y cuadre.
+      - name: 25 septendecies septies) test_escaner2_dbline.py
+        run: python -u test_escaner2_dbline.py
+
+      # (Encargo DB2-A, 9-oct-2026) La pasada de DBLine (escaner2_dbline_disponibilidad.py) contra una descarga y una
+      # base de mentira: aplica en lotes, «al día» por contenido en verde, vaciado y fallida, rescate de solo su run, el
+      # workflow por estructura, y el registro SIN la salida de descargar_dbline.py (login, URL, usuario y clave).
+      - name: 25 septendecies octies) test_escaner2_dbline_disponibilidad.py
+        run: python -u test_escaner2_dbline_disponibilidad.py
+
+      # (Encargo DB3, 9-oct-2026) El Escaneo PRO de DBLine (escaner2_dbline_pro.py, _barrido.py y _cruce.py) con una foto
+      # de disponibilidad INVENTADA: el filtro de marca de cada modo, la foto (solo lo que tiene unidades hoy, sin chase
+      # suelto, «w/Chase» y el EAN de 11 cifras dentro, sin precio fuera, PA = el precio vigente con la promo solo hasta
+      # su fin, un EAN con su código más barato), crudo = previas + foto, nueve mutantes en rojo, y los dos programas de
+      # punta a punta con los CUATRO CSV y la cabecera real del Visualizador: el Excel del PRO de HEO tal cual (con
+      # «Ventas», sin columnas nuevas) y el registro sin un EAN ni un precio.
+      - name: 25 septendecies novies) test_escaner2_dbline_pro.py
+        run: python -u test_escaner2_dbline_pro.py
+
       # (Encadenado de Keepa, 1-oct-2026) El job `encadenar` de procesar-keepa-escaparate.yml: el titulo de la
       # corrida igual en el YAML y en el codigo; el job por estructura (tras `procesar`, solo en aplicar, exito o
       # fallo, continue-on-error, actions: write solo en el); la decision con el buzon, las cargas y las corridas
@@ -516,6 +538,9 @@ jobs:
             test_escaner2_zentrada_pro.py
             test_escaner2_ociostock.py
             test_escaner2_ociostock_pro.py
+            test_escaner2_dbline.py
+            test_escaner2_dbline_disponibilidad.py
+            test_escaner2_dbline_pro.py
             test_encadenar_keepa.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
