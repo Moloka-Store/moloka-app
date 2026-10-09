@@ -28,7 +28,8 @@ QUE HACE, EN ORDEN:
      nada nuevo a HEO), cada fila con precio lleva `precio_escalon`, `uds_escalon` y `precio_pa` con el tramo mas
      barato (`escaner2_disponibilidad.poner_escalones`). Nadie los lee todavia para HEO. Si falla, van vacios, la
      pasada sigue y el run acaba en ROJO al final. (Encargo H3, 9-oct-2026) Con precio tachado en la lista cruda de
-     precios (`strikePricePerUnit` > 0), sin tramo: HEO no da descuento por cantidad en lo rebajado;
+     precios (`strikePricePerUnit` > 0), sin tramo: HEO no da descuento por cantidad en lo rebajado; y los de marca
+     Funko, tampoco (en la web de HEO ningun Funko lo tiene);
   4. sube las filas a `disp_lectura` en lotes y deja en la pasada sus recuentos;
   5. llama a `disp_aplicar_pasada`, la funcion de la base que, de una vez: pasa el blindaje
      anti-vaciado, apunta los cambios contra el estado de antes, marca lo que falta y cuadra. Si la
@@ -210,7 +211,7 @@ def poner_escalones(dp, filas, crudos, M):
         print(f">>> TRAMOS (en sombra, nadie los lee): {c['n_con_tramo']} productos con tramo · el tramo gana en "
               f"{c['n_escalon_gana']} · con descuento propio y tramo {c['n_propio_y_tramo']} · tramos raros ignorados {c['n_tramos_raros']} · repetidos con tramos distintos "
               f"(vacíos) {c['n_tramos_dudosos']} · sin precio (vacíos) {c['n_sin_precio']} · con precio tachado, sin tramo "
-              f"{c['n_tachado_sin_tramo']}", flush=True)
+              f"{c['n_tachado_sin_tramo']} · Funko sin tachado, sin tramo {c['n_funko_sin_tramo']}", flush=True)
         return True
     except Exception as ex:
         for f in filas:

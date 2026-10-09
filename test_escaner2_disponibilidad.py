@@ -55,7 +55,8 @@ QUE PRUEBA:
       `descargar_catalogo_heo`, las filas suben marcadas y `_paginar` queda como estaba.
   (Q) CON PRECIO TACHADO, SIN TRAMO (encargo H3, 9-oct-2026): con `strikePricePerUnit` > 0 en /catalog/prices, la fila
       se guarda sin tramo (el precio de hoy, uds 1); vacio, null, 0 o negativo, el tramo como antes; en el programa
-      entero, solo cambian las tres columnas de esa fila, y el log da el recuento sin importes.
+      entero, solo cambian las tres columnas de esa fila, y el log da el recuento sin importes. Y la fila de marca
+      Funko, tachada o no, tambien sin tramo (revision de Cowork, 9-oct-2026), contada aparte si no venia tachada.
 """
 import ast
 import os
@@ -423,7 +424,7 @@ eq('(P) 🔴 repetido con tramos DISTINTOS: las tres vacías (no se adivina cuá
 eq('(P) repetido con tramos iguales: vale', _esc(_pp['P11']), (9.0, 10, 9.0))
 eq('(P) las cuentas: con tramo, gana el tramo, raros, dudosos y sin precio', _cp,
    {'n_con_tramo': 9, 'n_escalon_gana': 6, 'n_propio_y_tramo': 2, 'n_tramos_raros': 4, 'n_tramos_dudosos': 1,
-    'n_sin_precio': 1, 'n_tachado_sin_tramo': 0})
+    'n_sin_precio': 1, 'n_tachado_sin_tramo': 0, 'n_funko_sin_tramo': 0})
 eq('(P) 🔒 la regla de la base: en cada fila, las tres llenas o las tres vacías',
    all((f['precio_escalon'] is None) == (f['uds_escalon'] is None) == (f['precio_pa'] is None) for f in _filas_p), True)
 eq('(P) …y solo toca esas tres claves (el resto de la fila, como venía)',
@@ -490,9 +491,35 @@ eq('(Q) tachado y sin precio de hoy, o repetido con tramos distintos: las tres v
 eq('(Q) las cuentas: 5 con tramo y tachado se guardan sin tramo (Q1, Q7, Q8, Q11, Q12; no Q9, sin tramo, ni Q14 y Q15, '
    'vacías), el tramo gana en los 7 sin tachado, y Q8 (tachado) no cuenta como descuento propio y tramo',
    _cq, {'n_con_tramo': 14, 'n_escalon_gana': 7, 'n_propio_y_tramo': 0, 'n_tramos_raros': 0, 'n_tramos_dudosos': 1,
-         'n_sin_precio': 1, 'n_tachado_sin_tramo': 5})
+         'n_sin_precio': 1, 'n_tachado_sin_tramo': 5, 'n_funko_sin_tramo': 0})
 eq('(Q) 🔒 la regla de la base, también con tachado: las tres llenas o las tres vacías',
    all((f['precio_escalon'] is None) == (f['uds_escalon'] is None) == (f['precio_pa'] is None) for f in _filas_q), True)
+
+# (Q) FUNKO, SIN TRAMO (revisión de Cowork al H3): en la web de HEO ningún Funko tiene descuento por cantidad, tampoco
+#     los que vienen sin tachado. La marca sale de la propia fila. Códigos e importes inventados, como arriba.
+def _fm(pn, hoy, marca, **k):
+    return dict(_fp(pn, hoy, **k), marca=marca)
+
+
+_filas_f = [_fm('QF1', 10.0, 'Funko'), _fm('QF2', 10.0, ' FUNKO '), _fm('QF3', 10.0, 'Funko'), _fm('QF4', 10.0, 'Funko'),
+            _fm('QF5', 60.0, 'Funko', es_caja=True, uds_caja=6), _fm('QF6', 10.0, 'Funko Europe'),
+            _fm('QF7', 10.0, 'Hasbro'), _fm('QF8', 10.0, None)]
+_prods_f = [_pc(pn, (10, 10)) for pn in ('QF1', 'QF2', 'QF3', 'QF6', 'QF7', 'QF8')] + [
+    {'productNumber': 'QF4', 'prices': {'scaledDiscounts': []}}, _pc('QF5', (2, 10))]
+_precios_f = [_pt('QF1', 10.0), _pt('QF2', 10.0), _pt('QF3', 10.0, {'amount': 12.0}), _pt('QF4', 10.0), _pt('QF5', 60.0),
+              _pt('QF6', 10.0), _pt('QF7', 10.0), _pt('QF8', 10.0)]
+_cf = dp.poner_escalones(_filas_f, _prods_f, _precios_f, M)
+_pf = {f['producto_prov']: f for f in _filas_f}
+eq('(Q) 🔴 Funko sin tachado y con tramo: SIN tramo, el de hoy y uds 1 (no 9 desde 10)', _esc(_pf['QF1']), (10.0, 1, 10.0))
+eq('(Q) la marca, sin distinguir mayúsculas ni espacios de los lados (« FUNKO »): sin tramo', _esc(_pf['QF2']), (10.0, 1, 10.0))
+eq('(Q) Funko y tachado: sin tramo, y cuenta como tachado (no como Funko)', _esc(_pf['QF3']), (10.0, 1, 10.0))
+eq('(Q) caja de Funko con tramo: su precio por unidad (10) y uds 1', _esc(_pf['QF5']), (10.0, 1, 10.0))
+eq('(Q) una marca parecida y distinta («Funko Europe»), Hasbro o sin marca: el tramo, como hoy',
+   [_esc(_pf[pn]) for pn in ('QF6', 'QF7', 'QF8')], [(9.0, 10, 9.0)] * 3)
+eq('(Q) las cuentas de Funko: 3 sin tramo solo por la marca (QF1, QF2, la caja QF5), 1 tachado (QF3); QF4 sin tramo en '
+   'la API no cuenta; el tramo gana en los 3 que no son Funko',
+   _cf, {'n_con_tramo': 7, 'n_escalon_gana': 3, 'n_propio_y_tramo': 0, 'n_tramos_raros': 0, 'n_tramos_dudosos': 0,
+         'n_sin_precio': 0, 'n_tachado_sin_tramo': 1, 'n_funko_sin_tramo': 3})
 
 # ── (G) EL PROGRAMA Y EL WORKFLOW, POR ESTRUCTURA ────────────────────────────────────────
 AQUI = os.path.dirname(os.path.abspath(__file__))
@@ -857,10 +884,10 @@ eq('(P) en el programa: sin tramos, toda fila con precio lleva las tres llenas c
    sorted({(f.get('precio_escalon') == f['precio_unidad'] == f.get('precio_pa'), f.get('uds_escalon', 'FALTA'))
            if f['precio_unidad'] is not None else _esc(f) for f in _lec_sin.values()}, key=str),
    sorted({(True, 1)}, key=str))
-eq('(P) …con tramos: HAS0002 (21, 10 % desde 10) → 18,90; UG00001 (hoy 5, base 6, 10 %) se queda en 5; la caja FK67930 '
-   '(48 la caja de 6, 10 % desde 2) → 7,20 por unidad',
-   {pn: _esc(_lec_con[pn]) for pn in ('HAS0002', 'UG00001', 'FK67930')},
-   {'HAS0002': (18.9, 10, 18.9), 'UG00001': (5.0, 1, 5.0), 'FK67930': (7.2, 2, 7.2)})
+# Los tres de _TRAMOS_I, en su orden: el de Hasbro, el de Ultimate Guard y la caja de Funko.
+eq('(P) …con tramos: el de Hasbro (21, 10 % desde 10) → 18,90; el de UG (hoy 5, base 6, 10 %) se queda en 5; la caja '
+   'de Funko (48 la caja de 6, 10 % desde 2), sin tramo desde el H3: 8 por unidad y uds 1',
+   [_esc(_lec_con[pn]) for pn in _TRAMOS_I], [(18.9, 10, 18.9), (5.0, 1, 5.0), (8.0, 1, 8.0)])
 _quitar = lambda ops: [dict(o, datos=[{k: v for k, v in f.items() if k not in ('precio_escalon', 'uds_escalon', 'precio_pa')}
                                       for f in o['datos']]) if (o['tabla'], o['accion']) == ('disp_lectura', 'insert') else o
                        for o in ops]
@@ -876,26 +903,27 @@ eq('(P) 🔒 en el log, SOLO recuentos (el repo es público): ni un importe',
    [bool(_re.fullmatch(r'>>> TRAMOS \(en sombra, nadie los lee\): \d+ productos con tramo · el tramo gana en \d+ · '
                        r'con descuento propio y tramo \d+ · '
                        r'tramos raros ignorados \d+ · repetidos con tramos distintos \(vacíos\) \d+ · sin precio \(vacíos\) \d+'
-                       r' · con precio tachado, sin tramo \d+',
+                       r' · con precio tachado, sin tramo \d+ · Funko sin tachado, sin tramo \d+',
                        l)) for l in _linea_tramos], [True])
-eq('(P) …y son los de este banco: 3 con tramo, gana en 2, y 1 con descuento propio y tramo (UG00001)',
-   'con tramo · el tramo gana en 2 · con descuento propio y tramo 1 ·' in texto_con and '3 productos con tramo' in texto_con,
-   True)
+eq('(P) …y son los de este banco: 3 con tramo, gana en 1, 1 con descuento propio y tramo (el de UG) y 1 Funko sin tramo',
+   ('3 productos con tramo · el tramo gana en 1 · con descuento propio y tramo 1 ·' in texto_con,
+    texto_con.count(' · Funko sin tachado, sin tramo 1')), (True, 1))
 
 # (Q) CON PRECIO TACHADO, EN EL PROGRAMA ENTERO (encargo H3): HAS0002 trae tramo y tachado → sin tramo, el de hoy (21).
 ops_tach, codigo_tach, texto_tach = correr_programa(tramos=_TRAMOS_I, bases=_BASES_I, tachados={'HAS0002': 25.0})
 _lec_tach = {f['producto_prov']: f for o in _de(ops_tach, 'disp_lectura', 'insert') for f in o['datos']}
 eq('(Q) en el programa: HAS0002 con tachado se queda en el de hoy (21) y uds 1 (con tramos y sin tachado iba a 18,90)',
    (_esc(_lec_tach['HAS0002']), _esc(_lec_con['HAS0002'])), ((21.0, 1, 21.0), (18.9, 10, 18.9)))
-eq('(Q) …y todas las demás filas, igual que con tramos y sin tachado (la caja, con su tramo)',
+eq('(Q) …y todas las demás filas, igual que con tramos y sin tachado (ninguna se queda con tramo: la caja es Funko)',
    ({pn: _esc(f) for pn, f in _lec_tach.items() if pn != 'HAS0002'} ==
     {pn: _esc(f) for pn, f in _lec_con.items() if pn != 'HAS0002'},
-    sum(1 for pn, f in _lec_tach.items() if pn != 'HAS0002' and f.get('uds_escalon') not in (None, 1))), (True, 1))
+    sum(1 for pn, f in _lec_tach.items() if pn != 'HAS0002' and f.get('uds_escalon') not in (None, 1))), (True, 0))
 eq('(Q) 🔒 …y la pasada hace EXACTAMENTE lo mismo que sin tramos salvo las tres columnas, y termina igual',
    (_quitar(ops_tach) == _quitar(ops_sin), codigo_tach), (True, 0))
-eq('(Q) …en el log, el recuento: 3 con tramo, gana en 1 (la caja), con precio tachado sin tramo 1',
-   ('3 productos con tramo · el tramo gana en 1 ·' in texto_tach, ' · con precio tachado, sin tramo 1' in texto_tach,
-    ' · con precio tachado, sin tramo 0' in texto_con), (True, True, True))
+eq('(Q) …en el log, el recuento: 3 con tramo, gana en 0, con precio tachado sin tramo 1, Funko sin tramo 1',
+   ('3 productos con tramo · el tramo gana en 0 ·' in texto_tach, ' · con precio tachado, sin tramo 1 ·' in texto_tach,
+    ' · con precio tachado, sin tramo 0 ·' in texto_con, ' · Funko sin tachado, sin tramo 1' in texto_tach),
+   (True, True, True, True))
 eq('(Q) 🔒 …y el importe del tachado (25) no sale en el log', '25' in texto_tach, False)
 # 🔴 Si los tramos FALLAN, la pasada se aplica igual con las tres vacías, y el run acaba en ROJO al final.
 _poner_de_verdad = dp.poner_escalones
