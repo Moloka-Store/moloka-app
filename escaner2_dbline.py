@@ -1,0 +1,392 @@
+# -*- coding: utf-8 -*-
+"""ESCANER 2 · LA FOTO DE DISPONIBILIDAD DE DBLINE: las reglas de lectura del catalogo general (encargo DB2-A,
+09-oct-2026). MODULO PURO: bytes del Excel dentro, filas y recuentos fuera. Ni red, ni base, ni reloj: la fecha de
+«hoy» entra como parametro.
+
+Las reglas salen del parte DB1 del 09-oct-2026 (punto 10.0, con su dato) y de lo que decidio Fernando. Este modulo NO
+lee el escaner viejo ni sus heredados; donde se parece a OcioStock (escaner2_ociostock.py), se dice.
+
+QUE ES EL FICHERO (parte DB1, 1.1): un .xlsx con una hoja. Fila 1 «Catalogo generale <dd-mm-aaaa>»; fila 3, la
+cabecera de 29 columnas, en italiano (navegador) o en ingles (servidor), siempre en el mismo orden; desde la 4, una
+fila por producto (~18.700, ~12.500 con unidades).
+
+🔑 LAS REGLAS:
+  1. LA LLAVE es el codigo propio de DBLine: el texto que enseña la formula =HYPERLINK(<enlace>,"<CODIGO>") de
+     «Codice/Link». Se lee con openpyxl SIN data_only (con data_only, o con pandas, sale vacia). Se contrasta con el
+     COD_PRODOTTO del base64 del `param` del enlace. Codigo vacio, repetido o que no case → LecturaInvalida.
+  2. EAN: sin espacios (vienen rellenados a la derecha hasta 20); solo cifras; 12 o 13 → ean_core tal cual; 11 →
+     '0' + crudo si forma un UPC-A de 12 con su digito de control bien (las fundas Ultra Pro); vacio o raro → regla
+     'ean_forma_rara', ean_core None, se cuenta y NO se tira.
+  3. DISPONIBLE = Disponibili > 0 (Fernando: «Solo quiero ver lo que este disponible para comprar hoy»). TELEFONARE y
+     NEW con unidades entran (Fernando: «si que entren»). preorder = Note PRENOTAZIONE. Note se guarda tal cual.
+  4. PRECIO: precio_catalogo = Prezzo; precio_unidad = Prezzo promo si es > 0 y su fin (solo el dia) es hoy o
+     despues; si no, Prezzo (Fernando: «Calcula con el precio vigente de compra en cada momento»). en_oferta y
+     fin_oferta (solo el dia). Sin escalones, sin el 1 % de transferencia, sin cajas (es_caja false siempre).
+  5. CHASE SUELTO: solo marca FUNKO (Publisher) con «chase» al final del nombre o entre parentesis, sin «w/» ni
+     «with» → regla 'chase_suelto' y es_chase true (como OcioStock, regla 4). «w/Chase» es la figura normal.
+  6. FECHAS: solo el dia (la hora que traen es la de la descarga y no significa nada).
+  7. HUELLA «AL DIA» POR CONTENIDO: md5 de las filas ordenadas por codigo con (codigo, disponible, precio_unidad,
+     precio_catalogo, fin_oferta). Ademas, el md5 y los bytes del fichero (cambian en cada descarga).
+  8. CUADRE: fila 1 con su forma; 29 columnas exactas; ≥ MIN_FILAS filas y ≥ MIN_DISPONIBLES disponibles. Si no,
+     LecturaInvalida.
+  9. RECUENTOS POR MARCA para la semana de medicion: total, Funko y Pyramid (filas y disponibles).
+
+🔴 REPO PUBLICO: nada de este modulo imprime. Sus errores (`LecturaInvalida`) dicen RECUENTOS y nombres de columna,
+   nunca un valor del fichero.
+"""
+import base64
+import binascii
+import hashlib
+import io
+import json
+import re
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
+from urllib.parse import parse_qs, urlparse
+
+import openpyxl
+
+# 🔑 LA CABECERA (fila 3), AL NOMBRE Y AL ORDEN: las 29 del parte DB1, 1.1. Las dos listas van en el MISMO orden; las
+#    filas se leen por posicion, asi que el idioma no cambia que columna es cual.
+COLUMNAS_IT = (
+    'Cat 1', 'Cat 2', 'Cat 3', 'Genere', 'Publisher', 'ID Listino', 'Link immagine', 'Codice/Link', 'Descrizione',
+    'SKU', 'EAN', 'Note', 'Data uscita', 'Disponibili', 'Listino (€)', 'Sconto 1 (%)', 'Sconto 2 (%)', 'Prezzo (€)',
+    'Iva (%)', 'RRP', 'Promo', 'Scadenza promo', 'Prezzo promo (€)', 'MOQ', 'Pcs/MC', 'Peso (gr)', 'X (mm)', 'Y (mm)',
+    'Z (mm)',
+)
+COLUMNAS_EN = (
+    'Cat 1', 'Cat 2', 'Cat 3', 'Genre', 'Publisher', 'Price List ID', 'Image Link', 'Code/Link', 'Description',
+    'SKU', 'EAN', 'Notes', 'Release date', 'Available', 'List Price (€)', 'Discount 1 (%)', 'Discount 2 (%)',
+    'Price (€)', 'VAT (%)', 'RRP', 'Promo', 'Promo Expiration', 'Promo Price (€)', 'MOQ', 'Pcs/MC', 'Weight (gr)',
+    'X (mm)', 'Y (mm)', 'Z (mm)',
+)
+IX = {c: i for i, c in enumerate(COLUMNAS_IT)}  # la posicion de cada columna, por su nombre italiano
+FILA_TITULO = 1
+FILA_CABECERA = 3
+MIN_FILAS = 16500        # el 90 % de las 18.414 mas bajas de 3 meses (parte DB1, 10.0.10)
+MIN_DISPONIBLES = 11000  # hoy ~12.500
+MARCA_CHASE = 'FUNKO'
+MARCAS_MEDIDAS = (('funko', 'FUNKO'), ('pyramid', 'PYRAMID'))
+NOTA_PREVENTA = 'PRENOTAZIONE'
+REGLAS = ('chase_suelto', 'ean_forma_rara')
+
+_RE_TITULO = re.compile(r'\s*Catalogo generale\s+(\d{2})-(\d{2})-(\d{4})\s*', re.I)
+_RE_HIPERVINCULO = re.compile(r'=\s*HYPERLINK\(\s*"([^"]*)"\s*[,;]\s*"([^"]*)"\s*\)\s*', re.I)
+_RE_CHASE_NOMBRE = re.compile(r'\bchase\b\s*$|\([^)]*\bchase\b[^)]*\)', re.I)
+_RE_CON_CHASE = re.compile(r'(?:\bw/|\bwith\b)\s*chase\b', re.I)
+_RE_NUMERO = re.compile(r'-?\d+(?:[.,]\d+)?')
+_FORMATOS_DIA = ('%d/%m/%Y', '%d-%m-%Y', '%Y-%m-%d', '%d.%m.%Y')
+
+
+class LecturaInvalida(ValueError):
+    """El fichero no se puede subir tal cual. El texto son recuentos y nombres de columna: se puede imprimir."""
+
+
+# ── El fichero ────────────────────────────────────────────────────────────────────────────
+def huella_fichero(contenido):
+    """(md5, bytes) del fichero tal cual se lee. Cambia en cada descarga (la hora va pegada a las fechas)."""
+    return hashlib.md5(contenido).hexdigest(), len(contenido)
+
+
+def leer_excel(contenido):
+    """(titulo, cabecera, filas) del .xlsx: el texto de A1, la fila 3 y las filas desde la 4 (las del todo vacias,
+    fuera). 🔴 SIN data_only: la llave vive en una formula y con data_only sale vacia."""
+    try:
+        libro = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=False)
+    except Exception:  # noqa: BLE001 - cualquier fallo de lectura es «no es un .xlsx», sin soltar su texto
+        raise LecturaInvalida('el fichero no se abre como .xlsx') from None
+    try:
+        hoja = libro.worksheets[0]
+        todas = [list(f) for f in hoja.iter_rows(values_only=True)]
+    finally:
+        libro.close()
+    if len(todas) < FILA_CABECERA:
+        raise LecturaInvalida(f'el fichero tiene {len(todas)} fila(s): no llega a la cabecera (fila {FILA_CABECERA})')
+    titulo = todas[FILA_TITULO - 1][0] if todas[FILA_TITULO - 1] else None
+    cabecera = ['' if c is None else str(c).strip() for c in todas[FILA_CABECERA - 1]]
+    while cabecera and cabecera[-1] == '':
+        cabecera.pop()
+    filas = [f for f in todas[FILA_CABECERA:] if any(c is not None and str(c).strip() for c in f)]
+    return titulo, cabecera, filas
+
+
+def fecha_del_titulo(titulo):
+    """El dia de «Catalogo generale <dd-mm-aaaa>» (fila 1). LecturaInvalida si no tiene esa forma."""
+    m = _RE_TITULO.fullmatch(str(titulo or ''))
+    if not m:
+        raise LecturaInvalida('fila 1: no dice «Catalogo generale <dd-mm-aaaa>»')
+    try:
+        return date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+    except ValueError:
+        raise LecturaInvalida('fila 1: la fecha de «Catalogo generale» no es un dia') from None
+
+
+def comprobar_cabecera(cabecera):
+    """'it' o 'en' si la cabecera es EXACTAMENTE una de las dos; si no, LecturaInvalida con la cuenta de columnas y la
+    primera que no casa (nombres de columna, nunca valores)."""
+    if tuple(cabecera) == COLUMNAS_IT:
+        return 'it'
+    if tuple(cabecera) == COLUMNAS_EN:
+        return 'en'
+    if len(cabecera) != len(COLUMNAS_IT):
+        raise LecturaInvalida(f'cabecera: {len(cabecera)} columnas, y son {len(COLUMNAS_IT)}')
+    for i, (it, en) in enumerate(zip(COLUMNAS_IT, COLUMNAS_EN)):
+        if cabecera[i] not in (it, en):
+            raise LecturaInvalida(f'cabecera: la columna {i + 1} no es «{it}» ni «{en}» (o se mezclan los idiomas)')
+    raise LecturaInvalida('cabecera: mezcla columnas en italiano y en inglés')
+
+
+# ── Las piezas de una fila (puras) ────────────────────────────────────────────────────────
+def codigo_de_formula(celda):
+    """El codigo propio de DBLine de la celda «Codice/Link» (regla 1), o None si no es la formula esperada, si el
+    texto esta vacio o si no casa con el COD_PRODOTTO del enlace."""
+    m = _RE_HIPERVINCULO.fullmatch(str(celda or ''))
+    if not m:
+        return None
+    enlace, codigo = m.group(1), m.group(2).strip()
+    if not codigo:
+        return None
+    param = parse_qs(urlparse(enlace).query).get('param', [''])[0]
+    try:
+        crudo = base64.b64decode(param + '=' * (-len(param) % 4), validate=False)
+        cod_enlace = json.loads(crudo.decode('utf-8')).get('COD_PRODOTTO')
+    except (binascii.Error, ValueError, UnicodeDecodeError, AttributeError):
+        return None
+    return codigo if isinstance(cod_enlace, str) and cod_enlace.strip() == codigo else None
+
+
+def _chk13(cuerpo12):
+    d = [int(x) for x in cuerpo12][::-1]
+    return str((10 - sum(v * (3 if i % 2 == 0 else 1) for i, v in enumerate(d)) % 10) % 10)
+
+
+def ean_de_cruce(crudo):
+    """(ean_core, regla) del EAN (regla 2): sin espacios; 12 o 13 cifras tal cual; 11 → '0' + crudo si es un UPC-A
+    de 12 con su digito de control bien; lo demas (vacio incluido) → (None, 'ean_forma_rara')."""
+    if isinstance(crudo, int):
+        crudo = str(crudo)
+    s = re.sub(r'\s+', '', str(crudo or ''))
+    if not s.isdigit() or not s.isascii():
+        return None, 'ean_forma_rara'
+    if len(s) in (12, 13):
+        return s, None
+    if len(s) == 11:
+        upc = '0' + s
+        if _chk13('0' + upc[:11]) == upc[11]:
+            return upc, None
+    return None, 'ean_forma_rara'
+
+
+def es_chase_suelto(marca, nombre):
+    """Regla 5: FUNKO y «chase» al final o entre parentesis, sin «w/» ni «with» delante."""
+    if MARCA_CHASE not in str(marca or '').upper():
+        return False
+    nombre = str(nombre or '')
+    return bool(_RE_CHASE_NOMBRE.search(nombre)) and not _RE_CON_CHASE.search(nombre)
+
+
+def numero(v):
+    """Decimal de una celda numerica; None si esta vacia; ValueError si no es un numero."""
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        raise ValueError('no es un número')
+    if isinstance(v, (int, float, Decimal)):
+        return Decimal(str(v))
+    s = str(v).strip()
+    if not s:
+        return None
+    if not _RE_NUMERO.fullmatch(s):
+        raise ValueError('no es un número')
+    return Decimal(s.replace(',', '.'))
+
+
+def solo_dia(v):
+    """El dia de una celda de fecha (regla 6): la hora, fuera. None si esta vacia; ValueError si no es una fecha."""
+    if v is None:
+        return None
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    s = str(v).strip()
+    if not s:
+        return None
+    primero = s.replace('T', ' ').split(' ')[0]
+    for fmt in _FORMATOS_DIA:
+        try:
+            return datetime.strptime(primero, fmt).date()
+        except ValueError:
+            pass
+    raise ValueError('no es una fecha')
+
+
+def precio_vigente(prezzo, promo, fin, hoy):
+    """(precio_unidad, en_oferta) de la regla 4: la promo si es > 0 y su fin es hoy o despues; si no, Prezzo."""
+    if promo is not None and promo > 0 and fin is not None and fin >= hoy:
+        return promo, True
+    return prezzo, False
+
+
+def _texto(v):
+    v = '' if v is None else str(v).strip()
+    return v or None
+
+
+def _num_txt(d):
+    return '' if d is None else format(d.normalize(), 'f')
+
+
+def huella_contenido(filas):
+    """md5 de las filas ordenadas por codigo con (codigo, disponible, precio_unidad, precio_catalogo, fin_oferta)
+    (regla 7). No mira la hora de las fechas ni nada que cambie en cada descarga sin cambiar el contenido."""
+    lineas = []
+    for f in sorted(filas, key=lambda x: x['producto_prov']):
+        lineas.append('|'.join((f['producto_prov'], '1' if f['disponible'] else '0',
+                                _num_txt(f['_precio_unidad']), _num_txt(f['_precio_catalogo']),
+                                f['fin_oferta'] or '')))
+    return hashlib.md5('\n'.join(lineas).encode('utf-8')).hexdigest()
+
+
+# ── El fichero entero → filas de disp_lectura ─────────────────────────────────────────────
+def convertir(contenido, hoy, min_filas=MIN_FILAS, min_disponibles=MIN_DISPONIBLES):
+    """De los bytes del .xlsx a las filas de disp_lectura, UNA por codigo, con TODAS las marcas y disponibles o no.
+    Devuelve (filas, cuentas). LecturaInvalida si la fila 1, la cabecera, la llave, un numero o una fecha de promo no
+    se entienden, o si no llega a los minimos (se dicen los recuentos, no los valores)."""
+    titulo, cabecera, crudas = leer_excel(contenido)
+    fecha_catalogo = fecha_del_titulo(titulo)
+    idioma = comprobar_cabecera(cabecera)
+    n_col = len(COLUMNAS_IT)
+
+    salida = []
+    vistos, repetidos = set(), set()
+    malos = {'llave': 0, 'disponibles': 0, 'precio': 0, 'promo': 0, 'fin_promo': 0}
+    c = {'n_crudo': len(crudas), 'n_leidas': 0, 'n_disponibles': 0, 'n_agotados': 0,
+         'n_sin_dato_disponibilidad': 0, 'n_sin_dato_precio': 0, 'n_preventa': 0, 'n_preventa_con_stock': 0,
+         'n_telefonare_disponibles': 0, 'n_new_disponibles': 0, 'n_en_oferta': 0, 'n_promo_caducada': 0,
+         'n_chase_suelto': 0, 'n_chase_suelto_disponibles': 0, 'n_ean_forma_rara': 0, 'n_ean_11_upc': 0,
+         'n_fecha_salida_rara': 0}
+    por_marca = {k: {'filas': 0, 'disponibles': 0} for k in ['total'] + [k for k, _m in MARCAS_MEDIDAS]}
+    for f in crudas:
+        f = list(f) + [None] * (n_col - len(f))
+
+        def v(col):
+            return f[IX[col]]
+
+        codigo = codigo_de_formula(v('Codice/Link'))
+        if codigo is None:
+            malos['llave'] += 1
+            continue
+        if codigo in vistos:
+            repetidos.add(codigo)
+            continue
+        vistos.add(codigo)
+
+        core, regla = ean_de_cruce(v('EAN'))
+        if core is not None and len(re.sub(r'\s+', '', str(v('EAN')))) == 11:
+            c['n_ean_11_upc'] += 1
+        marca, nombre = _texto(v('Publisher')), _texto(v('Descrizione'))
+        chase = es_chase_suelto(marca, nombre)
+        if chase:
+            regla = 'chase_suelto'
+
+        try:
+            uds = numero(v('Disponibili'))
+            if uds is not None and uds != uds.to_integral_value():
+                raise ValueError('no es entero')
+        except ValueError:
+            malos['disponibles'] += 1
+            uds = None
+        try:
+            prezzo = numero(v('Prezzo (€)'))
+        except ValueError:
+            malos['precio'] += 1
+            prezzo = None
+        try:
+            promo = numero(v('Prezzo promo (€)'))
+        except ValueError:
+            malos['promo'] += 1
+            promo = None
+        try:
+            fin = solo_dia(v('Scadenza promo'))
+        except ValueError:
+            fin = None
+            if promo is not None and promo > 0:
+                malos['fin_promo'] += 1  # con promo, sin su fin no se sabe el precio vigente
+        try:
+            salida_dia = solo_dia(v('Data uscita'))
+        except ValueError:
+            salida_dia = None
+            c['n_fecha_salida_rara'] += 1
+
+        p_unidad, en_oferta = precio_vigente(prezzo, promo, fin, hoy)
+        nota = _texto(v('Note'))
+        nota_up = (nota or '').upper()
+        preventa = nota_up == NOTA_PREVENTA
+        sin_dato_disp = uds is None
+        disponible = uds is not None and uds > 0
+
+        salida.append({
+            'producto_prov': codigo,
+            'ean_original': _texto(v('EAN')), 'ean_core': core,
+            'marca': marca, 'nombre': nombre, 'categoria': _texto(v('Cat 3')),
+            'es_caja': False, 'uds_caja': None, 'es_chase': chase,
+            'precio_catalogo': None if prezzo is None else float(prezzo),
+            'precio_unidad': None if p_unidad is None else float(p_unidad),
+            'precio_escalon': None, 'uds_escalon': None, 'precio_pa': None,
+            'disponible': disponible, 'disponibilidad': nota,
+            'en_oferta': en_oferta, 'preorder': preventa, 'fin_de_vida': None,
+            'fin_oferta': fin.isoformat() if fin else None,
+            'fecha_salida': salida_dia.isoformat() if salida_dia else None,
+            'regla': regla, 'aviso': None,
+            'sin_dato_disponibilidad': sin_dato_disp, 'sin_dato_precio': prezzo is None,
+            '_precio_unidad': p_unidad, '_precio_catalogo': prezzo,
+        })
+        c['n_leidas'] += 1
+        c['n_disponibles' if disponible else 'n_agotados'] += 1
+        c['n_sin_dato_disponibilidad'] += sin_dato_disp
+        c['n_sin_dato_precio'] += prezzo is None
+        c['n_preventa'] += preventa
+        c['n_preventa_con_stock'] += preventa and disponible
+        c['n_telefonare_disponibles'] += nota_up == 'TELEFONARE' and disponible
+        c['n_new_disponibles'] += nota_up == 'NEW' and disponible
+        c['n_en_oferta'] += en_oferta
+        c['n_promo_caducada'] += (promo is not None and promo > 0 and fin is not None and fin < hoy)
+        c['n_chase_suelto'] += chase
+        c['n_chase_suelto_disponibles'] += chase and disponible
+        c['n_ean_forma_rara'] += regla == 'ean_forma_rara'
+        marca_up = (marca or '').upper()
+        for clave, patron in [('total', '')] + list(MARCAS_MEDIDAS):
+            if patron in marca_up:
+                por_marca[clave]['filas'] += 1
+                por_marca[clave]['disponibles'] += disponible
+
+    problemas = []
+    if malos['llave']:
+        problemas.append(f"{malos['llave']} fila(s) sin código en «Codice/Link» o que no casa con el enlace (la llave)")
+    if repetidos:
+        problemas.append(f'{len(repetidos)} código(s) repetido(s) (la llave)')
+    textos = {'disponibles': 'con «Disponibili» que no es un entero',
+              'precio': 'con «Prezzo» que no es un número',
+              'promo': 'con «Prezzo promo» que no es un número',
+              'fin_promo': 'con promo y sin «Scadenza promo» que se entienda'}
+    for que, texto in textos.items():
+        if malos[que]:
+            problemas.append(f'{malos[que]} fila(s) {texto}')
+    if problemas:
+        raise LecturaInvalida(' · '.join(problemas))
+    if c['n_crudo'] != c['n_leidas']:
+        raise LecturaInvalida(f"no cuadra: crudo {c['n_crudo']} ≠ leídas {c['n_leidas']}")
+    if c['n_leidas'] < min_filas:
+        raise LecturaInvalida(f"cuadre: {c['n_leidas']} filas, y el mínimo es {min_filas}")
+    if c['n_disponibles'] < min_disponibles:
+        raise LecturaInvalida(f"cuadre: {c['n_disponibles']} disponibles, y el mínimo es {min_disponibles}")
+
+    c['huella_contenido'] = huella_contenido(salida)
+    c['md5_fichero'], c['bytes_fichero'] = huella_fichero(contenido)
+    c['idioma_cabecera'] = idioma
+    c['fecha_catalogo'] = fecha_catalogo.isoformat()
+    c['por_marca'] = por_marca
+    for fila in salida:
+        del fila['_precio_unidad'], fila['_precio_catalogo']
+    return salida, c
