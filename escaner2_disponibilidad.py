@@ -263,11 +263,27 @@ def _tramos_de(producto):
     return validos, raros
 
 
+def _tachado(precio):
+    """True si el registro de /catalog/prices trae `strikePricePerUnit` con un importe > 0 (el «precio antiguo»
+    tachado de la web de HEO). Vacio, null, 0 o un importe que no se lee: False, como si no viniera."""
+    strike = (precio or {}).get('strikePricePerUnit')
+    importe = _decimal(strike.get('amount')) if isinstance(strike, dict) else None
+    return importe is not None and importe > 0
+
+
+def _es_funko(fila):
+    """True si la fila de disp_lectura es de marca Funko (sin distinguir mayusculas ni espacios de los lados). Una
+    grafia parecida y distinta no cuenta: la caza el vigia de la marca del programa."""
+    return (fila.get('marca') or '').strip().casefold() == 'funko'
+
+
 def poner_escalones(filas, productos_crudos, precios_crudos, M):
     """Rellena en cada fila de disp_lectura `precio_escalon`, `uds_escalon` y `precio_pa` con el tramo MAS BARATO de
     HEO, y devuelve sus cuentas {n_con_tramo, n_escalon_gana, n_propio_y_tramo, n_tramos_raros, n_tramos_dudosos,
-    n_sin_precio}. `n_propio_y_tramo` = con precio de hoy por debajo de la base Y tramo: los que dependen de si HEO
-    acumula los dos (pregunta de Fernando a HEO).
+    n_sin_precio, n_tachado_sin_tramo, n_funko_sin_tramo}. `n_propio_y_tramo` = con precio de hoy por debajo de la base
+    Y tramo: los que dependen de si HEO acumula los dos (pregunta de Fernando a HEO). `n_tachado_sin_tramo` = con tramo
+    en la API y precio tachado: se guardan sin tramo; `n_funko_sin_tramo` = Funko con tramo en la API y SIN tachado:
+    tambien sin tramo (encargo H3).
     Modifica `filas` (solo esas tres claves).
 
     La regla (encargo H1):
@@ -283,7 +299,15 @@ def poner_escalones(filas, productos_crudos, precios_crudos, M):
       · sin precio de hoy, las tres vacias (la regla de la base: las tres llenas o las tres vacias).
     🔴 Un producto que el listado trae repetido con TRAMOS DISTINTOS no sabe cual es su tramo: sus tres columnas se
     quedan VACIAS y se cuenta (`n_tramos_dudosos`). No se tumba la pasada: esto va en sombra y la pasada es la que dice
-    que hay en HEO; lo que se sube y se aplica es exactamente lo de antes."""
+    que hay en HEO; lo que se sube y se aplica es exactamente lo de antes.
+    🆕 🔴 CON PRECIO TACHADO, SIN TRAMO (encargo H3, 9-oct-2026): si /catalog/prices trae `strikePricePerUnit` con un
+    importe > 0, el producto esta rebajado y HEO no le aplica el descuento por cantidad (HEO, 9-oct; comprobado en su
+    web: con precio antiguo no hay tramo, sin el si). Se guarda como uno sin tramo: el precio de hoy y uds 1. Vacio,
+    null o 0, como antes. Si el listado de precios lo trae repetido y una copia viene tachada, cuenta como tachado.
+    🆕 🔴 FUNKO, SIN TRAMO (encargo H3, revision de Cowork, 9-oct-2026): en la web de HEO, NINGUN Funko con tramo en la
+    API tiene descuento por cantidad, tampoco los que vienen sin tachado. La fila de marca Funko (la `marca` de la
+    propia fila, sin pedir nada a HEO) se guarda sin tramo, como un tachado. Si es Funko Y tachado, cuenta como
+    tachado: `n_funko_sin_tramo` son los que quita SOLO la marca."""
     perfil = M.PERFILES[e2.PROVEEDOR]
     tramos, raros_por, dudosos = {}, {}, set()
     for x in productos_crudos or []:
@@ -296,8 +320,9 @@ def poner_escalones(filas, productos_crudos, precios_crudos, M):
     bases = {_texto(p.get('productNumber')): _decimal((p.get('basePricePerUnit') or {}).get('amount')
                                                       if isinstance(p.get('basePricePerUnit'), dict) else None)
              for p in precios_crudos or []}
+    tachados = {_texto(p.get('productNumber')) for p in precios_crudos or [] if _tachado(p)}
     c = {'n_con_tramo': 0, 'n_escalon_gana': 0, 'n_propio_y_tramo': 0, 'n_tramos_raros': 0, 'n_tramos_dudosos': 0,
-         'n_sin_precio': 0}
+         'n_sin_precio': 0, 'n_tachado_sin_tramo': 0, 'n_funko_sin_tramo': 0}
     for f in filas:
         pn = f['producto_prov']
         validos = tramos.get(pn) or []
@@ -309,7 +334,11 @@ def poner_escalones(filas, productos_crudos, precios_crudos, M):
             continue
         escalon, uds = f['precio_unidad'], 1
         base = bases.get(pn)
-        if validos and base is not None and base > 0:
+        if validos and pn in tachados:
+            c['n_tachado_sin_tramo'] += 1      # (H3) rebajado: el tramo de la API no se aplica
+        elif validos and _es_funko(f):
+            c['n_funko_sin_tramo'] += 1        # (H3) Funko: HEO no le da descuento por cantidad
+        elif validos and base is not None and base > 0:
             q, pct = min(validos, key=lambda t: (-t[1], t[0]))
             c['n_propio_y_tramo'] += _decimal(f['precio_catalogo']) < base
             tramo = (base * (Decimal(100) - pct) / Decimal(100)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
