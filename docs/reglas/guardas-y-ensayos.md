@@ -3,10 +3,11 @@
 > Movido **literalmente** desde `CLAUDE.md` al acortarlo. Ni una palabra
 > cambiada, ni una regla nueva. Índice y cotejo línea a línea:
 > [`docs/reglas/COTEJO.md`](COTEJO.md) · vuelta: [`CLAUDE.md`](../../CLAUDE.md)
+> Después del movimiento se han editado partes con fecha; lo fechado manda sobre el texto movido.
 
 - 🔴 **UNA GUARDA COMPARA INVARIANTES, NO CIFRAS ABSOLUTAS** — y con más motivo si mide algo que
   el backup no copia. `backup-bd.yml` vuelca con `--schema=public`, así que `storage`, `auth` y
-  todo lo demás **no están en la copia** y `simulacro-copia.yml` no los repone. Cualquier número
+  todo lo demás **no están en la copia** y `simulacro-copia.yml` no los repone. 🕰️ *Histórico: la base de pruebas (staging) se jubiló el 30-sep-2026; el principio vale para el simulacro de la copia y para la base del CI.* Cualquier número
   fijo sobre lo que no se copia da **rojo en staging por el alcance del backup, no por la
   migración**: un falso rojo esperando su día.
   *Medido el 10-ago-2026 en `2026-08-10_buzon_custom_analytics.sql`: el encargo pedía comprobar
@@ -20,9 +21,10 @@
   un `LIKE` más ancho de lo que decía medir, y este número fijo de políticas. Antes de dar una
   guarda por buena, pregúntale: *¿puedes ponerte roja por el entorno, por el tipo de dato o por
   el alcance de una copia?* Si la respuesta es sí, todavía no es una guarda.
+- 🔗 **Una migración que toca permisos o restricciones lleva guarda de entrada y guarda de salida** (el ACL se compara entrada a entrada, no como texto; al retirar un valor admitido se buscan todas las restricciones que lo nombran). La regla entera vive en `docs/reglas/permisos-nace-cerrado.md` de `moloka-app-v2`, donde nacen las migraciones nuevas.
 - 🔴 **UN ENSAYO SOBRE UN ESTADO QUE YA ES EL DE DESTINO NO PRUEBA NADA.** Sale verde,
   parece una verificación y no lo es: solo dice que el destino ya estaba como se quería.
-  *Caso real del 10-ago-2026, y es mío: la migración de los comentarios de `demanda_asin` se
+  🕰️ *Histórico: la base de pruebas (staging) se jubiló el 30-sep-2026; el principio vale para el simulacro de la copia y para la base del CI.* *Caso real del 10-ago-2026, y es mío: la migración de los comentarios de `demanda_asin` se
   probó primero "en humo" escribiéndola a mano en staging para ver si el SQL parseaba. Luego
   iba a correr el `aplicar` encima — sobre unos comentarios que ya eran los nuevos. Habría
   dado verde verificando algo que ya era cierto antes de empezar. Se salvó devolviendo

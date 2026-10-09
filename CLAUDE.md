@@ -8,8 +8,8 @@ las ves tú solo — no están aquí a propósito.
 
 ## 0. QUIÉN USA ESTO
 
-**Elena usa esta app a diario para operar un almacén real.** Moloka Store S.L.U. vende en Amazon
-FBA Pan-EU en seis mercados (ES/IT/FR/DE/NL/BE), Miravia y web propia. Si rompes la app, se para el almacén.
+**Elena usa esta app a diario para operar un almacén real.** Moloka Store S.L.U. hoy solo vende Amazon
+(FBA Pan-EU en seis mercados: ES/IT/FR/DE/NL/BE); lo demás está pendiente de hacer u optimizar (Fernando, 9-oct-2026). Si rompes la app, se para el almacén.
 
 - **`index.html` (v1) está CONGELADO.** Solo bugs críticos. Es un monolito y no se refactoriza.
   Si tu cambio lo toca, párate y pregunta.
@@ -23,15 +23,15 @@ FBA Pan-EU en seis mercados (ES/IT/FR/DE/NL/BE), Miravia y web propia. Si rompes
 
 ### 1.1 Identidad: dos ejes, no un maestro único
 - **EAN = el producto físico.** Universal, cero huecos. Lo escribe la **factura** (fuente dura).
-- **ASIN = la capa Amazon**, por país. Lo pega Fernando a mano desde el Seller.
+- **ASIN = la capa Amazon**, el mismo en los seis mercados. Lo pega Fernando a mano desde el Seller.
 - **SKU = un traductor de los informes del Seller. JAMÁS llave maestra.** Fue el error de la v1:
   cruzar por SKU dejó fuera al 41,7% del catálogo. El SKU **nace y muere**; un mismo ASIN puede
   tener dos vidas de SKU con stock en países distintos.
-- **La llave de la capa Amazon es (ASIN, país).** Nunca el SKU.
+- **La llave de la capa Amazon es el ASIN** (el país es una fila). Nunca el SKU.
 - **"ASIN→EAN es 1:1" es la regla DE MOLOKA, no un hecho de Amazon.** Keepa devuelve varios EAN
   para algunos ASIN. Ir siempre ASIN→EAN, nunca EAN→ASIN (ambiguo con los packs).
 - **Ningún informe del Seller trae EAN.** El puente EAN↔ASIN es responsabilidad de Moloka.
-- **Fuentes duras escriben identidad; las blandas nunca.** Factura → EAN. All Listings → ASIN/SKU.
+- **Fuentes duras escriben identidad; las blandas nunca.** Factura → EAN. All Listings → solo el SKU vacío.
   **Keepa NO escribe identidad**, solo rellena huecos, y **NADA en fichas `es_chase=true`**.
 
 ### 1.2 El país es una FILA, nunca un sufijo de columna
@@ -92,10 +92,9 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
 - **UN PR, UNA COSA.** Sin excepciones.
 - 🔴 **AL TERMINAR UN TRABAJO, EL PARTE SE DEJA EN LA BANDEJA.** Además del PR, se escribe
   una copia del informe en `~/Mi unidad/Moloka/bandeja/` (nunca con letra de unidad) con el nombre
-  **`AAAA-MM-DD-HHMM-tema.md`** (hora española). **Primera línea del fichero: quién lo lee y
-  cuándo.** Sin esa copia, el trabajo solo existe dentro del repo y Fernando tiene que hacer de
-  correveidile entre Code y los chats. La bandeja es lo que lo evita, y **no depende de que
-  nadie se acuerde de pedirlo en el encargo**.
+  **`AAAA-MM-DD-HHMM-tema.md`** (hora española). **Primera línea del parte, una sola:** para quién es y
+  cuándo / modelo y esfuerzo leídos de la ficha de tu sesión (o «esfuerzo: no lo sé»). Sin esa
+  copia, Fernando hace de correveidile entre Code y los chats: **no depende de que el encargo lo pida**.
 - **Una regla nueva no se escribe aquí ni en `docs/reglas/`: va al parte, y entra por el consolidador con su encargo.**
 - **Antes de picar: lee cómo se hizo lo anterior.** Hay procesadores en producción que funcionan;
   el siguiente se les tiene que parecer. Si algo se aparta del patrón, dilo y explica por qué.
@@ -116,9 +115,7 @@ Orden de mudanza acordado: Inventario → Inicio → Alertas → Movimientos →
 
 ## EL RESTO, EN `docs/reglas/` — SE ABRE CUANDO TOCA
 
-Nada se ha perdido ni reescrito: se ha **movido tal cual**, con los títulos numerados
-dentro, así que una referencia vieja como «CLAUDE.md §3» sigue valiendo.
-Cotejo, línea a línea, en [`COTEJO.md`](docs/reglas/COTEJO.md).
+Se **movió tal cual** (lo reescrito lleva fecha en su cabecera); «CLAUDE.md §3» sigue valiendo. Cotejo: [`COTEJO.md`](docs/reglas/COTEJO.md).
 
 | § viejo | se abre cuando… | fichero |
 |---|---|---|

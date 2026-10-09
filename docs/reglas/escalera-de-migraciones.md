@@ -10,8 +10,8 @@ Toda escritura en la base sigue esta cadena, y no hay otra:
 Fernando delante, primero en modo ensayo → verificación SQL en producción después.**
 
 - **CI.** En la v1 corre `.github/workflows/ci-tests-python.yml` (job `tests`) y **no levanta
-  ninguna base**. En la v2, el job `trigger-postgres` prueba las migraciones que toca el PR contra
-  un Postgres propio que nace y muere en el run.
+  ninguna base**. En la v2, el job `trigger-postgres` prueba, en un Postgres propio que nace y muere en el run, lo ligado a lo que cambia el PR (o la batería
+  entera si toca algo compartido); la entera corre además cada noche (detalle en `docs/reglas/revision-de-pr-y-merge.md` de la v2).
 - **Producción, en modo ensayo primero.** Una migración de la v1 llega a la base por
   `.github/workflows/aplicar-migracion.yml` (o por el conector de escritura, con Fernando delante):
   primero `modo=ensayo` —corre de verdad contra la base y se **deshace** con rollback— y, si sale

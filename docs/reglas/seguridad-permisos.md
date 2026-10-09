@@ -3,6 +3,7 @@
 > Movido **literalmente** desde `CLAUDE.md` al acortarlo. Ni una palabra
 > cambiada, ni una regla nueva. Índice y cotejo línea a línea:
 > [`docs/reglas/COTEJO.md`](COTEJO.md) · vuelta: [`CLAUDE.md`](../../CLAUDE.md)
+> Después del movimiento se han editado partes con fecha; lo fechado manda sobre el texto movido.
 
 ## 4. SEGURIDAD
 
@@ -18,7 +19,7 @@
   Afecta a **todo objeto nuevo**, también a las tablas que crean los procesadores.
 - 🔴 **Y no basta con revocar AL CREAR: hay que revocar CADA VEZ QUE SE RECREA.**
   `CREATE OR REPLACE` **conserva** el ACL; **`DROP` + `CREATE` lo PIERDE**, y el objeto vuelve a nacer
-  con el default puesto, o sea con `anon` dentro. Caso real medido el 30-jul-2026:
+  con el default puesto, o sea con `anon` dentro. Histórico (caso del 30-jul-2026, con staging, jubilado el 30-sep-2026):
   `entrada_factura_pvd` tenía `anon=X` en **staging** y no en producción, **aunque su migración lleva
   el `revoke`** — alguien la había recreado con DROP+CREATE y aquel revoke ya no aplicaba a la función
   nueva. No era explotable (aritmética pura, `IMMUTABLE`, no lee tablas), pero **las dos bases dejaron
@@ -26,8 +27,7 @@
   con un `revoke … from anon` en staging.
   Regla práctica: **si la migración lleva un `drop`, el `revoke` va DESPUÉS del `create`, en la misma
   migración, y se mide el ACL al terminar.**
-- **SP-API: jamás con credenciales de Moloka SL.** Decidido y cerrado. Las cuentas de Moloka
-  (Elena) y Fernando (autónomo) están separadas a nivel de credenciales.
+- **SP-API: con la cuenta Seller de Moloka (la de Elena), decidido el 8-sep-2026.** La cuenta de autónomo de Fernando se dejó caducar el 11-sep y no se usa. Solo el cartero (proceso programado del repo privado) habla con Amazon; las credenciales, solo en GitHub Secrets, nunca en código ni en un mensaje. «Solo lectura» no lo da Amazon: lo garantiza la lista blanca del cartero (Seguridad 35 del cerebro).
 
 ## `SECURITY DEFINER`: con motivo y con candados (29-sep-2026)
 
