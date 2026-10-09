@@ -5,28 +5,34 @@
 La lanza escaner2-dbline-disponibilidad.yml, HOY SOLO A MANO. El esqueleto es el de escaner2_ociostock_disponibilidad.py,
 con la descarga de DBLine y las reglas de escaner2_dbline.py.
 
-🔴 TODAVIA NO PUEDE CORRER: depende de la migracion de la v2 (pendiente) que añade `fin_oferta` a `disp_lectura` y a
-   `disp_estado`, `huella_contenido` a `disp_pasada` y la fila DBLINE de `disp_parametros`. Sin ella, sale en ROJO al
-   leer los parametros (no hay minimo) o al subir las filas, y la pasada queda 'fallida'.
+🔴 DEPENDE DE LA MIGRACION 20261009190000_disp_dbline_en_sombra.sql DE LA V2 (encargo DB2-B; se aplica antes de
+   fusionar esto): `fin_oferta` en `disp_lectura` y `disp_estado`, `huella_contenido` en `disp_pasada` y la fila DBLINE
+   de `disp_parametros`. Sin ella, sale en ROJO al leer los parametros (no hay minimo) o al subir las filas, y la
+   pasada queda 'fallida'.
 
 QUE HACE, EN ORDEN:
   1. abre una pasada en `disp_pasada` (proveedor DBLINE, 'leyendo', con el id del run) y lee el minimo de filas
      (`disp_parametros.crudo_minimo`) y la huella de contenido de la ultima pasada APLICADA;
-  2. baja el catalogo con `descargar_dbline.descargar_catalogo_dbline()` TAL CUAL (el mismo que usa el director viejo),
-     con su salida TRAGADA: ese modulo imprime la respuesta del login y, si no llega un .xlsx, el principio de la
-     respuesta y una URL. Al registro no llega nada suyo;
+  2. baja el catalogo con `descargar_dbline.descargar_catalogo_dbline(verificar=CADENA_DBLINE)` (el mismo que usa el
+     director viejo, pero VALIDANDO el certificado contra la cadena GoDaddy de certificados/dbline_cadena.pem; el
+     viejo sigue sin validar), con su salida TRAGADA: desde DB2-B ese modulo solo imprime codigos y bytes, pero al
+     registro de la pasada no llega nada suyo igualmente;
   3. lee con escaner2_dbline.convertir (la fecha de «hoy», la de Madrid): si no se entiende → 'fallida' con recuentos;
      filas por debajo del minimo o disponibles por debajo de escaner2_dbline.MIN_DISPONIBLES → 'rechazada_vaciado';
   4. «AL DIA» POR CONTENIDO: si la huella de contenido es la de la ultima pasada aplicada → 'rechazada' «al día» y
      VERDE (DBLINE_AL_DIA). El md5 del fichero cambia en cada descarga (la hora va pegada a las fechas) y no sirve;
   5. sube las filas a `disp_lectura` en lotes de 500, deja los recuentos y llama a `disp_aplicar_pasada`; lo que vale
-     es lo que relee de la base.
+     es lo que relee de la base;
+  6. SEMANA DE MEDICION (encargo DB2-B): aplicada la pasada, lee sus filas de `disp_cambio` (tipo y marca, de 1.000 en
+     1.000) e imprime para Funko, Pyramid y el total cuantas entran, vuelven, salen, pasan a disponible, pasan a agotado
+     y cambian de precio EN ESA PASADA. El total tiene que cuadrar con los n_* de `disp_pasada`; si no cuadra o no se
+     puede leer, ROJO (la pasada queda aplicada).
 
 🔴 REPO PUBLICO: SOLO estados y recuentos. NUNCA la respuesta de DBLine, una URL, cabeceras, precios, nombres,
    codigos o EAN, ni el texto de un error (al registro, solo su tipo; el detalle, limpio, a `disp_pasada.motivo`). Lo
    comprueba test_escaner2_dbline_disponibilidad.py ejecutando el programa con una descarga y una base de mentira.
 🔑 EN SOMBRA: sin fila en `disp_fuente`; el director viejo sigue como siempre y este programa no lo toca.
-🔒 SOLO TOCA `disp_pasada`, `disp_lectura`, la funcion `disp_aplicar_pasada`, y LEE `disp_parametros`.
+🔒 SOLO TOCA `disp_pasada`, `disp_lectura`, la funcion `disp_aplicar_pasada`, y LEE `disp_parametros` y `disp_cambio`.
 🔒 SIN LOS SECRETOS (DBLINE_USER/DBLINE_PASS y la base), NO SE CORRE: aborta antes de abrir ninguna pasada.
 
 Uso:  python escaner2_dbline_disponibilidad.py            (la pasada)
@@ -42,6 +48,7 @@ from zoneinfo import ZoneInfo
 
 PROVEEDOR = 'DBLINE'
 LOTE = 500
+PAGINA = 1000  # PostgREST devuelve como mucho 1.000 filas por consulta
 _RE_HEX = re.compile(r'[0-9a-fA-F]{24,}')
 _RE_URL = re.compile(r'https?://\S+')
 
@@ -85,10 +92,44 @@ def limpio(texto, secretos=()):
 
 
 def bajar():
-    """Los bytes del catalogo, con descargar_dbline TAL CUAL y su salida tragada (imprime la respuesta del login)."""
+    """Los bytes del catalogo, con descargar_dbline VALIDANDO el certificado (su cadena GoDaddy) y su salida tragada."""
     import descargar_dbline
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-        return descargar_dbline.descargar_catalogo_dbline()
+        return descargar_dbline.descargar_catalogo_dbline(verificar=descargar_dbline.CADENA_DBLINE)
+
+
+def cambios_de_la_pasada(sb, pid):
+    """Las filas (tipo, marca) de disp_cambio de ESTA pasada, de PAGINA en PAGINA y en orden fijo."""
+    filas, desde = [], 0
+    while True:
+        lote = (sb.table('disp_cambio').select('tipo, marca').eq('pasada_id', pid).order('id')
+                  .range(desde, desde + PAGINA - 1).execute().data or [])
+        filas.extend(lote)
+        if len(lote) < PAGINA:
+            return filas
+        desde += PAGINA
+
+
+def medir(sb, pid, fila):
+    """La semana de medicion: los cambios de ESTA pasada por marca, al registro (solo recuentos). True si cuadran con
+    los n_* de disp_pasada."""
+    import escaner2_dbline as db
+    r = db.recuentos_cambios(cambios_de_la_pasada(sb, pid))
+    for clave, nombre in (('funko', 'Funko'), ('pyramid', 'Pyramid'), ('total', 'Total')):
+        x = r[clave]
+        print(f">>> MEDICIÓN {nombre}: entran {x['entran']} · vuelven {x['vuelven']} · salen {x['salen']} · a disponible "
+              f"{x['a_disponible']} · a agotado {x['a_agotado']} · cambian de precio {x['cambio_precio']}", flush=True)
+    columnas = (('entran', 'n_entran'), ('vuelven', 'n_vuelven'), ('salen', 'n_salen'),
+                ('a_disponible', 'n_a_disponible'), ('a_agotado', 'n_a_agotado'), ('cambio_precio', 'n_cambio_precio'))
+    descuadre = [f"{k} {r['total'][k]} ≠ {col} {fila.get(col)}" for k, col in columnas
+                 if r['total'][k] != (fila.get(col) or 0)]
+    if descuadre:
+        print(f"DBLINE_SIN_RECUENTOS: la pasada {pid} está APLICADA, pero los cambios leídos no cuadran con "
+              f"disp_pasada: {' · '.join(descuadre)}", flush=True)
+        return False
+    if fila.get('primera'):
+        print(">>> MEDICIÓN: primera pasada, la foto nace y no cuenta cambios.", flush=True)
+    return True
 
 
 def _cerrar(sb, pasada, estado, motivo, extra=None):
@@ -142,6 +183,7 @@ def pasada(sb, run_id, hoy):
                                                f"{db.MIN_DISPONIBLES}")
         if ult[0].get('huella_contenido') == c['huella_contenido']:
             raise AlDia(ult[0].get('id'))
+        print(">>> Contenido nuevo (la huella no es la de la última pasada aplicada): se sube.", flush=True)
 
         sb.table('disp_pasada').update(rec).eq('id', pid).execute()
         # `fecha_salida` no tiene columna en disp_lectura (no la pide nadie): fuera antes de subir.
@@ -157,6 +199,7 @@ def pasada(sb, run_id, hoy):
         _cerrar(sb, pid, ex.estado, ex.motivo, rec)
         if isinstance(ex, AlDia):
             print(f"DBLINE_AL_DIA: el contenido es el de la pasada aplicada {ex.pasada_aplicada}; nada nuevo.", flush=True)
+            print(">>> MEDICIÓN: al día, ningún cambio en esta pasada (Funko, Pyramid y total, 0).", flush=True)
             return 0
         print(f"DBLINE_NO_APLICADA: pasada {pid} {ex.estado}: {ex.motivo}", flush=True)
         return 1
@@ -181,6 +224,14 @@ def pasada(sb, run_id, hoy):
         return 1
     print(f">>> PASADA APLICADA: {fila.get('n_en_catalogo')} productos de DBLine en el catálogo, "
           f"{fila.get('n_disponibles_estado')} disponibles.", flush=True)
+    try:
+        cuadra = medir(sb, pid, fila)
+    except Exception as ex:  # noqa: BLE001 — 🔴 solo el tipo: el texto puede llevar una fila de la base
+        print(f"DBLINE_SIN_RECUENTOS: la pasada {pid} está APLICADA, pero no se han podido leer sus cambios "
+              f"({type(ex).__name__}).", flush=True)
+        return 1
+    if not cuadra:
+        return 1
     if fila.get('caida_aceptada'):
         print(f"CAIDA_ACEPTADA: la pasada {pid} se ha aplicado como NUEVA REFERENCIA tras varios rechazos estables por "
               f"el freno del 90 %: hay que mirar si DBLine ha caído de verdad.", flush=True)

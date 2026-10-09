@@ -26,10 +26,15 @@ fila por producto (~18.700, ~12.500 con unidades).
      «with» → regla 'chase_suelto' y es_chase true (como OcioStock, regla 4). «w/Chase» es la figura normal.
   6. FECHAS: solo el dia (la hora que traen es la de la descarga y no significa nada).
   7. HUELLA «AL DIA» POR CONTENIDO: md5 de las filas ordenadas por codigo con (codigo, disponible, precio_unidad,
-     precio_catalogo, fin_oferta). Ademas, el md5 y los bytes del fichero (cambian en cada descarga).
+     precio_catalogo, fin_oferta, ean_core, nota). El EAN y la nota (PRENOTAZIONE, NEW, TELEFONARE…) van dentro
+     (Cowork, DB2-B): un cambio de EAN o de reserva no se da por «al dia». Ademas, el md5 y los bytes del fichero
+     (cambian en cada descarga).
   8. CUADRE: fila 1 con su forma; 29 columnas exactas; ≥ MIN_FILAS filas y ≥ MIN_DISPONIBLES disponibles. Si no,
      LecturaInvalida.
-  9. RECUENTOS POR MARCA para la semana de medicion: total, Funko y Pyramid (filas y disponibles).
+  9. RECUENTOS POR MARCA para la semana de medicion: total, Funko y Pyramid (filas y disponibles); y, tras aplicar,
+     lo que ha cambiado EN ESA PASADA por marca (recuentos_cambios, de las filas de disp_cambio).
+ 10. SIN AVISOS AL REGISTRO: convertir() corre bajo warnings.catch_warnings(); un aviso de openpyxl puede citar el
+     fichero (encargo DB2-B).
 
 🔴 REPO PUBLICO: nada de este modulo imprime. Sus errores (`LecturaInvalida`) dicen RECUENTOS y nombres de columna,
    nunca un valor del fichero.
@@ -40,6 +45,7 @@ import hashlib
 import io
 import json
 import re
+import warnings
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qs, urlparse
@@ -69,6 +75,10 @@ MARCA_CHASE = 'FUNKO'
 MARCAS_MEDIDAS = (('funko', 'FUNKO'), ('pyramid', 'PYRAMID'))
 NOTA_PREVENTA = 'PRENOTAZIONE'
 REGLAS = ('chase_suelto', 'ean_forma_rara')
+# Los cambios de una pasada (disp_cambio.tipo) que cuenta la semana de medicion, con su nombre en el registro.
+CAMBIOS_MEDIDOS = (('entra_catalogo', 'entran'), ('vuelve_catalogo', 'vuelven'), ('sale_catalogo', 'salen'),
+                   ('pasa_disponible', 'a_disponible'), ('pasa_agotado', 'a_agotado'),
+                   ('cambia_precio', 'cambio_precio'))
 
 _RE_TITULO = re.compile(r'\s*Catalogo generale\s+(\d{2})-(\d{2})-(\d{4})\s*', re.I)
 _RE_HIPERVINCULO = re.compile(r'=\s*HYPERLINK\(\s*"([^"]*)"\s*[,;]\s*"([^"]*)"\s*\)\s*', re.I)
@@ -244,13 +254,14 @@ def _num_txt(d):
 
 
 def huella_contenido(filas):
-    """md5 de las filas ordenadas por codigo con (codigo, disponible, precio_unidad, precio_catalogo, fin_oferta)
-    (regla 7). No mira la hora de las fechas ni nada que cambie en cada descarga sin cambiar el contenido."""
+    """md5 de las filas ordenadas por codigo con (codigo, disponible, precio_unidad, precio_catalogo, fin_oferta,
+    ean_core, nota) (regla 7). No mira la hora de las fechas ni nada que cambie en cada descarga sin cambiar el
+    contenido (unidades, nombre)."""
     lineas = []
     for f in sorted(filas, key=lambda x: x['producto_prov']):
         lineas.append('|'.join((f['producto_prov'], '1' if f['disponible'] else '0',
                                 _num_txt(f['_precio_unidad']), _num_txt(f['_precio_catalogo']),
-                                f['fin_oferta'] or '')))
+                                f['fin_oferta'] or '', f['ean_core'] or '', f['disponibilidad'] or '')))
     return hashlib.md5('\n'.join(lineas).encode('utf-8')).hexdigest()
 
 
@@ -258,7 +269,14 @@ def huella_contenido(filas):
 def convertir(contenido, hoy, min_filas=MIN_FILAS, min_disponibles=MIN_DISPONIBLES):
     """De los bytes del .xlsx a las filas de disp_lectura, UNA por codigo, con TODAS las marcas y disponibles o no.
     Devuelve (filas, cuentas). LecturaInvalida si la fila 1, la cabecera, la llave, un numero o una fecha de promo no
-    se entienden, o si no llega a los minimos (se dicen los recuentos, no los valores)."""
+    se entienden, o si no llega a los minimos (se dicen los recuentos, no los valores).
+    🔴 Regla 10: ningun aviso (warnings) sale de aqui; los de openpyxl se tragan."""
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        return _convertir(contenido, hoy, min_filas, min_disponibles)
+
+
+def _convertir(contenido, hoy, min_filas, min_disponibles):
     hoy = solo_dia(hoy)  # (Cowork, 9-oct) si entra un datetime, solo su dia
     titulo, cabecera, crudas = leer_excel(contenido)
     fecha_catalogo = fecha_del_titulo(titulo)
@@ -399,3 +417,22 @@ def convertir(contenido, hoy, min_filas=MIN_FILAS, min_disponibles=MIN_DISPONIBL
     for fila in salida:
         del fila['_precio_unidad'], fila['_precio_catalogo']
     return salida, c
+
+
+# ── Lo que ha cambiado en una pasada, por marca (semana de medicion) ─────────────────────
+def recuentos_cambios(cambios):
+    """De las filas de disp_cambio de UNA pasada ({'tipo', 'marca'}), cuantas entran, vuelven, salen, pasan a
+    disponible, pasan a agotado y cambian de precio, para el total, Funko y Pyramid (la marca, como en por_marca:
+    contiene FUNKO / PYRAMID, en mayusculas). Los tipos que no se miden (agotado_sin_dato, recupera_dato) no cuentan.
+    Solo recuentos: ni codigos ni marcas salen de aqui."""
+    nombre = dict(CAMBIOS_MEDIDOS)
+    r = {k: {n: 0 for _t, n in CAMBIOS_MEDIDOS} for k in ['total'] + [k for k, _m in MARCAS_MEDIDAS]}
+    for c in cambios:
+        n = nombre.get(c.get('tipo'))
+        if n is None:
+            continue
+        marca_up = (c.get('marca') or '').upper()
+        for clave, patron in [('total', '')] + list(MARCAS_MEDIDAS):
+            if patron in marca_up:
+                r[clave][n] += 1
+    return r

@@ -13,9 +13,16 @@ QUE PRUEBA:
       la clave (como puede hacer descargar_dbline.py); nada de eso, ni un codigo, EAN, nombre o precio, sale al
       registro; y el motivo que queda en la base, tampoco la URL ni los secretos.
   (D) sin secretos: rojo sin abrir pasada. El rescate: solo la pasada de ESTE run, de DBLine.
-  (E) por estructura: el workflow solo se lanza a mano, con grupo propio, y los secretos en el primer paso.
+  (E) por estructura: el workflow solo se lanza a mano, con grupo propio, y los secretos en el primer paso; curl_cffi
+      con la version de requirements.txt (DB2-B).
+  (F) DB2-B: la pasada pide la descarga VALIDANDO el certificado (verificar=CADENA_DBLINE); la semana de medicion
+      (los cambios de la pasada por marca, de 1.000 en 1.000, cuadrados con disp_pasada; rojo si no cuadran o no se
+      leen); y descargar_dbline.py DE VERDAD con un curl_cffi de mentira: por defecto sin verificar (el director viejo,
+      como hoy), con la cadena si se le pide, su registro solo con codigos y bytes, y su error diciendo que paso sin
+      «mira el log de arriba».
 """
 import contextlib
+import importlib
 import io
 import os
 import runpy
@@ -84,6 +91,10 @@ class _Consulta:
     def limit(self, *_a):
         return self
 
+    def range(self, desde, hasta):
+        self.rango = (desde, hasta)
+        return self
+
     def execute(self):
         b = self.base
         r = []
@@ -105,6 +116,13 @@ class _Consulta:
                     r = [{'id': i} for i, p in b.pasadas.items()
                          if p.get('estado') == 'leyendo' and p.get('run_id') == self.filtros.get('run_id')
                          and p.get('proveedor') == self.filtros.get('proveedor')]
+        elif self.tabla == 'disp_cambio' and self.accion == 'select':
+            if b.error_cambios:
+                raise RuntimeError('la base de mentira no deja leer disp_cambio · fila FUNKO ZQ00001')
+            b.lecturas_cambio.append(self.rango)
+            todas = [c for c in b.cambios if c['pasada_id'] == self.filtros.get('pasada_id')]
+            desde, hasta = self.rango
+            r = [{'tipo': c['tipo'], 'marca': c['marca']} for c in todas[desde:hasta + 1]]
         elif self.tabla == 'disp_parametros' and self.accion == 'select':
             r = [{'crudo_minimo': b.minimo}] if b.minimo is not None else []
         elif self.tabla == 'disp_lectura':
@@ -117,9 +135,13 @@ class _Consulta:
 
 
 class Base:
-    def __init__(self, minimo=1000, ultima_huella=None):
+    def __init__(self, minimo=1000, ultima_huella=None, cambios=(), descuadre=False, error_cambios=False):
+        """cambios: (tipo, marca) que deja disp_aplicar_pasada en disp_cambio al aplicar, y sus n_* en la pasada
+        (descuadre=True: n_entran de mas, como si la lectura de disp_cambio se hubiera quedado corta)."""
         self.minimo, self.ultima_huella = minimo, ultima_huella
         self.pasadas, self.lectura, self.lotes, self.rpcs = {}, [], [], []
+        self.al_aplicar, self.descuadre, self.error_cambios = list(cambios), descuadre, error_cambios
+        self.cambios, self.lecturas_cambio = [], []
 
     def table(self, nombre):
         return _Consulta(self, nombre)
@@ -134,8 +156,16 @@ class Base:
                 leidas = [x for x in base.lectura if x['pasada_id'] == p['id']]
                 base.leidas_al_aplicar = leidas
                 if p.get('n_leidas') == len(leidas) == p.get('n_crudo'):
-                    p.update(estado='aplicada', primera=True, n_en_catalogo=len(leidas),
+                    p.update(estado='aplicada', primera=not base.al_aplicar, n_en_catalogo=len(leidas),
                              n_disponibles_estado=sum(1 for x in leidas if x['disponible']), caida_aceptada=False)
+                    for i, (tipo, marca) in enumerate(base.al_aplicar):
+                        base.cambios.append({'id': i, 'pasada_id': p['id'], 'tipo': tipo, 'marca': marca})
+                    for tipo, col in (('entra_catalogo', 'n_entran'), ('vuelve_catalogo', 'n_vuelven'),
+                                      ('sale_catalogo', 'n_salen'), ('pasa_disponible', 'n_a_disponible'),
+                                      ('pasa_agotado', 'n_a_agotado'), ('cambia_precio', 'n_cambio_precio')):
+                        p[col] = sum(1 for t, _m in base.al_aplicar if t == tipo)
+                    if base.descuadre:
+                        p['n_entran'] += 1
                 else:
                     p.update(estado='rechazada', motivo='no cuadra (de mentira)')
                 base.lectura = [x for x in base.lectura if x['pasada_id'] != p['id']]
@@ -143,11 +173,17 @@ class Base:
         return _Llamada()
 
 
-def descarga_de_mentira(contenido=None, error=None):
-    """Una `descargar_dbline` que, como la de verdad, IMPRIME cosas que no pueden salir al registro."""
-    m = types.ModuleType('descargar_dbline')
+LLAMADAS_DESCARGA = []
 
-    def descargar_catalogo_dbline():
+
+def descarga_de_mentira(contenido=None, error=None):
+    """Una `descargar_dbline` que, como la vieja, IMPRIME cosas que no pueden salir al registro; apunta con que
+    argumentos la llaman (LLAMADAS_DESCARGA)."""
+    m = types.ModuleType('descargar_dbline')
+    m.CADENA_DBLINE = 'CADENA-DE-MENTIRA.pem'
+
+    def descargar_catalogo_dbline(**k):
+        LLAMADAS_DESCARGA.append(k)
         print(f'   login -> 200 | respuesta: {{"ok":1,"utente":"{USUARIO}","pw":"{CLAVE}"}}')
         print(f'   Intento bajar el fichero enlazado: {URL}')
         if error:
@@ -280,6 +316,126 @@ eq('workflow: la pasada lleva DBLINE_USER/PASS y la base',
    ['DBLINE_PASS', 'DBLINE_USER', 'SUPABASE_SERVICE_KEY', 'SUPABASE_URL'])
 eq('workflow: el rescate no lleva los de DBLine', 'DBLINE_PASS' in pasos[5]['env'], False)
 eq('workflow: el rescate solo si los secretos estaban', 'steps.secretos.outcome' in pasos[5]['if'], True)
+_req = [l.strip() for l in open(os.path.join(RAIZ, 'requirements.txt'), encoding='utf-8') if l.strip().startswith('curl_cffi')]
+eq('workflow (DB2-B): curl_cffi con la version de requirements.txt', (len(_req), _req[0] in pasos[3]['run'].split()),
+   (1, True))
+
+# ── (F) DB2-B: certificado, semana de medicion y descargar_dbline.py de verdad ─────────────────
+# La pasada pide la descarga VALIDANDO el certificado.
+LLAMADAS_DESCARGA.clear()
+cod, log, base = correr(bueno)
+eq('certificado (DB2-B): la pasada llama con verificar=CADENA_DBLINE', (cod, LLAMADAS_DESCARGA),
+   (0, [{'verificar': 'CADENA-DE-MENTIRA.pem'}]))
+
+# c) La semana de medicion: 2.550 cambios (mas de una pagina de 1.000), por marca y cuadrados con disp_pasada.
+_al_aplicar = ([('entra_catalogo', 'FUNKO')] * 1200 + [('cambia_precio', 'Pyramid International')] * 900
+               + [('pasa_agotado', 'OTRA')] * 400 + [('pasa_disponible', 'FUNKO')] * 30 + [('vuelve_catalogo', 'OTRA')] * 5
+               + [('sale_catalogo', 'PYRAMID')] * 15)
+cod, log, base = correr(bueno, base=Base(cambios=_al_aplicar))
+eq('medición: verde', (cod, list(base.pasadas.values())[0]['estado']), (0, 'aplicada'))
+eq('medición: lee disp_cambio de 1.000 en 1.000 hasta acabar', base.lecturas_cambio,
+   [(0, 999), (1000, 1999), (2000, 2999)])
+eq('medición: Funko', 'MEDICIÓN Funko: entran 1200 · vuelven 0 · salen 0 · a disponible 30 · a agotado 0 · cambian de '
+                      'precio 0' in log, True)
+eq('medición: Pyramid', 'MEDICIÓN Pyramid: entran 0 · vuelven 0 · salen 15 · a disponible 0 · a agotado 0 · cambian de '
+                        'precio 900' in log, True)
+eq('medición: total', 'MEDICIÓN Total: entran 1200 · vuelven 5 · salen 15 · a disponible 30 · a agotado 400 · cambian '
+                      'de precio 900' in log, True)
+eq('(C) medición: el registro no suelta datos', limpio_de_datos(log), [])
+cod, log, base = correr(bueno, base=Base(cambios=_al_aplicar, descuadre=True))
+eq('medición: si no cuadra con disp_pasada, ROJO y la pasada sigue aplicada',
+   (cod, 'DBLINE_SIN_RECUENTOS' in log, 'entran 1200 ≠ n_entran 1201' in log, list(base.pasadas.values())[0]['estado']),
+   (1, True, True, 'aplicada'))
+cod, log, base = correr(bueno, base=Base(cambios=_al_aplicar, error_cambios=True))
+eq('medición: si no se pueden leer los cambios, ROJO con el tipo y sin el texto',
+   (cod, 'DBLINE_SIN_RECUENTOS' in log, '(RuntimeError)' in log, 'ZQ00001' in log), (1, True, True, False))
+cod, log, base = correr(bueno, base=Base(ultima_huella=huella))
+eq('medición: al día, ningún cambio', (cod, 'MEDICIÓN: al día' in log), (0, True))
+
+# descargar_dbline.py DE VERDAD, con un curl_cffi de mentira que devuelve lo que diga cada caso.
+XLSX = excel([fila('ZQ00001', Descrizione='Nombre inventado 1')])
+SECRETO_RESPUESTA = 'RESPUESTA-SECRETA-DE-DBLINE'
+
+
+class _Resp:
+    def __init__(self, status, contenido):
+        self.status_code, self.content = status, contenido
+        self.text = contenido.decode('utf-8', 'replace')
+        self.headers = {'content-type': 'text/html; tipo-secreto'}
+
+
+class _Sesion:
+    kwargs, descarga, enlazado, login = {}, b'', b'', b''
+
+    def __init__(self, **k):
+        _Sesion.kwargs = k
+
+    def get(self, url, **_k):
+        return _Resp(200, b'<html>home</html>') if url.endswith('/') else _Resp(200, _Sesion.enlazado)
+
+    def post(self, _url, data=None, **_k):
+        return _Resp(200, _Sesion.login) if data['action'] == 'ESEGUI_LOGIN' else _Resp(200, _Sesion.descarga)
+
+
+def descargar_de_verdad(descarga, enlazado=b'', login=None, **kw):
+    """(modulo, bytes, error, registro, kwargs de la sesion) de descargar_dbline.descargar_catalogo_dbline(**kw)."""
+    falso = types.ModuleType('curl_cffi')
+    falso.requests = types.SimpleNamespace(Session=_Sesion)
+    guardados = {k: sys.modules.get(k) for k in ('curl_cffi', 'descargar_dbline')}
+    viejo_env = {k: os.environ.get(k) for k in ('DBLINE_USER', 'DBLINE_PASS')}
+    sys.modules['curl_cffi'] = falso
+    sys.modules.pop('descargar_dbline', None)
+    os.environ.update(DBLINE_USER=USUARIO, DBLINE_PASS=CLAVE)
+    _Sesion.descarga, _Sesion.enlazado = descarga, enlazado
+    _Sesion.login = login if login is not None else (
+        f'{{"ok":1,"utente":"{USUARIO}","pw":"{CLAVE}","nota":"{SECRETO_RESPUESTA}"}}'.encode())
+    salida, cont, err = io.StringIO(), None, None
+    try:
+        mod = importlib.import_module('descargar_dbline')
+        with contextlib.redirect_stdout(salida), contextlib.redirect_stderr(salida):
+            try:
+                cont = mod.descargar_catalogo_dbline(**kw)
+            except RuntimeError as e:
+                err = str(e)
+    finally:
+        for k, v in guardados.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
+        for k, v in viejo_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    return mod, cont, err, salida.getvalue(), dict(_Sesion.kwargs)
+
+
+PROHIBIDO_DESCARGA = (USUARIO, CLAVE, URL, 'tienda.invalid', 'abcdef0123456789', SECRETO_RESPUESTA, 'utente',
+                      'tipo-secreto', 'ZQ0', 'Nombre inventado')
+
+mod, cont, err, log, k = descargar_de_verdad(XLSX)
+eq('descargar_dbline: por defecto SIN verificar (el director viejo, como hoy)', (k.get('verify'), err), (False, None))
+eq('descargar_dbline: devuelve el .xlsx', (cont or b'')[:2], b'PK')
+eq('descargar_dbline: el registro solo con códigos y bytes', [p for p in PROHIBIDO_DESCARGA if p in log], [])
+eq('descargar_dbline: el registro dice los códigos', ('login -> 200' in log, 'descarga -> 200' in log), (True, True))
+mod, cont, err, log, k = descargar_de_verdad(XLSX, verificar=mod.CADENA_DBLINE)
+eq('descargar_dbline: con verificar=CADENA_DBLINE, la sesión valida contra la cadena', k.get('verify'), mod.CADENA_DBLINE)
+_pem = open(mod.CADENA_DBLINE, encoding='utf-8').read()
+eq('certificado: el fichero existe, con 3 certificados y sin claves', (_pem.count('-----BEGIN CERTIFICATE-----'),
+                                                                     'PRIVATE' in _pem), (3, False))
+_html = (f'<html>{SECRETO_RESPUESTA} <a href="{URL}">catalogo</a></html>').encode()
+mod, cont, err, log, k = descargar_de_verdad(_html, enlazado=XLSX)
+eq('descargar_dbline: con enlace a un .xlsx, lo baja', ((cont or b'')[:2], err), (b'PK', None))
+eq('descargar_dbline: con enlace, ni la respuesta ni la URL al registro', [p for p in PROHIBIDO_DESCARGA if p in log], [])
+mod, cont, err, log, k = descargar_de_verdad(f'<html>{SECRETO_RESPUESTA}</html>'.encode(),
+                                             login=b'{"esito":"password errata"}')
+eq('descargar_dbline (e): sin .xlsx, error que dice qué pasó con códigos y bytes',
+   (err is not None, 'login 200 (parece que NO entra)' in (err or ''), 'descarga 200 (' in (err or ''),
+    'sin enlace a un .xlsx' in (err or '')), (True, True, True, True))
+eq('descargar_dbline (e): el error ya no manda a «mirar el log de arriba»', 'log de arriba' in (err or '').lower(), False)
+eq('descargar_dbline (e): ni el error ni el registro sueltan datos',
+   [p for p in PROHIBIDO_DESCARGA if p in (err or '') + log], [])
 
 print()
 if fallos:

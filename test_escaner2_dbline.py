@@ -10,8 +10,11 @@ fallida; cabeceras en italiano y en ingles (y mezcladas o de menos → fallida);
 (UPC-A con su control bien y mal) y raro; promo vigente, del dia y caducada; TELEFONARE con unidades; PRENOTAZIONE sin
 unidades; «w/Chase» normal y chase suelto; huella igual con la hora de las fechas distinta; minimos del cuadre; los
 recuentos por marca; y que los errores no sueltan valores.
+DB2-B (devolucion de Cowork): la huella cambia con el EAN y con la nota; convertir() no deja salir avisos de openpyxl
+(con su CONTROL: sin la regla, el aviso sale); y los cambios de una pasada contados por marca.
 """
 import base64
+import contextlib
 import io
 import json
 import os
@@ -215,9 +218,20 @@ s4, c4 = leer([fila('H1', **{'Prezzo promo (€)': 8.0, 'Scadenza promo': dateti
                fila('H2', Disponibili=0)])
 eq('huella: cambia si cambia el disponible', c1['huella_contenido'] != c4['huella_contenido'], True)
 s5, c5 = leer([fila('H1', **{'Prezzo promo (€)': 8.0, 'Scadenza promo': datetime(2026, 1, 20)}),
-               fila('H2', Disponibili=99, Note='NEW', Descrizione='Otro nombre')])
-eq('huella: NO cambia si cambian unidades (sigue disponible), nota o nombre',
+               fila('H2', Disponibili=99, Descrizione='Otro nombre')])
+eq('huella: NO cambia si cambian unidades (sigue disponible) o nombre',
    c1['huella_contenido'] == c5['huella_contenido'], True)
+# (DB2-B) El EAN y la nota, dentro: un cambio de EAN o de reserva no es «al día».
+s6, c6 = leer([fila('H1', **{'Prezzo promo (€)': 8.0, 'Scadenza promo': datetime(2026, 1, 20)}),
+               fila('H2', Note='PRENOTAZIONE')])
+eq('huella (DB2-B): cambia si cambia la nota (PRENOTAZIONE)', c1['huella_contenido'] != c6['huella_contenido'], True)
+s7, c7 = leer([fila('H1', **{'Prezzo promo (€)': 8.0, 'Scadenza promo': datetime(2026, 1, 20)}),
+               fila('H2', EAN='4999999000023')])
+eq('huella (DB2-B): cambia si cambia el EAN', c1['huella_contenido'] != c7['huella_contenido'], True)
+s8, c8 = leer([fila('H1', **{'Prezzo promo (€)': 8.0, 'Scadenza promo': datetime(2026, 1, 20)}),
+               fila('H2', EAN='  4999999000016')])
+eq('huella (DB2-B): NO cambia si el EAN es el mismo con otros espacios (mira ean_core)',
+   c1['huella_contenido'] == c8['huella_contenido'], True)
 eq('filas: no salen las columnas internas', any(k.startswith('_') for f in s1 for k in f), False)
 
 # ── (8) Cuadre y recuentos por marca ──────────────────────────────────────────────────────
@@ -296,6 +310,54 @@ try:
 except DB.LecturaInvalida as e:
     r = str(e)
 eq('cowork 6: dimension declarada A1:C3 → se leen las 29 columnas y las filas', r, (2, 'it', 10.0))
+
+# ── (10) Devolucion de Cowork al DB2-B ─────────────────────────────────────────────────────
+# d) Ningun aviso de openpyxl sale de convertir(): uno de mentira (con un codigo y un EAN inventados dentro) en cada
+#    apertura del libro. CONTROL: la lectura SIN la regla 10 (_convertir) si lo deja salir; si no, la prueba no prueba.
+import warnings as _w
+
+_load_real = DB.openpyxl.load_workbook
+
+
+def _load_con_aviso(*a, **k):
+    _w.warn('AVISO-DE-OPENPYXL ZZW001 4999999000016', UserWarning)
+    return _load_real(*a, **k)
+
+
+_libro_w = excel([fila('ZZW001')])
+DB.openpyxl.load_workbook = _load_con_aviso
+try:
+    with _w.catch_warnings(record=True) as _vistos:
+        _w.simplefilter('always')
+        DB._convertir(_libro_w, HOY, 1, 0)
+    _control = len(_vistos)
+    with _w.catch_warnings(record=True) as _vistos:
+        _w.simplefilter('always')
+        DB.convertir(_libro_w, HOY, min_filas=1, min_disponibles=0)
+    _con_regla = len(_vistos)
+    _err = io.StringIO()
+    with contextlib.redirect_stderr(_err), _w.catch_warnings():
+        _w.simplefilter('default')
+        DB.convertir(_libro_w, HOY, min_filas=1, min_disponibles=0)
+finally:
+    DB.openpyxl.load_workbook = _load_real
+eq('avisos (DB2-B): CONTROL, sin la regla 10 el aviso de mentira sale', _control >= 1, True)
+eq('avisos (DB2-B): convertir() no deja salir ninguno', _con_regla, 0)
+eq('avisos (DB2-B): nada al registro (stderr)', _err.getvalue(), '')
+
+# c) Los cambios de UNA pasada, por marca (las filas de disp_cambio: tipo y marca).
+_cambios = [{'tipo': 'entra_catalogo', 'marca': 'FUNKO'}, {'tipo': 'pasa_disponible', 'marca': 'Funko Pop'},
+            {'tipo': 'cambia_precio', 'marca': 'Pyramid International'}, {'tipo': 'sale_catalogo', 'marca': None},
+            {'tipo': 'agotado_sin_dato', 'marca': 'FUNKO'}, {'tipo': 'vuelve_catalogo', 'marca': 'OTRA'},
+            {'tipo': 'pasa_agotado', 'marca': 'PYRAMID'}, {'tipo': 'cambia_precio', 'marca': 'FUNKO'}]
+_r = DB.recuentos_cambios(_cambios)
+_cero = {'entran': 0, 'vuelven': 0, 'salen': 0, 'a_disponible': 0, 'a_agotado': 0, 'cambio_precio': 0}
+eq('cambios (DB2-B): Funko', _r['funko'], dict(_cero, entran=1, a_disponible=1, cambio_precio=1))
+eq('cambios (DB2-B): Pyramid', _r['pyramid'], dict(_cero, cambio_precio=1, a_agotado=1))
+eq('cambios (DB2-B): total (agotado_sin_dato no se mide)', _r['total'],
+   {'entran': 1, 'vuelven': 1, 'salen': 1, 'a_disponible': 1, 'a_agotado': 1, 'cambio_precio': 2})
+eq('cambios (DB2-B): sin cambios, todo a 0', DB.recuentos_cambios([]),
+   {'total': _cero, 'funko': _cero, 'pyramid': _cero})
 
 print()
 if fallos:

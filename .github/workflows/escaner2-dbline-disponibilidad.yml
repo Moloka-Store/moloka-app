@@ -1,21 +1,23 @@
 # ============================================================
 # Moloka - Escaner 2 · DISPONIBILIDAD DE DBLINE (encargo DB2-A, 09-oct-2026)
 #
-# Baja el catalogo general de DBLine con descargar_dbline.py (el mismo del director viejo, tal cual), lo lee con las
+# Baja el catalogo general de DBLine con descargar_dbline.py (el mismo del director viejo, pero validando el certificado
+# contra certificados/dbline_cadena.pem), lo lee con las
 # reglas de escaner2_dbline.py y deja en la base lo que tiene DBLine ahora (disp_estado) y lo que ha cambiado
 # (disp_cambio), con la MISMA funcion que HEO, OSMA y OcioStock (disp_aplicar_pasada). EN SOMBRA: sin fila en
 # disp_fuente; el director viejo sigue como siempre. Sin Amazon.
 #
-# 🔴 TODAVIA NO SE PUEDE LANZAR: falta la migracion de la v2 que añade fin_oferta (disp_lectura y disp_estado),
-#    huella_contenido (disp_pasada) y la fila DBLINE de disp_parametros. Sin ella, rojo y la pasada 'fallida'.
+# 🔴 NECESITA LA MIGRACION 20261009190000_disp_dbline_en_sombra.sql DE LA V2 (fin_oferta, huella_contenido y la fila
+#    DBLINE de disp_parametros), que se aplica antes de fusionar esto. Sin ella, rojo y la pasada 'fallida'.
 #
-# 🔴 REPO PUBLICO: este registro lo ve cualquiera. El programa SOLO imprime estados y recuentos; la salida de
-#    descargar_dbline.py (la respuesta del login, URLs) se TRAGA. Lo comprueba test_escaner2_dbline_disponibilidad.py.
+# 🔴 REPO PUBLICO: este registro lo ve cualquiera. El programa SOLO imprime estados y recuentos (tambien los de la
+#    semana de medicion, por marca); la salida de descargar_dbline.py se TRAGA. Lo comprueba
+#    test_escaner2_dbline_disponibilidad.py.
 #
-# 🔒 SOLO TOCA disp_pasada, disp_lectura, la funcion disp_aplicar_pasada, y lee disp_parametros.
+# 🔒 SOLO TOCA disp_pasada, disp_lectura, la funcion disp_aplicar_pasada, y lee disp_parametros y disp_cambio.
 #
-# >>> SIN RELOJ, A PROPOSITO <<<  Se lanza a mano desde Actions. El reloj (cron-job.org) se decide tras la primera
-#     pasada de verdad.
+# >>> SIN RELOJ AQUI, A PROPOSITO <<<  Se lanza a mano desde Actions o desde cron-job.org (POST a la API de
+#     dispatches con {"ref":"main"}): la semana de medicion, cada hora de 07:00 a 21:00, de lunes a sabado (Madrid).
 # ============================================================
 name: Moloka - Escaner 2 · Disponibilidad DBLine
 
@@ -62,8 +64,9 @@ jobs:
           python-version: '3.11'
 
       - name: Instalar dependencias
-        # curl_cffi: la descarga de DBLine (descargar_dbline.py) · openpyxl: el Excel · supabase: la base.
-        run: pip install --quiet supabase==2.31.0 openpyxl==3.1.5 curl_cffi
+        # curl_cffi: la descarga de DBLine (descargar_dbline.py), la version de requirements.txt · openpyxl: el Excel ·
+        # supabase: la base.
+        run: pip install --quiet supabase==2.31.0 openpyxl==3.1.5 curl_cffi==0.15.0
 
       - name: Leer DBLine y aplicar la pasada
         # El tope va en el PASO (15 min), no solo en el job (20): si se agota, el rescate corre.
