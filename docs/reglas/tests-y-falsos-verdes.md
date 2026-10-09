@@ -3,6 +3,7 @@
 > Movido **literalmente** desde `CLAUDE.md` al acortarlo. Ni una palabra
 > cambiada, ni una regla nueva. Índice y cotejo línea a línea:
 > [`docs/reglas/COTEJO.md`](COTEJO.md) · vuelta: [`CLAUDE.md`](../../CLAUDE.md)
+> Después del movimiento se han editado partes con fecha; lo fechado manda sobre el texto movido.
 
 ## 3. VALIDACIÓN: QUÉ CUENTA COMO PRUEBA
 
@@ -97,7 +98,7 @@
   | | la comprobación | por qué no podía fallar |
   |---|---|---|
   | 1 | El pin del `search_path`: longitud **con** y **sin** pin en el mismo `UNION` | `set_config(…, true)` es de **transacción**: fijado en la primera rama, la segunda ya lo tiene. Salía **379 y 379** siempre |
-  | 2 | Testigo de entorno: `current_database()` y `count(*) from productos` | staging es un **clon restaurado** de producción: coinciden **por construcción**. `postgres` y **455** en las dos |
+  | 2 | Testigo de entorno: `current_database()` y `count(*) from productos` | staging (jubilado el 30-sep-2026) es un **clon restaurado** de producción: coinciden **por construcción**. `postgres` y **455** en las dos |
   | 3 | La huella `es_case` para saber si `v_escaner_ultimo` estaba al día | ese texto está en la versión **vieja y en la nueva** (es una columna del `SELECT`). Lo que cambió fue la cláusula de dedup. Daba `vigente` sobre la vista vieja |
   | 4 | `bash -n` sobre el script extraído de un `.yml`, para validar su sintaxis | el extractor había petado por el encoding y no escribió nada. **Validar la nada siempre sale bien.** El `-n` decía OK sobre 0 bytes |
   🔑 **La forma común: la entrada no puede producir un resultado distinto** — porque se

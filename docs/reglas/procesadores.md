@@ -3,6 +3,7 @@
 > Movido **literalmente** desde `CLAUDE.md` al acortarlo. Ni una palabra
 > cambiada, ni una regla nueva. Índice y cotejo línea a línea:
 > [`docs/reglas/COTEJO.md`](COTEJO.md) · vuelta: [`CLAUDE.md`](../../CLAUDE.md)
+> Después del movimiento se han editado partes con fecha; lo fechado manda sobre el texto movido.
 
 ## 2. LOS PROCESADORES: EL PATRÓN
 
@@ -119,12 +120,14 @@
   *"en agosto se vendieron X"*.
 - **La DESPENSA COMÚN:** `crudo` guarda todas las columnas aunque hoy no se usen. Caso real: el
   `sales-rank` llevaba semanas descargándose sin mirarse — y resultó ser el detector de ASIN muertos.
-- 🔴 **Los CSV de Keepa en Storage (`informes/keepa_escaparate/`) NO SE BORRAN NUNCA.** Dejaron de
+- 🔴 **Los CSV de Keepa en Storage (`informes/keepa_escaparate/`) NO SE PIERDEN NUNCA.** Cada martes
+  `comprimir-keepa-antiguos.yml` cambia los .csv de más de 2 días por su .csv.gz y borra el .csv solo si ese
+  objeto ya está en R2 con el mismo tamaño. Borrar a mano para "hacer sitio" sigue prohibido. Dejaron de
   ser fichero temporal el día que `keepa_escaparate_hist` dejó de guardar `crudo` (29-jul-2026):
   pasaron a ser **el archivo histórico permanente**. Ese `crudo` era copia byte a byte del CSV y se
   sacó de la base porque estaba duplicado con 25× menos margen (BD 500 MB vs Storage 1 GB), pero las
   512 claves que solo viven ahí siguen siendo munición del trackeador. **El rescate de cualquiera se
-  hace por `keepa_escaparate_hist.fichero` → `informes/keepa_escaparate/<fichero>`.** Borrar esos CSV
+  hace por `keepa_escaparate_hist.fichero` → `informes/keepa_escaparate/<fichero>` (con `.gz` si ya fue comprimido).** Borrar esos CSV
   para "hacer sitio" es borrar el histórico sin vuelta atrás. Es la CONTRAPARTIDA del `DROP COLUMN
   crudo` (migración `2026-07-29_keepa_hist_drop_crudo.sql`): el DROP solo fue seguro porque el CSV se
   conserva. La misma regla aplica a cualquier `crudo` que en el futuro se mueva de la BD al Storage.

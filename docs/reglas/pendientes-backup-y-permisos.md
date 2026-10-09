@@ -3,7 +3,9 @@
 > Movido **literalmente** desde `CLAUDE.md` al acortarlo. Ni una palabra
 > cambiada, ni una regla nueva. Índice y cotejo línea a línea:
 > [`docs/reglas/COTEJO.md`](COTEJO.md) · vuelta: [`CLAUDE.md`](../../CLAUDE.md)
+> Después del movimiento se han editado partes con fecha; lo fechado manda sobre el texto movido.
 
+- ✅ **CERRADO el 17-sep-2026:** la copia semanal de la v2 (`copia-r2.yml`) guarda aparte, en pareja con el volcado, un fichero con los permisos y las políticas de storage, y el simulacro los restaura y los compara línea a línea (Seguridad 60 y Frentes 21 del cerebro). Lo que sigue queda como histórico (9-ago a 17-sep-2026); sigue vigente la regla: el ACL se verifica en producción, después de aplicar.
 - 🔴 **PENDIENTE — el backup NO copia los permisos: restaurar te deja la base ABIERTA.**
   `backup-bd.yml` vuelca con `--no-privileges`, así que el fichero **no contiene ni un `GRANT` ni un
   `REVOKE`**. Dicho en alto y sin adornos: **el día que haya que restaurar de verdad, la base vuelve
@@ -43,7 +45,8 @@
   un UNIQUE NO aparecen en el dump como `CREATE INDEX`**, sino dentro de un `ALTER TABLE … ADD
   CONSTRAINT`, así que contar `CREATE INDEX` da de menos y se inventa un rojo falso. Los índices de
   puro rendimiento no cambian si un ensayo es válido. Ese PR se llama **restricciones**, no índices.
-- ⚠️ **PENDIENTE — la copia de FICHEROS a R2 no tiene simulacro de restauración.** Desde el
+- ⚠️ **PENDIENTE — la copia de FICHEROS a R2 no tiene simulacro de restauración.** Desde el 17-sep-2026 la copia es semanal (`copia-r2.yml` de la v2, los lunes), lleva tres cubos (`amz-crudos`, `informes`, `facturas-pdfs`) y se carea objeto a objeto; el backup diario de la v1 ya no tiene reloj. Pendiente, si sigue (sin comprobar): un simulacro que baje de R2 una muestra de ficheros y compruebe que abren.
+  🕰️ *Histórico (30-jul a 17-sep-2026):* Desde el
   30-jul-2026 el backup diario (`backup-bd.yml` + `backup_storage.py`) copia a R2 los buckets
   `facturas-pdfs` e `informes` (las facturas de proveedor y el archivo histórico de Keepa). Pero
   `simulacro-copia.yml` solo ensaya el incendio de la **BD**: **esos ficheros no los recupera ni
@@ -98,7 +101,7 @@
 - 🔴 **PENDIENTE — NO EXISTE UNA LISTA FIABLE DE QUÉ MIGRACIONES SE HAN APLICADO A PRODUCCIÓN.**
   `supabase_migrations.schema_migrations` existe y tiene **37 registros, el último
   `20260806085625`** — o sea del **6-ago-2026**. Ni el contador ni el `setval` del 10-ago están
-  ahí, ni nada de lo aplicado desde entonces. **Medido el 10-ago-2026.**
+  ahí, ni nada de lo aplicado desde entonces. **Medido el 10-ago-2026.** El 29-sep eran 59 (el conector de escritura sí registra; el workflow de la v1 no); el volcado sigue sin copiar ese esquema (sin remedir).
   Son **dos agujeros, uno encima del otro**:
   1. `aplicar-migracion.yml` aplica con **psql directo**, no por la CLI de Supabase, así que ese
      registro no se toca nunca. No es un fallo del workflow: es que nadie lo escribe.
