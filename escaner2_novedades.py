@@ -30,7 +30,8 @@ QUE HACE, EN ORDEN:
      a pedir a Amazon en su corrida siguiente. Con los paises que tienen cifra se decide igual:
      con el MISMO codigo con el que el Escaneo PRO decide COMPRAR / VALORAR (escaner2_motor: `_decidir_con_asin`,
      que llama a `calcular_pais` -> `calc_rentabilidad` y `decision_de` del viejo). Las tarifas previstas (API o
-     Keepa) se restan TAL CUAL, sin dividir entre 1,21 (Identidad 9). pa = el precio por unidad de HEO.
+     Keepa) se restan TAL CUAL, sin dividir entre 1,21 (Identidad 9). pa = el precio por unidad de HEO; 🔴 en un
+     expositor que el Escaneo PRO ve suelto («… Surtido (N)»), el de la caja entera, como alli (`pa_de_la_novedad`).
      🔴 (encargo V) Precio, tarifa y comision, de Amazon; y, solo si Amazon fallo, del respaldo de Keepa del momento,
      marcado. La cache de Keepa y el Escaneo PRO nunca dan tarifa ni comision.
   2. KEEPA, recorriendo `nov_cola` en su orden (bajadas por % primero; luego nuevo y vuelve; al final las subidas
@@ -95,10 +96,11 @@ import escaner2_motor as e2
 PROVEEDOR = 'HEO'
 # (Encargo OC4) Lo propio de cada proveedor de novedades: el nombre que se lee (Telegram, Excel, avalancha), la carpeta
 # del Excel en el bucket (la ruta la exige asi nov_excel_ruta_excel_check en la base) y si su Excel lleva al final las
-# dos columnas del escalon («Uds. escalón» y «Precio unidad», de nov_novedad).
+# dos columnas del escalon («Uds. escalón» y «Precio unidad», de nov_novedad). `surtido_con_caja`: el expositor que el Escaneo
+# PRO ve suelto se compara con el precio de la caja (`pa_de_la_novedad`, Frentes 108): HEO si, OcioStock no.
 PROVEEDORES = {
-    'HEO': {'nombre': 'HEO', 'carpeta': 'heo/novedades', 'escalon': False},
-    'OCIOSTOCK': {'nombre': 'OcioStock', 'carpeta': 'ociostock/novedades', 'escalon': True},
+    'HEO': {'nombre': 'HEO', 'carpeta': 'heo/novedades', 'escalon': False, 'surtido_con_caja': True},
+    'OCIOSTOCK': {'nombre': 'OcioStock', 'carpeta': 'ociostock/novedades', 'escalon': True, 'surtido_con_caja': False},
 }
 PAISES = ('ES', 'IT', 'FR', 'DE')
 # Los dominios de Keepa (keepa.DCODES): de 3, fr 4, it 8, es 9.
@@ -356,18 +358,40 @@ def leer_params_escaner2(sb, proveedor=PROVEEDOR):
 
 
 def estados_del_proveedor(sb, productos, proveedor=PROVEEDOR):
-    """{producto_prov: fila de disp_estado} (EAN de cruce y nombre) de los productos de las novedades."""
-    filas = _en_trozos(sb, 'disp_estado', 'producto_prov,ean_core,ean_norm,nombre', 'producto_prov', 'producto_prov',
+    """{producto_prov: fila de disp_estado} (EAN de cruce, el que trae HEO y nombre) de los productos de las novedades."""
+    filas = _en_trozos(sb, 'disp_estado', 'producto_prov,ean_original,ean_core,ean_norm,nombre', 'producto_prov', 'producto_prov',
                        productos, [('eq', 'proveedor', proveedor)])
     return {f['producto_prov']: f for f in filas}
 
 
-def fila_foto(nov, estado, M):
+def pa_de_la_novedad(nov, estado, M, proveedor=PROVEEDOR):
+    """🔴 (Frentes 108, encargo HEO 9-oct-2026) EL PA CON EL QUE SE COMPARA, COMO EL ESCANEO PRO. Puro.
+    La foto parte el expositor en unidades (encargo T: «… Expositor (12)», «… Surtido (6)» es caja de N, y precio_ahora
+    = la caja ÷ N), pero el Escaneo PRO NO: para su regla heredada (`clasificar_chase`: sufijo C del EAN o «5+1») ese
+    producto es SUELTO y su PA es el precio entero de la caja, porque la ficha de Amazon con ese codigo vende la caja
+    entera en 22 de 34 medidas y dividir fabricaria margenes falsos de ~50 % (Escaner 5, 25-sep). Las novedades de HEO
+    comparan igual: si la foto dice caja, sin chase, y la regla del Escaneo PRO no la ve caja, PA = precio_ahora × N.
+    La caja con chase (5+1) y la que el Escaneo PRO tambien ve caja siguen por unidad, como alli. Solo HEO
+    (PROVEEDORES[...]['surtido_con_caja']): la foto de OcioStock no se toca."""
+    pa = nov.get('precio_ahora')
+    if not PROVEEDORES[proveedor]['surtido_con_caja'] or not nov.get('es_caja') or nov.get('es_chase'):
+        return pa
+    if not pa or not nov.get('uds_caja'):
+        return pa
+    _case, caja_para_el_pro, _descartar = M.clasificar_chase(nov.get('nombre') or (estado or {}).get('nombre') or '',
+                                                             (estado or {}).get('ean_original') or '')
+    if caja_para_el_pro:
+        return pa
+    return float(pa) * int(nov['uds_caja'])
+
+
+def fila_foto(nov, estado, M, proveedor=PROVEEDOR):
     """La fila de la foto con la que deciden las puertas del Escaneo PRO: las variantes del EAN (para cruzar con
-    las fichas), el precio por unidad de HEO, el EAN de cruce (el IVA de la ficha) y el nombre (elegir ficha)."""
+    las fichas), el PA (`pa_de_la_novedad`: el precio por unidad de HEO, o el de la caja en un expositor que el Escaneo
+    PRO ve suelto), el EAN de cruce (el IVA de la ficha) y el nombre (elegir ficha)."""
     core = (estado or {}).get('ean_core') or nov['ean_norm'].zfill(13)
     return {'variantes': sorted({M.norm(v) for v in M.variantes_ean(core)} - {''}),
-            'codigos_keepa': e2.codigos_para_keepa(core, M), 'precio_unidad': nov['precio_ahora'],
+            'codigos_keepa': e2.codigos_para_keepa(core, M), 'precio_unidad': pa_de_la_novedad(nov, estado, M, proveedor),
             'ean_core': core, 'nombre': nov.get('nombre') or (estado or {}).get('nombre') or ''}
 
 
@@ -592,7 +616,7 @@ def cuentas(sb, M, params, imprimir=print, valoradas=None, keepa=None, reserva=2
             if not suyas or len(asins) != 1:
                 raise RuntimeError('la novedad lista no tiene sus filas con UNA ficha (%d filas, %d ASIN)' % (len(suyas), len(asins)))
             asin = asins.pop()
-            foto = fila_foto(n, estados.get(n['producto_prov']), M)
+            foto = fila_foto(n, estados.get(n['producto_prov']), M, proveedor)
             # 🔑 EL RESPALDO de los paises en que Amazon fallo: Keepa del momento, o «repedir» con su motivo.
             respaldos = {}
             for f in suyas:
@@ -726,7 +750,7 @@ def _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, i
                                    momento - timedelta(days=int(par['escaneo_pro_dias'])))
         eleccion = _EleccionPerezosa(sb, proveedor)
         for n in cola:
-            foto = fila_foto(n, estados.get(n['producto_prov']), M)
+            foto = fila_foto(n, estados.get(n['producto_prov']), M, proveedor)
             desde = momento - ventana(n)
             # 🔑 (encargo V) Una nuestra: solo SUS fichas (productos.asin), y a Keepa se le pregunta por ASIN.
             suyos = list(n.get('asins_nuestros') or []) if n.get('nuestro') else None

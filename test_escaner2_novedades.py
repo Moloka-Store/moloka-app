@@ -512,8 +512,9 @@ eq('(I) 🔴 sin poder leer el catálogo propio (el IVA de la ficha), la cuenta 
    (b.llamadas('nov_guardar_cuenta'), cierre(b)['estado'], ok), ([], 'fallida', False))
 
 # (I) FK76102 (encargo T): con la caja bien puesta en la foto (expositor de 12), la base deja en precio_ahora el precio
-#     POR UNIDAD (la caja ÷ 12; nov_novedad.precio_ahora: «quien lea no divide nada»), y la cuenta lo compara con la ficha
-#     de UNA unidad («1 of 12»). Precios inventados: 60 el expositor → 5 la unidad; la ficha, a 10.
+#     POR UNIDAD (la caja ÷ 12; nov_novedad.precio_ahora: «quien lea no divide nada»). 🔴 (Frentes 108, 9-oct-2026) La
+#     cuenta NO lo compara por unidad: como el Escaneo PRO, que ve ese expositor SUELTO (su regla heredada no lo ve caja),
+#     compara el precio de la CAJA entera con la ficha. Precios inventados: 60 el expositor → 5 la unidad; la ficha, a 10.
 VALS_EXPO = [{'novedad_id': 'nov-7', 'pais': p, 'asin': 'B0UNIDAD12', 'titulo': 'Funko Mystery Mini: Spongebob 25th Anniversary - 1 of 12',
               'caidas_30d': 20, 'rank': 3000, 'rank_90d': 6000, 'precio_venta': 10.0, 'canal': 'BB-FBA', 'ref_pct': 15.0,
               'fee_fba': 3.0, 'decision': 'Sin datos'} for p in ('ES', 'IT', 'FR', 'DE')]
@@ -523,9 +524,27 @@ b = Base(novedades=[expo], valoraciones=VALS_EXPO)
 ok, res, txt = correr(b, KeepaFalso())
 c = b.llamadas('nov_guardar_cuenta')[0]
 es = next(p for p in c['p_paises'] if p['pais'] == 'ES')
-# A mano: 10/1,21 − 5 − (10 × 15 % + 3 % de eso) − 3,00 − 0,15 = 8,264463 − 5 − 1,545 − 3 − 0,15 = −1,430537.
-eq('(I) FK76102: la cuenta compara la UNIDAD de la caja (5 = 60 ÷ 12) con la ficha de una unidad, no el expositor entero',
-   (es['pa'], round(es['beneficio'], 4)), (5.0, -1.4305))
+# A mano: 10/1,21 − 60 − (10 × 15 % + 3 % de eso) − 3,00 − 0,15 = 8,264463 − 60 − 1,545 − 3 − 0,15 = −56,430537.
+eq('(I) 🔴 FK76102 (Frentes 108): la cuenta compara la CAJA entera (60 = 5 × 12), como el Escaneo PRO, no la unidad',
+   (es['pa'], round(es['beneficio'], 4), es['decision'], c['p_decision']), (60.0, -56.4305, 'NO COMPRAR', 'NO COMPRAR'))
+eq('(I) …y la hoja «Novedades» sigue diciendo el precio POR UNIDAD (antes/ahora «(ud)»): lo que cambia es solo el PA',
+   b.tablas['nov_novedad'][0]['precio_ahora'], 5.0)
+
+# (I) LO QUE NO CAMBIA (pa_de_la_novedad, pura): la caja con chase (5+1: la figura común sí se vende suelta), la caja que
+#     el Escaneo PRO TAMBIÉN ve caja (sufijo C del EAN, o «5+1» en el nombre), una sin unidades y OcioStock. Inventados.
+EXPO = dict(novedad(7, precio=5.0), es_caja=True, uds_caja=12, nombre='Funko Mystery Minis Expositor (12)')
+eq('(I) PA de la novedad: expositor sin chase → la caja (60); con chase → la unidad (5); caja por sufijo C del EAN → la '
+   'unidad; caja por «5+1» → la unidad; sin uds_caja → la unidad; suelto → la unidad; OcioStock → la unidad',
+   [nv.pa_de_la_novedad(EXPO, {}, M),
+    nv.pa_de_la_novedad(dict(EXPO, es_chase=True), {}, M),
+    nv.pa_de_la_novedad(EXPO, {'ean_original': '889698761024C'}, M),
+    nv.pa_de_la_novedad(dict(EXPO, nombre='Funko Pop! Figura 5+1 (6)', uds_caja=6), {}, M),
+    nv.pa_de_la_novedad(dict(EXPO, uds_caja=None), {}, M),
+    nv.pa_de_la_novedad(dict(EXPO, es_caja=False), {}, M),
+    nv.pa_de_la_novedad(EXPO, {}, M, 'OCIOSTOCK')],
+   [60.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0])
+eq('(I) …y el EAN que trae HEO sale de la foto: estados_del_proveedor lo pide a disp_estado',
+   any(isinstance(k, str) and 'ean_original' in k.split(',') for k in nv.estados_del_proveedor.__code__.co_consts), True)
 
 
 # ── (L) LA FICHA TIENE QUE SER DE LA MARCA (encargo T, 30-sep-2026: FK93061 y el casco B08HH6GYRP) ─────────
@@ -963,6 +982,15 @@ b = Base(novedades=[novedad(9, estado='lista')], valoraciones=VALS_COMPRA)
 correr(b, KeepaFalso())
 cab_heo = [list(r) for r in load_workbook(_io.BytesIO(b.subidos[0][2]))['Novedades'].iter_rows(values_only=True)][0]
 eq('(O2) …y el de HEO, sin ellas (acaba en «Por qué», como hasta hoy)', cab_heo[-1], 'Por qué')
+
+# (O2 bis) (Frentes 108) La cuenta de OcioStock pasa SU proveedor: un expositor suyo sigue con el PA de la unidad (la regla
+#     de la caja entera es solo de HEO). Inventados: 60 el expositor → 5 la unidad.
+nov_oc7 = dict(novedad(7, estado='lista', precio=5.0), id='oc-27', producto_prov='OC00027', ean_norm='889698100277',
+               es_caja=True, uds_caja=12, nombre='Funko Mystery Minis Expositor (12)')
+b = con_ociostock(Base(valorar=False), [nov_oc7], [dict(v, novedad_id='oc-27') for v in VALS_EXPO])
+ok, res, txt = correr_oc(b, KeepaFalso())
+eq('(O2 bis) el expositor de OcioStock se cuenta con la UNIDAD (5), no con la caja: la regla de HEO no le toca',
+   sorted({p['pa'] for p in b.llamadas('nov_guardar_cuenta')[0]['p_paises']}), [5.0])
 
 # (O3) El Telegram, con su nombre.
 eq('(O3) el Telegram dice «Novedades OcioStock Funko» (y el de HEO, como siempre)',
