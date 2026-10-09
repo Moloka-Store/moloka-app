@@ -1,0 +1,75 @@
+# ============================================================
+# Moloka - Escaner 2 · NOVEDADES DE DBLINE (FUNKO Y PYRAMID): LAS CUENTAS (encargo DB4, 09-oct-2026)
+#
+# El molde: escaner2-ociostock-novedades-cuentas.yml. La cuenta de las novedades de Funko y Pyramid de DBLine que ya
+# estan «lista» (el cartero de novedades de la v2, a y 20, les dio precio y tarifa de Amazon tras sus reintentos), con
+# el RESPALDO de Keepa del momento para los paises en que Amazon fallo, su Excel en la biblioteca de escaneos si alguna
+# sale COMPRAR («DBLine · Funko y Pyramid», con la fecha de fin de la oferta) y su Telegram «Novedades DBLine Funko y
+# Pyramid» (escaner2_dbline_novedades_cuentas.py -> escaner2_novedades.solo_cuentas con proveedor='DBLINE'). SIN las
+# ventas de Keepa, SIN bajar el fichero y sin tocar nov_pasada. Con el interruptor de la base apagado
+# (nov_parametros.valorar de DBLINE, que NACE apagado), no hace nada y sale verde.
+#
+# 🔴 REPO PUBLICO: el registro solo dice estados y recuentos (ni EAN, ni ASIN, ni el texto de un error).
+#
+# >>> SIN RELOJ, A PROPOSITO: SOLO A MANO <<<  Se lanza desde Actions. Si un dia lleva reloj (cuando Fernando encienda
+#     las novedades de DBLine y se sepa la hora de sus pasadas), lo crean Fernando y Cowork en cron-job.org, como el de
+#     OcioStock: POST
+#     https://api.github.com/repos/Moloka-Store/moloka-app/actions/workflows/escaner2-dbline-novedades-cuentas.yml/dispatches
+#     con cuerpo {"ref":"main"} y las mismas cabeceras que ya usan los directores.
+#
+# 🆕 A MANO, LAS NOVEDADES DE UNA PASADA: con la entrada `pasada` (el id de una pasada aplicada de DBLine), en vez de
+#    las cuentas, la seleccion y la valoracion de esa pasada (lo mismo que hara la foto tras aplicar). Vacia, las
+#    cuentas de siempre.
+# ============================================================
+name: Moloka - Escaner 2 · Novedades DBLine · cuentas
+
+on:
+  workflow_dispatch:
+    inputs:
+      pasada:
+        description: 'Opcional: el id (uuid) de una pasada APLICADA de DBLine para sacar y valorar sus novedades a mano. Vacío: las cuentas sueltas.'
+        required: false
+        default: ''
+
+# 🔒 EL MISMO GRUPO QUE LA FOTO DE DBLINE (escaner2-dbline-disponibilidad.yml), sin cancelar lo que esta en curso: una
+#    cuenta suelta no corre a la vez que la pasada (las dos cuentan las «lista»). Si la pasada tarda, esta queda
+#    PENDIENTE y corre al acabar.
+concurrency:
+  group: escaner2-dbline
+  cancel-in-progress: false
+
+jobs:
+  cuentas:
+    runs-on: ubuntu-24.04
+    # Solo leer el repo: lo demas lo hace con la llave de servicio de Supabase.
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        # Las mismas versiones FIJADAS que las cuentas de HEO y OcioStock (supabase: base · requests: Keepa y Telegram ·
+        # openpyxl: el Excel).
+        run: pip install supabase==2.31.0 requests==2.34.2 openpyxl==3.1.5
+
+      - name: Contar las novedades listas, dejar su Excel y avisar
+        timeout-minutes: 8
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          # 🔑 Solo el respaldo de los paises en que Amazon fallo (3 tokens por ASIN y pais, sin cruzar la reserva).
+          KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}
+          # 🔑 El aviso, como los directores (los mismos secretos). Sin ellos, no se manda y la corrida sigue.
+          TELEGRAM_TOKEN:       ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+          # La pasada de la entrada, por el entorno (nunca pegada en la orden); el programa exige que sea un uuid.
+          NOVEDADES_PASADA:     ${{ inputs.pasada }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_dbline_novedades_cuentas.py

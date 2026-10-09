@@ -183,6 +183,8 @@ PROGRAMAS = [
     ('escaner2_heo_novedades_cuentas.py', 'solo-servicio',  1),   # escaner2-heo-novedades-cuentas
     # 🆕 07-oct-2026 (encargo OC4): las de OcioStock, igual (el mismo modulo con proveedor='OCIOSTOCK').
     ('escaner2_ociostock_novedades_cuentas.py', 'solo-servicio', 1),   # escaner2-ociostock-novedades-cuentas
+    # 🆕 09-oct-2026 (encargo DB4): las de DBLine, igual (el mismo modulo con proveedor='DBLINE').
+    ('escaner2_dbline_novedades_cuentas.py', 'solo-servicio', 1),   # escaner2-dbline-novedades-cuentas
     # 🆕 02-oct-2026 (encargo AG, Escaneo PRO de OSMA): el barrido lee `productos` (los enlaces por código) y el
     #    cruce tambien (el IVA de la ficha y el factor de nuestros packs); los dos corren desatendidos.
     ('escaner2_osma_barrido.py',   'solo-servicio',         1),   # escaner2-osma-barrido
