@@ -447,6 +447,19 @@ jobs:
       - name: 25 septendecies sexies) test_escaner2_ociostock_pro.py
         run: python -u test_escaner2_ociostock_pro.py
 
+      # (Encargo DB2-A, 9-oct-2026) Las reglas de lectura del catalogo general de DBLine (escaner2_dbline.py, modulo
+      # puro) con un Excel INVENTADO de la misma forma que el real: la llave en la formula de «Codice/Link» contrastada
+      # con el enlace (vacia, repetida o que no casa: fallida), cabecera en italiano y en ingles, EAN con espacios y de
+      # 11 cifras, promo vigente y caducada, TELEFONARE y PRENOTAZIONE, «w/Chase» normal, huella por contenido y cuadre.
+      - name: 25 septendecies septies) test_escaner2_dbline.py
+        run: python -u test_escaner2_dbline.py
+
+      # (Encargo DB2-A, 9-oct-2026) La pasada de DBLine (escaner2_dbline_disponibilidad.py) contra una descarga y una
+      # base de mentira: aplica en lotes, «al día» por contenido en verde, vaciado y fallida, rescate de solo su run, el
+      # workflow por estructura, y el registro SIN la salida de descargar_dbline.py (login, URL, usuario y clave).
+      - name: 25 septendecies octies) test_escaner2_dbline_disponibilidad.py
+        run: python -u test_escaner2_dbline_disponibilidad.py
+
       # (Encargo DB3, 9-oct-2026) El Escaneo PRO de DBLine (escaner2_dbline_pro.py, _barrido.py y _cruce.py) con una foto
       # de disponibilidad INVENTADA: el filtro de marca de cada modo, la foto (solo lo que tiene unidades hoy, sin chase
       # suelto, «w/Chase» y el EAN de 11 cifras dentro, sin precio fuera, PA = el precio vigente con la promo solo hasta
@@ -525,6 +538,8 @@ jobs:
             test_escaner2_zentrada_pro.py
             test_escaner2_ociostock.py
             test_escaner2_ociostock_pro.py
+            test_escaner2_dbline.py
+            test_escaner2_dbline_disponibilidad.py
             test_escaner2_dbline_pro.py
             test_encadenar_keepa.py
           )
