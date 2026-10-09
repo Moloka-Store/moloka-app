@@ -20,6 +20,9 @@ QUE PRUEBA:
       leen); y descargar_dbline.py DE VERDAD con un curl_cffi de mentira: por defecto sin verificar (el director viejo,
       como hoy), con la cadena si se le pide, su registro solo con codigos y bytes, y su error diciendo que paso sin
       «mira el log de arriba».
+  (G) DB2-B, la fila 1: los catalogos de este banco llevan la fecha de HOY en Madrid (el programa la compara con su
+      reloj). Una fila 1 en ingles sin la fecha de hoy → fallida y rojo; al registro solo su forma, a la base su texto
+      recortado; la fila 2 en ningun sitio.
 """
 import contextlib
 import importlib
@@ -28,6 +31,8 @@ import os
 import runpy
 import sys
 import types
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import yaml
 
@@ -54,11 +59,16 @@ def eq(nombre, obtenido, esperado):
     print(('OK ' if ok else 'XX ') + nombre + ('' if ok else '   got=%r exp=%r' % (obtenido, esperado)))
 
 
-def libro(n=1200, disponibles=None, **k):
-    """Un catalogo inventado de n filas; las primeras `disponibles` con unidades (todas, si no se dice)."""
+HOY_MADRID = datetime.now(ZoneInfo('Europe/Madrid')).strftime('%d-%m-%Y')
+
+
+def libro(n=1200, disponibles=None, titulo=None, fila2=None, **k):
+    """Un catalogo inventado de n filas; las primeras `disponibles` con unidades (todas, si no se dice). La fila 1,
+    con la fecha de hoy en Madrid (la que mira el programa), salvo que se diga otra."""
     disponibles = n if disponibles is None else disponibles
     return excel([fila('ZQ%05d' % i, Disponibili=(3 if i < disponibles else 0), Descrizione='Nombre inventado %d' % i,
-                       EAN='49999990%05d' % i, **k) for i in range(n)])
+                       EAN='49999990%05d' % i, **k) for i in range(n)],
+                 titulo=titulo or 'Catalogo generale ' + HOY_MADRID, fila2=fila2)
 
 
 class _Consulta:
@@ -436,6 +446,23 @@ eq('descargar_dbline (e): sin .xlsx, error que dice qué pasó con códigos y by
 eq('descargar_dbline (e): el error ya no manda a «mirar el log de arriba»', 'log de arriba' in (err or '').lower(), False)
 eq('descargar_dbline (e): ni el error ni el registro sueltan datos',
    [p for p in PROHIBIDO_DESCARGA if p in (err or '') + log], [])
+
+# ── (G) DB2-B: la fila 1 ──────────────────────────────────────────────────────────────────
+cod, log, base = correr(libro(1200, titulo='General catalogue ' + HOY_MADRID.replace('-', '/')))
+eq('fila 1 (DB2-B): en inglés y con la fecha de hoy, aplica', (cod, list(base.pasadas.values())[0]['estado']),
+   (0, 'aplicada'))
+cod, log, base = correr(libro(1200, titulo='General catalogue TITULO-SECRETO 01-01-1999',
+                              fila2='CLIENTE-SECRETO 777 Moloka Store'))
+p = list(base.pasadas.values())[0]
+eq('fila 1 (DB2-B): sin la fecha de hoy, fallida y rojo sin subir nada', (cod, p['estado'], base.lotes), (1, 'fallida', []))
+eq('fila 1 (DB2-B): al registro, la forma y no el texto',
+   ('su forma: «aaaaaaa aaaaaaaaa aaaaaa-aaaaaaa 99-99-9999»' in log,
+    [x for x in ('General', 'TITULO-SECRETO', 'catalogue') if x in log]), (True, []))
+eq('fila 1 (DB2-B): a la base, además su texto',
+   'su texto: «General catalogue TITULO-SECRETO 01-01-1999»' in p['motivo'], True)
+eq('fila 1 (DB2-B): la fila 2, ni al registro ni a la base',
+   [x for x in ('CLIENTE-SECRETO', '777', 'Moloka') if x in log + p['motivo']], [])
+eq('(C) fila 1 (DB2-B): el registro no suelta datos', limpio_de_datos(log), [])
 
 print()
 if fallos:

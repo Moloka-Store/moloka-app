@@ -31,6 +31,8 @@ QUE HACE, EN ORDEN:
 🔴 REPO PUBLICO: SOLO estados y recuentos. NUNCA la respuesta de DBLine, una URL, cabeceras, precios, nombres,
    codigos o EAN, ni el texto de un error (al registro, solo su tipo; el detalle, limpio, a `disp_pasada.motivo`). Lo
    comprueba test_escaner2_dbline_disponibilidad.py ejecutando el programa con una descarga y una base de mentira.
+   Si la fila 1 o la cabecera no se entienden (encargo DB2-B): al registro, su FORMA (letras → a, cifras → 9); a
+   `disp_pasada.motivo` (privada), además su texto real recortado a 80 caracteres. Nunca la fila 2.
 🔑 EN SOMBRA: sin fila en `disp_fuente`; el director viejo sigue como siempre y este programa no lo toca.
 🔒 SOLO TOCA `disp_pasada`, `disp_lectura`, la funcion `disp_aplicar_pasada`, y LEE `disp_parametros` y `disp_cambio`.
 🔒 SIN LOS SECRETOS (DBLINE_USER/DBLINE_PASS y la base), NO SE CORRE: aborta antes de abrir ninguna pasada.
@@ -60,11 +62,14 @@ def abortar(motivo):
 
 
 class Rechazo(Exception):
-    """La pasada no se aplica: `estado` y un `motivo` escrito por este programa (estados y recuentos)."""
+    """La pasada no se aplica: `estado` y un `motivo` escrito por este programa (estados y recuentos), que va al
+    registro. `motivo_base`, si lo hay, es el que se guarda en disp_pasada.motivo (puede llevar el texto real de la
+    fila que falla: la base es privada)."""
 
-    def __init__(self, estado, motivo):
+    def __init__(self, estado, motivo, motivo_base=None):
         super().__init__(motivo)
         self.estado, self.motivo = estado, motivo
+        self.motivo_base = motivo_base or motivo
 
 
 class AlDia(Rechazo):
@@ -162,7 +167,7 @@ def pasada(sb, run_id, hoy):
         try:
             lectura, c = db.convertir(contenido, hoy, min_filas=0, min_disponibles=0)
         except db.LecturaInvalida as ex:
-            raise Rechazo('fallida', str(ex)) from None
+            raise Rechazo('fallida', str(ex), ex.para_la_base()) from None
         n = c['n_crudo']
         rec = {'n_declarado': n, 'n_crudo': n, 'n_declarado_precios': n, 'n_precios': n,
                'n_declarado_disponibilidades': n, 'n_disponibilidades': n, 'n_sin_gtin': 0,
@@ -196,7 +201,7 @@ def pasada(sb, run_id, hoy):
         }).eq('id', pid).execute()
         sb.rpc('disp_aplicar_pasada', {'p_pasada': pid}).execute()
     except Rechazo as ex:
-        _cerrar(sb, pid, ex.estado, ex.motivo, rec)
+        _cerrar(sb, pid, ex.estado, ex.motivo_base, rec)
         if isinstance(ex, AlDia):
             print(f"DBLINE_AL_DIA: el contenido es el de la pasada aplicada {ex.pasada_aplicada}; nada nuevo.", flush=True)
             print(">>> MEDICIÓN: al día, ningún cambio en esta pasada (Funko, Pyramid y total, 0).", flush=True)
