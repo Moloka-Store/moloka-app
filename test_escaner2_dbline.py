@@ -12,6 +12,10 @@ unidades; «w/Chase» normal y chase suelto; huella igual con la hora de las fec
 recuentos por marca; y que los errores no sueltan valores.
 DB2-B (devolucion de Cowork): la huella cambia con el EAN y con la nota; convertir() no deja salir avisos de openpyxl
 (con su CONTROL: sin la regla, el aviso sale); y los cambios de una pasada contados por marca.
+DB2-B, la fila 1 de la descarga por servidor (seccion 11): vale con la fecha de HOY en italiano o en ingles, con - / .,
+en los dos ordenes (dd-mm y mm-dd), partida en dos celdas o como fecha de Excel; ayer, mañana, otro año o un dia
+imposible → fallida. Si falla la fila 1 o la cabecera, al texto solo su FORMA y donde esta «Publisher»/«EAN»; su
+texto real, recortado a 80, solo en para_la_base(); la fila 2, en ningun sitio.
 """
 import base64
 import contextlib
@@ -55,10 +59,15 @@ def fila(codigo='ZZ0001', **k):
     return [d[c] for c in DB.COLUMNAS_IT]
 
 
-def excel(filas, cabecera=DB.COLUMNAS_IT, titulo='Catalogo generale 10-01-2026'):
+def excel(filas, cabecera=DB.COLUMNAS_IT, titulo='Catalogo generale 10-01-2026', fila2=None):
+    """titulo: el valor de A1, o una lista (una celda por valor, desde A1). fila2: el valor de A2 (como el codigo de
+    cliente y el nombre de Moloka del fichero de verdad), si se da."""
     libro = openpyxl.Workbook()
     h = libro.active
-    h.cell(row=1, column=1, value=titulo)
+    for j, t in enumerate(titulo if isinstance(titulo, (list, tuple)) else [titulo], 1):
+        h.cell(row=1, column=j, value=t)
+    if fila2 is not None:
+        h.cell(row=2, column=1, value=fila2)
     for j, c in enumerate(cabecera, 1):
         h.cell(row=3, column=j, value=c)
     for i, f in enumerate(filas, 4):
@@ -71,7 +80,7 @@ def excel(filas, cabecera=DB.COLUMNAS_IT, titulo='Catalogo generale 10-01-2026')
 
 
 def leer(filas, **k):
-    return DB.convertir(excel(filas, **{x: y for x, y in k.items() if x in ('cabecera', 'titulo')}), HOY,
+    return DB.convertir(excel(filas, **{x: y for x, y in k.items() if x in ('cabecera', 'titulo', 'fila2')}), HOY,
                         min_filas=k.get('min_filas', 1), min_disponibles=k.get('min_disponibles', 0))
 
 
@@ -80,6 +89,15 @@ def invalida(filas, **k):
         leer(filas, **k)
     except DB.LecturaInvalida as e:
         return str(e)
+    return None
+
+
+def excepcion(filas, **k):
+    """La LecturaInvalida entera (para mirar lo que va a la base), o None."""
+    try:
+        leer(filas, **k)
+    except DB.LecturaInvalida as e:
+        return e
     return None
 
 
@@ -117,13 +135,16 @@ mezcla = list(DB.COLUMNAS_IT)
 mezcla[3] = DB.COLUMNAS_EN[3]
 eq('cabecera: idiomas mezclados → fallida', 'mezcla' in (invalida([fila()], cabecera=tuple(mezcla)) or ''), True)
 err = invalida([fila()], cabecera=DB.COLUMNAS_IT[:28])
-eq('cabecera: 28 columnas → fallida con la cuenta', err, 'cabecera: 28 columnas, y son 29')
+eq('cabecera: 28 columnas → fallida con la cuenta', (err or '').startswith('cabecera: 28 columnas, y son 29 · su forma: «'),
+   True)
 movida = list(DB.COLUMNAS_IT)
 movida[13], movida[17] = movida[17], movida[13]
 eq('cabecera: columnas cambiadas de sitio → fallida', 'columna 14' in (invalida([fila()], cabecera=tuple(movida)) or ''), True)
 eq('fila 1: fecha del catalogo', c_it['fecha_catalogo'], '2026-01-10')
-eq('fila 1: otra cosa → fallida', invalida([fila()], titulo='Listino'), 'fila 1: no dice «Catalogo generale <dd-mm-aaaa>»')
-eq('fila 1: dia imposible → fallida', 'no es un dia' in (invalida([fila()], titulo='Catalogo generale 31-02-2026') or ''), True)
+eq('fila 1: otra cosa → fallida', (invalida([fila()], titulo='Listino') or '').startswith(
+    'fila 1: no trae la fecha de hoy (10-01-2026) · su forma: «aaaaaaa»'), True)
+eq('fila 1: dia imposible → fallida', (invalida([fila()], titulo='Catalogo generale 31-02-2026') or '').startswith(
+    'fila 1: no trae la fecha de hoy'), True)
 
 # ── (3) EAN ───────────────────────────────────────────────────────────────────────────────
 eq('ean: espacios de relleno fuera (13)', DB.ean_de_cruce('4999999000016       '), ('4999999000016', None))
@@ -358,6 +379,55 @@ eq('cambios (DB2-B): total (agotado_sin_dato no se mide)', _r['total'],
    {'entran': 1, 'vuelven': 1, 'salen': 1, 'a_disponible': 1, 'a_agotado': 1, 'cambio_precio': 2})
 eq('cambios (DB2-B): sin cambios, todo a 0', DB.recuentos_cambios([]),
    {'total': _cero, 'funko': _cero, 'pyramid': _cero})
+
+# ── (11) DB2-B: la fila 1 de la descarga por servidor ─────────────────────────────────────
+# Titulos INVENTADOS (el de servidor no lo ha visto nadie): vale cualquiera que traiga la fecha de HOY (10-01-2026).
+for _t in ('Catalogo generale 10-01-2026', 'General catalogue 10-01-2026', 'General catalog 10/01/2026',
+           'Catalogue général 10.01.2026', 'Price list 2026-01-10', 'Catalogo generale 10-1-2026',
+           'General catalogue 01-10-2026', 'General catalogue 01/10/2026', ['General catalogue', '10-01-2026'],
+           [datetime(2026, 1, 10)]):
+    try:
+        _r = leer([fila()], titulo=_t)[1]['fecha_catalogo']
+    except DB.LecturaInvalida as e:
+        _r = str(e)
+    eq('fila 1 (DB2-B): vale %r' % (_t,), _r, '2026-01-10')
+eq('fila 1 (DB2-B): las dos lecturas de 01-10-2026 (1-oct y 10-ene)', DB.fechas_de_la_fila('x 01-10-2026'),
+   {date(2026, 10, 1), date(2026, 1, 10)})
+for _t, _que in (('Catalogo generale 09-01-2026', 'ayer'), ('General catalogue 11-01-2026', 'mañana (y 1-nov)'),
+                 ('General catalogue 10-01-2025', 'otro año'), ('Catalogo generale 31-02-2026', 'dia imposible'),
+                 ('General catalogue', 'sin fecha'), ('', 'vacía'), ('General catalogue 10-01-26', 'año de 2 cifras'),
+                 ('Ref 110-01-2026', 'con una cifra pegada delante')):
+    eq('fila 1 (DB2-B): %s → fallida' % _que, (invalida([fila()], titulo=_t) or '').startswith(
+        'fila 1: no trae la fecha de hoy (10-01-2026)'), True)
+
+# Lo que va al texto (registro) y lo que va a la base.
+_e = excepcion([fila()], titulo='General catalogue SECRETO 09-01-2026', fila2='CLIENTE-FILA2 12345 Moloka Store')
+_pub, _base = str(_e), _e.para_la_base()
+eq('fila 1 (DB2-B): al texto, la forma', 'su forma: «aaaaaaa aaaaaaaaa aaaaaaa 99-99-9999»' in _pub, True)
+eq('fila 1 (DB2-B): al texto, nada del titulo', [x for x in ('General', 'catalogue', 'SECRETO') if x in _pub], [])
+eq('fila 1 (DB2-B): al texto, dónde está la cabecera',
+   '«Publisher» y «EAN» en la fila 3; 29 columnas en la fila 3' in _pub, True)
+eq('fila 1 (DB2-B): a la base, además su texto', _base == _pub + ' · su texto: «General catalogue SECRETO 09-01-2026»',
+   True)
+eq('fila 1 (DB2-B): la fila 2, en ningún sitio', [x for x in ('CLIENTE', '12345', 'Moloka') if x in _pub + _base], [])
+_largo = 'Titolo ' + 'x' * 100 + ' 09-01-2026'
+_e = excepcion([fila()], titulo=_largo)
+eq('fila 1 (DB2-B): el texto a la base, recortado a 80',
+   ('«' + _largo[:80] + '»' in _e.para_la_base(), _largo[:81] in _e.para_la_base()), (True, False))
+eq('fila 1 (DB2-B): la forma, recortada a 80', len(str(_e).split('su forma: «')[1].split('»')[0]), 80)
+_e = excepcion([fila()], titulo='Catalogo generale 09-01-2026', cabecera=tuple('Col%d' % i for i in range(29)))
+eq('fila 1 (DB2-B): sin «Publisher» ni «EAN», lo dice',
+   'sin «Publisher» y «EAN» en las 6 primeras filas; 29 columnas en la fila 3' in str(_e), True)
+# La cabecera: igual.
+_cab = list(DB.COLUMNAS_IT)
+_cab[13] = 'ColumnaInventada'
+_e = excepcion([fila()], cabecera=tuple(_cab), fila2='CLIENTE-FILA2')
+eq('cabecera (DB2-B): fallida en la columna 14', str(_e).startswith('cabecera: la columna 14 no es «Disponibili»'), True)
+eq('cabecera (DB2-B): al texto la forma, no el nombre real',
+   ('su forma: «aaa 9 aaa 9 aaa 9' in str(_e), 'ColumnaInventada' in str(_e)), (True, False))
+eq('cabecera (DB2-B): a la base, su texto', 'su texto: «Cat 1 Cat 2 Cat 3' in _e.para_la_base(), True)
+eq('cabecera (DB2-B): la fila 2, en ningún sitio', 'CLIENTE' in _e.para_la_base(), False)
+eq('fila 1 (DB2-B): lo que no falla no lleva privado', DB.LecturaInvalida('x').para_la_base(), 'x')
 
 print()
 if fallos:

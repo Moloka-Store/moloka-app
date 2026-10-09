@@ -6,9 +6,12 @@
 Las reglas salen del parte DB1 del 09-oct-2026 (punto 10.0, con su dato) y de lo que decidio Fernando. Este modulo NO
 lee el escaner viejo ni sus heredados; donde se parece a OcioStock (escaner2_ociostock.py), se dice.
 
-QUE ES EL FICHERO (parte DB1, 1.1): un .xlsx con una hoja. Fila 1 «Catalogo generale <dd-mm-aaaa>»; fila 3, la
-cabecera de 29 columnas, en italiano (navegador) o en ingles (servidor), siempre en el mismo orden; desde la 4, una
-fila por producto (~18.700, ~12.500 con unidades).
+QUE ES EL FICHERO (parte DB1, 1.1): un .xlsx con una hoja. Fila 1, el titulo con la fecha del dia («Catalogo generale
+<dd-mm-aaaa>» en la copia del navegador; la de servidor, en ingles, no la habia visto nadie: encargo DB2-B, 9-oct); la
+fila 2 lleva el codigo de cliente y el nombre de Moloka (🔴 no se lee ni se cuenta nunca); fila 3, la cabecera de 29
+columnas, en italiano (navegador) o en ingles (servidor), siempre en el mismo orden (por servidor: fila 3 y 16
+traducidas en las 25 ultimas corridas del director viejo); desde la 4, una fila por producto (~18.700, ~12.500 con
+unidades).
 
 🔑 LAS REGLAS:
   1. LA LLAVE es el codigo propio de DBLine: el texto que enseña la formula =HYPERLINK(<enlace>,"<CODIGO>") de
@@ -29,15 +32,18 @@ fila por producto (~18.700, ~12.500 con unidades).
      precio_catalogo, fin_oferta, ean_core, nota). El EAN y la nota (PRENOTAZIONE, NEW, TELEFONARE…) van dentro
      (Cowork, DB2-B): un cambio de EAN o de reserva no se da por «al dia». Ademas, el md5 y los bytes del fichero
      (cambian en cada descarga).
-  8. CUADRE: fila 1 con su forma; 29 columnas exactas; ≥ MIN_FILAS filas y ≥ MIN_DISPONIBLES disponibles. Si no,
-     LecturaInvalida.
+  8. CUADRE: la fila 1 trae la FECHA DE HOY (Madrid), diga lo que diga alrededor (italiano o ingles) y con el separador
+     que sea (- / .); si la fecha admite dos lecturas (dd-mm y mm-dd), vale si una de las dos es hoy (encargo DB2-B).
+     29 columnas exactas; ≥ MIN_FILAS filas y ≥ MIN_DISPONIBLES disponibles. Si no, LecturaInvalida.
   9. RECUENTOS POR MARCA para la semana de medicion: total, Funko y Pyramid (filas y disponibles); y, tras aplicar,
      lo que ha cambiado EN ESA PASADA por marca (recuentos_cambios, de las filas de disp_cambio).
  10. SIN AVISOS AL REGISTRO: convertir() corre bajo warnings.catch_warnings(); un aviso de openpyxl puede citar el
      fichero (encargo DB2-B).
 
 🔴 REPO PUBLICO: nada de este modulo imprime. Sus errores (`LecturaInvalida`) dicen RECUENTOS y nombres de columna,
-   nunca un valor del fichero.
+   nunca un valor del fichero. Si falla la fila 1 o la cabecera, el texto de la excepcion lleva solo la FORMA de esa
+   fila (letras → a, cifras → 9) y en que fila estan «Publisher» y «EAN»; su texto real, recortado a 80 caracteres, va
+   aparte (`LecturaInvalida.privado`, `para_la_base()`): solo a disp_pasada.motivo, que es privada. Nunca la fila 2.
 """
 import base64
 import binascii
@@ -80,7 +86,11 @@ CAMBIOS_MEDIDOS = (('entra_catalogo', 'entran'), ('vuelve_catalogo', 'vuelven'),
                    ('pasa_disponible', 'a_disponible'), ('pasa_agotado', 'a_agotado'),
                    ('cambia_precio', 'cambio_precio'))
 
-_RE_TITULO = re.compile(r'\s*Catalogo generale\s+(\d{2})-(\d{2})-(\d{4})\s*', re.I)
+# Una fecha en la fila 1: dia y mes (en el orden que sea) y año de 4 cifras, o año-mes-dia; separador - / o .
+_RE_FECHA_DMA = re.compile(r'(?<!\d)(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})(?!\d)')
+_RE_FECHA_AMD = re.compile(r'(?<!\d)(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?!\d)')
+RECORTE = 80  # caracteres del texto real de una fila que van a la base cuando falla
+FILAS_BUSCAR_CABECERA = 6
 _RE_HIPERVINCULO = re.compile(r'=\s*HYPERLINK\(\s*"([^"]*)"\s*[,;]\s*"([^"]*)"\s*\)\s*', re.I)
 _RE_CHASE_NOMBRE = re.compile(r'\bchase\b\s*$|\([^)]*\bchase\b[^)]*\)', re.I)
 _RE_CON_CHASE = re.compile(r'(?:\bw/|\bwith\b)\s*chase\b', re.I)
@@ -89,7 +99,25 @@ _FORMATOS_DIA = ('%d/%m/%Y', '%d-%m-%Y', '%Y-%m-%d', '%d.%m.%Y')
 
 
 class LecturaInvalida(ValueError):
-    """El fichero no se puede subir tal cual. El texto son recuentos y nombres de columna: se puede imprimir."""
+    """El fichero no se puede subir tal cual. El texto son recuentos, nombres de columna y formas: se puede imprimir.
+    `privado` (si lo hay) lleva el texto real de la fila que falla, recortado: SOLO para la base (para_la_base)."""
+
+    def __init__(self, texto, privado=None):
+        super().__init__(texto)
+        self.privado = privado
+
+    def para_la_base(self):
+        return str(self) + (f' · {self.privado}' if self.privado else '')
+
+
+def forma(texto):
+    """La forma de un texto para el registro publico: letras → a, cifras → 9, lo demas igual; recortada a RECORTE."""
+    return ''.join('a' if ch.isalpha() else '9' if ch.isdigit() else ch for ch in str(texto))[:RECORTE]
+
+
+def texto_de_fila(fila):
+    """Las celdas no vacias de una fila, unidas por un espacio."""
+    return ' '.join(str(c).strip() for c in (fila or []) if c is not None and str(c).strip())
 
 
 # ── El fichero ────────────────────────────────────────────────────────────────────────────
@@ -99,8 +127,9 @@ def huella_fichero(contenido):
 
 
 def leer_excel(contenido):
-    """(titulo, cabecera, filas) del .xlsx: el texto de A1, la fila 3 y las filas desde la 4 (las del todo vacias,
-    fuera). 🔴 SIN data_only: la llave vive en una formula y con data_only sale vacia."""
+    """(fila1, cabecera, filas, donde) del .xlsx: las celdas de la fila 1, la fila 3, las filas desde la 4 (las del
+    todo vacias, fuera) y `donde`: en que fila estan «Publisher» y «EAN» (de las 6 primeras) y cuantas columnas tiene
+    la fila 3, para decirlo si algo falla. 🔴 SIN data_only: la llave vive en una formula y con data_only sale vacia."""
     try:
         libro = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=False)
     except Exception:  # noqa: BLE001 - cualquier fallo de lectura es «no es un .xlsx», sin soltar su texto
@@ -113,38 +142,69 @@ def leer_excel(contenido):
         libro.close()
     if len(todas) < FILA_CABECERA:
         raise LecturaInvalida(f'el fichero tiene {len(todas)} fila(s): no llega a la cabecera (fila {FILA_CABECERA})')
-    titulo = todas[FILA_TITULO - 1][0] if todas[FILA_TITULO - 1] else None
+    fila1 = list(todas[FILA_TITULO - 1] or [])
     cabecera = ['' if c is None else str(c).strip() for c in todas[FILA_CABECERA - 1]]
     while cabecera and cabecera[-1] == '':
         cabecera.pop()
     filas = [f for f in todas[FILA_CABECERA:] if any(c is not None and str(c).strip() for c in f)]
-    return titulo, cabecera, filas
+    # Solo el NUMERO de la fila que tiene «Publisher» y «EAN» (la fila 2 se mira, pero nada suyo sale de aqui).
+    fila_pub = next((i + 1 for i, f in enumerate(todas[:FILAS_BUSCAR_CABECERA])
+                     if {'Publisher', 'EAN'} <= {str(c).strip() for c in f if c is not None}), None)
+    donde = (f'«Publisher» y «EAN» en la fila {fila_pub}' if fila_pub else
+             f'sin «Publisher» y «EAN» en las {FILAS_BUSCAR_CABECERA} primeras filas')
+    donde += f'; {len(cabecera)} columnas en la fila {FILA_CABECERA}'
+    return fila1, cabecera, filas, donde
 
 
-def fecha_del_titulo(titulo):
-    """El dia de «Catalogo generale <dd-mm-aaaa>» (fila 1). LecturaInvalida si no tiene esa forma."""
-    m = _RE_TITULO.fullmatch(str(titulo or ''))
-    if not m:
-        raise LecturaInvalida('fila 1: no dice «Catalogo generale <dd-mm-aaaa>»')
+def _dia(a, m, d):
     try:
-        return date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+        return date(a, m, d)
     except ValueError:
-        raise LecturaInvalida('fila 1: la fecha de «Catalogo generale» no es un dia') from None
+        return None
 
 
-def comprobar_cabecera(cabecera):
+def fechas_de_la_fila(texto):
+    """Los dias que puede decir el texto de la fila 1: cada dd-mm-aaaa en sus dos lecturas (dd-mm y mm-dd) y cada
+    aaaa-mm-dd; las que no son un dia, fuera."""
+    dias = set()
+    for m in _RE_FECHA_DMA.finditer(texto):
+        x, y, a = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        dias.update(d for d in (_dia(a, y, x), _dia(a, x, y)) if d)
+    for m in _RE_FECHA_AMD.finditer(texto):
+        d = _dia(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        if d:
+            dias.add(d)
+    return dias
+
+
+def fecha_del_titulo(fila1, hoy, donde=''):
+    """HOY si la fila 1 trae la fecha de hoy (regla 8), diga lo que diga alrededor. Si no, LecturaInvalida: al texto,
+    la forma de la fila y `donde`; a `privado`, su texto real recortado."""
+    texto = texto_de_fila(fila1)
+    if hoy in fechas_de_la_fila(texto):
+        return hoy
+    raise LecturaInvalida(f'fila 1: no trae la fecha de hoy ({hoy:%d-%m-%Y}) · su forma: «{forma(texto)}»'
+                          + (f' · {donde}' if donde else ''),
+                          privado=f'su texto: «{texto[:RECORTE]}»')
+
+
+def comprobar_cabecera(cabecera, donde=''):
     """'it' o 'en' si la cabecera es EXACTAMENTE una de las dos; si no, LecturaInvalida con la cuenta de columnas y la
-    primera que no casa (nombres de columna, nunca valores)."""
+    primera que no casa (nombres de columna esperados, nunca valores), la forma de la fila 3 y `donde`; su texto real,
+    recortado, a `privado`."""
     if tuple(cabecera) == COLUMNAS_IT:
         return 'it'
     if tuple(cabecera) == COLUMNAS_EN:
         return 'en'
     if len(cabecera) != len(COLUMNAS_IT):
-        raise LecturaInvalida(f'cabecera: {len(cabecera)} columnas, y son {len(COLUMNAS_IT)}')
-    for i, (it, en) in enumerate(zip(COLUMNAS_IT, COLUMNAS_EN)):
-        if cabecera[i] not in (it, en):
-            raise LecturaInvalida(f'cabecera: la columna {i + 1} no es «{it}» ni «{en}» (o se mezclan los idiomas)')
-    raise LecturaInvalida('cabecera: mezcla columnas en italiano y en inglés')
+        que = f'cabecera: {len(cabecera)} columnas, y son {len(COLUMNAS_IT)}'
+    else:
+        que = next((f'cabecera: la columna {i + 1} no es «{it}» ni «{en}» (o se mezclan los idiomas)'
+                    for i, (it, en) in enumerate(zip(COLUMNAS_IT, COLUMNAS_EN)) if cabecera[i] not in (it, en)),
+                   'cabecera: mezcla columnas en italiano y en inglés')
+    texto = texto_de_fila(cabecera)
+    raise LecturaInvalida(f'{que} · su forma: «{forma(texto)}»' + (f' · {donde}' if donde else ''),
+                          privado=f'su texto: «{texto[:RECORTE]}»')
 
 
 # ── Las piezas de una fila (puras) ────────────────────────────────────────────────────────
@@ -278,9 +338,9 @@ def convertir(contenido, hoy, min_filas=MIN_FILAS, min_disponibles=MIN_DISPONIBL
 
 def _convertir(contenido, hoy, min_filas, min_disponibles):
     hoy = solo_dia(hoy)  # (Cowork, 9-oct) si entra un datetime, solo su dia
-    titulo, cabecera, crudas = leer_excel(contenido)
-    fecha_catalogo = fecha_del_titulo(titulo)
-    idioma = comprobar_cabecera(cabecera)
+    fila1, cabecera, crudas, donde = leer_excel(contenido)
+    fecha_catalogo = fecha_del_titulo(fila1, hoy, donde)
+    idioma = comprobar_cabecera(cabecera, donde)
     n_col = len(COLUMNAS_IT)
 
     salida = []
