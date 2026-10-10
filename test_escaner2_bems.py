@@ -202,8 +202,9 @@ eq('«(Chase)» de Funko: entra como figura igual, pero lo dice el aviso',
 eq('«Chase» de otra marca: nada', 'chase' in (por['900055']['aviso'] or '').lower(), False)
 eq('chase y EAN ASSOC: recuentos', (c['n_parece_chase'], c['n_ean_assoc']), (1, 1))
 eq('regla de chase, suelta', [EB.parece_chase_suelto('Funko', t) for t in (
-    'X w/Chase', 'X with Mimmy Chase', 'X (Chase)', 'X Chase', 'X (Chase Edition)', 'Chaser X', 'X w/ Chase')],
-   [False, False, True, True, True, False, False])
+    'X w/Chase', 'X with Mimmy Chase', 'X (Chase)', 'X Chase', 'X (Chase Edition)', 'Chaser X', 'X w/ Chase',
+    'X avec Chase', 'X Avec Chase (Exc)')],
+   [False, False, True, True, True, False, False, False, False])
 
 # ── (6) El cuadre ─────────────────────────────────────────────────────────────────────────
 eq('nombre: la fecha del nombre', EB.fecha_del_nombre('BEMS_EXPORT_01_02_2027.csv').isoformat(), '2027-02-01')

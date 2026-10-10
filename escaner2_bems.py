@@ -28,7 +28,7 @@ punto decimal, una cabecera de 39 columnas (la ultima, «LENGTH », con un espac
   6. SIN CHASE SUELTO: es_chase false siempre. Fernando (10-oct), del Hello Kitty «with Mimmy Chase»: «Es la normal,
      si compras 6 pues te vendra 5 normales y un chase»; Cowork midio los 119 Funko del CSV con «chase» en el titulo
      y todos son la figura normal con posibilidad de chase. Si algun dia sale un titulo que SI parezca un chase suelto
-     (Funko, «chase» al final o entre parentesis, y sin «w/» ni «with» antes en el titulo), entra como figura y se
+     (Funko, «chase» al final o entre parentesis, y sin «w/», «with» ni «avec» antes en el titulo), entra como figura y se
      dice en su aviso («parece chase suelto») y en el recuento (n_parece_chase): al aviso, no fuera.
   7. marca = FABRICANT, nombre = TITRE UK, categoria = CATEGORIE. El STATUS («Disponible en», «Fuera de stock»…) va al
      aviso: no decide nada (parte BE1, 1.1: stock y estado no se contradicen en ninguna fila).
@@ -57,7 +57,7 @@ MARCAS_MEDIDAS = (('funko', 'FUNKO'), ('bandai_model_kit', 'BANDAI MODEL KIT'), 
 MAX_FILAS_CITADAS = 5  # numeros de fila que se citan en un error (nunca su contenido)
 _RE_NOMBRE = re.compile(r'BEMS_EXPORT_([0-9]{2})_([0-9]{2})_([0-9]{4})[.]csv')
 _RE_CHASE_NOMBRE = re.compile(r'\bchase\b\s*$|\([^)]*\bchase\b[^)]*\)', re.I)
-_RE_CON_CHASE = re.compile(r'(?:\bw/|\bwith\b).*\bchase\b', re.I)
+_RE_CON_CHASE = re.compile(r'(?:\bw/|\bwith\b|\bavec\b).*\bchase\b', re.I)
 _RE_ENTERO = re.compile(r'[0-9]+')
 _RE_DECIMAL = re.compile(r'[0-9]+(?:[.][0-9]+)?')
 
@@ -165,8 +165,9 @@ def precio(crudo):
 
 
 def parece_chase_suelto(marca, nombre):
-    """Regla 6: FUNKO y «chase» al final o entre parentesis, sin «w/» ni «with» ANTES en el titulo («w/Chase»,
-    «with Chase», «with Mimmy Chase» son la figura normal). Solo informa: la fila entra igual como figura."""
+    """Regla 6: FUNKO y «chase» al final o entre parentesis, sin «w/», «with» ni «avec» ANTES en el titulo
+    («w/Chase», «with Chase», «with Mimmy Chase» y «avec Chase» son la figura normal: el CSV del 10-oct trae un
+    «… avec Chase» en TITRE UK). Solo informa: la fila entra igual como figura."""
     if MARCA_CHASE not in str(marca or '').upper():
         return False
     nombre = str(nombre or '')
