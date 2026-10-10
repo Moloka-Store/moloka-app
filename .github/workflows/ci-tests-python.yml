@@ -485,6 +485,16 @@ jobs:
       - name: 25 septendecies undecies) test_escaner2_bems_disponibilidad.py
         run: python -u test_escaner2_bems_disponibilidad.py
 
+      # (Encargo BE4, 10-oct-2026) El Escaneo PRO de BEMS (escaner2_bems_pro.py, _barrido.py y _cruce.py) con una foto
+      # de disponibilidad INVENTADA: el filtro de marca de cada modo (la lista fija con la regla de siempre, todas, las
+      # elegidas exactas), la foto (solo lo que tiene stock hoy, SIN regla de chase, la blind box a su precio de caja,
+      # sin EAN o sin PA fuera, un EAN con su referencia más barata), crudo = artículos del CSV = previas + foto, siete
+      # mutantes en rojo, y los dos programas de punta a punta con los CUATRO CSV y la cabecera real del Visualizador: el
+      # Excel del PRO de HEO tal cual (con «Ventas», sin columnas nuevas), el día del CSV en el registro y en el Excel, y
+      # el registro sin un EAN, un precio ni una referencia.
+      - name: 25 septendecies duodecies) test_escaner2_bems_pro.py
+        run: python -u test_escaner2_bems_pro.py
+
       # (Encadenado de Keepa, 1-oct-2026) El job `encadenar` de procesar-keepa-escaparate.yml: el titulo de la
       # corrida igual en el YAML y en el codigo; el job por estructura (tras `procesar`, solo en aplicar, exito o
       # fallo, continue-on-error, actions: write solo en el); la decision con el buzon, las cargas y las corridas
@@ -559,6 +569,7 @@ jobs:
             test_escaner2_dbline_pro.py
             test_escaner2_bems.py
             test_escaner2_bems_disponibilidad.py
+            test_escaner2_bems_pro.py
             test_encadenar_keepa.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
