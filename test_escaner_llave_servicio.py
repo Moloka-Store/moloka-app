@@ -195,6 +195,9 @@ PROGRAMAS = [
     # 🆕 09-oct-2026 (encargo DB3, Escaneo PRO de DBLine): el cruce lee `productos` (el IVA de la ficha), como el de
     #    OcioStock, y corre desatendido.
     ('escaner2_dbline_cruce.py',   'solo-servicio',         1),   # escaner2-dbline-cruce
+    # 🆕 10-oct-2026 (encargo BE4, Escaneo PRO de BEMS): el cruce lee `productos` (el IVA de la ficha), como el de
+    #    DBLine, y corre desatendido.
+    ('escaner2_bems_cruce.py',     'solo-servicio',         1),   # escaner2-bems-cruce
 ]
 
 
@@ -626,7 +629,8 @@ eq('(B) 🔴 ningun paso lanza ninguno de estos programas sin la llave de servic
    _incumplen, [])
 # (OC3) +1, el cruce de OcioStock · (Encargo OC4, 07-oct-2026) +1, el paso de las cuentas de las novedades de OcioStock.
 # (Encargo DB3, 09-oct-2026) +1, el cruce de DBLine. (Encargo DB4, 09-oct-2026) +1, el paso de las cuentas de las novedades de DBLine.
-eq('(D) …y en total se han mirado los DIECIOCHO pasos que existen, no cero', _total, 18)
+# (Encargo BE4, 10-oct-2026) +1, el cruce de BEMS.
+eq('(D) …y en total se han mirado los DIECINUEVE pasos que existen, no cero', _total, 19)
 
 # (C) la otra direccion: un paso que lanza el escaner sin la llave tiene que
 # salir en la lista. Este es el estado exacto de `director-dbline.yml` ayer.
