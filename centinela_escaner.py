@@ -5,7 +5,7 @@
 # ------------------------------------------------------------
 # QUE VIGILA: la ULTIMA escritura de cada proveedor. Si uno lleva mas horas que su
 # umbral sin escribir, avisa por Telegram y el run sale en ROJO.
-#   - DBLINE y TCG (escaner viejo): el MAXIMO de `fecha` en `escaner_memoria`.
+#   - TCG (escaner viejo): el MAXIMO de `fecha` en `escaner_memoria`.
 #   - HEO y OSMA (escaner 2, desde el 03-oct-2026): la ultima pasada 'aplicada'
 #     de `disp_pasada` (`terminada_en`). El director viejo de HEO se apago a
 #     proposito el 01-oct y `escaner_memoria` ya no se mueve para HEO ni para OSMA:
@@ -15,6 +15,10 @@
 #     foto del catalogo entero. Su director viejo sigue en .github/workflows hasta
 #     que se apague, pero lo que leen Reponer y el Trackeador al pulsar el
 #     interruptor es la foto: el centinela vigila lo que se lee.
+#   - DBLINE (escaner 2, encargo DB6, 10-oct-2026): tambien `disp_pasada`, la foto
+#     del catalogo general, el dia que se pulsa su interruptor y se apaga su
+#     director viejo (`reglas_director` DBLINE inactivo): su `escaner_memoria` deja
+#     de moverse, y mirarla daria MUDO a las 26 h.
 #
 # CUANDO MIRA: 06:00, 10:00, 14:00 y 18:00 UTC. Cuatro pasadas, ninguna de noche
 # -- el porque, y por que el hueco nocturno no retrasa nada, esta en el cron de
@@ -67,8 +71,9 @@ from datetime import datetime, timedelta, timezone
 #   TCG        | 06-16, todos los dias|   ~6    |   18,00 h   |   18,00 h   | 22
 #   DBLINE     | 06-11, L a S         |   ~4    |   44,00 h   |   23,00 h   | 26
 #   OCIOSTOCK  | 07-15, L a S         |   ~5    |   40,00 h   |   18,00 h   | 22
-#   (HEO, OSMA y, desde el 07-oct-2026, OCIOSTOCK: tabla propia, mas abajo; ya no
-#   salen de `escaner_memoria`. La fila de OCIOSTOCK de aqui es la del escaner viejo.)
+#   (HEO, OSMA y, desde el 07-oct-2026, OCIOSTOCK y, desde el 10-oct-2026, DBLINE:
+#   tabla propia, mas abajo; ya no salen de `escaner_memoria`. Las filas de OCIOSTOCK
+#   y DBLINE de aqui son las del escaner viejo.)
 #
 # Con esas X, en los 28 dias medidos NO habria saltado ni un aviso falso:
 # ningun hueco descontado llego a la X de su proveedor (DBLine tuvo 2 por encima
@@ -109,7 +114,25 @@ from datetime import datetime, timedelta, timezone
 #      HEO       | disp_pasada      | 06-19, todos       |  23,00 h *  |  (ninguno)  | 26
 #      OSMA      | disp_pasada      | 05, L a V          |  24,00 h *  |  sab y dom  | 26
 #      OCIOSTOCK | disp_pasada      | 07, todos          |  24,00 h *  |  (ninguno)  | 26
+#      DBLINE    | disp_pasada      | 05-19, L a S       |  24,00 h *  |  domingo    | 26
 #      (* derivado del horario, no medido en la pelicula: ver arriba y abajo.)
+#
+# 🆕 DBLINE EN EL ESCANER 2 (10-oct-2026, encargo DB6). Medido el 10-oct a las
+#    14:46 UTC en `disp_pasada`: 7 'aplicadas' en total (9-oct 17:37 y 17:39 UTC, a
+#    mano; y desde el 10-oct 10:06 UTC una por hora, a los :06, todas con cambios,
+#    ninguna «al dia» todavia). 🔴 SIN PELICULA: el reloj es cron-job.org (tarea
+#    8613521), a las :05 de 07 a 21 h Madrid (05-19 UTC en verano), de lunes a
+#    sabado; el domingo no hay pasadas.
+#    Si el catalogo cambia cada hora, como hoy, el hueco normal es la noche: 19:06 a
+#    05:06 UTC = 10 h (y el sabado al lunes, 34 h menos el domingo = 10 h). Pero una
+#    pasada «al dia» (mismo contenido) no cuenta como escritura, y no se sabe aun
+#    cuantas seguidas puede dar DBLine: el peor caso que se admite sin aviso es un
+#    dia entero sin cambio de contenido, 24 h de una aplicada a la del dia
+#    siguiente (de ahi los 24,00 h, derivados). X = 26 h, como HEO, OSMA y
+#    OcioStock; bajarla cuando haya pelicula de «al dia».
+#    Escribe 14 h seguidas, como HEO: lleva `ventana_ancha` (ver abajo). El domingo
+#    SE DESCUENTA (DBLine no pasa el domingo) y el sabado NO (si pasa). Con el cambio
+#    de hora del 25-oct la franja se corre a 06-20 UTC.
 #
 # 🆕 OCIOSTOCK EN EL ESCANER 2 (07-oct-2026, encargo OC5). Medido el 07-oct a las
 #    15:02 UTC en `disp_pasada`: UNA sola 'aplicada' (10:50:59 UTC, la primera,
@@ -140,10 +163,11 @@ from datetime import datetime, timedelta, timezone
 #      proveedor  | escribe (UTC) |  X   | su plazo vence entre | demora | detectado en
 #      -----------+---------------+------+----------------------+--------+-------------
 #      TCG        | 06-16         | 22 h |   04:00 y 14:00      |  ≤ 4 h |   ≤ 26 h
-#      DBLINE     | 06-11         | 26 h |   08:00 y 13:00      |  ≤ 4 h |   ≤ 30 h
 #      OCIOSTOCK  | 07 (una)      | 26 h |   09:00 y 09:00      |  ≤ 1 h |   ≤ 27 h
 #      OSMA       | 05 (una)      | 26 h |   07:00 y 07:00      |  ≤ 3 h |   ≤ 29 h
 #      HEO        | 06-19         | 26 h |   08:00 y 21:00      | ≤ 12 h |   ≤ 38 h  <- ver abajo
+#      DBLINE     | 05-19         | 26 h |   07:00 y 21:00      | ≤ 12 h |   ≤ 38 h  <- como HEO (DB6)
+#      (Hasta el 10-oct-2026, DBLINE en escaner_memoria: 06-11 UTC, vencia 08:00-13:00.)
 #
 #    🔴 HEO ES LA EXCEPCION y se dice: escribe 13 h seguidas (06-19 UTC), asi que su
 #       plazo puede vencerse en CUALQUIER hora entre las 08:00 y las 21:00 UTC, una
@@ -156,7 +180,10 @@ from datetime import datetime, timedelta, timezone
 #       UTC, es una linea en el cron y el banco lo comprueba. En invierno (UTC+1) la
 #       franja de HEO y de OSMA se corre 1 h hacia delante, y la demora no empeora.
 #       El banco marca a HEO con `ventana_ancha` y le exige <= 12 h (y <= 4 h en la
-#       parte diurna), no le quita la comprobacion.
+#       parte diurna), no le quita la comprobacion. DBLINE (desde el 10-oct-2026, DB6)
+#       lleva la misma marca y por lo mismo: escribe 05-19 UTC y su plazo vence entre
+#       las 07:00 y las 21:00. Y como descansa el domingo, el banco le exige lo mismo
+#       en la ventana del lunes.
 #
 #    Con un domingo por medio la ventana se corre al lunes (el reloj descontado
 #    esta parado el domingo entero) y cae entre las 05:00 y las 15:00 UTC del
@@ -187,14 +214,14 @@ from datetime import datetime, timedelta, timezone
 # mire. El banco lo comprueba contra el cron del workflow.
 # `fuente` dice DE DONDE sale la fecha: 'escaner_memoria' (el MAXIMO de `fecha`) o
 # 'disp_pasada' (la ultima pasada 'aplicada'). `descansa_sabado` descuenta ademas
-# los sabados (OSMA: de lunes a viernes). `ventana_ancha` (solo HEO): ver arriba.
+# los sabados (OSMA: de lunes a viernes). `ventana_ancha` (HEO y DBLINE): ver arriba.
 HORARIOS = {
     'TCG':       {'fuente': 'escaner_memoria', 'umbral_h': 22, 'descansa_domingo': False,
                   'descansa_sabado': False, 'medido_h': 18.00,
                   'primera_h': 6, 'ultima_h': 16, 'dias': 'todos los dias'},
-    'DBLINE':    {'fuente': 'escaner_memoria', 'umbral_h': 26, 'descansa_domingo': True,
-                  'descansa_sabado': False, 'medido_h': 23.00,
-                  'primera_h': 6, 'ultima_h': 11, 'dias': 'L a S'},
+    'DBLINE':    {'fuente': 'disp_pasada', 'umbral_h': 26, 'descansa_domingo': True,
+                  'descansa_sabado': False, 'medido_h': 24.00, 'ventana_ancha': True,
+                  'primera_h': 5, 'ultima_h': 19, 'dias': 'L a S (cada hora, :05 de 07 a 21 Madrid)'},
     'HEO':       {'fuente': 'disp_pasada', 'umbral_h': 26, 'descansa_domingo': False,
                   'descansa_sabado': False, 'medido_h': 23.00, 'ventana_ancha': True,
                   'primera_h': 6, 'ultima_h': 19, 'dias': 'todos los dias'},
