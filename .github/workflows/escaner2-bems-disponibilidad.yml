@@ -1,0 +1,91 @@
+# ============================================================
+# Moloka - Escaner 2 · DISPONIBILIDAD DE BEMS, DESDE EL CSV SUBIDO (encargo BE2, 10-oct-2026)
+#
+# Lee el CSV que Fernando baja a mano de la web de BEMS y sube al almacen (escaner2/bems/foto/<pasada>/
+# BEMS_EXPORT_DD_MM_AAAA.csv; el buzon de la v2, encargo BE3), con las reglas de escaner2_bems.py, y deja en la base lo
+# que tiene BEMS ahora (disp_estado) y lo que ha cambiado (disp_cambio), con la MISMA funcion que HEO, OSMA, OcioStock
+# y DBLine (disp_aplicar_pasada). EN SOMBRA: sin fila en disp_fuente; Reponer no lo lee. Sin Amazon.
+#
+# 🔴 NECESITA LA MIGRACION 20261010133000_disp_bems_en_sombra.sql DE LA V2 (la fila BEMS de disp_parametros y la
+#    politica de subida escaner2_subir_foto_bems), que se aplica antes de fusionar esto.
+#
+# 🔴 REPO PUBLICO: este registro lo ve cualquiera. El programa SOLO imprime estados y recuentos: ni precios, ni EAN,
+#    ni REF, ni titulos. Lo comprueba test_escaner2_bems_disponibilidad.py.
+#
+# 🔒 SOLO TOCA disp_pasada, disp_lectura, la funcion disp_aplicar_pasada, y lee disp_parametros y el almacen.
+#
+# >>> SOLO A MANO, SIN RELOJ <<<  Lo dispara la v2 al terminar la subida (encargo BE3), o Fernando desde Actions, con
+#     el input `pasada` = el id de la carpeta (un uuid). El input llega al programa por env:, nunca dentro de un run:.
+# ============================================================
+name: Moloka - Escaner 2 · Disponibilidad BEMS
+
+on:
+  workflow_dispatch:
+    inputs:
+      pasada:
+        description: 'id de la carpeta bems/foto/<pasada>/ del almacen escaner2 (un uuid): sera el id de la disp_pasada'
+        type: string
+        required: true
+
+# 🔒 GRUPO PROPIO: nunca dos pasadas de BEMS a la vez, sin cancelar la que corre.
+concurrency:
+  group: escaner2-bems
+  cancel-in-progress: false
+
+jobs:
+  leer:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 20
+    steps:
+      # 🔴 PRIMERO, LOS SECRETOS Y LA FORMA DEL INPUT: sin ellos, rojo aqui y sin tocar la base (el rescate tampoco).
+      - name: Comprobar los secretos y la pasada
+        id: secretos
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PASADA:               ${{ inputs.pasada }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_KEY" ]; then
+            echo "::error title=Faltan secretos::faltan SUPABASE_URL/SUPABASE_SERVICE_KEY; no se abre ninguna pasada"
+            exit 1
+          fi
+          if ! printf '%s' "$PASADA" | grep -Eqx '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'; then
+            echo "::error title=Pasada sin forma de uuid::el input pasada tiene que ser el uuid de la carpeta bems/foto/<pasada>/; no se abre nada"
+            exit 1
+          fi
+          echo "secretos: presentes · pasada: con forma de uuid"
+
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        # supabase: la base y el almacen · psycopg2-binary: lo importa foto_comun (el listado y la descarga con
+        # reintento); las mismas versiones que el cruce de DBLine.
+        run: pip install --quiet supabase==2.31.0 psycopg2-binary==2.9.13
+
+      - name: Leer el CSV de BEMS y aplicar la pasada
+        # El tope va en el PASO (15 min), no solo en el job (20): si se agota, el rescate corre.
+        timeout-minutes: 15
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PASADA:               ${{ inputs.pasada }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_bems_disponibilidad.py
+
+      # 🔴 SI EL RUN MUERE A MEDIAS, LA PASADA NO SE QUEDA 'leyendo' PARA SIEMPRE. Solo si los secretos estaban.
+      - name: Rescate · si el run ha fallado, la pasada de este run queda 'fallida'
+        if: (failure() || cancelled()) && steps.secretos.outcome == 'success'
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PASADA:               ${{ inputs.pasada }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_bems_disponibilidad.py --rescate
