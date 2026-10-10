@@ -205,6 +205,48 @@ eq('precio: Prezzo que no es numero → fallida', 'Prezzo' in (invalida([fila(**
 eq('precio: promo sin fin que se entienda → fallida',
    'Scadenza promo' in (invalida([fila(**{'Prezzo promo (€)': 8.0, 'Scadenza promo': 'pronto'})]) or ''), True)
 
+# ── (5b) DB5: el precio de compra es el MINIMO de Prezzo y la promo vigente ────────────────
+_FIN = datetime(2026, 12, 31, 10, 0)
+salida, c = leer([
+    fila('M1', **{'Prezzo (€)': 7.83, 'Prezzo promo (€)': 7.0, 'Scadenza promo': _FIN}),
+    fila('M2', **{'Prezzo (€)': 7.83, 'Prezzo promo (€)': 7.83, 'Scadenza promo': _FIN}),
+    fila('M3', **{'Prezzo (€)': 7.83, 'Prezzo promo (€)': 7.99, 'Scadenza promo': _FIN}),
+    fila('M4', **{'Prezzo (€)': 7.83, 'Prezzo promo (€)': 8.49, 'Scadenza promo': datetime(2026, 1, 10, 0, 1)}),
+    fila('M5', **{'Prezzo (€)': 7.83, 'Prezzo promo (€)': 7.99, 'Scadenza promo': datetime(2026, 1, 9, 23, 59)}),
+    fila('M6', **{'Prezzo (€)': 0, 'Prezzo promo (€)': 5.0, 'Scadenza promo': _FIN}),
+    fila('M7', **{'Prezzo (€)': None, 'Prezzo promo (€)': 5.0, 'Scadenza promo': _FIN}),
+])
+p = por_codigo(salida)
+
+
+def _precio(k):
+    return (p[k]['precio_unidad'], p[k]['precio_catalogo'], p[k]['en_oferta'], p[k]['fin_oferta'])
+
+
+eq('DB5: promo vigente MAS BARATA que Prezzo → la promo, en oferta', _precio('M1'), (7.0, 7.83, True, '2026-12-31'))
+eq('DB5: promo vigente IGUAL a Prezzo → Prezzo, sin oferta y sin fin', _precio('M2'), (7.83, 7.83, False, None))
+eq('DB5: promo vigente MAS CARA que Prezzo → Prezzo, sin oferta y sin fin', _precio('M3'), (7.83, 7.83, False, None))
+eq('DB5: promo mas cara que acaba hoy → Prezzo, sin oferta y sin fin', _precio('M4'), (7.83, 7.83, False, None))
+eq('DB5: promo mas cara y CADUCADA → como antes (Prezzo, su fin, sin oferta)', _precio('M5'),
+   (7.83, 7.83, False, '2026-01-09'))
+eq('DB5: Prezzo a 0 → como antes (la promo vigente vale)', _precio('M6'), (5.0, 0.0, True, '2026-12-31'))
+eq('DB5: Prezzo vacio → como antes (la promo vigente vale, sin dato de precio)',
+   _precio('M7') + (p['M7']['sin_dato_precio'],), (5.0, None, True, '2026-12-31', True))
+eq('DB5: recuentos (en oferta, mas cara, caducada, sin fin)',
+   (c['n_en_oferta'], c['n_promo_mas_cara'], c['n_promo_caducada'], c['n_promo_sin_fin']), (3, 3, 1, 0))
+eq('DB5: precio_vigente directo (mas barata, igual, mas cara, Prezzo 0, Prezzo vacio)',
+   [DB.precio_vigente(DB.Decimal(a), DB.Decimal(b), date(2026, 1, 10), HOY) for a, b in
+    (('7.83', '7'), ('7.83', '7.83'), ('7.83', '7.99'), ('0', '5'))]
+   + [DB.precio_vigente(None, DB.Decimal('5'), date(2026, 1, 10), HOY)],
+   [(DB.Decimal('7'), True), (DB.Decimal('7.83'), False), (DB.Decimal('7.83'), False), (DB.Decimal('5'), True),
+    (DB.Decimal('5'), True)])
+# Una promo mas cara deja la fila (y la huella) igual que la del mismo producto sin promo.
+_s_cara, _c_cara = leer([fila('M3', **{'Prezzo (€)': 7.83, 'Prezzo promo (€)': 7.99, 'Scadenza promo': _FIN})])
+_s_sin, _c_sin = leer([fila('M3', **{'Prezzo (€)': 7.83})])
+eq('DB5: promo mas cara = la fila de un producto sin promo', (_s_cara, _c_cara['huella_contenido']),
+   (_s_sin, _c_sin['huella_contenido']))
+eq('DB5: …y se cuenta solo en la de la promo', (_c_cara['n_promo_mas_cara'], _c_sin['n_promo_mas_cara']), (1, 0))
+
 # ── (6) Chase ─────────────────────────────────────────────────────────────────────────────
 salida, c = leer([fila('C1', Publisher='FUNKO', Descrizione='POP Heroe Inventado w/Chase'),
                   fila('C2', Publisher='FUNKO', Descrizione='POP Heroe Inventado Chase'),
