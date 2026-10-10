@@ -27,14 +27,24 @@ QUE HACE, EN ORDEN:
      1.000) e imprime para Funko, Pyramid y el total cuantas entran, vuelven, salen, pasan a disponible, pasan a agotado
      y cambian de precio EN ESA PASADA. El total tiene que cuadrar con los n_* de `disp_pasada`; si no cuadra o no se
      puede leer, ROJO (la pasada queda aplicada).
+  7. 🆕 (encargo DB6, 10-oct-2026) LAS NOVEDADES DE FUNKO Y PYRAMID: con la pasada APLICADA (no «al día», no rechazada),
+     como paso aparte, `escaner2_novedades.novedades_tras_la_pasada(proveedor='DBLINE')`, como OcioStock: la seleccion
+     en la base (nov_seleccionar_pasada, con nov_parametros.marcas de DBLINE) y su valoracion (Keepa con KEEPA_API_KEY;
+     el Excel, si hay un COMPRAR, y el Telegram con TELEGRAM_TOKEN/TELEGRAM_CHAT_ID). Corre aunque la medicion del
+     paso 6 salga en rojo (la pasada ya esta aplicada). Si falla, la pasada sigue aplicada y el run sale en ROJO al
+     final; el vigia de las marcas (algo que se parece a Funko o a Pyramid sin serlo), tambien ROJO. Con el interruptor
+     apagado (nov_parametros.valorar de DBLINE), cero llamadas a Keepa.
 
 🔴 REPO PUBLICO: SOLO estados y recuentos. NUNCA la respuesta de DBLine, una URL, cabeceras, precios, nombres,
    codigos o EAN, ni el texto de un error (al registro, solo su tipo; el detalle, limpio, a `disp_pasada.motivo`). Lo
    comprueba test_escaner2_dbline_disponibilidad.py ejecutando el programa con una descarga y una base de mentira.
    Si la fila 1 o la cabecera no se entienden (encargo DB2-B): al registro, su FORMA (letras → a, cifras → 9); a
    `disp_pasada.motivo` (privada), además su texto real recortado a 80 caracteres. Nunca la fila 2.
-🔑 EN SOMBRA: sin fila en `disp_fuente`; el director viejo sigue como siempre y este programa no lo toca.
+🔑 EL INTERRUPTOR (`disp_fuente`, que decide si Reponer y el Trackeador leen DBLine de esta foto o de la memoria del
+   director viejo) no lo lee ni lo toca este programa: lo pulsa Fernando en la base (encargo DB6).
 🔒 SOLO TOCA `disp_pasada`, `disp_lectura`, la funcion `disp_aplicar_pasada`, y LEE `disp_parametros` y `disp_cambio`.
+   (Encargo DB6) Las novedades van por escaner2_novedades.py (nov_*, Keepa, el Excel y el Telegram), con su registro
+   DISCRETO (`imprimir_discreto`: ni EAN, ni ASIN, ni el texto de un error, que queda en nov_pasada.valoracion_motivo).
 🔒 SIN LOS SECRETOS (DBLINE_USER/DBLINE_PASS y la base), NO SE CORRE: aborta antes de abrir ninguna pasada.
 
 Uso:  python escaner2_dbline_disponibilidad.py            (la pasada)
@@ -229,19 +239,46 @@ def pasada(sb, run_id, hoy):
         return 1
     print(f">>> PASADA APLICADA: {fila.get('n_en_catalogo')} productos de DBLine en el catálogo, "
           f"{fila.get('n_disponibles_estado')} disponibles.", flush=True)
+    codigo = 0
     try:
-        cuadra = medir(sb, pid, fila)
+        if not medir(sb, pid, fila):
+            codigo = 1
     except Exception as ex:  # noqa: BLE001 — 🔴 solo el tipo: el texto puede llevar una fila de la base
         print(f"DBLINE_SIN_RECUENTOS: la pasada {pid} está APLICADA, pero no se han podido leer sus cambios "
               f"({type(ex).__name__}).", flush=True)
-        return 1
-    if not cuadra:
-        return 1
+        codigo = 1
     if fila.get('caida_aceptada'):
         print(f"CAIDA_ACEPTADA: la pasada {pid} se ha aplicado como NUEVA REFERENCIA tras varios rechazos estables por "
               f"el freno del 90 %: hay que mirar si DBLine ha caído de verdad.", flush=True)
-        return 1
-    return 0
+        codigo = 1
+    # 7 · LAS NOVEDADES DE FUNKO Y PYRAMID (encargo DB6): paso aparte con la pasada ya aplicada; no lanza nunca. Si
+    #     falla, ROJO al final.
+    if not novedades(sb, pid, run_id):
+        codigo = 1
+    return codigo
+
+
+def novedades(sb, pid, run_id):
+    """Las novedades de Funko y Pyramid de la pasada aplicada `pid` (encargo DB6, como OcioStock). NUNCA LANZA.
+    Devuelve True si todo fue bien (sin el vigia de las marcas). 🔴 Repo publico: el registro, discreto (solo estados
+    y recuentos)."""
+    try:
+        import escaner2_novedades as nv
+        ok, seleccion = nv.novedades_tras_la_pasada(sb, pid, PROVEEDOR, keepa_llave=os.environ.get('KEEPA_API_KEY'),
+                                                    imprimir=nv.imprimir_discreto, run_id=run_id or None)
+    except Exception as ex:
+        print(f"DBLINE_NOVEDADES_NO_HECHAS: la pasada {pid} sigue aplicada; las novedades han fallado antes de poder "
+              f"apuntarse ({type(ex).__name__})", flush=True)
+        return False
+    marca_parecida = (seleccion or {}).get('marca_parecida') or 0
+    if marca_parecida:
+        print(f"MARCA_PARECIDA: {marca_parecida} producto(s) de DBLine tienen una marca que se parece a Funko o a Pyramid "
+              f"y no es ninguna de las dos: si DBLine cambia la grafía, sus novedades se quedarían a cero en silencio "
+              f"(nov_pasada.n_marca_parecida de la pasada {pid}).", flush=True)
+    if not ok:
+        print(f"DBLINE_NOVEDADES_EN_ROJO: la pasada {pid} sigue aplicada; las novedades no han salido bien (el detalle, "
+              f"en nov_pasada de esa pasada).", flush=True)
+    return ok and not marca_parecida
 
 
 def rescatar(sb, run_id):
