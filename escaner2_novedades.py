@@ -14,6 +14,13 @@ seleccion siguen aplicadas, el fallo queda apuntado (nov_pasada.valoracion_*) y 
    «Novedades»: «Uds. escalón» y «Precio unidad» (el PA es el precio con escalón × 0,99: nov_parametros.precio_novedad).
    🔴 El repo es publico y el registro de la foto de OcioStock solo dice estados y recuentos: `imprimir_discreto` no
    imprime las lineas de cada producto ni el texto de un error (va a la base, a nov_pasada.valoracion_motivo).
+🆕 DBLINE, CON DOS MARCAS (encargo DB4, 09-oct-2026; Fernando: «aqui mete Pyramid en el diario»): las novedades de Funko
+   y Pyramid de DBLine, con proveedor='DBLINE'. La seleccion (nov_parametros.marcas, en la base) ya trae las dos; aqui
+   cambia lo que se lee: «Novedades DBLine Funko y Pyramid» en el Telegram y la avalancha, el Excel en dbline/novedades/
+   (Novedades_DBLINE_FunkoPyramid_…), la marca de cada fila en el Excel (la de su foto: Funko o Pyramid) y, al final de
+   la hoja «Novedades», «Fin de la oferta» (nov_novedad.fin_oferta: el ultimo dia de la oferta con la que salio). La
+   comprobacion del titulo de la ficha (encargo T) es la de Funko para Funko; para Pyramid NO hay (ver
+   MARCAS_SIN_COMPROBAR_TITULO). Sus cuentas sueltas: escaner2_dbline_novedades_cuentas.py.
 
 QUE HACE, EN ORDEN:
   0. EL INTERRUPTOR (nov_parametros.valorar). Apagado: ni una llamada a Keepa, ni una cuenta; solo se cierra la
@@ -99,7 +106,23 @@ PROVEEDOR = 'HEO'
 PROVEEDORES = {
     'HEO': {'nombre': 'HEO', 'carpeta': 'heo/novedades', 'escalon': False},
     'OCIOSTOCK': {'nombre': 'OcioStock', 'carpeta': 'ociostock/novedades', 'escalon': True},
+    # (Encargo DB4) DBLine: sus DOS marcas en lo que se lee (`marcas`) y en el nombre del Excel (`marca_ruta`: la base
+    # exige [A-Za-z0-9]+), la marca de cada fila del Excel sacada de su foto (`marca_de_la_foto`) y la columna «Fin de
+    # la oferta» (`fin_oferta`). Sin escalon. Los que no lo dicen: Funko, Funko, no y no (HEO y OcioStock, como siempre).
+    'DBLINE': {'nombre': 'DBLine', 'carpeta': 'dbline/novedades', 'escalon': False, 'marcas': 'Funko y Pyramid',
+               'marca_ruta': 'FunkoPyramid', 'marca_de_la_foto': True, 'fin_oferta': True},
 }
+
+
+def _de(proveedor, clave, defecto):
+    """Lo propio de un proveedor de novedades (PROVEEDORES), o lo de siempre si no lo dice. Puro."""
+    return PROVEEDORES[proveedor].get(clave, defecto)
+
+
+def marcas_de(proveedor=None):
+    """(Encargo DB4) Como se le llama a lo que vigila un proveedor: «Funko» (HEO, OcioStock) o «Funko y Pyramid»
+    (DBLine). Puro."""
+    return _de(proveedor or PROVEEDOR, 'marcas', 'Funko')
 PAISES = ('ES', 'IT', 'FR', 'DE')
 # Los dominios de Keepa (keepa.DCODES): de 3, fr 4, it 8, es 9.
 DOMINIO_KEEPA = {'ES': 9, 'IT': 8, 'FR': 4, 'DE': 3}
@@ -256,20 +279,30 @@ PALABRAS_DE_LA_MARCA = ('funko', 'pop')
 
 
 _RE_MARCA = re.compile(r'\b(?:%s)\b' % '|'.join(PALABRAS_DE_LA_MARCA), re.I)
+# 🔑 (Encargo DB4, 09-oct-2026) LAS MARCAS SIN ESTA COMPROBACION: Pyramid. Medido ese dia en la base: de las 308 fichas
+#    del Escaneo PRO de productos de marca Pyramid, solo 126 llevan «Pyramid» en el titulo (y 83 pasan la de Funko:
+#    «Pop» como palabra, p. ej. «K-Pop Demon Hunters»); de las 8 fichas nuestras de Pyramid, 6. Exigir la palabra
+#    tiraria fichas buenas (sus llaveros, tazas y posters se titulan por la licencia: «Death Note (L) 11oz Mug»), y las
+#    de Funko no le sirven. Va como el Escaneo PRO, que no mira el titulo. Cualquier otra marca, la regla de Funko (la de siempre).
+MARCAS_SIN_COMPROBAR_TITULO = ('PYRAMID',)
 
 
-def ficha_de_la_marca(titulo):
-    """True si el titulo de la ficha es de un producto de la marca (Funko: lleva «Funko» o «Pop» como palabra). Puro."""
+def ficha_de_la_marca(titulo, marca=None):
+    """True si el titulo de la ficha es de un producto de la marca (Funko: lleva «Funko» o «Pop» como palabra). (Encargo
+    DB4) Con `marca` (la de la foto del producto) en MARCAS_SIN_COMPROBAR_TITULO, siempre True. Puro."""
+    if str(marca or '').strip().upper() in MARCAS_SIN_COMPROBAR_TITULO:
+        return True
     return bool(_RE_MARCA.search(str(titulo or '')))
 
 
-def apartar_fichas_dudosas(fichas_por_pais):
+def apartar_fichas_dudosas(fichas_por_pais, marca=None):
     """({pais: [fichas de la marca]}, {pais: 'ficha dudosa: <titulo>'}). Un pais que solo tenia fichas dudosas se queda
-    SIN fichas: para las puertas del Escaneo PRO es «sin dato» ahi, como si Keepa no lo hubiera encontrado. Puro."""
+    SIN fichas: para las puertas del Escaneo PRO es «sin dato» ahi, como si Keepa no lo hubiera encontrado. (Encargo DB4)
+    `marca`: la de la foto del producto (Pyramid no se aparta). Puro."""
     buenas, dudosas = {}, {}
     for pais, fichas in fichas_por_pais.items():
-        buenas[pais] = [f for f in fichas if ficha_de_la_marca(f.get('titulo'))]
-        malas = [f for f in fichas if not ficha_de_la_marca(f.get('titulo'))]
+        buenas[pais] = [f for f in fichas if ficha_de_la_marca(f.get('titulo'), marca)]
+        malas = [f for f in fichas if not ficha_de_la_marca(f.get('titulo'), marca)]
         if malas:
             dudosas[pais] = '; '.join('ficha dudosa: %s' % ((f.get('titulo') or '(sin título)')[:120]) for f in malas)
     return buenas, dudosas
@@ -356,19 +389,21 @@ def leer_params_escaner2(sb, proveedor=PROVEEDOR):
 
 
 def estados_del_proveedor(sb, productos, proveedor=PROVEEDOR):
-    """{producto_prov: fila de disp_estado} (EAN de cruce y nombre) de los productos de las novedades."""
-    filas = _en_trozos(sb, 'disp_estado', 'producto_prov,ean_core,ean_norm,nombre', 'producto_prov', 'producto_prov',
+    """{producto_prov: fila de disp_estado} (EAN de cruce, nombre y, encargo DB4, marca) de los productos de las novedades."""
+    filas = _en_trozos(sb, 'disp_estado', 'producto_prov,ean_core,ean_norm,nombre,marca', 'producto_prov', 'producto_prov',
                        productos, [('eq', 'proveedor', proveedor)])
     return {f['producto_prov']: f for f in filas}
 
 
 def fila_foto(nov, estado, M):
     """La fila de la foto con la que deciden las puertas del Escaneo PRO: las variantes del EAN (para cruzar con
-    las fichas), el precio por unidad de HEO, el EAN de cruce (el IVA de la ficha) y el nombre (elegir ficha)."""
+    las fichas), el precio por unidad de HEO, el EAN de cruce (el IVA de la ficha), el nombre (elegir ficha) y (encargo
+    DB4) la marca de la foto (la comprobacion del titulo y la marca de la fila del Excel de DBLine)."""
     core = (estado or {}).get('ean_core') or nov['ean_norm'].zfill(13)
     return {'variantes': sorted({M.norm(v) for v in M.variantes_ean(core)} - {''}),
             'codigos_keepa': e2.codigos_para_keepa(core, M), 'precio_unidad': nov['precio_ahora'],
-            'ean_core': core, 'nombre': nov.get('nombre') or (estado or {}).get('nombre') or ''}
+            'ean_core': core, 'nombre': nov.get('nombre') or (estado or {}).get('nombre') or '',
+            'marca': (estado or {}).get('marca')}
 
 
 class _EleccionPerezosa:
@@ -654,9 +689,11 @@ def valorar_pasada(sb, pasada, keepa_llave=None, http=None, dormir=time.sleep, a
         else:
             valoradas, incompletos = [], []
             if avalancha:
-                imprimir('>>> AVALANCHA: %d cambios en %s Funko (más de %d) — lanza un Escaneo PRO. El automático sigue con '
-                         'las que quepan por prioridad sin cruzar la reserva de Keepa.' % (avalancha, nombre, AVALANCHA), flush=True)
-                _resumen_del_run('⚠️ **Avalancha: %d cambios en %s Funko — lanza un Escaneo PRO**' % (avalancha, nombre), env)
+                imprimir('>>> AVALANCHA: %d cambios en %s %s (más de %d) — lanza un Escaneo PRO. El automático sigue con '
+                         'las que quepan por prioridad sin cruzar la reserva de Keepa.'
+                         % (avalancha, nombre, marcas_de(proveedor), AVALANCHA), flush=True)
+                _resumen_del_run('⚠️ **Avalancha: %d cambios en %s %s — lanza un Escaneo PRO**'
+                                 % (avalancha, nombre, marcas_de(proveedor)), env)
             _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, imprimir, valoradas, incompletos,
                      proveedor)
             # 🔑 (encargo V) EL EXCEL, con lo valorado en esta pasada, si hay un COMPRAR. Un fallo aqui es un aviso (rojo
@@ -805,7 +842,7 @@ def _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, i
             try:
                 # 🔴 Encargo T: la ficha que no es de la marca no se usa; ese pais, sin dato, y el motivo lo dice. Una
                 #    nuestra no pasa por aqui: su ficha es la nuestra (productos.asin), no una adivinada por EAN.
-                fichas, dudosas = apartar_fichas_dudosas(fichas) if suyos is None else (fichas, {})
+                fichas, dudosas = apartar_fichas_dudosas(fichas, foto.get('marca')) if suyos is None else (fichas, {})
                 destino, decision, r = _decidir_ventas(n, foto, fichas, params, M, eleccion)
                 filas = _filas_de_ventas(r, origen, fecha) if r.get('asin') and r['puerta'] != 'b' else []
                 fuentes = sorted(set(origen.values()))
@@ -868,20 +905,24 @@ def _madrid(d):
 
 def ruta_del_excel(momento, proveedor=PROVEEDOR):
     """heo/novedades/<AAAA-MM-DD>/Novedades_HEO_Funko_<AAAA-MM-DD_HHMM>.xlsx, en hora de Madrid (encargo OC4: la carpeta
-    y el nombre, los del proveedor: ociostock/novedades/…/Novedades_OCIOSTOCK_Funko_…). Puro."""
+    y el nombre, los del proveedor: ociostock/novedades/…/Novedades_OCIOSTOCK_Funko_…; encargo DB4:
+    dbline/novedades/…/Novedades_DBLINE_FunkoPyramid_…). Puro."""
     m = _madrid(momento)
-    return '%s/%s/Novedades_%s_Funko_%s.xlsx' % (PROVEEDORES[proveedor]['carpeta'], m.strftime('%Y-%m-%d'), proveedor,
-                                                 m.strftime('%Y-%m-%d_%H%M'))
+    return '%s/%s/Novedades_%s_%s_%s.xlsx' % (PROVEEDORES[proveedor]['carpeta'], m.strftime('%Y-%m-%d'), proveedor,
+                                              _de(proveedor, 'marca_ruta', 'Funko'), m.strftime('%Y-%m-%d_%H%M'))
 
 
-def datos_del_excel(valoradas):
+def datos_del_excel(valoradas, proveedor=PROVEEDOR):
     """(foto, resultados) con la forma que lee escaner2_motor.excel_como_el_viejo: una fila de foto por novedad (su EAN
-    de cruce, su nombre y su precio por unidad de HEO) y el resultado de sus puertas. Puro."""
+    de cruce, su nombre y su precio por unidad de HEO) y el resultado de sus puertas. La marca, Funko; (encargo DB4) en
+    DBLine, la de la foto de cada producto (Funko o Pyramid). Puro."""
+    de_la_foto = _de(proveedor, 'marca_de_la_foto', False)
     foto, resultados = [], []
     for v in valoradas:
         n, f = v['nov'], v['foto']
         foto.append({'id': n['id'], 'ean_original': f['ean_core'], 'ean_core': f['ean_core'],
-                     'nombre': f.get('nombre') or n.get('nombre') or '', 'marca': 'Funko',
+                     'nombre': f.get('nombre') or n.get('nombre') or '',
+                     'marca': (f.get('marca') or 'Funko') if de_la_foto else 'Funko',
                      'precio_unidad': f['precio_unidad'], 'aviso_caja': None})
         resultados.append(dict(v['r'], foto_id=n['id']))
     return foto, resultados
@@ -904,11 +945,13 @@ def texto_amazon(v, pais):
     return QUE_DIJO_AMAZON.get(estado, estado or '—') + (' (%s)' % texto if estado in ('no_dado', 'falta_amazon') and texto else '')
 
 
-def hoja_novedades(wb, valoradas, avalancha=None, escalon=None):
+def hoja_novedades(wb, valoradas, avalancha=None, escalon=None, fin=None):
     """La hoja «Novedades», detras de las del viejo: una fila por novedad, las COMPRAR primero. Con AVALANCHA, arriba
     «Avalancha: N cambios — lanza un Escaneo PRO» y es la hoja que se abre. (Encargo OC4) Con `escalon` ({id de la
     novedad: (uds del escalon, precio por unidad)}, OcioStock), dos columnas MAS al final: «Uds. escalón» y «Precio
-    unidad» (el PA de las demas columnas es el precio con escalon × 0,99)."""
+    unidad» (el PA de las demas columnas es el precio con escalon × 0,99). (Encargo DB4) Con `fin` ({id de la novedad:
+    el ultimo dia de su oferta, o None}, DBLine), una columna MAS al final: «Fin de la oferta» (vacia si salio sin
+    oferta)."""
     from openpyxl.styles import Font
     ws = wb.create_sheet('Novedades')
     if avalancha:
@@ -917,7 +960,8 @@ def hoja_novedades(wb, valoradas, avalancha=None, escalon=None):
         wb.active = wb.sheetnames.index('Novedades')
     ws.append(['EAN', 'Nombre', 'Novedad', 'Precio antes (ud)', 'Precio ahora (ud)', 'Cambio %', 'Nuestra', 'Decisión',
                'Mejor país'] + ['Amazon ' + p for p in PAISES] + ['Por qué']
-              + (['Uds. escalón', 'Precio unidad'] if escalon is not None else []))
+              + (['Uds. escalón', 'Precio unidad'] if escalon is not None else [])
+              + (['Fin de la oferta'] if fin is not None else []))
     for c in ws[ws.max_row]:
         c.font = Font(bold=True)
     for v in sorted(valoradas, key=lambda x: (_ORDEN_DECISION.get(x['decision'], 9), str(x['nov'].get('nombre') or ''))):
@@ -925,7 +969,8 @@ def hoja_novedades(wb, valoradas, avalancha=None, escalon=None):
         ws.append([v['foto']['ean_core'], n.get('nombre') or v['foto'].get('nombre'), n.get('motivo'), n.get('precio_antes'),
                    n.get('precio_ahora'), n.get('cambio_pct'), 'sí' if n.get('nuestro') else '', v['decision'], v['mejor']]
                   + [texto_amazon(v, p) for p in PAISES] + [v['motivo']]
-                  + (list(escalon.get(n.get('id'), (None, None))) if escalon is not None else []))
+                  + (list(escalon.get(n.get('id'), (None, None))) if escalon is not None else [])
+                  + ([fin.get(n.get('id'))] if fin is not None else []))
     for letra, ancho in {'A': 16, 'B': 48, 'C': 12, 'H': 14, 'J': 28, 'K': 28, 'L': 28, 'M': 28, 'N': 70}.items():
         ws.column_dimensions[letra].width = ancho
     ws.freeze_panes = 'A3' if avalancha else 'A2'
@@ -939,6 +984,14 @@ def escalon_de(sb, ids):
             for f in _en_trozos(sb, 'nov_novedad', 'id,uds_escalon,precio_unidad', 'id', 'id', ids)}
 
 
+def fin_oferta_de(sb, ids):
+    """(Encargo DB4) {id de la novedad: el ultimo dia de su oferta (date), o None} de nov_novedad: lo que la seleccion
+    guardo de la foto de DBLine al sacar cada novedad (solo con la oferta vigente)."""
+    from datetime import date
+    return {f['id']: (date.fromisoformat(str(f['fin_oferta'])[:10]) if f.get('fin_oferta') else None)
+            for f in _en_trozos(sb, 'nov_novedad', 'id,fin_oferta', 'id', 'id', ids)}
+
+
 def excel_de_novedades(sb, valoradas, origen, pasada, run_id=None, ahora=_ahora, imprimir=print, avalancha=None,
                        proveedor=PROVEEDOR):
     """EL EXCEL de las novedades valoradas en esta ejecucion, si al menos una sale COMPRAR: al bucket escaner2 y a
@@ -949,10 +1002,11 @@ def excel_de_novedades(sb, valoradas, origen, pasada, run_id=None, ahora=_ahora,
                  % len(valoradas), flush=True)
         return None
     try:
-        foto, resultados = datos_del_excel(valoradas)
+        foto, resultados = datos_del_excel(valoradas, proveedor)
         wb = e2.excel_como_el_viejo(foto, resultados, [], comprar[0]['M'])
         escalon = escalon_de(sb, [v['nov']['id'] for v in valoradas]) if PROVEEDORES[proveedor]['escalon'] else None
-        hoja_novedades(wb, valoradas, avalancha, escalon)
+        fin = fin_oferta_de(sb, [v['nov']['id'] for v in valoradas]) if _de(proveedor, 'fin_oferta', False) else None
+        hoja_novedades(wb, valoradas, avalancha, escalon, fin)
         buf = io.BytesIO()
         wb.save(buf)
         ruta = ruta_del_excel(ahora(), proveedor)
@@ -978,8 +1032,10 @@ _ORIGEN_TG = {'keepa': ' de Keepa'}
 
 def mensaje_telegram(valoradas, avalancha=None, incompletos=(), proveedor=PROVEEDOR):
     """El texto del Telegram de una ejecucion, o None si no toca mandarlo (sin COMPRAR, sin avalancha y completa). Puro.
-    (Encargo OC4) Con el nombre del proveedor: «Novedades HEO Funko» u «Novedades OcioStock Funko»."""
+    (Encargo OC4) Con el nombre del proveedor: «Novedades HEO Funko» u «Novedades OcioStock Funko». (Encargo DB4) Y sus
+    marcas: «Novedades DBLine Funko y Pyramid»."""
     nombre = PROVEEDORES[proveedor]['nombre']
+    marcas = marcas_de(proveedor)
     compras = []
     for v in valoradas:
         if v['decision'] != 'COMPRAR' or not v.get('mejor'):
@@ -991,9 +1047,9 @@ def mensaje_telegram(valoradas, avalancha=None, incompletos=(), proveedor=PROVEE
         return None
     lineas = []
     if compras or incompletos:
-        lineas.append('%s <b>Novedades %s Funko</b>: %d para COMPRAR' % ('🔴' if incompletos else '🟢', nombre, len(compras)))
+        lineas.append('%s <b>Novedades %s %s</b>: %d para COMPRAR' % ('🔴' if incompletos else '🟢', nombre, marcas, len(compras)))
     if avalancha:
-        lineas.append('⚠️ <b>Avalancha</b>: %d cambios en %s Funko — lanza un Escaneo PRO' % (avalancha, nombre))
+        lineas.append('⚠️ <b>Avalancha</b>: %d cambios en %s %s — lanza un Escaneo PRO' % (avalancha, nombre, marcas))
     if incompletos:
         escalon = sum(1 for x in incompletos if x['tipo'] == 'escalon')
         reserva = sum(1 for x in incompletos if x['tipo'] == 'reserva')
@@ -1141,7 +1197,7 @@ def novedades_tras_la_pasada(sb, pasada, proveedor, keepa_llave=None, imprimir=p
     no se valora. Devuelve (ok, lo que devolvio la seleccion o None): ok=False -> el run en rojo al final."""
     try:
         seleccion = sb.rpc('nov_seleccionar_pasada', {'p_pasada': pasada}).execute().data
-        imprimir('>>> NOVEDADES DE FUNKO (%s): %s' % (proveedor, seleccion), flush=True)
+        imprimir('>>> NOVEDADES DE %s (%s): %s' % (marcas_de(proveedor).upper(), proveedor, seleccion), flush=True)
     except Exception as ex:
         motivo = '%s: %s' % (type(ex).__name__, ex)
         imprimir('NOVEDADES_NO_SELECCIONADAS: la pasada %s sigue aplicada; la selección de novedades ha fallado y se apunta '

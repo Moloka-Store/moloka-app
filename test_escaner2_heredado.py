@@ -132,7 +132,8 @@ print('    miro %d ficheros .py (%s) y %d workflows' % (len(_PY), ', '.join(_PY)
 # (Encargo OC4, 07-oct-2026) Y las cuentas sueltas de las novedades de OcioStock (su programa y su workflow).
 # (Encargo DB2-A, 09-oct-2026) Y la foto de disponibilidad de DBLine: sus reglas, su pasada y su workflow.
 # (Encargo DB3, 09-oct-2026) Y el Escaneo PRO de DBLine: su modulo, su barrido, su cruce y sus dos workflows.
-eq('(A) hay qué mirar: los programas, el motor, la huella y los cinco heredados, y los dieciséis workflows',
+# (Encargo DB4, 09-oct-2026) Y las cuentas sueltas de las novedades de DBLine (su programa y su workflow).
+eq('(A) hay qué mirar: los programas, el motor, la huella y los cinco heredados, y los diecisiete workflows',
    ({'escaner2_motor.py', 'escaner2_heo_barrido.py', 'escaner2_heo_cruce.py', 'escaner2_heo_disponibilidad.py',
      'escaner2_disponibilidad.py', 'escaner2_novedades.py', 'escaner2_heo_novedades_cuentas.py',
      'escaner2_osma_disponibilidad.py', 'escaner2_osma.py', 'escaner2_osma_barrido.py',
@@ -140,10 +141,11 @@ eq('(A) hay qué mirar: los programas, el motor, la huella y los cinco heredados
      'escaner2_zentrada_cruce.py', 'escaner2_ociostock.py', 'escaner2_ociostock_disponibilidad.py',
      'escaner2_ociostock_pro.py', 'escaner2_ociostock_barrido.py', 'escaner2_ociostock_cruce.py',
      'escaner2_ociostock_novedades_cuentas.py', 'escaner2_dbline.py', 'escaner2_dbline_disponibilidad.py',
-     'escaner2_dbline_pro.py', 'escaner2_dbline_barrido.py', 'escaner2_dbline_cruce.py'}
+     'escaner2_dbline_pro.py', 'escaner2_dbline_barrido.py', 'escaner2_dbline_cruce.py',
+     'escaner2_dbline_novedades_cuentas.py'}
     | {h for h, _v in HEREDADOS}) <= set(_PY)
    and [os.path.basename(y) for y in _YML] == ['escaner2-dbline-barrido.yml', 'escaner2-dbline-cruce.yml',
-                                               'escaner2-dbline-disponibilidad.yml',
+                                               'escaner2-dbline-disponibilidad.yml', 'escaner2-dbline-novedades-cuentas.yml',
                                                'escaner2-heo-barrido.yml', 'escaner2-heo-cruce.yml',
                                                'escaner2-heo-disponibilidad.yml', 'escaner2-heo-novedades-cuentas.yml',
                                                'escaner2-ociostock-barrido.yml', 'escaner2-ociostock-cruce.yml',

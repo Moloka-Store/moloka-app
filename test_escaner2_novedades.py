@@ -43,6 +43,10 @@ QUE PRUEBA:
       sin ellas); su Telegram «Novedades OcioStock Funko»; la seleccion + valoracion de una pasada
       (`novedades_tras_la_pasada`, que apunta el fallo de la seleccion como la foto de HEO); y el registro discreto (ni
       EAN, ni ASIN, ni el texto de un error). Datos inventados.
+  (DB) (encargo DB4) DBLINE con DOS marcas: su Excel en dbline/novedades/ (Novedades_DBLINE_FunkoPyramid_…, la forma que
+      exige la base), con la marca de la foto en cada fila y «Fin de la oferta» al final; su Telegram «Novedades DBLine
+      Funko y Pyramid»; la comprobación del título que no aparta las fichas de Pyramid (y sí las de Funko); su selección
+      con el interruptor APAGADO (como nace); y sus cuentas sueltas enteras (runpy). HEO y OcioStock, como siempre.
 """
 import ast
 import json
@@ -1007,8 +1011,9 @@ eq('(O5) 🔒 …y una valoración entera de OcioStock con él no suelta ni el E
    [c for c in ('889698100299', 'B0LISTA001', 'Figura 9') if c in _buf.getvalue()], [])
 
 
-def correr_cuentas_oc(entorno, base):
-    """(Encargo OC4) escaner2_ociostock_novedades_cuentas.py entero (runpy), con `supabase` de mentira."""
+def correr_cuentas_oc(entorno, base, programa='escaner2_ociostock_novedades_cuentas.py'):
+    """(Encargo OC4) escaner2_ociostock_novedades_cuentas.py entero (runpy), con `supabase` de mentira. (Encargo DB4) O el
+    `programa` que se diga (las cuentas de DBLine)."""
     import runpy
     import types as _types
     falso = _types.ModuleType('supabase')
@@ -1016,12 +1021,12 @@ def correr_cuentas_oc(entorno, base):
     guardado, viejo_env = sys.modules.get('supabase'), {k: os.environ.get(k) for k in entorno}
     sys.modules['supabase'] = falso
     os.environ.update(entorno)
-    viejo_argv, sys.argv = sys.argv, ['escaner2_ociostock_novedades_cuentas.py']
+    viejo_argv, sys.argv = sys.argv, [programa]
     buf, codigo = _io.StringIO(), 0
     try:
         with _ctx.redirect_stdout(buf):
             try:
-                runpy.run_path(os.path.join(AQUI, 'escaner2_ociostock_novedades_cuentas.py'), run_name='__main__')
+                runpy.run_path(os.path.join(AQUI, programa), run_name='__main__')
             except SystemExit as e:
                 codigo = e.code if isinstance(e.code, int) else (0 if e.code is None else 1)
     finally:
@@ -1048,6 +1053,158 @@ eq('(O6) (encargo OC4) a mano, con NOVEDADES_PASADA: la selección y la valoraci
     'NOVEDADES_CUENTAS_NO_EJECUTADAS' in out_mal, cod_cu, [n for n, _p in b_mano3.rpcs]),
    (0, [{'p_pasada': '0c400000-0000-0000-0000-000000000001'}], ['nov_seleccionar_pasada', 'nov_cerrar_valoracion'], 1, [], [],
     True, 0, []))
+
+# ── (DB) (encargo DB4) DBLINE, CON DOS MARCAS, POR EL MISMO CAMINO ──────────────────────────────────
+#    Datos inventados. Lo propio de DBLine: «Funko y Pyramid» en lo que se lee, su carpeta y su nombre de Excel (que la
+#    base admita: dbline/novedades/…/Novedades_DBLINE_FunkoPyramid_…), la marca de cada fila del Excel (la de su foto),
+#    «Fin de la oferta» al final de la hoja «Novedades» y la comprobación del título que NO aparta las fichas de Pyramid.
+#    Y que HEO y OcioStock siguen escribiendo lo mismo que antes.
+import re as _re
+from datetime import date as _date
+
+
+def con_dbline(base, novedades_db=(), valoraciones_db=(), valorar=True, marcas=None, fin=None):
+    """La base de mentira con DBLine al lado de HEO: su fila de parámetros (apagada o encendida), la del escáner 2, sus
+    novedades (con su fin_oferta) y su foto (con la marca de cada producto: Funko por defecto)."""
+    base.tablas['nov_parametros'].append({'proveedor': 'DBLINE', 'marcas': ['Funko', 'Pyramid'], 'valorar': valorar,
+                                          'keepa_reserva': 20, 'keepa_tope_peticion': 3, 'keepa_horas_nuevo': 360,
+                                          'keepa_dias_precio': 15, 'escaneo_pro_dias': 15})
+    base.tablas['escaner2_parametros'].append({'proveedor': 'DBLINE', 'umbral_caidas_30d': 6,
+                                               'paises_filtro': ['ES', 'IT', 'FR', 'DE'], 'paises_calculo': ['ES', 'IT', 'FR', 'DE']})
+    for n in novedades_db:
+        base.tablas['nov_novedad'].append(dict(n, proveedor='DBLINE', fin_oferta=(fin or {}).get(n['id'])))
+        base.tablas['disp_estado'].append({'proveedor': 'DBLINE', 'producto_prov': n['producto_prov'], 'ean_core': n['ean_norm'],
+                                           'ean_norm': n['ean_norm'], 'nombre': n['nombre'], 'disponible': True, 'ausencias': 0,
+                                           'es_chase': n['es_chase'], 'precio_catalogo': n['precio_ahora'],
+                                           'marca': (marcas or {}).get(n['id'], 'Funko')})
+    base.tablas['nov_valoracion'] += [dict(v) for v in valoraciones_db]
+    return base
+
+
+def correr_db(base, keepa=None, env=None, imprimir=None):
+    salida = []
+    ok_, res_ = nv.valorar_pasada(base, 'PASADA-DB', keepa_llave=LLAVE, http=keepa or KeepaFalso(), dormir=lambda s: None,
+                                  ahora=lambda: AHORA, imprimir=imprimir or (lambda *a, **k: salida.append(' '.join(str(x) for x in a))),
+                                  run_id='36700000039', env=env if env is not None else {}, post=post_falso, proveedor='DBLINE')
+    return ok_, res_, '\n'.join(salida)
+
+
+# (DB1) El nombre del Excel: el de DBLine, en su carpeta y con la forma que exige la base; los de HEO y OcioStock, iguales.
+_RUTA_BASE = r'^%s/novedades/[0-9]{4}-[0-9]{2}-[0-9]{2}/Novedades_[A-Za-z0-9]+_[A-Za-z0-9]+_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{4}\.xlsx$'
+eq('(DB1) el Excel de DBLine va a dbline/novedades/<día>/Novedades_DBLINE_FunkoPyramid_<hora de Madrid> (la forma de '
+   'nov_excel_ruta_excel_check); HEO y OcioStock, con su nombre de siempre',
+   (nv.ruta_del_excel(AHORA, 'DBLINE'), bool(_re.match(_RUTA_BASE % 'dbline', nv.ruta_del_excel(AHORA, 'DBLINE'))),
+    nv.ruta_del_excel(AHORA), nv.ruta_del_excel(AHORA, 'OCIOSTOCK')),
+   ('dbline/novedades/2026-09-29/Novedades_DBLINE_FunkoPyramid_2026-09-29_2005.xlsx', True,
+    'heo/novedades/2026-09-29/Novedades_HEO_Funko_2026-09-29_2005.xlsx',
+    'ociostock/novedades/2026-09-29/Novedades_OCIOSTOCK_Funko_2026-09-29_2005.xlsx'))
+
+# (DB2) El Telegram: «Novedades DBLine Funko y Pyramid», solo si hay COMPRAR (como los demás); HEO y OcioStock, iguales.
+eq('(DB2) el Telegram dice «Novedades DBLine Funko y Pyramid»; sin COMPRAR (y completo, sin avalancha) no se manda; HEO y '
+   'OcioStock siguen diciendo lo suyo',
+   (nv.mensaje_telegram([v_compra(1)], proveedor='DBLINE').split('\n')[0],
+    nv.mensaje_telegram([dict(v_compra(1), decision='VALORAR')], proveedor='DBLINE'),
+    'DBLine Funko y Pyramid' in nv.mensaje_telegram([], avalancha=150, proveedor='DBLINE'),
+    nv.mensaje_telegram([v_compra(1)]).split('\n')[0], nv.mensaje_telegram([v_compra(1)], proveedor='OCIOSTOCK').split('\n')[0]),
+   ('🟢 <b>Novedades DBLine Funko y Pyramid</b>: 1 para COMPRAR', None, True,
+    '🟢 <b>Novedades HEO Funko</b>: 1 para COMPRAR', '🟢 <b>Novedades OcioStock Funko</b>: 1 para COMPRAR'))
+
+# (DB3) El título de la ficha: la regla de Funko para Funko (y para cualquier otra, como siempre); Pyramid, sin ella.
+_TAZA = 'Death Note (L) 11oz/315ml Mug'
+eq('(DB3) la comprobación del título: una taza de Pyramid sin «Pyramid» en el título vale para Pyramid; para Funko (y sin '
+   'marca, como hasta hoy) no; el casco del encargo T sigue fuera para Funko',
+   (nv.ficha_de_la_marca(_TAZA, 'Pyramid'), nv.ficha_de_la_marca(_TAZA, 'PYRAMID '), nv.ficha_de_la_marca(_TAZA, 'Funko'),
+    nv.ficha_de_la_marca(_TAZA), nv.ficha_de_la_marca('Casco de moto integral', 'FUNKO'),
+    nv.apartar_fichas_dudosas({'ES': [{'titulo': _TAZA}]}, 'Pyramid'), nv.apartar_fichas_dudosas({'ES': [{'titulo': _TAZA}]})[0]),
+   (True, True, False, False, False, ({'ES': [{'titulo': _TAZA}]}, {}), {'ES': []}))
+# …y por el camino entero: una novedad de Pyramid con una ficha de Keepa que no dice «Pyramid» SE VALORA (va a Amazon);
+#    la misma de Funko se aparta (SIN HISTORIAL), como siempre.
+_db_p = dict(novedad(31, 'nuevo', ean='889698100311'), id='db-31', producto_prov='DBPY0031', nombre='Taza Death Note')
+_db_f = dict(novedad(32, 'nuevo', ean='889698100321'), id='db-32', producto_prov='DBFU0032', nombre='Funko Taza Death Note')
+b = con_dbline(Base(valorar=False), [_db_p, _db_f], marcas={'db-31': 'Pyramid', 'db-32': 'Funko'})
+k = KeepaFalso(productos={(None, '889698100311'): [prod('B0PYRAMID1', caidas=20, titulo=_TAZA)],
+                          (None, '889698100321'): [prod('B0PYRAMID2', caidas=20, titulo=_TAZA)]})
+ok, res, txt = correr_db(b, k)
+eq('(DB3) …por el camino entero (HEO apagado): la de Pyramid, a esperar a Amazon; la de Funko, apartada por el título',
+   ({n['id']: n['estado'] for n in b.tablas['nov_novedad'] if n['proveedor'] == 'DBLINE'},
+    [x['proveedor'] for x in b.tablas['nov_keepa']][:1], ok),
+   ({'db-31': 'espera_amazon', 'db-32': 'valorada'}, ['DBLINE'], True))
+eq('(DB3) …y la de Funko dice por qué (ficha dudosa) en los cuatro países',
+   [p['p_motivo'].count('ficha dudosa') for p in b.llamadas('nov_guardar_keepa') if p['p_novedad'] == 'db-32'], [4])
+
+# (DB4) Una de Pyramid «lista» que sale COMPRAR, con su oferta: el Excel en dbline/novedades/, con la marca de la foto y
+#       «Fin de la oferta» al final; su fila en nov_excel con SU proveedor.
+VALS_DB = [dict(v, novedad_id='db-39') for v in VALS_COMPRA]
+_db9 = dict(novedad(9, estado='lista'), id='db-39', producto_prov='DBPY0039', ean_norm='889698100391')
+b = con_dbline(Base(), [_db9], VALS_DB, marcas={'db-39': 'Pyramid'}, fin={'db-39': '2026-10-31'})
+ok, res, txt = correr_db(b, KeepaFalso())
+eq('(DB4) 🔑 el Excel de DBLine: en dbline/novedades/<día>/, Novedades_DBLINE_FunkoPyramid_<hora de Madrid>, y su fila en '
+   'nov_excel con SU proveedor',
+   ([ruta for _c, ruta, _x, _o in b.subidos], [(x['proveedor'], x['ruta_excel'], x['pasada_id']) for x in b.tablas['nov_excel']], ok),
+   (['dbline/novedades/2026-09-29/Novedades_DBLINE_FunkoPyramid_2026-09-29_2005.xlsx'],
+    [('DBLINE', 'dbline/novedades/2026-09-29/Novedades_DBLINE_FunkoPyramid_2026-09-29_2005.xlsx', 'PASADA-DB')], True))
+hoja = [list(r) for r in load_workbook(_io.BytesIO(b.subidos[0][2]))['Novedades'].iter_rows(values_only=True)]
+eq('(DB4) …la hoja «Novedades» lleva AL FINAL «Fin de la oferta», con el día que guardó la selección (sin las columnas del '
+   'escalón: DBLine no tiene)',
+   (hoja[0][-1], hoja[1][-1].date() if hasattr(hoja[1][-1], 'date') else hoja[1][-1], hoja[0][-2]),
+   ('Fin de la oferta', _date(2026, 10, 31), 'Por qué'))
+_v = {'nov': {'id': 'x', 'nombre': 'Taza'}, 'foto': {'ean_core': '889698100391', 'nombre': 'Taza', 'marca': 'Pyramid',
+                                                      'precio_unidad': 5.0}, 'r': {}}
+_v_oc = dict(_v, foto=dict(_v['foto'], marca='FUNKO'))
+eq('(DB4) …la marca de cada fila del Excel: en DBLine, la de su foto (Pyramid); en HEO y OcioStock, Funko como siempre',
+   (nv.datos_del_excel([_v], 'DBLINE')[0][0]['marca'], nv.datos_del_excel([_v])[0][0]['marca'],
+    nv.datos_del_excel([_v_oc], 'OCIOSTOCK')[0][0]['marca']),
+   ('Pyramid', 'Funko', 'Funko'))
+b = con_dbline(Base(), [dict(_db9, id='db-40', producto_prov='DBPY0040')], [dict(v, novedad_id='db-40') for v in VALS_COMPRA],
+               marcas={'db-40': 'Pyramid'})
+correr_db(b, KeepaFalso())
+eq('(DB4) …y una que salió sin oferta deja «Fin de la oferta» vacía', [list(r) for r in load_workbook(
+    _io.BytesIO(b.subidos[0][2]))['Novedades'].iter_rows(values_only=True)][1][-1], None)
+eq('(DB4) …y los Excel de HEO y OcioStock NO llevan «Fin de la oferta» (acaban como siempre)', (cab_heo[-1], hoja[0][-2]),
+   ('Por qué', 'Por qué'))
+
+# (DB5) La selección de una pasada de DBLine, con su nombre en el registro; y con DBLine APAGADO (como nace), la
+#       valoración se cierra «apagada» sin Keepa.
+b = con_dbline(Base(), valorar=False)
+_lineas = []
+ok, sel = nv.novedades_tras_la_pasada(b, 'PASADA-DB', 'DBLINE', keepa_llave=LLAVE, imprimir=lambda *a, **k: _lineas.append(' '.join(map(str, a))),
+                                      http=KeepaFalso(), dormir=lambda s: None, ahora=lambda: AHORA, env={}, post=post_falso)
+eq('(DB5) la selección de una pasada de DBLine y su valoración APAGADA: nov_seleccionar_pasada, y cerrada «apagada», sin Keepa',
+   (ok, [n for n, _p in b.rpcs], cierre(b)['estado'], b.tablas['nov_keepa'],
+    any(l.startswith('>>> NOVEDADES DE FUNKO Y PYRAMID (DBLINE):') for l in _lineas)),
+   (True, ['nov_seleccionar_pasada', 'nov_cerrar_valoracion'], 'apagada', [], True))
+b = con_ociostock(Base())
+_lineas = []
+nv.novedades_tras_la_pasada(b, 'PASADA-OC', 'OCIOSTOCK', keepa_llave=LLAVE, imprimir=lambda *a, **k: _lineas.append(' '.join(map(str, a))),
+                            http=KeepaFalso(), dormir=lambda s: None, ahora=lambda: AHORA, env={}, post=post_falso)
+eq('(DB5) …y la de OcioStock sigue diciendo «NOVEDADES DE FUNKO (OCIOSTOCK)»',
+   any(l.startswith('>>> NOVEDADES DE FUNKO (OCIOSTOCK):') for l in _lineas), True)
+
+# (DB6) escaner2_dbline_novedades_cuentas.py: el MISMO solo_cuentas con proveedor DBLINE y el registro discreto; entero (runpy):
+#       a mano con una pasada, la selección de ESA pasada de DBLine; vacía y APAGADO, nada y verde; algo que no es un uuid, ROJO.
+with open(os.path.join(AQUI, 'escaner2_dbline_novedades_cuentas.py'), encoding='utf-8') as fh:
+    _fuente_db = fh.read()
+_llamadas_db = [n for n in ast.walk(ast.parse(_fuente_db)) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr in ('solo_cuentas', 'novedades_tras_la_pasada')]
+eq('(DB6) las cuentas de DBLine: solo_cuentas con proveedor=DBLINE y novedades_tras_la_pasada con DBLINE, las dos con el '
+   'registro discreto; sin el texto de los avisos',
+   (sorted((n.func.attr, ast.unparse(n.args[2]) if len(n.args) > 2 else
+            dict((k.arg, ast.unparse(k.value)) for k in n.keywords).get('proveedor'),
+            dict((k.arg, ast.unparse(k.value)) for k in n.keywords).get('imprimir')) for n in _llamadas_db),
+    "res.get('avisos') or res}" in _fuente_db),
+   ([('novedades_tras_la_pasada', "'DBLINE'", 'nv.imprimir_discreto'), ('solo_cuentas', "'DBLINE'", 'nv.imprimir_discreto')], False))
+b_db1 = con_dbline(Base(valorar=False), valorar=False)
+cod_db1, _out = correr_cuentas_oc(dict(_ENT, NOVEDADES_PASADA='0DB40000-0000-0000-0000-000000000001'), b_db1,
+                                  'escaner2_dbline_novedades_cuentas.py')
+b_db2 = con_dbline(Base(), valorar=False)
+cod_db2, out_db2 = correr_cuentas_oc(dict(_ENT, NOVEDADES_PASADA=''), b_db2, 'escaner2_dbline_novedades_cuentas.py')
+b_db3 = con_dbline(Base())
+cod_db3, out_db3 = correr_cuentas_oc(dict(_ENT, NOVEDADES_PASADA='no-es-un-uuid'), b_db3, 'escaner2_dbline_novedades_cuentas.py')
+eq('(DB6) entero: a mano, la selección de esa pasada (en minúsculas) y verde; vacía y DBLine apagado, ni una función y verde '
+   '(lo dice); con algo que no es un uuid, ROJO sin tocar la base',
+   (cod_db1, b_db1.llamadas('nov_seleccionar_pasada'), cod_db2, b_db2.rpcs, 'APAGADO' in out_db2, cod_db3, b_db3.rpcs, b_db3.ops,
+    'NOVEDADES_CUENTAS_NO_EJECUTADAS' in out_db3),
+   (0, [{'p_pasada': '0db40000-0000-0000-0000-000000000001'}], 0, [], True, 1, [], [], True))
 
 print()
 if fallos:
