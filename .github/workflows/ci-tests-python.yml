@@ -471,6 +471,20 @@ jobs:
       - name: 25 septendecies novies) test_escaner2_dbline_pro.py
         run: python -u test_escaner2_dbline_pro.py
 
+      # (Encargo BE2, 10-oct-2026) Las reglas de lectura del CSV de BEMS (escaner2_bems.py, modulo puro) con un CSV
+      # INVENTADO de la misma forma que el real: llave REF BEMS (fila identica repetida = una y se cuenta; REF repetida
+      # distinta = falla), EAN de 13 con control (vacio = forma rara, dentro), STOCK > 0 y «100+», PA, blind box con EAN
+      # ASSOC sin dividir, «w/Chase» y «with Mimmy Chase» como figura, cabecera con «LENGTH », huella por contenido.
+      - name: 25 septendecies decies) test_escaner2_bems.py
+        run: python -u test_escaner2_bems.py
+
+      # (Encargo BE2, 10-oct-2026) La pasada de BEMS (escaner2_bems_disponibilidad.py) contra un almacen y una base de
+      # mentira: abre la pasada con el id de la carpeta, baja el UNICO CSV con foto_comun, aplica en lotes, «al día» en
+      # verde, vaciado con los minimos de la base, guardas antes de la red, rescate de solo esa pasada, el workflow por
+      # estructura (el input por env:) y el registro SIN un precio, EAN, REF ni el texto de un error del almacen.
+      - name: 25 septendecies undecies) test_escaner2_bems_disponibilidad.py
+        run: python -u test_escaner2_bems_disponibilidad.py
+
       # (Encadenado de Keepa, 1-oct-2026) El job `encadenar` de procesar-keepa-escaparate.yml: el titulo de la
       # corrida igual en el YAML y en el codigo; el job por estructura (tras `procesar`, solo en aplicar, exito o
       # fallo, continue-on-error, actions: write solo en el); la decision con el buzon, las cargas y las corridas
@@ -543,6 +557,8 @@ jobs:
             test_escaner2_dbline.py
             test_escaner2_dbline_disponibilidad.py
             test_escaner2_dbline_pro.py
+            test_escaner2_bems.py
+            test_escaner2_bems_disponibilidad.py
             test_encadenar_keepa.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
