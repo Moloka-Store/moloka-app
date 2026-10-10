@@ -23,13 +23,20 @@ QUE PRUEBA:
   (G) DB2-B, la fila 1: los catalogos de este banco llevan la fecha de HOY en Madrid (el programa la compara con su
       reloj). Una fila 1 en ingles sin la fecha de hoy → fallida y rojo; al registro solo su forma, a la base su texto
       recortado; la fila 2 en ningun sitio.
+  (H) (encargo DB6, 10-oct-2026, como (G) de test_escaner2_ociostock.py) LAS NOVEDADES tras la pasada aplicada: la
+      seleccion de ESA pasada y su valoracion (con el interruptor apagado, solo se cierra); tambien si la medicion sale
+      en rojo; nunca si la pasada no se aplica o esta «al día»; si la seleccion falla, la pasada sigue aplicada, se
+      apunta y ROJO, sin soltar el texto del error; el vigia de las marcas, ROJO. El workflow da a ese paso la llave de
+      Keepa y la del Telegram (no al rescate) y requests. Y la mitad roja: cuatro mutantes la ponen en rojo.
 """
+import ast
 import contextlib
 import importlib
 import io
 import os
 import runpy
 import sys
+import tempfile
 import types
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -91,6 +98,10 @@ class _Consulta:
         self.accion = 'select'
         return self
 
+    def upsert(self, d, **_k):
+        self.accion, self.datos = 'upsert', d
+        return self
+
     def eq(self, col, val):
         self.filtros[col] = val
         return self
@@ -135,6 +146,11 @@ class _Consulta:
             r = [{'tipo': c['tipo'], 'marca': c['marca']} for c in todas[desde:hasta + 1]]
         elif self.tabla == 'disp_parametros' and self.accion == 'select':
             r = [{'crudo_minimo': b.minimo}] if b.minimo is not None else []
+        elif self.tabla == 'nov_parametros' and self.accion == 'select':
+            # (encargo DB6) El interruptor de las novedades de DBLine, APAGADO: la valoración solo se cierra.
+            r = [{'proveedor': 'DBLINE', 'marcas': ['Funko', 'Pyramid'], 'valorar': False}]
+        elif self.tabla == 'nov_pasada' and self.accion == 'upsert':
+            b.nov_pasada.append(self.datos)
         elif self.tabla == 'disp_lectura':
             if self.accion == 'insert':
                 b.lectura.extend(self.datos)
@@ -145,13 +161,17 @@ class _Consulta:
 
 
 class Base:
-    def __init__(self, minimo=1000, ultima_huella=None, cambios=(), descuadre=False, error_cambios=False):
+    def __init__(self, minimo=1000, ultima_huella=None, cambios=(), descuadre=False, error_cambios=False,
+                 falla_seleccion=False, marca_parecida=0):
         """cambios: (tipo, marca) que deja disp_aplicar_pasada en disp_cambio al aplicar, y sus n_* en la pasada
-        (descuadre=True: n_entran de mas, como si la lectura de disp_cambio se hubiera quedado corta)."""
+        (descuadre=True: n_entran de mas, como si la lectura de disp_cambio se hubiera quedado corta).
+        (Encargo DB6) falla_seleccion: nov_seleccionar_pasada revienta con un texto que lleva una fila y la URL;
+        marca_parecida: lo que devuelve la seleccion para el vigia de las marcas."""
         self.minimo, self.ultima_huella = minimo, ultima_huella
         self.pasadas, self.lectura, self.lotes, self.rpcs = {}, [], [], []
         self.al_aplicar, self.descuadre, self.error_cambios = list(cambios), descuadre, error_cambios
         self.cambios, self.lecturas_cambio = [], []
+        self.falla_seleccion, self.marca_parecida, self.nov_pasada = falla_seleccion, marca_parecida, []
 
     def table(self, nombre):
         return _Consulta(self, nombre)
@@ -162,6 +182,14 @@ class Base:
         class _Llamada:
             def execute(self):
                 base.rpcs.append((nombre, params))
+                if nombre == 'nov_seleccionar_pasada':
+                    # (encargo DB6) La selección de la base, imitada.
+                    if base.falla_seleccion:
+                        raise RuntimeError(f'APIError: Failing row contains (ZQ00001, 4999999000001, 10.00) · {URL}')
+                    return types.SimpleNamespace(data={'pasada': params['p_pasada'], 'estado': 'hecha', 'novedades': 0,
+                                                       'subidas_fuera': 0, 'marca_parecida': base.marca_parecida})
+                if nombre == 'nov_cerrar_valoracion':
+                    return types.SimpleNamespace(data={'pasada': params['p_pasada'], 'estado': params['p_datos']['estado']})
                 p = base.pasadas[params['p_pasada']]
                 leidas = [x for x in base.lectura if x['pasada_id'] == p['id']]
                 base.leidas_al_aplicar = leidas
@@ -203,7 +231,8 @@ def descarga_de_mentira(contenido=None, error=None):
     return m
 
 
-def correr(contenido=None, base=None, argv=(), secretos=True, run_id='4242', error=None):
+def correr(contenido=None, base=None, argv=(), secretos=True, run_id='4242', error=None, programa=PROGRAMA):
+    """`programa`: el de verdad, o (encargo DB6) un mutante suyo en otra carpeta."""
     base = base or Base()
     falso = types.ModuleType('supabase')
     falso.create_client = lambda url, llave: base
@@ -218,12 +247,12 @@ def correr(contenido=None, base=None, argv=(), secretos=True, run_id='4242', err
     os.environ.pop('DBLINE_USER', None)
     os.environ.pop('DBLINE_PASS', None)
     os.environ.update(entorno)
-    viejo_argv, sys.argv = sys.argv, [PROGRAMA] + list(argv)
+    viejo_argv, sys.argv = sys.argv, [programa] + list(argv)
     salida = io.StringIO()
     try:
         with contextlib.redirect_stdout(salida), contextlib.redirect_stderr(salida):
             try:
-                runpy.run_path(PROGRAMA, run_name='__main__')
+                runpy.run_path(programa, run_name='__main__')
                 codigo = 0
             except SystemExit as e:
                 codigo = e.code if isinstance(e.code, int) else (0 if e.code is None else 1)
@@ -262,7 +291,10 @@ p = list(base.pasadas.values())[0]
 eq('bueno: sale en verde', cod, 0)
 eq('bueno: aplicada', p['estado'], 'aplicada')
 eq('bueno: lotes de 500', base.lotes, [500, 500, 200])
-eq('bueno: una llamada a disp_aplicar_pasada', [n for n, _ in base.rpcs], ['disp_aplicar_pasada'])
+eq('bueno: una llamada a disp_aplicar_pasada y (encargo DB6) después, la selección de las novedades de ESA pasada y el '
+   'cierre de su valoración (interruptor apagado)',
+   ([n for n, _ in base.rpcs], [x.get('p_pasada') for _n, x in base.rpcs]),
+   (['disp_aplicar_pasada', 'nov_seleccionar_pasada', 'nov_cerrar_valoracion'], [p['id']] * 3))
 eq('bueno: recuentos en la pasada', (p['n_crudo'], p['n_leidas'], p['n_disponibles']), (1200, 1200, 1200))
 eq('bueno: huella de contenido guardada', len(p.get('huella_contenido') or ''), 32)
 eq('bueno: md5 y bytes del fichero', (len(p.get('fichero_md5') or ''), p.get('fichero_bytes')), (32, len(bueno)))
@@ -281,7 +313,7 @@ eq('al día: rechazada y sin subir nada', (p['estado'], base.lotes, base.rpcs), 
 # ── Lo que no aplica ──────────────────────────────────────────────────────────────────────
 cod, log, base = correr(b'esto no es un excel')
 p = list(base.pasadas.values())[0]
-eq('ilegible: rojo y fallida', (cod, p['estado']), (1, 'fallida'))
+eq('ilegible: rojo y fallida, y (encargo DB6) sin pedir novedades', (cod, p['estado'], base.rpcs), (1, 'fallida', []))
 cod, log, base = correr(libro(900))
 p = list(base.pasadas.values())[0]
 eq('vaciado: filas por debajo del minimo', (cod, p['estado'], base.lotes), (1, 'rechazada_vaciado', []))
@@ -321,9 +353,23 @@ eq('workflow: solo a mano', list(wf[True]), ['workflow_dispatch'])
 eq('workflow: grupo propio sin cancelar', wf['concurrency'], {'group': 'escaner2-dbline', 'cancel-in-progress': False})
 eq('workflow: los secretos, en el primer paso', sorted(pasos[0]['env']),
    ['DBLINE_PASS', 'DBLINE_USER', 'SUPABASE_SERVICE_KEY', 'SUPABASE_URL'])
-eq('workflow: la pasada lleva DBLINE_USER/PASS y la base',
+eq('workflow: la pasada lleva DBLINE_USER/PASS, la base y (encargo DB6) Keepa y el Telegram',
    sorted(k for k in pasos[4]['env'] if k != 'PYTHONIOENCODING'),
-   ['DBLINE_PASS', 'DBLINE_USER', 'SUPABASE_SERVICE_KEY', 'SUPABASE_URL'])
+   ['DBLINE_PASS', 'DBLINE_USER', 'KEEPA_API_KEY', 'SUPABASE_SERVICE_KEY', 'SUPABASE_URL', 'TELEGRAM_CHAT_ID',
+    'TELEGRAM_TOKEN'])
+eq('workflow (DB6): la llave de Keepa y la del Telegram, SOLO al paso de la pasada (no al rescate ni a los secretos), '
+   'de los secretos del repo',
+   ([i for i, s in enumerate(pasos) if {'KEEPA_API_KEY', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID'} & set(s.get('env') or {})],
+    [pasos[4]['env'][k] for k in ('KEEPA_API_KEY', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID')]),
+   ([4], ['${{ secrets.KEEPA_API_KEY }}', '${{ secrets.TELEGRAM_TOKEN }}', '${{ secrets.TELEGRAM_CHAT_ID }}']))
+eq('workflow (DB6): requests con la versión de la foto de OcioStock, y openpyxl para el Excel',
+   ('requests==2.34.2' in pasos[3]['run'].split(), 'openpyxl==3.1.5' in pasos[3]['run'].split()), (True, True))
+_llamadas_nv = [n for n in ast.walk(ast.parse(open(PROGRAMA, encoding='utf-8').read())) if isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Attribute) and n.func.attr == 'novedades_tras_la_pasada']
+eq('(DB6) las novedades, por escaner2_novedades con PROVEEDOR (DBLINE) y el registro DISCRETO',
+   [(n.args[2].id if len(n.args) > 2 and isinstance(n.args[2], ast.Name) else None,
+     [ast.unparse(k.value) for k in n.keywords if k.arg == 'imprimir']) for n in _llamadas_nv],
+   [('PROVEEDOR', ['nv.imprimir_discreto'])])
 eq('workflow: el rescate no lleva los de DBLine', 'DBLINE_PASS' in pasos[5]['env'], False)
 eq('workflow: el rescate solo si los secretos estaban', 'steps.secretos.outcome' in pasos[5]['if'], True)
 _req = [l.strip() for l in open(os.path.join(RAIZ, 'requirements.txt'), encoding='utf-8') if l.strip().startswith('curl_cffi')]
@@ -463,6 +509,78 @@ eq('fila 1 (DB2-B): a la base, además su texto',
 eq('fila 1 (DB2-B): la fila 2, ni al registro ni a la base',
    [x for x in ('CLIENTE-SECRETO', '777', 'Moloka') if x in log + p['motivo']], [])
 eq('(C) fila 1 (DB2-B): el registro no suelta datos', limpio_de_datos(log), [])
+
+
+# ── (H) Encargo DB6: las novedades tras la pasada ─────────────────────────────────────────
+def novedades_casos(programa, decir):
+    """Los casos de las novedades sobre `programa` (el de verdad o un mutante); llama a decir(nombre, obtenido,
+    esperado)."""
+    def pasada_de(base):
+        return list(base.pasadas.values())[0] if base.pasadas else {}
+
+    cod, log, base = correr(bueno, programa=programa)
+    p = pasada_de(base)
+    decir('(H) el bueno: verde, aplicada, la selección y el cierre de la valoración de ESA pasada (interruptor apagado)',
+          (cod, p.get('estado'), [(n, x.get('p_pasada')) for n, x in base.rpcs[1:]],
+           [x['p_datos'] for n, x in base.rpcs if n == 'nov_cerrar_valoracion']),
+          (0, 'aplicada', [('nov_seleccionar_pasada', p.get('id')), ('nov_cerrar_valoracion', p.get('id'))],
+           [{'estado': 'apagada'}]))
+    decir('(H) el bueno: el registro dice las novedades de DBLine', '>>> NOVEDADES DE FUNKO Y PYRAMID (DBLINE)' in log, True)
+    decir('(C) (H) el bueno: el registro no suelta datos', limpio_de_datos(log), [])
+
+    cod, log, base = correr(bueno, base=Base(falla_seleccion=True), programa=programa)
+    p = pasada_de(base)
+    decir('(H) 🔴 la selección de novedades falla: la pasada SIGUE aplicada, se apunta en nov_pasada (fallida), no se '
+          'valora y ROJO',
+          (cod, p.get('estado'), [(x.get('pasada_id'), x.get('proveedor'), x.get('estado')) for x in base.nov_pasada],
+           [n for n, _x in base.rpcs], 'DBLINE_NOVEDADES_EN_ROJO' in log),
+          (1, 'aplicada', [(p.get('id'), 'DBLINE', 'fallida')], ['disp_aplicar_pasada', 'nov_seleccionar_pasada'], True))
+    decir('(C) (H) la selección falla: el registro no suelta la fila ni la URL del error', limpio_de_datos(log), [])
+
+    cod, log, base = correr(bueno, base=Base(marca_parecida=3), programa=programa)
+    decir('(H) 🔴 el vigía de las marcas (3 que se parecen a Funko o a Pyramid): la pasada aplicada, las novedades '
+          'hechas, y ROJO',
+          (cod, pasada_de(base).get('estado'), 'nov_cerrar_valoracion' in [n for n, _x in base.rpcs],
+           'MARCA_PARECIDA: 3 producto(s) de DBLine' in log), (1, 'aplicada', True, True))
+
+    cod, log, base = correr(bueno, base=Base(cambios=_al_aplicar, descuadre=True), programa=programa)
+    decir('(H) la medición no cuadra: ROJO, pero las novedades de la pasada aplicada se hacen igual',
+          (cod, 'DBLINE_SIN_RECUENTOS' in log, [n for n, _x in base.rpcs]),
+          (1, True, ['disp_aplicar_pasada', 'nov_seleccionar_pasada', 'nov_cerrar_valoracion']))
+
+    cod, log, base = correr(bueno, base=Base(ultima_huella=huella), programa=programa)
+    decir('(H) «al día»: verde y ni se piden novedades', (cod, base.rpcs, base.nov_pasada), (0, [], []))
+    cod, log, base = correr(libro(900), programa=programa)
+    decir('(H) vaciado: rojo y ni se piden novedades', (cod, base.rpcs, base.nov_pasada), (1, [], []))
+
+
+novedades_casos(PROGRAMA, eq)
+
+
+def mutar(ruta, antes, despues, carpeta, nombre):
+    texto = open(ruta, encoding='utf-8').read()
+    assert texto.count(antes) == 1, 'el ancla del mutante «%s» no es única (%d)' % (nombre, texto.count(antes))
+    destino = os.path.join(carpeta, os.path.basename(ruta))
+    with open(destino, 'w', encoding='utf-8', newline='') as f:
+        f.write(texto.replace(antes, despues))
+    return destino
+
+
+MUTANTES_NOVEDADES = [
+    ('sin novedades', "    if not novedades(sb, pid, run_id):\n        codigo = 1\n", ''),
+    ('las novedades sin registro discreto', "imprimir=nv.imprimir_discreto", "imprimir=print"),
+    ('el vigía callado', "    return ok and not marca_parecida", "    return ok"),
+    ('la medición en rojo se salta las novedades', "        if not medir(sb, pid, fila):\n            codigo = 1\n",
+     "        if not medir(sb, pid, fila):\n            return 1\n"),
+]
+with tempfile.TemporaryDirectory() as _tmp:
+    for _i, (_nombre, _antes, _despues) in enumerate(MUTANTES_NOVEDADES):
+        _d = os.path.join(_tmp, 'm%d' % _i)
+        os.makedirs(_d)
+        _rotos = []
+        novedades_casos(mutar(PROGRAMA, _antes, _despues, _d, _nombre),
+                        lambda n, o, e: _rotos.append(n) if o != e else None)
+        eq('(H) 🔴 el banco se pone ROJO con el mutante «%s»' % _nombre, bool(_rotos), True)
 
 print()
 if fallos:

@@ -457,6 +457,8 @@ jobs:
       # (Encargo DB2-A, 9-oct-2026) La pasada de DBLine (escaner2_dbline_disponibilidad.py) contra una descarga y una
       # base de mentira: aplica en lotes, «al día» por contenido en verde, vaciado y fallida, rescate de solo su run, el
       # workflow por estructura, y el registro SIN la salida de descargar_dbline.py (login, URL, usuario y clave).
+      # (Encargo DB6, 10-oct-2026) Y las novedades de Funko y Pyramid tras la pasada aplicada, como las de OcioStock
+      # (seleccion, cierre de la valoracion, rojo si fallan o salta el vigia de las marcas) y cuatro mutantes en rojo.
       - name: 25 septendecies octies) test_escaner2_dbline_disponibilidad.py
         run: python -u test_escaner2_dbline_disponibilidad.py
 
