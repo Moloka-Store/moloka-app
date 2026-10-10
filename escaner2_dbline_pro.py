@@ -22,8 +22,8 @@ LO PROPIO DE DBLINE (decidido por Fernando, 9-oct-2026, y medido en el parte DB1
   3. CHASE: en DBLine no hay chase sueltos; «w/Chase» es la figura normal y entra como tal. Si la foto marca uno
      (`regla = 'chase_suelto'`, la guarda de DB2: hoy 0), fuera.
   4. EL PRECIO, EL VIGENTE Y POR UNIDAD («Calcula con el precio vigente de compra en cada momento»): PA =
-     `precio_unidad` de la foto (Prezzo, o el de promo si su fin es hoy o despues). 🔴 La promo solo hasta su fin:
-     si la foto la dio por vigente pero su `fin_oferta` ya ha pasado el dia del barrido, se usa `precio_catalogo`
+     `precio_unidad` de la foto (Prezzo, o la promo si esta vigente y es mas barata que Prezzo: DB5).
+     🔴 La promo solo hasta su fin: si la foto la dio por vigente pero su `fin_oferta` ya ha pasado el dia del barrido, se usa `precio_catalogo`
      (Prezzo) y se cuenta. Sin escalones, sin el 1 % de transferencia, sin porte, sin cajas, sin MOQ.
   5. SIN PRECIO DE COMPRA (vacio o 0: DB1 vio 4 filas con Prezzo a 0), FUERA: un PA de 0 daria un COMPRAR falso. Va a
      la puerta previa `estado_no_servible`, que en DBLine se llama «Sin precio de compra», listada.
@@ -296,8 +296,9 @@ def escribir_excel(foto, resultados, apartados, M, info):
     elif modo == 'marcas':
         filas_res += [['Marcas del director', ', '.join(info.get('marcas') or []) or '(ninguna)']]
     filas_res += [['Foto de DBLine (pasada de disponibilidad)', info.get('foto') or '—'],
-                  ['Precio de compra (PA)', 'el vigente, por unidad: el precio del catálogo, o el de la promo hasta '
-                                            'su fin; sin escalón, sin 1 %, sin porte'],
+                  ['Precio de compra (PA)', 'el vigente, por unidad: el precio del catálogo, o el de la promo si '
+                                            'está vigente y es más barata que el del catálogo; sin escalón, '
+                                            'sin 1 %, sin porte'],
                   ['Promos vigentes en la foto de la pasada', info.get('n_en_oferta', '—')],
                   ['Promos caducadas desde la foto (con el precio normal)', info.get('n_promo_caducada', '—')],
                   ['Umbral de caídas (30 días)', '%s (> %d)' % (e2.texto_corte(p['umbral']), p['umbral'])],

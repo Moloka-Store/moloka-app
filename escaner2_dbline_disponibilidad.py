@@ -177,8 +177,8 @@ def pasada(sb, run_id, hoy):
         print(f">>> Leídas {c['n_leidas']} (disponibles {c['n_disponibles']}, agotados {c['n_agotados']}) · cabecera "
               f"{c['idioma_cabecera']} · catálogo del {c['fecha_catalogo']} · sin dato de stock "
               f"{c['n_sin_dato_disponibilidad']}, de precio {c['n_sin_dato_precio']} · preventa {c['n_preventa']} (con "
-              f"stock {c['n_preventa_con_stock']}) · en oferta {c['n_en_oferta']}, promo caducada {c['n_promo_caducada']} "
-              f"· chase sueltos {c['n_chase_suelto']} · EAN de forma rara {c['n_ean_forma_rara']} (de 11 cifras a UPC "
+              f"stock {c['n_preventa_con_stock']}) · en oferta {c['n_en_oferta']}, promo caducada {c['n_promo_caducada']}, "
+              f"promo más cara que el precio {c['n_promo_mas_cara']} · chase sueltos {c['n_chase_suelto']} · EAN de forma rara {c['n_ean_forma_rara']} (de 11 cifras a UPC "
               f"{c['n_ean_11_upc']}) · Funko {pm['funko']['filas']} (disponibles {pm['funko']['disponibles']}) · "
               f"Pyramid {pm['pyramid']['filas']} (disponibles {pm['pyramid']['disponibles']})", flush=True)
         if n < minimo:

@@ -345,6 +345,16 @@ eq('A2 · las rutas que admiten los checks de la v2',
 eq('A2 · precio_vigente: promo sin fecha de fin = la que dio la foto',
    edb.precio_vigente({'precio_unidad': 3.0, 'precio_catalogo': 4.0, 'en_oferta': True, 'fin_oferta': None}, HOY),
    (3.0, True, False))
+# DB5: la promo vigente MAS CARA que Prezzo (7,99 frente a 7,83). La fila sale de la regla de la foto de
+# disponibilidad (escaner2_dbline.precio_vigente) y el PRO compra a Prezzo, sin oferta.
+import escaner2_dbline as DBF  # noqa: E402
+_pu30, _of30 = DBF.precio_vigente(DBF.Decimal('7.83'), DBF.Decimal('7.99'), date(2026, 12, 31), HOY)
+E30 = ean13('840000000230')
+_f30, _a30, _c30 = edb.construir_foto([fila('ZZ0030', E30, 'Funko', float(_pu30), 7.83, oferta=_of30, fin=None)],
+                                      lambda _m: True, M, 1, 0, HOY, 'todas')
+eq('A2 · DB5: promo vigente más cara que Prezzo → PA = Prezzo, sin oferta (y nada caducado)',
+   ([(f['precio_unidad'], f['precio_catalogo'], f['en_oferta']) for f in _f30], _c30['n_en_oferta'],
+    _c30['n_promo_caducada'], _c30['cuadra_previo']), ([(7.83, 7.83, False)], 0, 0, True))
 
 print('A3 · 🔴 mutantes de lo puro: cada uno pone A2 en rojo')
 with io.open(os.path.join(AQUI, 'escaner2_dbline_pro.py'), encoding='utf-8') as _fh:

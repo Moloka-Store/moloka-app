@@ -25,6 +25,10 @@ unidades).
   4. PRECIO: precio_catalogo = Prezzo; precio_unidad = Prezzo promo si es > 0 y su fin (solo el dia) es hoy o
      despues; si no, Prezzo (Fernando: «Calcula con el precio vigente de compra en cada momento»). en_oferta y
      fin_oferta (solo el dia). Promo > 0 sin fin: con Prezzo, y se cuenta (n_promo_sin_fin). Sin escalones, sin el 1 % de transferencia, sin cajas (es_caja false siempre).
+     EL MINIMO (encargo DB5, 10-oct-2026; Fernando: «Tengo un precio tan negociado en DBLine que hasta las ofertas
+     salen mas caras muchas veces que mi precio normal»): la promo vigente que NO es mas barata que Prezzo (igual o
+     mas cara) no vale: precio_unidad = Prezzo, en_oferta false y fin_oferta vacio, como un producto sin promo; se
+     cuenta (n_promo_mas_cara). Con Prezzo vacio o 0, como antes (la promo vigente vale).
   5. CHASE SUELTO: solo marca FUNKO (Publisher) con «chase» al final del nombre o entre parentesis, sin «w/» ni
      «with» → regla 'chase_suelto' y es_chase true (como OcioStock, regla 4). «w/Chase» es la figura normal.
   6. FECHAS: solo el dia (la hora que traen es la de la descarga y no significa nada).
@@ -298,8 +302,11 @@ def solo_dia(v):
 
 
 def precio_vigente(prezzo, promo, fin, hoy):
-    """(precio_unidad, en_oferta) de la regla 4: la promo si es > 0 y su fin es hoy o despues; si no, Prezzo."""
+    """(precio_unidad, en_oferta) de la regla 4: la promo si es > 0, su fin es hoy o despues y es mas barata que
+    Prezzo (DB5: el minimo); si no, Prezzo. Con Prezzo vacio o 0, la promo vigente vale (como antes de DB5)."""
     if promo is not None and promo > 0 and fin is not None and fin >= hoy:
+        if prezzo is not None and prezzo > 0 and promo >= prezzo:
+            return prezzo, False
         return promo, True
     return prezzo, False
 
@@ -349,7 +356,7 @@ def _convertir(contenido, hoy, min_filas, min_disponibles):
     c = {'n_crudo': len(crudas), 'n_leidas': 0, 'n_disponibles': 0, 'n_agotados': 0,
          'n_sin_dato_disponibilidad': 0, 'n_sin_dato_precio': 0, 'n_preventa': 0, 'n_preventa_con_stock': 0,
          'n_telefonare_disponibles': 0, 'n_new_disponibles': 0, 'n_en_oferta': 0, 'n_promo_caducada': 0,
-         'n_promo_sin_fin': 0,
+         'n_promo_sin_fin': 0, 'n_promo_mas_cara': 0,
          'n_chase_suelto': 0, 'n_chase_suelto_disponibles': 0, 'n_ean_forma_rara': 0, 'n_ean_11_upc': 0,
          'n_fecha_salida_rara': 0}
     por_marca = {k: {'filas': 0, 'disponibles': 0} for k in ['total'] + [k for k, _m in MARCAS_MEDIDAS]}
@@ -406,6 +413,9 @@ def _convertir(contenido, hoy, min_filas, min_disponibles):
             c['n_fecha_salida_rara'] += 1
 
         p_unidad, en_oferta = precio_vigente(prezzo, promo, fin, hoy)
+        # DB5: promo vigente que no baja de Prezzo → como un producto sin promo (fin_oferta vacio) y se cuenta.
+        promo_mas_cara = (promo is not None and promo > 0 and fin is not None and fin >= hoy and not en_oferta)
+        fin_oferta = None if promo_mas_cara else fin
         nota = _texto(v('Note'))
         nota_up = (nota or '').upper()
         preventa = nota_up == NOTA_PREVENTA
@@ -422,7 +432,7 @@ def _convertir(contenido, hoy, min_filas, min_disponibles):
             'precio_escalon': None, 'uds_escalon': None, 'precio_pa': None,
             'disponible': disponible, 'disponibilidad': nota,
             'en_oferta': en_oferta, 'preorder': preventa, 'fin_de_vida': None,
-            'fin_oferta': fin.isoformat() if fin else None,
+            'fin_oferta': fin_oferta.isoformat() if fin_oferta else None,
             'fecha_salida': salida_dia.isoformat() if salida_dia else None,
             'regla': regla, 'aviso': None,
             'sin_dato_disponibilidad': sin_dato_disp, 'sin_dato_precio': prezzo is None,
@@ -439,6 +449,7 @@ def _convertir(contenido, hoy, min_filas, min_disponibles):
         c['n_en_oferta'] += en_oferta
         c['n_promo_caducada'] += (promo is not None and promo > 0 and fin is not None and fin < hoy)
         c['n_promo_sin_fin'] += (promo is not None and promo > 0 and fin is None)  # se calcula con Prezzo
+        c['n_promo_mas_cara'] += promo_mas_cara
         c['n_chase_suelto'] += chase
         c['n_chase_suelto_disponibles'] += chase and disponible
         c['n_ean_forma_rara'] += core is None  # (Cowork, 9-oct) por el EAN: un chase suelto con EAN raro tambien cuenta
