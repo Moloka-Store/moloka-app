@@ -33,8 +33,9 @@ Y UNO MAS (encargo CJ4, decision de Fernando del 11-oct-2026):
      es el DESCUENTO DE CLIENTE (el «Precio incluye dto.» de la web de HEO), que en Funko llevan los de precio
      normal y pierden los rebajados (parte CJ3, 11-oct-2026). La oferta de verdad es el precio TACHADO:
      `strikePricePerUnit` > 0. En oferta pasa a ser eso, y la fila lleva `precio_tachado` (el importe tal cual lo da
-     HEO, al centimo; vacio si no hay). Nada lee el descuento de cliente: no se guarda. El director viejo
-     (descargar_heo.py) no cambia.
+     HEO, al centimo; vacio si no hay). Las cajas con chase que la descarga desvia llevan tambien su `precio_tachado`
+     (el viejo no les calcula oferta; escaner2_motor._fila_de_chase la saca de ahi). Nada lee el descuento de
+     cliente: no se guarda. El director viejo (descargar_heo.py) no cambia.
 """
 
 # Heredado → {pieza: [(antes, despues), …]}. Los textos van con la sangria del VIEJO (en el heredado, la
@@ -76,6 +77,12 @@ DESVIOS = {
              "            'en_oferta':      ('SI' if en_oferta else ''), 'precio_tachado': tachado,  # 🔑 DESVÍO CJ4\n"),
             ('    print(f">>> En oferta (campana/descuento/precio<base): {en_of}")\n',
              '    print(f">>> En oferta (precio tachado de HEO, DESVÍO CJ4): {en_of}")\n'),
+            # Las cajas con chase que la descarga desvia: HEO tambien les pone tachado (15 de 83 en la sonda del
+            # 11-oct-2026), y el viejo no les calcula oferta. Llevan su `precio_tachado` (el de la caja).
+            ("            discc = _amt(prc.get('discountedPricePerUnit'))\n",
+             "            discc = _amt(prc.get('discountedPricePerUnit')); strikec = _amt(prc.get('strikePricePerUnit'))  # 🔑 DESVÍO CJ4\n"),
+            ("                'precio_caja':  (None if precioc is None else round(precioc, 2)),\n",
+             "                'precio_caja':  (None if precioc is None else round(precioc, 2)), 'precio_tachado': (round(strikec, 2) if strikec is not None and strikec > 0 else None),  # 🔑 DESVÍO CJ4\n"),
         ],
     },
 }

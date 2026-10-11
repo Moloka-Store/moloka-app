@@ -162,7 +162,8 @@ def construir_disponibilidad(filas_heo, chase_heo, M, *, con_precio, con_disponi
             producto=_texto(c.get('producto_heo')), disponible=f.get('estado') == 'disponible',
             ean_in=f['ean'], core=ean, nombre=f['nombre'], marca=f['marca'], categoria=None,
             pa=M._num(f['precio']), es_caja=True, uds=uds, es_chase=True,
-            en_oferta=False, precio_tachado=None, preorder=False, fin_de_vida=False, disponibilidad=None,
+            en_oferta=f.get('en_oferta') == 'SI', precio_tachado=f.get('precio_tachado'),
+            preorder=False, fin_de_vida=False, disponibilidad=None,
             regla=None if ean is not None else 'caja_chase_sin_figura',
             aviso=aviso, M=M))
 

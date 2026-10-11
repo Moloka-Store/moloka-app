@@ -1126,6 +1126,33 @@ eq('(K) …un repetido DISTINTO en la heredada de verdad: rojo, sin subir nada n
    (codigo, _de(ops, 'disp_lectura', 'insert'), [o for o in ops if o['tabla'].startswith('rpc:')],
     'repetidos con datos distintos: R2' in _de(ops, 'disp_pasada', 'update')[-1]['datos'].get('motivo', '')), (1, [], [], True))
 
+# (K) 🆕 (encargo CJ4, 11-oct-2026) LA OFERTA DE HEO ES EL PRECIO TACHADO, con la heredada de verdad (desvío CJ4 de
+#     escaner2_desvios.py). Importes INVENTADOS. R1 trae `strikePricePerUnit` → en oferta, con su tachado; R2 lo trae a
+#     0 → no; R5 trae el DESCUENTO DE CLIENTE (`retailerProductDiscount` y precio de hoy por debajo del base) sin
+#     tachado → NO es oferta (antes, sí); la caja con chase R3 trae tachado → en oferta, con el de la caja.
+PAGINAS = {'catalog/products': [_prod('R1', 'Figura uno', 'Hasbro', '5010993999990'),
+                                _prod('R2', 'Figura dos', 'Hasbro', '5010993999991'),
+                                _prod('R3', 'Figura tres w/Chase Surtido (6)', 'Funko', '889698862646'),
+                                _prod('R5', 'Figura cinco', 'Funko', '5010993999992')],
+           'catalog/prices': [dict(_precio('R1', 10.0), strikePricePerUnit={'amount': 12.5}),
+                              dict(_precio('R2', 10.0), strikePricePerUnit={'amount': 0}),
+                              dict(_precio('R3', 60.0), strikePricePerUnit={'amount': 72.0}),
+                              {'productNumber': 'R5', 'basePricePerUnit': {'amount': 10.0},
+                               'discountedPricePerUnit': {'amount': 9.0}, 'retailerProductDiscount': {'amount': 10.0}}],
+           'catalog/availabilities': [_dispo('R1'), _dispo('R2'), _dispo('R3'), _dispo('R5')]}
+hd_real._get = _get_en_memoria
+try:
+    ops, codigo, _texto = correr_programa(modulo_descarga=hd_real)
+finally:
+    hd_real._get = _get_de_verdad
+lectura = {f['producto_prov']: f for o in _de(ops, 'disp_lectura', 'insert') for f in o['datos']}
+eq('(K) (CJ4) en oferta = trae precio tachado, y sube su tachado: R1 sí (12,5), R2 a 0 no, R5 con solo el descuento de '
+   'cliente NO, y la caja con chase R3 sí (72, el de la caja)',
+   (codigo, {p: (f['en_oferta'], f.get('precio_tachado', 'FALTA')) for p, f in sorted(lectura.items())}),
+   (0, {'R1': (True, 12.5), 'R2': (False, None), 'R3': (True, 72.0), 'R5': (False, None)}))
+eq('(K) (CJ4) …y la descarga lo dice en su log con su nombre nuevo',
+   ('En oferta (precio tachado de HEO, DESVÍO CJ4): 1' in _texto, 'campana/descuento' in _texto), (True, False))
+
 print()
 if fallos:
     print('ROJO: %d fallo(s): %s' % (len(fallos), '; '.join(fallos)))

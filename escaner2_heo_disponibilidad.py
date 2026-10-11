@@ -30,6 +30,10 @@ QUE HACE, EN ORDEN:
      pasada sigue y el run acaba en ROJO al final. (Encargo H3, 9-oct-2026) Con precio tachado en la lista cruda de
      precios (`strikePricePerUnit` > 0), sin tramo: HEO no da descuento por cantidad en lo rebajado; y los de marca
      Funko, tampoco (en la web de HEO ningun Funko lo tiene);
+     🆕 3 ter (encargo CJ4, 11-oct-2026): LA OFERTA ES EL PRECIO TACHADO. La descarga heredada (desvio CJ4 de
+     escaner2_desvios.py) da `en_oferta` = «trae `strikePricePerUnit` > 0» y `precio_tachado`, tambien en las cajas con
+     chase; cada fila sube su `precio_tachado` (vacio si no hay) y la base lo copia como copia en_oferta (migracion
+     20261011191500 de la v2). Antes, en_oferta era el descuento de cliente;
   4. sube las filas a `disp_lectura` en lotes y deja en la pasada sus recuentos;
   5. llama a `disp_aplicar_pasada`, la funcion de la base que, de una vez: pasa el blindaje
      anti-vaciado, apunta los cambios contra el estado de antes, marca lo que falta y cuadra. Si la

@@ -246,6 +246,19 @@ eq('(F) 🔴 una TANDA de 20.000 no arranca (el Visualizador no la acepta entera
 _t = e2.partir_en_tandas([str(i) for i in range(23563)], e2.tanda_visualizador())
 eq('(F) 23.563 códigos → tres tandas, ninguna de más de 10.000', [len(x) for x in _t], [10000, 10000, 3563])
 
+# ═══════════════════════════════════════════════════════════════════════════════
+print('\n(G) 🆕 (encargo CJ4) la caja con chase con precio tachado es oferta, en el filtro del barrido y en su foto')
+_con = [dict(c, precio_tachado=72.0) if c['producto_heo'] == 'FK87245' else c for c in CHASE]
+_k1 = e2._fila_de_chase(next(c for c in _con if c['producto_heo'] == 'FK87245'))
+_k2 = e2._fila_de_chase(next(c for c in _con if c['producto_heo'] == 'FK93894'))
+eq('(G) _fila_de_chase: con tachado, en oferta y con su tachado; sin él, como antes (sin oferta)',
+   [(_k1['en_oferta'], _k1['precio_tachado']), (_k2['en_oferta'], _k2['precio_tachado'])], [('SI', 72.0), ('', None)])
+_QO, _ = e2.filtro_elegidas([], True)
+_FO, _AO, _CO = e2.construir_foto([], _con, _QO, M, n_crudo=len(_con), n_sin_gtin=0, n_declarado=len(_con),
+                                  modo='elegidas', tolerancia=0)
+eq('(G) «ofertas de cualquier marca» se lleva la caja con tachado, en oferta, y ninguna otra',
+   [(f['producto_heo'], f['en_oferta']) for f in _FO], [('FK87245', True)])
+
 print()
 if fallos:
     print('ROJO: %d comprobaciones fallan: %s' % (len(fallos), ', '.join(fallos)))

@@ -510,11 +510,15 @@ def rotulo_caja(f):
 def _fila_de_chase(c):
     """Una entrada de la lista `chase` de descargar_heo con la forma de una fila del catalogo,
     para que pase por el MISMO filtro y las MISMAS reglas que las demas. descargar_heo no calcula
-    la oferta de estas (no se toca): sin dato, no es oferta."""
+    la oferta de estas (no se toca): sin dato, no es oferta.
+    🆕 (encargo CJ4, 11-oct-2026) La descarga heredada les da `precio_tachado` (desvio CJ4 de escaner2_desvios.py):
+    con tachado, es oferta, como cualquier otro producto de HEO."""
+    tachado = c.get('precio_tachado')
     return {'productNumber': c.get('producto_heo'), 'ean': c.get('ean_caja') or '',
             'nombre': c.get('nombre') or '', 'marca': c.get('marca') or '', 'categoria': '',
             'precio': '' if c.get('precio_caja') is None else c.get('precio_caja'),
-            'precio_base': '', 'en_oferta': '', 'campana': '', 'estado': c.get('estado') or '',
+            'precio_base': '', 'en_oferta': 'SI' if tachado else '', 'precio_tachado': tachado,
+            'campana': '', 'estado': c.get('estado') or '',
             'disponibilidad': '', 'imagen': c.get('imagen') or '', 'fin_de_vida': '', 'preorder': ''}
 
 
@@ -584,7 +588,7 @@ def construir_foto(filas_heo, chase_heo, quiere, M, n_crudo=None, n_sin_gtin=Non
             'producto_heo': c.get('producto_heo'), 'ean_in': f['ean'], 'core': ean,
             'nombre': f['nombre'], 'marca': f['marca'], 'categoria': '', 'pa': M._num(f['precio']),
             'es_chase': True, 'es_caja': True, 'uds_caja': uds,
-            'en_oferta': False, 'campana': '', 'disponibilidad': '', 'fin_de_vida': False,
+            'en_oferta': f.get('en_oferta') == 'SI', 'campana': '', 'disponibilidad': '', 'fin_de_vida': False,
             'preorder': False, 'imagen': f['imagen'], 'origen_ean': origen, 'aviso_ean': aviso,
         })
 
