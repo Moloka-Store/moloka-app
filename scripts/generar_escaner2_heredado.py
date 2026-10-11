@@ -25,6 +25,7 @@ sys.path.insert(0, os.getcwd())
 import escaner2_desvios as desvios  # noqa: E402
 
 NOTA_DESVIO = 'DESVÍO DELIBERADO del viejo (encargo D, Fernando 28-sep-2026): ver escaner2_desvios.py'
+NOTA_DESVIO_CJ4 = 'DESVÍO DELIBERADO del viejo (encargo CJ4, Fernando 11-oct-2026): ver escaner2_desvios.py'
 
 
 def fuente(fichero):
@@ -221,7 +222,9 @@ def descarga_extra(texto, lineas, sha):
     out = []
     for n in cuerpo:
         if isinstance(n, ast.FunctionDef) and n.name == 'descargar_catalogo_heo':
-            out.append(pieza('descargar_heo.py', texto, lineas, n, sha))
+            # (encargo CJ4) La oferta de HEO es el precio tachado: desvio de escaner2_desvios.py, dicho en su cabecera.
+            desviada = n.name in desvios.piezas_desviadas('escaner2_heredado_descarga.py')
+            out.append(pieza('descargar_heo.py', texto, lineas, n, sha, nota=NOTA_DESVIO_CJ4 if desviada else None))
             break
         if isinstance(n, ast.Expr) and isinstance(getattr(n, 'value', None), ast.Constant):
             continue                                                  # el docstring del modulo, si lo hubiera
@@ -234,7 +237,7 @@ def descarga_extra(texto, lineas, sha):
     return out
 
 
-piezas, sha_des = por_nombre('descargar_heo.py', (), (), extra=descarga_extra)
+piezas, sha_des = por_nombre('descargar_heo.py', (), (), extra=descarga_extra, heredado='escaner2_heredado_descarga.py')
 escribir('escaner2_heredado_descarga.py',
          'ESCANER 2 · LO HEREDADO DE descargar_heo.py (la API de HEO), COPIADO LITERALMENTE.\n\n'
          'Encargo B7 (25-sep-2026). Todo el modulo hasta `descargar_catalogo_heo` incluida (imports, credenciales\n'
@@ -244,6 +247,9 @@ escribir('escaner2_heredado_descarga.py',
          'con las MISMAS lineas de log de siempre.\n'
          'No se trae `COLS` ni `a_csv_bytes` (son del director viejo) ni el bloque `__main__` (solo su `TANDA`).\n'
          '🔴 NO SE TOCA A MANO: si descargar_heo.py cambia, test_escaner2_heredado.py lo avisa y decide Fernando.\n'
+         '🔑 Salvo el desvio DELIBERADO de escaner2_desvios.py (encargo CJ4, 11-oct-2026): en oferta = precio tachado\n'
+         '   de HEO (`strikePricePerUnit` > 0), y la fila lleva `precio_tachado`. Lo aplica el generador al copiar;\n'
+         '   `descargar_catalogo_heo` lo dice encima.\n'
          % (COMMIT[:7], sha_des[:10]), piezas)
 
 # ───────────────────────── procesador_keepa_escaparate.py ─────────────────────────
