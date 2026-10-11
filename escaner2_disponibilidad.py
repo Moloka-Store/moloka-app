@@ -87,9 +87,12 @@ def _texto(v):
 
 
 def _fila(producto, disponible, ean_in, core, nombre, marca, categoria, pa, es_caja, uds, es_chase,
-          en_oferta, preorder, fin_de_vida, disponibilidad, regla, aviso, M):
+          en_oferta, precio_tachado, preorder, fin_de_vida, disponibilidad, regla, aviso, M):
     """Una fila de disp_lectura. El precio por unidad, con la regla de la Celda 8 del escaner 2: solo se
-    divide donde el proveedor da el precio de la CAJA COMPLETA (HEO: si)."""
+    divide donde el proveedor da el precio de la CAJA COMPLETA (HEO: si).
+    🆕 (encargo CJ4, 11-oct-2026) `precio_tachado`: el `strikePricePerUnit` de HEO tal cual lo da la descarga (por
+    producto de HEO, como `precio_catalogo`: en una caja, el de la caja), o vacio si no trae; y `en_oferta` es
+    «trae tachado» (desvio CJ4 de escaner2_desvios.py)."""
     perfil = M.PERFILES[e2.PROVEEDOR]
     precio_unidad = pa
     if es_caja and pa and perfil.get('precio_caja6') == 'caja':
@@ -109,6 +112,7 @@ def _fila(producto, disponible, ean_in, core, nombre, marca, categoria, pa, es_c
         'disponible': bool(disponible),
         'disponibilidad': _texto(disponibilidad),
         'en_oferta': en_oferta,
+        'precio_tachado': precio_tachado,
         'preorder': preorder,
         'fin_de_vida': fin_de_vida,
         'regla': regla,
@@ -158,7 +162,7 @@ def construir_disponibilidad(filas_heo, chase_heo, M, *, con_precio, con_disponi
             producto=_texto(c.get('producto_heo')), disponible=f.get('estado') == 'disponible',
             ean_in=f['ean'], core=ean, nombre=f['nombre'], marca=f['marca'], categoria=None,
             pa=M._num(f['precio']), es_caja=True, uds=uds, es_chase=True,
-            en_oferta=False, preorder=False, fin_de_vida=False, disponibilidad=None,
+            en_oferta=False, precio_tachado=None, preorder=False, fin_de_vida=False, disponibilidad=None,
             regla=None if ean is not None else 'caja_chase_sin_figura',
             aviso=aviso, M=M))
 
@@ -177,7 +181,7 @@ def construir_disponibilidad(filas_heo, chase_heo, M, *, con_precio, con_disponi
             ean_in=ean_in, core=core, nombre=nombre, marca=f.get(perfil['col_marca']) or '',
             categoria=f.get('categoria') or '', pa=M._num(f.get(perfil['col_pa'], '')),
             es_caja=bool(es_caja6), uds=uds, es_chase=bool(es_case),
-            en_oferta=f.get('en_oferta') == 'SI', preorder=f.get('preorder') == 'SI',
+            en_oferta=f.get('en_oferta') == 'SI', precio_tachado=f.get('precio_tachado'), preorder=f.get('preorder') == 'SI',
             fin_de_vida=f.get('fin_de_vida') == 'SI', disponibilidad=f.get('disponibilidad') or '',
             regla=regla, aviso=None, M=M))
 

@@ -27,6 +27,14 @@ HOY, DOS (encargo D, decisiones de Fernando del 28-sep-2026):
      'true/verdadero/sí/si/1': ni una fila 'BB-FBA' en los tres cruces guardados. Se anade «yes», como ya
      hace procesador_keepa_escaparate.py con el mismo export. El precio no cambia (es el de la caja en los
      dos casos): solo la etiqueta del canal.
+Y UNO MAS (encargo CJ4, decision de Fernando del 11-oct-2026):
+  3. La oferta de HEO (`descargar_catalogo_heo`, la descarga que usan la foto de cada hora y el barrido): el viejo
+     daba «en oferta» si habia campana, `retailerProductDiscount` > 0 o el precio de hoy por debajo del base, y eso
+     es el DESCUENTO DE CLIENTE (el «Precio incluye dto.» de la web de HEO), que en Funko llevan los de precio
+     normal y pierden los rebajados (parte CJ3, 11-oct-2026). La oferta de verdad es el precio TACHADO:
+     `strikePricePerUnit` > 0. En oferta pasa a ser eso, y la fila lleva `precio_tachado` (el importe tal cual lo da
+     HEO, al centimo; vacio si no hay). Nada lee el descuento de cliente: no se guarda. El director viejo
+     (descargar_heo.py) no cambia.
 """
 
 # Heredado → {pieza: [(antes, despues), …]}. Los textos van con la sangria del VIEJO (en el heredado, la
@@ -54,6 +62,20 @@ DESVIOS = {
         'leer_csv_visualizador': [
             ("                 es_fba=(es_fba in ('true','verdadero','sí','si','1')),\n",
              "                 es_fba=(es_fba in ('true','verdadero','sí','si','1','yes')),  # 🔑 DESVÍO D: Keepa escribe «yes»/«no»\n"),
+        ],
+    },
+    'escaner2_heredado_descarga.py': {
+        'descargar_catalogo_heo': [
+            ("        # En oferta si: hay campana, o descuento>0, o el precio de hoy es menor que el base.\n"
+             "        en_oferta = bool(campana) or (dto is not None and dto > 0) or \\\n"
+             "                    (base is not None and precio is not None and precio < base - 0.001)\n",
+             "        # 🔑 DESVÍO CJ4 (Fernando, 11-oct-2026): en oferta = HEO trae precio TACHADO (strikePricePerUnit > 0).\n"
+             "        en_oferta = strike is not None and strike > 0\n"
+             "        tachado = round(strike, 2) if en_oferta else None\n"),
+            ("            'en_oferta':      ('SI' if en_oferta else ''),\n",
+             "            'en_oferta':      ('SI' if en_oferta else ''), 'precio_tachado': tachado,  # 🔑 DESVÍO CJ4\n"),
+            ('    print(f">>> En oferta (campana/descuento/precio<base): {en_of}")\n',
+             '    print(f">>> En oferta (precio tachado de HEO, DESVÍO CJ4): {en_of}")\n'),
         ],
     },
 }
