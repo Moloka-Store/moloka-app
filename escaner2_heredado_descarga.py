@@ -8,6 +8,9 @@ hace `from escaner2_heredado_descarga import descargar_catalogo_heo`, y cuenta e
 con las MISMAS lineas de log de siempre.
 No se trae `COLS` ni `a_csv_bytes` (son del director viejo) ni el bloque `__main__` (solo su `TANDA`).
 🔴 NO SE TOCA A MANO: si descargar_heo.py cambia, test_escaner2_heredado.py lo avisa y decide Fernando.
+🔑 Salvo el desvio DELIBERADO de escaner2_desvios.py (encargo CJ4, 11-oct-2026): en oferta = precio tachado
+   de HEO (`strikePricePerUnit` > 0), y la fila lleva `precio_tachado`. Lo aplica el generador al copiar;
+   `descargar_catalogo_heo` lo dice encima.
 """
 
 
@@ -187,7 +190,8 @@ def _campana(pr):
     return str(c)
 
 
-# ── ORIGEN: descargar_heo.py, líneas 140-215 · commit 2f9c06a · blob 0189eae9af · md5 32c3fb61118983621fd581fca2b8ac1a ──
+# ── ORIGEN: descargar_heo.py, líneas 140-215 · commit 2f9c06a · blob 0189eae9af · md5 29e43b3c5edd59cd5d343803026da1ef ──
+# ── DESVÍO DELIBERADO del viejo (encargo CJ4, Fernando 11-oct-2026): ver escaner2_desvios.py
 def descargar_catalogo_heo(max_paginas=None, con_chase=False):
     """Baja y cruza los 3 endpoints. Devuelve lista de dicts (una fila por producto CON EAN).
     Si con_chase=True devuelve (filas, chase): los Funko chase se DESVIAN a 'chase' (no
@@ -207,7 +211,7 @@ def descargar_catalogo_heo(max_paginas=None, con_chase=False):
             prc = precios.get(pnc) or {}
             avc = dispo.get(pnc) or {}
             basec = _amt(prc.get('basePricePerUnit'))
-            discc = _amt(prc.get('discountedPricePerUnit'))
+            discc = _amt(prc.get('discountedPricePerUnit')); strikec = _amt(prc.get('strikePricePerUnit'))  # 🔑 DESVÍO CJ4
             precioc = discc if discc is not None else basec
             orderablec = bool(avc.get('availableToOrder')) and str(avc.get('availabilityState', '')).upper() == 'AVAILABLE'
             nombrec = _trad(prod.get('name'))
@@ -216,7 +220,7 @@ def descargar_catalogo_heo(max_paginas=None, con_chase=False):
                 'nombre':       nombrec,
                 'ean_caja':     _ean_bruto(prod),
                 'marca':        _marca(prod),
-                'precio_caja':  (None if precioc is None else round(precioc, 2)),
+                'precio_caja':  (None if precioc is None else round(precioc, 2)), 'precio_tachado': (round(strikec, 2) if strikec is not None and strikec > 0 else None),  # 🔑 DESVÍO CJ4
                 'estado':       ('disponible' if orderablec else 'agotado'),
                 'imagen':       ((prod.get('media') or {}).get('mainImage') or {}).get('url') or '',
                 'link_amazon':  'https://www.amazon.es/s?k=' + quote_plus(nombrec or ''),
@@ -236,9 +240,9 @@ def descargar_catalogo_heo(max_paginas=None, con_chase=False):
         strike = _amt(pr.get('strikePricePerUnit'))
         campana = _campana(pr)
         precio = disc if disc is not None else base   # el coste real de hoy
-        # En oferta si: hay campana, o descuento>0, o el precio de hoy es menor que el base.
-        en_oferta = bool(campana) or (dto is not None and dto > 0) or \
-                    (base is not None and precio is not None and precio < base - 0.001)
+        # 🔑 DESVÍO CJ4 (Fernando, 11-oct-2026): en oferta = HEO trae precio TACHADO (strikePricePerUnit > 0).
+        en_oferta = strike is not None and strike > 0
+        tachado = round(strike, 2) if en_oferta else None
         orderable = bool(av.get('availableToOrder')) and str(av.get('availabilityState', '')).upper() == 'AVAILABLE'
         img = ((prod.get('media') or {}).get('mainImage') or {}).get('url') or ''
         filas.append({
@@ -249,7 +253,7 @@ def descargar_catalogo_heo(max_paginas=None, con_chase=False):
             'categoria':      _categoria(prod),
             'precio':         ('' if precio is None else round(precio, 2)),
             'precio_base':    ('' if base is None else round(base, 2)),
-            'en_oferta':      ('SI' if en_oferta else ''),
+            'en_oferta':      ('SI' if en_oferta else ''), 'precio_tachado': tachado,  # 🔑 DESVÍO CJ4
             'campana':        campana,
             'estado':         ('disponible' if orderable else 'agotado'),
             'disponibilidad': (av.get('availability') or ''),        # GREEN / YELLOW / RED
@@ -259,7 +263,7 @@ def descargar_catalogo_heo(max_paginas=None, con_chase=False):
         })
     print(f">>> Catalogo cruzado: {len(filas)} filas con EAN (descartadas {sin_ean} sin GTIN)")
     en_of = sum(1 for f in filas if f['en_oferta'])
-    print(f">>> En oferta (campana/descuento/precio<base): {en_of}")
+    print(f">>> En oferta (precio tachado de HEO, DESVÍO CJ4): {en_of}")
     if con_chase:
         print(f">>> Funko chase desviados a la puente: {len(chase)}")
         return filas, chase
