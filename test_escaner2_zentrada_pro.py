@@ -535,12 +535,12 @@ eq('B2 · eans.txt: el UPC tal como lo escribe Zentrada (sin el cero)', E_UPC_ZE
    .split('\n'), True)
 
 _carpeta = 'zentrada/%s/csv/' % PASADA
-# (Z, 12-oct-2026) La ficha compartida en los dos CSV: ASIN_UNO, sola en la lista y con 3 variantes en Amazon (30 ÷ 3 =
-# 10, sigue COMPRAR, con la marca); y el pack de 2 de «Fichas», que SOLO trae el CSV de ASIN, comparte padre y puesto
+# (Z, 12-oct-2026; Z2) La ficha compartida en los dos CSV: ASIN_UNO, sola en la lista y con 6 variantes en Amazon, NO se
+# divide (con 30 ÷ 6 = 5 se iría a la c): sigue COMPRAR, solo marcada; y el pack de 2 de «Fichas», que SOLO trae el CSV de ASIN, comparte padre y puesto
 # con una hermana del CSV de EAN (B0ZHER0099, que no es de la foto): 15 ÷ 2 hermanos = 7,5, sigue entrando.
 PADRE_UNO, PADRE_PCK, ASIN_HERMANA = 'B0ZPAD0001', 'B0ZPAD0004', 'B0ZHER0099'
 E_HERMANA = ean13('849999999999')
-_filas_es = [(ASIN_UNO, E_UNO, '30', '12.95', 'Producto Uno', {COL_PADRE: PADRE_UNO, COL_NVAR: '3'}),
+_filas_es = [(ASIN_UNO, E_UNO, '30', '12.95', 'Producto Uno', {COL_PADRE: PADRE_UNO, COL_NVAR: '6'}),
              (ASIN_HERMANA, E_HERMANA, '40', '12.95', 'Hermana del pack', {COL_PADRE: PADRE_PCK}),
              (ASIN_UPC, E_UPC, '25', '12.95', 'Producto G-2'),
              (ASIN_COMP, E_COMP, '20', '12.95', 'Producto A-3'),
@@ -584,11 +584,11 @@ eq('B2 · 🔴 el UPC que Zentrada escribe sin el cero casa con el de Keepa (con
    (_res[E_UPC_ZEN]['asin'], _res[E_UPC_ZEN]['puerta']), (ASIN_UPC, 'f'))
 eq('B2 · E_UNO: COMPRAR con la oferta más barata (2,00) en su cuenta de ES',
    (_res[E_UNO]['puerta'], _pais[_res[E_UNO]['id']]['pa']), ('f', 2.0))
-eq('🔴 B2 · (Z) E_UNO, sola en la lista con 3 variantes en Amazon: ficha compartida ÷ 3 (30 → 10), sigue COMPRAR y el '
-   'detalle dice que no se ha podido comprobar el puesto',
+eq('🔴 B2 · (Z2) E_UNO, sola en la lista con 6 variantes en Amazon: NO se divide (30 ÷ 6 = 5 la mandaría a la c), sigue '
+   'COMPRAR y el detalle lleva la marca para mirarlo',
    (_res[E_UNO]['puerta'], _res[E_UNO]['detalle'].endswith(
-       ' · Ficha compartida en ES: 3 variantes · ventas de la ficha 30/mes · estimadas por figura 10/mes · ninguna '
-       'hermana en la lista: no se ha podido comprobar que comparten puesto')), ('f', True))
+       ' · Ficha en ES con 6 variantes · ventas de la ficha 30/mes · ninguna hermana en la lista: no se sabe si comparten '
+       'puesto, míralo')), ('f', True))
 eq('B2 · la de la competencia: VALORAR (4,80)', (_res[E_COMP]['puerta'], _pais[_res[E_COMP]['id']]['pa']), ('e', 4.8))
 eq('B2 · 🔴 Keepa cae por EAN en el pack de 3 de «Fichas»: coste 4,50 y VALORAR (con 1,50 sería COMPRAR)',
    (_res[E_PACK]['asin'], _res[E_PACK]['puerta'], _pais[_res[E_PACK]['id']]['pa']), (ASIN_PACK3, 'e', 4.5))
@@ -638,10 +638,15 @@ eq('B2 · 🔴 las fichas de «Fichas» de E_FICHA: la suelta (la misma que la f
    [(_por[(E_FICHA, a)][_ix['PA (€)']], _por[(E_FICHA, a)][_ix[ez.COLUMNA_MAPA]], _por[(E_FICHA, a)][_ix['Origen']])
     for a in (ASIN_SUELTA, ASIN_PACK2)],
    [(1.0, 'ficha de «Fichas»', 'competidor, top 300'), (2.0, 'pack ×2 (de «Fichas»)', 'competidor, top 300')])
-eq('🔴 B2 · (Z) la columna «Ficha compartida» de E_UNO, con «variantes» y el aviso del puesto',
+eq('🔴 B2 · (Z2) la columna «Ficha compartida» de E_UNO: la marca, sin reparto',
    _u[_ix[e2.COLUMNA_FICHA_COMPARTIDA]],
-   'Ficha compartida: 3 variantes · ventas de la ficha 30/mes · estimadas por figura 10/mes · ninguna hermana en la '
-   'lista: no se ha podido comprobar que comparten puesto')
+   'Ficha con 6 variantes · ventas de la ficha 30/mes · ninguna hermana en la lista: no se sabe si comparten puesto, '
+   'míralo')
+eq('🔴 B2 · (Z2) la columna «Ficha compartida» también en las filas de «Fichas», cruzada por ASIN: el pack de 2 lleva la '
+   'suya y la suelta del MISMO EAN no se la lleva prestada',
+   [_por[(E_FICHA, a)][_ix[e2.COLUMNA_FICHA_COMPARTIDA]] for a in (ASIN_PACK2, ASIN_SUELTA)],
+   ['Ficha compartida: 2 figuras · ventas de la ficha 15/mes · estimadas por figura 7,5/mes (sin «Recuento de '
+    'variaciones» de Amazon: repartido entre los 2 hermanos de la lista)', None])
 eq('B2 · el pack de 3: una fila, la de «Fichas», con su coste 4,50 y VALORAR',
    [(_por[(E_PACK, ASIN_PACK3)][_ix[k]]) for k in ('PA (€)', 'Decisión', ez.COLUMNA_MAPA)],
    [4.5, 'VALORAR', 'pack ×3 (de «Fichas»)'])
@@ -686,8 +691,8 @@ eq('🔴 B2 · (Z) el pack de 2, que SOLO trae el CSV de ASIN, comparte padre y 
    (_p2[4][0], _p2[6].endswith(' · Ficha compartida en ES: 2 figuras · ventas de la ficha 15/mes · estimadas por figura '
                                '7,5/mes (sin «Recuento de variaciones» de Amazon: repartido entre los 2 hermanos de la '
                                'lista)')), ('f', True))
-eq('B2 · (Z) el Resumen cuenta las fichas compartidas de los dos CSV: E_UNO, el pack de 2 y su hermana',
-   _resu.get('Fichas compartidas (productos de la lista, por país)'), 'ES 3')
+eq('B2 · (Z2) el Resumen cuenta las fichas compartidas DE VERDAD de los dos CSV: el pack de 2 y su hermana (E_UNO, la '
+   'marcada, no)', _resu.get('Fichas compartidas (productos de la lista, por país)'), 'ES 2')
 
 print('B3 · 🔴 el registro (repo PÚBLICO) no lleva ni un EAN, ASIN, precio ni nombre')
 _prohibido = [E_UNO, E_UPC, E_UPC_ZEN, E_COMP, E_FICHA, E_PACK, E_AGOT, E_SIN, E_DUP, ASIN_UNO, ASIN_UPC, ASIN_COMP,

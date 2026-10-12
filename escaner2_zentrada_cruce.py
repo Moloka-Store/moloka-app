@@ -232,7 +232,7 @@ def cruzar(cruce, params, pasada):
     for p, fs in sin_ficha.items():
         avisos.append('Sin ASIN padre/variaciones/puesto en %s (%s): ahí no se detecta la ficha compartida'
                       % (p, '; '.join(fs)))
-    n_compartidas = {p: len(compartidas.get(p) or {}) for p in usados}
+    n_compartidas = {p: e2.contar_compartidas(compartidas, p) for p in usados}  # (Z2) sin las marcadas
 
     # ── 2 · La foto, el IVA de la ficha y «En mi BD» ─────────────────────────────────────────
     foto = _todas('escaner2_foto', 'id,producto_heo,ean_original,ean_core,variantes,nombre,marca,precio_unidad,'

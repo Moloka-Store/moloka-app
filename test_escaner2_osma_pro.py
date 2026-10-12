@@ -927,6 +927,15 @@ eq('🔴 B2 · (Mapa de OSMA) en «Análisis», el Lenor pack de 2: UNA fila, su
    if _lenor2 else None,
    (1, 'pack ×2 (ficha del mapa)', eo.formula_pa(_l_sin, _lenor2[0][0], 1) if _lenor2 else None, 3.198, 3.41,
     'Lenor Trocknertücher Aprilfrisch 34er · pack ×2 (ficha del mapa)'))
+_i_fc = _cab.index(e2.COLUMNA_FICHA_COMPARTIDA)
+eq('🔴 B2 · (Z2) la columna «Ficha compartida» también en las filas del mapa, cruzada por ASIN: el Lenor pack de 2 lleva '
+   'la suya, y ninguna otra fila de su mismo EAN se la lleva prestada',
+   ([r[_i_fc] for r in _filas if r[_i['ASIN']] == 'B07HCJQ45L'],
+    [r[_i_fc] for r in _filas if r[_i['EAN']] == '8001090747723' and r[_i['ASIN']] != 'B07HCJQ45L']),
+   (['Ficha compartida: 3 figuras · ventas de la ficha 27/mes · estimadas por figura 9/mes'],
+    [None] * sum(1 for r in _filas if r[_i['EAN']] == '8001090747723' and r[_i['ASIN']] != 'B07HCJQ45L')))
+eq('B2 · (Z2) …y hay al menos otra fila de ese EAN en «Análisis» con la que podría haber chocado',
+   sum(1 for r in _filas if r[_i['EAN']] == '8001090747723' and r[_i['ASIN']] != 'B07HCJQ45L') >= 1, True)
 eq('B2 · (Mapa de OSMA) el Kukident sale UNA vez en «Análisis», como ficha del mapa (manda la del mapa)',
    [r[_i_mapa] for r in _filas if r[_i['ASIN']] == 'B001PASC5E'], ['ficha del mapa'])
 _ag = list(_wb[eo.HOJA_AGOTADOS].iter_rows(values_only=True))

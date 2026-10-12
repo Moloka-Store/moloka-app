@@ -975,7 +975,9 @@ def filas_mapa_excel(mapa):
             'precio_catalogo': r['precio_catalogo'], 'precio_unidad': r['pa'],
             'aviso_caja': 'coste de «Fichas»: %s' % r['coste'] if r['unidades'] > 1 else None,
             'asin': r['asin_mapa'], '_mapa': r['marca_mapa'], '_origen_ficha': r['origen_ficha']})
-        resultados.append(dict(r, foto_id=fid, id=fid, fichas=None, compartida={}, eleccion=None, factor=1))
+        # (Z2) Con su ficha compartida (o su marca sin hermanas): la columna «Ficha compartida» la cruza por ASIN.
+        resultados.append(dict(r, foto_id=fid, id=fid, fichas=None, compartida=r.get('compartida') or {}, eleccion=None,
+                               factor=1))
     return foto, resultados
 
 
@@ -1104,7 +1106,7 @@ def escribir_excel(foto, resultados, apartados, M, info):
             datos['cotejo_info'].setdefault(x['ean'], {'veredicto': None, 'detalle': None})
     datos['PROVEEDOR'] = NOMBRE
     wb = e2.escribir_celda9(datos, M, paises=paises if len(paises) == 1 else None)
-    e2.poner_columna_ficha_compartida(wb, foto_excel, resultados)
+    e2.poner_columna_ficha_compartida(wb, foto_excel, list(resultados) + list(res_mapa))
     poner_columna_mapa(wb, foto_excel)
     poner_columnas_compra(wb, foto_excel, info.get('compra'))
 
