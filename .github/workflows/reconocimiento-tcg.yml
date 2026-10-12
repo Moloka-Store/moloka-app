@@ -1,0 +1,94 @@
+name: Moloka - Reconocimiento TCG (solo lectura)
+
+# Encargo T1 (12-oct-2026). Baja el catalogo de TCG por el mismo camino que el
+# director (login + smcatalog) VECES veces, separadas CADA_MINUTOS, y lo sube como
+# artefacto CIFRADO. Sin reloj: solo se lanza a mano. No toca Supabase.
+#
+# Por que cifrado: el repo es PUBLICO y cualquier cuenta de GitHub puede bajar sus
+# artefactos; sin cifrar, publicariamos la lista de precios de mayorista de TCG.
+# Se cifra con la llave PUBLICA de abajo (publicarla no es un riesgo); la privada
+# no esta en el repo ni en Secrets: solo en el equipo de quien lanzo el reconocimiento.
+#   Abrir:  openssl cms -decrypt -binary -inform DER -in tcg.tar.gz.p7 -inkey privada.pem -out tcg.tar.gz
+
+on:
+  workflow_dispatch:
+    inputs:
+      veces:
+        description: 'Cuantas descargas en este run (1-6)'
+        type: string
+        default: '1'
+      cada_minutos:
+        description: 'Minutos entre descargas'
+        type: string
+        default: '60'
+
+concurrency:
+  group: reconocimiento-tcg
+  cancel-in-progress: false
+
+jobs:
+  descargar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install curl_cffi beautifulsoup4 openpyxl
+
+      - name: Descargar el catalogo TCG (solo lectura)
+        env:
+          TCG_USER: ${{ secrets.TCG_USER }}
+          TCG_PASS: ${{ secrets.TCG_PASS }}
+          VECES: ${{ inputs.veces }}
+          CADA_MINUTOS: ${{ inputs.cada_minutos }}
+        run: python -u reconocimiento_tcg.py
+
+      - name: Cifrar lo descargado
+        if: always()
+        run: |
+          if [ -z "$(ls -A salida 2>/dev/null)" ]; then echo "Nada que cifrar"; exit 0; fi
+          cat > publica.pem <<'PEM'
+          -----BEGIN CERTIFICATE-----
+          MIIELzCCApegAwIBAgIUZpX7rdztEatkY43GiXUSOKhcUDswDQYJKoZIhvcNAQEL
+          BQAwJzElMCMGA1UEAwwcbW9sb2thLXQxLXJlY29ub2NpbWllbnRvLXRjZzAeFw0y
+          NjEwMTIxNTM2MDVaFw0yNjExMTExNTM2MDVaMCcxJTAjBgNVBAMMHG1vbG9rYS10
+          MS1yZWNvbm9jaW1pZW50by10Y2cwggGiMA0GCSqGSIb3DQEBAQUAA4IBjwAwggGK
+          AoIBgQCvRoTdYiDNKKS66He7hh/vnoxotrI9AlqkKMedxJxsNnnb16s23NEvbX/9
+          MkscKXNVF2Hm9KCe6F8aFD3wmfmMlvWFFQxjoSzfuyD1rEyZ02I0yYZjwk4y9CZ+
+          xLnei7C2dHQ0yixMNXDcWOUB7xi/ZpArF0DEK5LVarbizmXAz5jFQL8vbekzU7ag
+          7GqrBp9bNqAjtgtCjr4QhNz1Mom/ARMzWXU/gz7vOCbIlXOAG2OaASdQaZzM11BU
+          wp9LKsRiznMb3szSn8B5vCQh46uE9QpxmPleCBPTvmtRbZ+4hJXeSYPtdXXyn+tx
+          NlR100t7cZDT3RQZYVi4rsyZo8lVjw3XFzthkuzvYq8WLZD3Ocntse3wNWvUqMJU
+          VJYZXuIxuq8k3m/Tzr/3Myq3Vu2O9yIKR6ypHP2iRfVq3TnVfaWUyCDpFrzj3kS/
+          yyX67AcHxyUFtEcZdKFMjV0ab6sGRhtGyxn8h9yhigwsAHfh2+LxAYShwkaqcDSN
+          WGsvllcCAwEAAaNTMFEwHQYDVR0OBBYEFJuVnJlYVJoX8n9lFoRvi/BK/P4jMB8G
+          A1UdIwQYMBaAFJuVnJlYVJoX8n9lFoRvi/BK/P4jMA8GA1UdEwEB/wQFMAMBAf8w
+          DQYJKoZIhvcNAQELBQADggGBAD0uNr4X3iYOiBNOgEqOKUCmPnpiHi+nKxVHwjQ/
+          LmkrjbVuj3ySCjM24I1QAm9W8YBhYa1B0y+oR8yEDrwEEt6G2pgu2vsDwH1Vc2F5
+          FS32d4uzQj2ikXDsHmkUopb54czZsLtXwQdlOuWrG1Bo318qerUbCoJ3BkDgSQUp
+          ItjbW8s+4QP7vJhisQ+HsNdmzbxj0TiRu0iV2ZC42aS13zOznYAyj7lsRIFlqjhA
+          4SEvmMS+RzhTLamLZdiv/xqPuU8gbD0t8p7udT4GQdmf/E4H9u+XXHoCYBGS/TVN
+          v0vddTzg3FqvmWMPp5fimaLWHat6fod88HcyKCY4Hnza9W+jYvn4iyQxnwSe3SAR
+          LbHo51SRBRx5Uyw3RbfNRHqmTVniolBIvSDC1f6sTxDy9KpgYo8ZbgSYOjUtiwci
+          BFcpotg11V1MG9H41PbQX9CpJ1T9ajt+mUnB1WG+hfZzl1pLStNybbVdNLEP1tcf
+          M+maHjMTuisULoCIOIT0gwAMPw==
+          -----END CERTIFICATE-----
+          PEM
+          tar -czf tcg.tar.gz salida
+          openssl cms -encrypt -binary -aes256 -outform DER -in tcg.tar.gz -out tcg.tar.gz.p7 publica.pem
+          sha256sum tcg.tar.gz tcg.tar.gz.p7
+          rm -rf salida tcg.tar.gz
+
+      - name: Subir el artefacto cifrado
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reconocimiento-tcg-${{ github.run_id }}
+          path: tcg.tar.gz.p7
+          retention-days: 7
+          if-no-files-found: ignore
