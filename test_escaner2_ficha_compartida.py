@@ -290,7 +290,7 @@ eq('(E) quiénes salen marcados «sin hermanas»: las cuatro solas con padre y r
    sorted(a for a, i in _ces.items() if i['origen_divisor'] == 'amazon_sin_hermanos'),
    ['B0SOLA0321', 'B0SOLA0505', 'B0SOLA0530', 'B0SOLA1224'])
 eq('(E) 🔴 se marcan, no se reparten: divisor 1, el recuento guardado, y fuera del recuento de compartidas',
-   ([(_ces[a]['divisor'], _ces[a]['nvar'], _ces[a]['solo_marca']) for a in ('B0SOLA0321', 'B0SOLA1224')],
+   ([(_ces[a]['divisor'], _ces[a]['nvar'], _ces[a].get('solo_marca')) for a in ('B0SOLA0321', 'B0SOLA1224')],
     e2.contar_compartidas(_ce, 'ES')), ([(1, 3.0, True), (1, 12.0, True)], 2))
 eq('(E) 🔴 sola con recuento 3 y 21 caídas: pasa el corte con las 21 enteras y sale marcada al final del detalle',
    (_re[1]['puerta'] in ('d', 'e', 'f'), _re[1]['paises']['ES']['vende_aqui'], _re[1]['compartida']['ES']['por_figura'],
