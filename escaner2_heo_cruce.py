@@ -241,7 +241,7 @@ def cruzar(cruce, params, pasada):
     for p, ficheros_sin in sin_ficha.items():
         avisos.append('Sin ASIN padre/variaciones/puesto en %s (%s): ahí no se detecta la ficha compartida'
                       % (p, '; '.join(ficheros_sin)))
-    n_compartidas = {p: len(compartidas.get(p) or {}) for p in usados}
+    n_compartidas = {p: e2.contar_compartidas(compartidas, p) for p in usados}  # (Z2) sin las marcadas
     print('FICHAS COMPARTIDAS (mismo ASIN padre y mismo puesto que otro producto de la lista): '
           + ' · '.join('%s %d' % (p, n_compartidas[p]) for p in usados), flush=True)
 

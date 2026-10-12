@@ -861,18 +861,36 @@ def examinar_csv(ruta, pro, col_pais, col_caidas, cols_ficha=None):
 #   · ventas por figura = caidas de la fila ÷ «Recuento de variaciones» de Amazon (no ÷ los hermanos de la lista);
 #     si el recuento falta o es 0, ÷ los hermanos de la lista, y el detalle lo dice;
 #   · el corte de «se vende» se aplica a esa cifra repartida, no a la de la ficha.
+# (Z2, 12-oct-2026) Y SIN HERMANAS EN LA LISTA: un producto con «ASIN Padre» (distinto de el mismo) y «Recuento de
+# variaciones» de 2 o mas que no tiene NINGUNA otra fila de ese padre en la lista del pais NO se divide: solo se MARCA
+# (origen 'amazon_sin_hermanos', `solo_marca`, divisor 1), para mirarlo a ojo. Medido en el parte Z: cuando las hermanas
+# SI estan en la lista, comparten todas el puesto solo en un 25-50 % de los padres; dividir a ciegas mandaba a «no se
+# vende» fichas con puesto propio (el Twinings de 100 bolsitas, 24 caidas → 2/mes).
 def fichas_compartidas(fichas_por_pais):
-    """{pais: {asin: {'padre', 'rank'}}} (lo que deja `examinar_csv` en `fichas`) → {pais: {asin: info}} SOLO de las
-    fichas compartidas, con info = {'padre', 'rank', 'hermanos' (los ASIN del grupo, el mismo incluido), 'n_lista',
-    'nvar', 'divisor', 'origen_divisor' ('amazon' o 'lista')}. Puro."""
+    """{pais: {asin: {'padre', 'rank'}}} (lo que deja `examinar_csv` en `fichas`) → {pais: {asin: info}} de las fichas
+    compartidas y de las marcadas sin hermanas, con info = {'padre', 'rank', 'hermanos' (los ASIN del grupo, el mismo
+    incluido), 'n_lista', 'nvar', 'divisor', 'origen_divisor' ('amazon', 'lista' o 'amazon_sin_hermanos')} y, en las
+    marcadas, 'solo_marca' = True y divisor 1 (no se reparten: `es_solo_marca`). Puro."""
     salida = {}
     for pais, fichas in (fichas_por_pais or {}).items():
-        grupos = {}
+        grupos, por_padre = {}, {}
         for asin, f in fichas.items():
             padre, rank = (f.get('padre') or '').strip(), f.get('rank')
+            if padre:
+                por_padre.setdefault(padre, []).append(asin)
             if not padre or rank is None:
                 continue
             grupos.setdefault((padre, rank), []).append(asin)
+        # (Z2) Solo en la lista: ninguna otra fila de su padre, con el puesto que sea. Se marca, no se divide.
+        for padre, asins in por_padre.items():
+            if len(asins) != 1 or asins[0] == padre:
+                continue
+            nvar = fichas[asins[0]].get('nvar')
+            if nvar is None or nvar < 2:
+                continue
+            salida.setdefault(pais, {})[asins[0]] = {
+                'padre': padre, 'rank': fichas[asins[0]].get('rank'), 'hermanos': list(asins), 'n_lista': 1,
+                'nvar': nvar, 'divisor': 1, 'origen_divisor': 'amazon_sin_hermanos', 'solo_marca': True}
         for (padre, rank), asins in grupos.items():
             if len(asins) < 2:
                 continue
@@ -886,6 +904,17 @@ def fichas_compartidas(fichas_por_pais):
                     'divisor': nvar if desde_amazon else len(hermanos),
                     'origen_divisor': 'amazon' if desde_amazon else 'lista'}
     return salida
+
+
+def es_solo_marca(info):
+    """(Z2) La ficha sin hermanas en la lista: se marca para mirarla, pero sus caidas cuentan enteras."""
+    return bool((info or {}).get('solo_marca'))
+
+
+def contar_compartidas(compartidas, pais):
+    """(Z2) Las fichas compartidas DE VERDAD de un pais (las que se reparten), sin las marcadas sin hermanas: el
+    «Fichas compartidas» del Resumen."""
+    return sum(1 for i in ((compartidas or {}).get(pais) or {}).values() if not es_solo_marca(i))
 
 
 def pasa_corte(ventas, umbral):
@@ -908,9 +937,17 @@ def _cifra(x):
     return ('%d' % r) if r == int(r) else ('%.1f' % r).replace('.', ',')
 
 
+TEXTO_SIN_HERMANOS = 'ninguna hermana en la lista: no se sabe si comparten puesto, míralo'
+
+
 def texto_ficha_compartida(info, pais=None):
     """La marca de una ficha compartida en un pais (AA): «Ficha compartida: N figuras · ventas de la ficha X/mes ·
-    estimadas por figura Y/mes»; con `pais`, «Ficha compartida en ES: …». Si el recuento de Amazon faltaba, lo dice."""
+    estimadas por figura Y/mes»; con `pais`, «Ficha compartida en ES: …». Si el recuento de Amazon faltaba, lo dice.
+    (Z2) La marcada sin hermanas (no se reparte): «Ficha con N variantes · ventas de la ficha X/mes · ninguna hermana
+    en la lista: no se sabe si comparten puesto, míralo»; con `pais`, «Ficha en ES con N variantes · …»."""
+    if es_solo_marca(info):
+        return 'Ficha%s con %s variantes · ventas de la ficha %s/mes · %s' % (
+            (' en %s' % pais) if pais else '', _cifra(info['nvar']), _cifra(info['ventas_ficha']), TEXTO_SIN_HERMANOS)
     txt = 'Ficha compartida%s: %s figuras · ventas de la ficha %s/mes · estimadas por figura %s/mes' % (
         (' en %s' % pais) if pais else '', _cifra(info['divisor']), _cifra(info['ventas_ficha']),
         _cifra(info['por_figura']))
@@ -1056,7 +1093,9 @@ def _decidir_con_asin(fila_foto, cands_por_pais, caidas_por_pais, params, M, asi
         ventas[p] = caidas[p]
         info = ((compartidas or {}).get(p) or {}).get(asin) if rec is not None else None
         if info is not None and caidas[p] is not None:
-            ventas[p] = caidas[p] / info['divisor']
+            # (Z2) La marcada sin hermanas no se reparte: decide con las caidas de la ficha, enteras.
+            if not es_solo_marca(info):
+                ventas[p] = caidas[p] / info['divisor']
             reparto[p] = dict(info, ventas_ficha=caidas[p], por_figura=ventas[p])
         if rec is not None:
             calculos[p] = calcular_pais(p, rec, fila_foto['precio_unidad'], fila_foto['ean_core'], M)
@@ -1075,7 +1114,8 @@ def _decidir_con_asin(fila_foto, cands_por_pais, caidas_por_pais, params, M, asi
         if not con_dato:
             return dict(salida, puerta='c', motivo='c_sin_dato',
                         detalle='Sin dato de caídas en ' + ' ni en '.join(filtro))
-        compartidos = [p for p in con_dato if p in reparto]
+        # (Z2) La marcada sin hermanas no es una ficha compartida aqui: no se ha repartido, no lleva c_ficha_compartida.
+        compartidos = [p for p in con_dato if p in reparto and not es_solo_marca(reparto[p])]
         if compartidos:
             # (AA) Motivo propio, visible en «Puertas». 🔒 El motivo de la base sigue siendo c_pocas_caidas: su CHECK
             #      (escaner2_resultado_ean_motivo_check) y el cuadre de la c (escaner2_cruce_c_dos_motivos: c = pocas +
@@ -1086,7 +1126,7 @@ def _decidir_con_asin(fila_foto, cands_por_pais, caidas_por_pais, params, M, asi
                 + ('' if reparto[p]['origen_divisor'] == 'amazon'
                    else ' (sin recuento de Amazon: ÷ %d hermanos de la lista)' % reparto[p]['n_lista'])
                 for p in compartidos), texto_corte(umbral))
-            resto = [p for p in con_dato if p not in reparto]
+            resto = [p for p in con_dato if p not in compartidos]
             if resto:
                 det += ' · ≤ %d caídas en %s' % (umbral, ' y en '.join(resto))
         else:
@@ -1534,25 +1574,27 @@ def marca_por_fila(r, pais):
 
 
 def poner_columna_ficha_compartida(wb, foto, resultados):
-    """Anade «Ficha compartida» detras de la ultima columna de «Análisis», fila a fila por (EAN, País), y alarga
-    la tabla. Devuelve cuantas filas llevan marca."""
+    """Anade «Ficha compartida» detras de la ultima columna de «Análisis», fila a fila por (ASIN, País), y alarga
+    la tabla. Devuelve cuantas filas llevan marca.
+    (Z2, 12-oct-2026) Se cruza por el ASIN de la fila, no por su EAN: la ficha compartida es de un ASIN en un pais, y
+    las filas de «Fichas» (Zentrada) y del mapa (OSMA) comparten EAN con la fila de la foto pero no ASIN. `foto` ya no
+    hace falta para cruzar; se conserva la firma."""
     from openpyxl.styles import Font
     from openpyxl.utils import get_column_letter
     from openpyxl.worksheet.table import TableColumn
     ws = wb['Análisis']
     cab = [c.value for c in ws[1]]
-    i_ean, i_pais = cab.index('EAN'), cab.index('País')
+    i_asin, i_pais = cab.index('ASIN'), cab.index('País')
     col = len(cab) + 1
     ws.cell(row=1, column=col, value=COLUMNA_FICHA_COMPARTIDA).font = Font(bold=True)
     ws.column_dimensions[get_column_letter(col)].width = ANCHO_FICHA_COMPARTIDA
-    por_ean = {}
-    por_foto = {f['id']: f for f in foto}
+    por_asin = {}
     for r in resultados:
-        if r.get('compartida'):
-            por_ean[str(por_foto[r['foto_id']]['ean_original'])] = r
+        if r.get('compartida') and r.get('asin'):
+            por_asin.setdefault(str(r['asin']), r)
     n = 0
     for fila in range(2, ws.max_row + 1):
-        r = por_ean.get(str(ws.cell(row=fila, column=i_ean + 1).value))
+        r = por_asin.get(str(ws.cell(row=fila, column=i_asin + 1).value))
         texto = marca_por_fila(r, ws.cell(row=fila, column=i_pais + 1).value) if r else None
         if texto:
             ws.cell(row=fila, column=col, value=texto)

@@ -1082,7 +1082,8 @@ def filas_mapa_excel(mapa):
             '_sin_porte': (None if r['precio_catalogo'] is None
                            else float(_dec(r['precio_catalogo']) * r['unidades'])),
             '_mapa': r['marca_mapa']})
-        resultados.append(dict(r, foto_id=fid, id=fid, fichas=None, compartida={}, eleccion=None,
+        # (Z2) Con su ficha compartida (o su marca sin hermanas): la columna «Ficha compartida» la cruza por ASIN.
+        resultados.append(dict(r, foto_id=fid, id=fid, fichas=None, compartida=r.get('compartida') or {}, eleccion=None,
                                pack=None, pack_amazon=None, factor=1))
     return foto, resultados
 
@@ -1183,7 +1184,7 @@ def excel_como_el_viejo_osma(foto_excel, resultados, apartados, M, eleccion=None
             datos['cotejo_info'].setdefault(x['ean'], {'veredicto': None, 'detalle': None})
     datos['PROVEEDOR'] = PROVEEDOR
     wb = e2.escribir_celda9(datos, M, paises=paises)
-    e2.poner_columna_ficha_compartida(wb, foto_excel, resultados)
+    e2.poner_columna_ficha_compartida(wb, foto_excel, list(resultados) + list(res_mapa))
     poner_columna_no_habra_mas(wb, foto_excel)
     poner_pedido_vivo(wb, foto_excel, list(resultados) + list(res_mapa))
     poner_columna_mapa(wb, foto_excel)

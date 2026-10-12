@@ -214,6 +214,13 @@ def cruzar(cruce, params, pasada):
             avisos.append(f"CSV de {ex['pais']} ignorado ({o['name']}): OSMA se cruza solo en "
                           f"{', '.join(params['paises_calculo'])}")
             continue
+        # (Z, 12-oct-2026) Padre, variaciones y puesto de los DOS CSV del pais (el de EAN y el de la lista de ASIN del
+        # mapa), la primera fila de cada ASIN: la ficha compartida se detecta sobre la union. Antes el de ASIN saltaba
+        # aqui abajo sin dejarlos y las fichas del mapa nunca se repartian.
+        for asin, v in ex['fichas'].items():
+            fichas_por_pais.setdefault(ex['pais'], {}).setdefault(asin, v)
+        if ex['sin_columnas_ficha']:
+            sin_ficha.setdefault(ex['pais'], []).append('%s (le falta %s)' % (o['name'], ', '.join(ex['sin_columnas_ficha'])))
         if del_mapa:
             rutas_mapa.setdefault(ex['pais'], []).append(ruta)
             for asin, v in ex['caidas'].items():
@@ -222,10 +229,6 @@ def cruzar(cruce, params, pasada):
         rutas.setdefault(ex['pais'], []).append(ruta)
         for asin, v in ex['caidas'].items():
             caidas_por_pais.setdefault(ex['pais'], {}).setdefault(asin, v)
-        for asin, v in ex['fichas'].items():
-            fichas_por_pais.setdefault(ex['pais'], {}).setdefault(asin, v)
-        if ex['sin_columnas_ficha']:
-            sin_ficha.setdefault(ex['pais'], []).append('%s (le falta %s)' % (o['name'], ', '.join(ex['sin_columnas_ficha'])))
         if subido and (fecha_datos is None or subido < fecha_datos):
             fecha_datos = subido
     usados = [p for p in params['paises_calculo'] if p in rutas]
@@ -249,7 +252,7 @@ def cruzar(cruce, params, pasada):
     for p, fs in sin_ficha.items():
         avisos.append('Sin ASIN padre/variaciones/puesto en %s (%s): ahí no se detecta la ficha compartida'
                       % (p, '; '.join(fs)))
-    n_compartidas = {p: len(compartidas.get(p) or {}) for p in usados}
+    n_compartidas = {p: e2.contar_compartidas(compartidas, p) for p in usados}  # (Z2) sin las marcadas
 
     # ── 2 · La foto, el IVA de la ficha, «En mi BD» y nuestros packs ────────────────────────
     foto = _todas('escaner2_foto', 'id,producto_heo,ean_original,ean_core,variantes,nombre,marca,precio_unidad,'
