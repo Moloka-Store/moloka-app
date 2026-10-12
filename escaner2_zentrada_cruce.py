@@ -195,6 +195,13 @@ def cruzar(cruce, params, pasada):
             avisos.append(f"CSV de {ex['pais']} ignorado ({o['name']}): Zentrada se cruza solo en "
                           f"{', '.join(params['paises_calculo'])}")
             continue
+        # (Z, 12-oct-2026) Padre, variaciones y puesto de los DOS CSV del pais (el de EAN y el de la lista de ASIN de
+        # «Fichas»), la primera fila de cada ASIN: la ficha compartida se detecta sobre la union. Antes el de ASIN
+        # saltaba aqui abajo sin dejarlos y sus fichas nunca se repartian.
+        for asin, v in ex['fichas'].items():
+            fichas_por_pais.setdefault(ex['pais'], {}).setdefault(asin, v)
+        if ex['sin_columnas_ficha']:
+            sin_ficha.setdefault(ex['pais'], []).append('%s (le falta %s)' % (o['name'], ', '.join(ex['sin_columnas_ficha'])))
         if del_mapa:
             rutas_mapa.setdefault(ex['pais'], []).append(ruta)
             for asin, v in ex['caidas'].items():
@@ -203,10 +210,6 @@ def cruzar(cruce, params, pasada):
         rutas.setdefault(ex['pais'], []).append(ruta)
         for asin, v in ex['caidas'].items():
             caidas_por_pais.setdefault(ex['pais'], {}).setdefault(asin, v)
-        for asin, v in ex['fichas'].items():
-            fichas_por_pais.setdefault(ex['pais'], {}).setdefault(asin, v)
-        if ex['sin_columnas_ficha']:
-            sin_ficha.setdefault(ex['pais'], []).append('%s (le falta %s)' % (o['name'], ', '.join(ex['sin_columnas_ficha'])))
         if subido and (fecha_datos is None or subido < fecha_datos):
             fecha_datos = subido
     usados = [p for p in params['paises_calculo'] if p in rutas]

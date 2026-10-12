@@ -764,6 +764,7 @@ _carpeta = 'osma/%s/csv/' % pas['id']
 _PACK_COREGA = {'Detalles de la unidad: Valor de la unidad': '324', 'Detalles de la unidad: Tipo de unidad': 'unidad',
                 'Tamaño': '108 unidad (Paquete de 3)'}
 _PACK_PROTEFIX = {'Número de artículos': '3', 'Paquete: Cantidad': '3', 'Tamaño': '47 g (Paquete de 3)'}
+PADRE_LENOR, EAN_HERMANA_LENOR = 'B0OPAD0001', '8001090999993'
 _filas_es = [('B001PASC5E', '4002448039440', '30', '12.95', 'Kukident Active Plus 99 Tabletas'),
              ('B0NUEVA001', EAN_OSMA_COREGA, '40', '9.99', 'Corega Tabs caja nueva'),
              ('B0C9T9RZT3', EAN_FICHA_COREGA, '18', '11.50', 'Corega Tabs pastillas limpiadoras 108', _PACK_COREGA),
@@ -771,7 +772,9 @@ _filas_es = [('B001PASC5E', '4002448039440', '30', '12.95', 'Kukident Active Plu
               _PACK_PROTEFIX),
              ('B0NIVEA001', EAN_NORMAL, '12', '8.90', 'Nivea Creme 150 ml'),
              # Dos fichas para el EAN de la Nivea: la hoja «Ambiguos» del viejo tiene algo que enseñar.
-             ('B0NIVEA002', EAN_NORMAL, '9', '9.40', 'Nivea Creme 150 ml lata')]
+             ('B0NIVEA002', EAN_NORMAL, '9', '9.40', 'Nivea Creme 150 ml lata'),
+             # (Z, 12-oct-2026) La hermana del Lenor pack de 2 (mismo padre y puesto), solo en el CSV de EAN y fuera de la foto.
+             ('B0OHER0099', EAN_HERMANA_LENOR, '50', '12.95', 'Hermana del Lenor', {COL_PADRE: PADRE_LENOR, COL_NVAR: '3'})]
 _alm[_carpeta + '20261002-090000-KeepaExport-2026-10-02-VisualizadorDeProductos.csv'] = \
     base64.b64encode(csv_real('es', _filas_es)).decode()
 _alm[_carpeta + '20261002-090100-KeepaExport-2026-10-02-VisualizadorDeProductos (1).csv'] = \
@@ -779,7 +782,7 @@ _alm[_carpeta + '20261002-090100-KeepaExport-2026-10-02-VisualizadorDeProductos 
 # (Mapa de OSMA) Y el CSV de la lista de ASIN (modo «ASIN» del Visualizador): el pack de 2 del Lenor SIN EAN en Keepa (el
 # lector por EAN lo perdería), el suelto nuestro con el EAN de OSMA, el otro suelto y el Kukident (también en el de EAN).
 _filas_asin = [('B014DGG0OQ', '8001090747723', '28', '6.95', 'Lenor toallitas secadora Aprilfrisch 34'),
-               ('B07HCJQ45L', '', '27', '12.95', 'Lenor toallitas secadora pack 2 x 34'),
+               ('B07HCJQ45L', '', '27', '12.95', 'Lenor toallitas secadora pack 2 x 34', {COL_PADRE: PADRE_LENOR, COL_NVAR: '3'}),
                ('B0794VHRVZ', '8001090747723', '17', '6.49', 'Lenor toallitas secadora 34'),
                ('B001PASC5E', '4002448039440', '30', '12.95', 'Kukident Active Plus 99 Tabletas')]
 _alm[_carpeta + '20261002-090200-KeepaExport-2026-10-02-VisualizadorDeProductos (2).csv'] = \
@@ -910,6 +913,11 @@ eq('🔴 B2 · (Mapa de OSMA) «Puertas»: las 4 fichas del mapa de códigos dis
    (_pu[0][-1], sorted(r[-1] for r in _pu_mapa), next(r[3] for r in _pu_mapa if 'B07HCJQ45L' in r[-1])),
    (eo.COLUMNA_MAPA, sorted(['ficha del mapa · B001PASC5E', 'ficha del mapa · B014DGG0OQ', 'ficha del mapa · B0794VHRVZ',
                              'pack ×2 (ficha del mapa) · B07HCJQ45L']), 3.41))
+_lenor_pu = next(r for r in _pu_mapa if 'B07HCJQ45L' in r[-1])
+eq('🔴 B2 · (Z) el Lenor pack de 2, que SOLO trae el CSV de ASIN, comparte padre y puesto con una hermana del CSV de EAN: '
+   'la ficha compartida se detecta sobre los DOS CSV (27 ÷ 3 variaciones = 9: sigue entrando, con la marca)',
+   (_lenor_pu[4][0] in 'def', _lenor_pu[6].endswith(' · Ficha compartida en ES: 3 figuras · ventas de la ficha 27/mes · '
+                                                    'estimadas por figura 9/mes')), (True, True))
 _i_mapa = _cab.index(eo.COLUMNA_MAPA)
 _lenor2 = [(n, r) for n, r in enumerate(_filas, 2) if r[_i['ASIN']] == 'B07HCJQ45L']
 eq('🔴 B2 · (Mapa de OSMA) en «Análisis», el Lenor pack de 2: UNA fila, su marca al final, «PA (€)» viva sobre 2 × 1,599 '
@@ -971,7 +979,9 @@ print('B3 · 🔴 el registro (repo PÚBLICO) no lleva ni un EAN, ASIN ni precio
 _prohibido = ['4002448039440', EAN_OSMA_COREGA, EAN_FICHA_COREGA, EAN_NORMAL, 'B001PASC5E', 'B0C9T9RZT3', 'B01GIE0QSM',
               '3.52', '3,52', '3.299', '6.39', 'Kukident', 'Corega', 'Protefix', 'Nivea',
               # (AG2) Ni el Lenor que queda fuera (sus ASIN y el EAN de la ficha).
-              'B014DGG0OQ', 'B07HCJQ45L', '8001090747723', 'Lenor']
+              'B014DGG0OQ', 'B07HCJQ45L', '8001090747723', 'Lenor',
+              # (Z) Ni la hermana del Lenor ni su padre.
+              'B0OHER0099', PADRE_LENOR, EAN_HERMANA_LENOR]
 eq('B3 · ni en el barrido ni en el cruce', [x for x in _prohibido if x in log or x in log2], [])
 
 print('B4 · solo se escribe en escaner2_* y en su carpeta del almacén')

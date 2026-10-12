@@ -17,6 +17,10 @@ QUE PRUEBA:
       c_pocas_caidas: su CHECK solo admite ese). Cada pais guarda las caidas de la FICHA, no las repartidas.
   (D) EL EXCEL: «Ficha compartida» es la ULTIMA columna de «Análisis», dentro de la tabla T_Analisis; la fila del pais
       compartido lleva la marca, las demas filas del EAN dicen en que pais lo es, y un EAN sin reparto la deja vacia.
+  (E) (Z, 12-oct-2026) SIN HERMANAS EN LA LISTA: padre (distinto de el mismo) y recuento ≥ 2 sin ninguna otra fila de
+      su padre → ÷ el recuento, origen 'amazon_sin_hermanos' y el aviso de que el puesto no se ha podido comprobar;
+      hermanas con puesto distinto (o sin puesto) → no se divide; recuento vacio/0/1, padre = el mismo o sin padre → no.
+      Y el corte sigue con decimales (6,67 no pasa). La union de los dos CSV de Zentrada y OSMA la prueban sus bancos.
 """
 import ast
 import csv
@@ -174,11 +178,16 @@ eq('(B) recuento de variaciones vacío o 0 → ÷ los hermanos de la lista (2)',
    [(_es[a]['divisor'], _es[a]['origen_divisor'], _es[a]['nvar']) for a in ('B0SINREC01', 'B0SINREC02')],
    [(2, 'lista', None), (2, 'lista', None)])
 eq('(B) solo esos cuatro son ficha compartida', sorted(_es), ['B0HERMA001', 'B0HERMA002', 'B0SINREC01', 'B0SINREC02'])
-eq('(B) un ASIN solo en su padre no es compartido (hace falta OTRO producto de la lista)',
-   e2.fichas_compartidas({'ES': {'B0SOLO0001': {'padre': 'B0P', 'rank': 5.0, 'nvar': 7.0}}}), {})
-eq('(B) el padre y el puesto se cruzan POR PAÍS: el mismo par en ES y en DE no se junta',
-   e2.fichas_compartidas({'ES': {'B0A': {'padre': 'B0P', 'rank': 5.0, 'nvar': 2.0}},
-                          'DE': {'B0B': {'padre': 'B0P', 'rank': 5.0, 'nvar': 2.0}}}), {})
+eq('(B) (Z, 12-oct-2026: antes «no es compartido») un ASIN solo en su padre, con 7 variaciones en Amazon: compartido ÷ 7, '
+   'con su origen propio',
+   e2.fichas_compartidas({'ES': {'B0SOLO0001': {'padre': 'B0P', 'rank': 5.0, 'nvar': 7.0}}}),
+   {'ES': {'B0SOLO0001': {'padre': 'B0P', 'rank': 5.0, 'hermanos': ['B0SOLO0001'], 'n_lista': 1, 'nvar': 7.0,
+                          'divisor': 7.0, 'origen_divisor': 'amazon_sin_hermanos'}}})
+_porpais = e2.fichas_compartidas({'ES': {'B0A': {'padre': 'B0P', 'rank': 5.0, 'nvar': 2.0}},
+                                  'DE': {'B0B': {'padre': 'B0P', 'rank': 5.0, 'nvar': 2.0}}})
+eq('(B) el padre y el puesto se cruzan POR PAÍS: el mismo par en ES y en DE no se junta (cada uno, solo en su lista)',
+   {p: {a: (i['hermanos'], i['origen_divisor']) for a, i in v.items()} for p, v in _porpais.items()},
+   {'ES': {'B0A': (['B0A'], 'amazon_sin_hermanos')}, 'DE': {'B0B': (['B0B'], 'amazon_sin_hermanos')}})
 _sin_col = escribir('sin_padre.csv', [fila('B0X0000001', 1, '7')], [c for c in CABECERA if c != COL_PADRE])
 _exs = e2.examinar_csv(_sin_col, pro, COL_PAIS, COL_CAIDAS, COLS_FICHA)
 eq('(B) un CSV sin «ASIN Padre» se lee igual (las caídas están), sin fichas, y dice qué columna falta',
@@ -242,6 +251,59 @@ eq('(D) las otras filas del mismo EAN dicen en qué país es compartida',
 eq('(D) la del recuento que faltaba lo dice', 'repartido entre los 2 hermanos de la lista' in _marcas[(ean(5), 'ES')], True)
 eq('(D) un EAN sin reparto: la celda, vacía', [_marcas[(ean(7), p)] for p in ('ES', 'IT', 'FR', 'DE')], [None] * 4)
 eq('(D) la ficha compartida que no pasa no está en «Análisis» (va a la c)', (ean(3), 'ES') in _marcas, False)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+print('\n(E) (Z, 12-oct-2026) sin hermanas en la lista: ÷ el recuento de Amazon')
+SIN_H = 'ninguna hermana en la lista: no se ha podido comprobar que comparten puesto'
+_FILAS_E = [fila('B0SOLA0003', 1, '30', padre='B0PADRSOL3', rank='4000', nvar='3'),    # 30 ÷ 3 = 10 → entra
+            fila('B0SOLA0005', 2, '30', padre='B0PADRSOL5', rank='4000', nvar='5'),    # 30 ÷ 5 = 6 → c
+            fila('B0SOLA0021', 3, '20', padre='B0PADRS21', rank='4100', nvar='3'),     # 20 ÷ 3 = 6,67 → c (decimales)
+            fila('B0SOLA0022', 4, '21', padre='B0PADRS22', rank='4200', nvar='3'),     # 21 ÷ 3 = 7 → entra
+            fila('B0PROPIO01', 5, '30', padre='B0PROPIO01', rank='4300', nvar='4'),    # padre = el mismo → no
+            fila('B0RECVAC01', 6, '30', padre='B0PADRVAC', rank='4400', nvar=''),      # recuento vacío → no
+            fila('B0RECCER01', 7, '30', padre='B0PADRCER', rank='4500', nvar='0'),     # recuento 0 → no
+            fila('B0RECUNO01', 8, '30', padre='B0PADRUNO', rank='4600', nvar='1'),     # recuento 1 → no
+            # 🔑 Hermanas con PUESTO DISTINTO (mismo padre, 6 variaciones): la prueba de que la ficha da puesto por
+            #    variante. No se divide ninguna.
+            fila('B0PUEDIS01', 9, '30', padre='B0PADRPUE', rank='5100', nvar='6'),
+            fila('B0PUEDIS02', 10, '30', padre='B0PADRPUE', rank='5200', nvar='6'),
+            # Una hermana del mismo padre SIN puesto: hay otra fila del padre, así que tampoco se divide.
+            fila('B0SINPUE11', 11, '30', padre='B0PADRSPU', rank='5300', nvar='6'),
+            fila('B0SINPUE12', 12, '30', padre='B0PADRSPU', rank='', nvar='6'),
+            # Sin padre, aunque Amazon dé recuento: no.
+            fila('B0SINPADR1', 13, '30', padre='', rank='5400', nvar='5')]
+_re, _ce, _ = cruzar(_FILAS_E, 6, range(1, 14))
+_ces = _ce.get('ES', {})
+eq('(E) quiénes son ficha compartida «sin hermanas»: las cuatro solas con padre y recuento ≥ 2, y nadie más',
+   sorted(a for a, i in _ces.items() if i['origen_divisor'] == 'amazon_sin_hermanos'),
+   ['B0SOLA0003', 'B0SOLA0005', 'B0SOLA0021', 'B0SOLA0022'])
+eq('(E) 🔴 hermanas con puesto distinto: NO se divide (ninguna de las dos es ficha compartida), como antes',
+   [a for a in ('B0PUEDIS01', 'B0PUEDIS02') if a in _ces], [])
+eq('(E) …y una hermana sin puesto también cuenta como «hay otra fila del padre»: no se divide',
+   [a for a in ('B0SINPUE11', 'B0SINPUE12') if a in _ces], [])
+eq('(E) padre = el mismo ASIN, recuento vacío, 0 o 1, o sin padre: no es compartida',
+   [a for a in ('B0PROPIO01', 'B0RECVAC01', 'B0RECCER01', 'B0RECUNO01', 'B0SINPADR1') if a in _ces], [])
+eq('(E) el reparto: ÷ el recuento de Amazon, la lista de hermanos es ella sola',
+   [(_ces['B0SOLA0005'][k]) for k in ('divisor', 'nvar', 'hermanos', 'n_lista')], [5.0, 5.0, ['B0SOLA0005'], 1])
+eq('(E) 30 ÷ 3 = 10 por figura → entra, con la marca al final del detalle (variantes y el aviso del puesto)',
+   (_re[1]['puerta'] in ('d', 'e', 'f'), _re[1]['detalle'].endswith(
+       ' · Ficha compartida en ES: 3 variantes · ventas de la ficha 30/mes · estimadas por figura 10/mes · ' + SIN_H)),
+   (True, True))
+eq('(E) 30 ÷ 5 = 6 → puerta c, motivo de la base c_pocas_caidas, y el detalle lo dice',
+   (_re[2]['puerta'], _re[2]['motivo'], _re[2]['detalle']),
+   ('c', 'c_pocas_caidas', 'c_ficha_compartida: ES 5 variantes, ventas de la ficha 30/mes → 6/mes por figura (%s) · '
+                           'por debajo del corte (7 o más caídas en 30 días) (IT, FR, DE: sin dato)' % SIN_H))
+eq('(E) 🔴 pasa_corte sigue con decimales: 20 ÷ 3 = 6,67 → c; 21 ÷ 3 = 7 → entra',
+   (_re[3]['puerta'], round(_re[3]['compartida']['ES']['por_figura'], 2), _re[4]['puerta'] in ('d', 'e', 'f'),
+    _re[4]['compartida']['ES']['por_figura']), ('c', 6.67, True, 7.0))
+eq('(E) los que no se dividen deciden con las caídas de la ficha (30 → entran), sin marca',
+   [(_re[n]['puerta'] in ('d', 'e', 'f'), _re[n]['compartida'], 'Ficha compartida' in _re[n]['detalle'])
+    for n in (5, 6, 7, 8, 9, 10, 11, 12, 13)], [(True, {}, False)] * 9)
+eq('(E) la marca de la columna del Excel, con el aviso',
+   e2.marca_por_fila(_re[1], 'ES'),
+   'Ficha compartida: 3 variantes · ventas de la ficha 30/mes · estimadas por figura 10/mes · ' + SIN_H)
+_cqe = e2.cuadre(['F%d' % n for n in range(1, 14)], [dict(_re[n], foto_id='F%d' % n) for n in range(1, 14)])
+eq('(E) el cuadre sigue: las dos que no pasan cuentan como «pocas caídas»', (_cqe['cuadra'], _cqe['n_c_pocas']), (True, 2))
 
 shutil.rmtree(_tmp, ignore_errors=True)
 print()

@@ -861,18 +861,35 @@ def examinar_csv(ruta, pro, col_pais, col_caidas, cols_ficha=None):
 #   · ventas por figura = caidas de la fila ÷ «Recuento de variaciones» de Amazon (no ÷ los hermanos de la lista);
 #     si el recuento falta o es 0, ÷ los hermanos de la lista, y el detalle lo dice;
 #   · el corte de «se vende» se aplica a esa cifra repartida, no a la de la ficha.
+# (Z, 12-oct-2026) Y SIN HERMANAS EN LA LISTA: un producto con «ASIN Padre» (distinto de el mismo) y «Recuento de
+# variaciones» de 2 o mas que no tiene NINGUNA otra fila de ese padre en la lista del pais tambien es ficha compartida,
+# ÷ el recuento de Amazon (origen 'amazon_sin_hermanos'): solo en la lista, se quedaba con las caidas de toda la familia,
+# y en un catalogo mezclado (Zentrada) es lo normal. Si hay otra fila del padre con OTRO puesto, no se divide: es la
+# prueba de que esa ficha da puesto por variante.
 def fichas_compartidas(fichas_por_pais):
     """{pais: {asin: {'padre', 'rank'}}} (lo que deja `examinar_csv` en `fichas`) → {pais: {asin: info}} SOLO de las
     fichas compartidas, con info = {'padre', 'rank', 'hermanos' (los ASIN del grupo, el mismo incluido), 'n_lista',
-    'nvar', 'divisor', 'origen_divisor' ('amazon' o 'lista')}. Puro."""
+    'nvar', 'divisor', 'origen_divisor' ('amazon', 'lista' o 'amazon_sin_hermanos')}. Puro."""
     salida = {}
     for pais, fichas in (fichas_por_pais or {}).items():
-        grupos = {}
+        grupos, por_padre = {}, {}
         for asin, f in fichas.items():
             padre, rank = (f.get('padre') or '').strip(), f.get('rank')
+            if padre:
+                por_padre.setdefault(padre, []).append(asin)
             if not padre or rank is None:
                 continue
             grupos.setdefault((padre, rank), []).append(asin)
+        # (Z) Solo en la lista: ninguna otra fila de su padre, con el puesto que sea.
+        for padre, asins in por_padre.items():
+            if len(asins) != 1 or asins[0] == padre:
+                continue
+            nvar = fichas[asins[0]].get('nvar')
+            if nvar is None or nvar < 2:
+                continue
+            salida.setdefault(pais, {})[asins[0]] = {
+                'padre': padre, 'rank': fichas[asins[0]].get('rank'), 'hermanos': list(asins), 'n_lista': 1,
+                'nvar': nvar, 'divisor': nvar, 'origen_divisor': 'amazon_sin_hermanos'}
         for (padre, rank), asins in grupos.items():
             if len(asins) < 2:
                 continue
@@ -908,13 +925,20 @@ def _cifra(x):
     return ('%d' % r) if r == int(r) else ('%.1f' % r).replace('.', ',')
 
 
+TEXTO_SIN_HERMANOS = 'ninguna hermana en la lista: no se ha podido comprobar que comparten puesto'
+
+
 def texto_ficha_compartida(info, pais=None):
     """La marca de una ficha compartida en un pais (AA): «Ficha compartida: N figuras · ventas de la ficha X/mes ·
-    estimadas por figura Y/mes»; con `pais`, «Ficha compartida en ES: …». Si el recuento de Amazon faltaba, lo dice."""
-    txt = 'Ficha compartida%s: %s figuras · ventas de la ficha %s/mes · estimadas por figura %s/mes' % (
-        (' en %s' % pais) if pais else '', _cifra(info['divisor']), _cifra(info['ventas_ficha']),
-        _cifra(info['por_figura']))
-    if info.get('origen_divisor') == 'lista':
+    estimadas por figura Y/mes»; con `pais`, «Ficha compartida en ES: …». Si el recuento de Amazon faltaba, lo dice.
+    (Z) Sin hermanas en la lista: «N variantes» y que no se ha podido comprobar el puesto."""
+    sin_hermanos = info.get('origen_divisor') == 'amazon_sin_hermanos'
+    txt = 'Ficha compartida%s: %s %s · ventas de la ficha %s/mes · estimadas por figura %s/mes' % (
+        (' en %s' % pais) if pais else '', _cifra(info['divisor']), 'variantes' if sin_hermanos else 'figuras',
+        _cifra(info['ventas_ficha']), _cifra(info['por_figura']))
+    if sin_hermanos:
+        txt += ' · ' + TEXTO_SIN_HERMANOS
+    elif info.get('origen_divisor') == 'lista':
         txt += (' (sin «Recuento de variaciones» de Amazon: repartido entre los %d hermanos de la lista)'
                 % info['n_lista'])
     return txt
@@ -1081,10 +1105,12 @@ def _decidir_con_asin(fila_foto, cands_por_pais, caidas_por_pais, params, M, asi
             #      (escaner2_resultado_ean_motivo_check) y el cuadre de la c (escaner2_cruce_c_dos_motivos: c = pocas +
             #      sin dato) solo admiten esos dos; un motivo nuevo pide una migracion de la v2. El detalle lo dice delante.
             det = 'c_ficha_compartida: %s · por debajo del corte (%s)' % ('; '.join(
-                '%s %s figuras, ventas de la ficha %s/mes → %s/mes por figura' % (
-                    p, _cifra(reparto[p]['divisor']), _cifra(reparto[p]['ventas_ficha']), _cifra(reparto[p]['por_figura']))
-                + ('' if reparto[p]['origen_divisor'] == 'amazon'
-                   else ' (sin recuento de Amazon: ÷ %d hermanos de la lista)' % reparto[p]['n_lista'])
+                '%s %s %s, ventas de la ficha %s/mes → %s/mes por figura' % (
+                    p, _cifra(reparto[p]['divisor']),
+                    'variantes' if reparto[p]['origen_divisor'] == 'amazon_sin_hermanos' else 'figuras',
+                    _cifra(reparto[p]['ventas_ficha']), _cifra(reparto[p]['por_figura']))
+                + {'amazon': '', 'amazon_sin_hermanos': ' (%s)' % TEXTO_SIN_HERMANOS}.get(
+                    reparto[p]['origen_divisor'], ' (sin recuento de Amazon: ÷ %d hermanos de la lista)' % reparto[p]['n_lista'])
                 for p in compartidos), texto_corte(umbral))
             resto = [p for p in con_dato if p not in reparto]
             if resto:
