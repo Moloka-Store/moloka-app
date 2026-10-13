@@ -79,6 +79,8 @@ class Web:
             r = self._pedir('login (página)', 'GET', url, timeout=ESPERA_S)
             if r.status_code != 200:
                 continue
+            if _con_sesion(r.text) and not any(i.attrs.get('type') == 'password' for i in arbol(r.text).buscar('input')):
+                return  # ya dentro (la misma sesion entra dos veces: la sonda T2 lo midio)
             for f in arbol(r.text).buscar('form'):
                 if any(i.attrs.get('type') == 'password' for i in f.buscar('input')):
                     form, accion = f, f.attrs.get('action') or url
