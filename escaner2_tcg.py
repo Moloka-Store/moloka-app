@@ -109,6 +109,9 @@ def leer_excel(contenido):
     cabecera = ['' if c is None else str(c).strip() for c in todas[0]]
     while len(cabecera) > len(COLUMNAS) and cabecera[-1] == '':
         cabecera.pop()
+    # La columna 17 no tiene nombre: openpyxl corta la fila 1 en la 16 (medido en la sonda T2, 13-oct). Se completa
+    # con vacias; si falta una con nombre, comprobar_cabecera lo dice.
+    cabecera += [''] * (len(COLUMNAS) - len(cabecera))
     filas = [f for f in todas[1:] if any(c is not None and str(c).strip() for c in f)]
     return cabecera, filas
 
