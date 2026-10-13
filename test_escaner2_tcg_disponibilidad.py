@@ -321,7 +321,7 @@ eq('B6 el lector: la ficha de A, ok con su cociente (texto exacto)', (base.tramo
                                                                       base.tramo(EANS['A'])['cociente'],
                                                                       base.tramo(EANS['A'])['uds_mas_barato'],
                                                                       base.tramo(EANS['A'])['precio_excel']),
-   ('ok', '0.976600000000', 12, '10.0'))
+   ('ok', '0.976600000000', 12, '10'))  # openpyxl devuelve un 10.0 guardado como entero
 eq('B7 B sin ficha (404), C de otro EAN: apuntados, sin cociente', (base.tramo(EANS['B'])['intento_resultado'],
                                                                      base.tramo(EANS['B']).get('cociente'),
                                                                      base.tramo(EANS['C'])['intento_resultado'],
