@@ -45,10 +45,12 @@ _fuente = open(os.path.join(RAIZ, 'test_escaner2_tcg.py'), encoding='utf-8').rea
 _ns = {'__file__': os.path.join(RAIZ, 'test_escaner2_tcg.py')}
 exec(compile(_fuente.split('# ── (A) El Excel')[0], 'test_escaner2_tcg.py', 'exec'), _ns)
 fila, excel = _ns['fila'], _ns['excel']
-_cab = _fuente.split('# ── (C) La ficha')[1].split('TABLA = ')[0]
+_cab = _fuente.split('# ── (C) La ficha')[1].split('
+', 1)[1].split('TABLA = ')[0]
 exec(compile(_cab, 'test_escaner2_tcg.py', 'exec'), _ns)
 ficha_html = _ns['ficha']
-_dl = _fuente.split('# ── (D) El listado')[1].split('U = ')[0]
+_dl = _fuente.split('# ── (D) El listado')[1].split('
+', 1)[1].split('U = ')[0]
 exec(compile(_dl, 'test_escaner2_tcg.py', 'exec'), _ns)
 tarjeta = _ns['tarjeta']
 
