@@ -238,6 +238,10 @@ lanza('C15 un dis que no es un número: para', tr.FichaNoEntendida, tr.leer_fich
 lanza('C16 una columna sin «A partir de»: para', tr.FichaNoEntendida, tr.leer_ficha,
       ficha(tabla=TABLA).replace('A partir de 6 uds.', 'Seis'))
 lanza('C17 HTML vacío: para', tr.FichaNoEntendida, tr.leer_ficha, '')
+lanza('C17b la URL lleva a una categoría (el producto ya no está ahí): sin ficha, NO para', tr.FichaNoEsProducto, tr.leer_ficha,
+      ficha(tabla=TABLA).replace('id="product"', 'id="category"'))
+lanza('C17c una categoría sin sesión: para (la sesión se mira antes)', tr.FichaNoEntendida, tr.leer_ficha,
+      ficha(tabla=TABLA, sesion=False).replace('id="product"', 'id="category"'))
 eq('C18 el EAN de la ficha casa sin ceros delante', tr.ean_casa(['008000000000017'], '8000000000017', '8000000000017', False), True)
 eq('C19 el de otro producto, no', tr.ean_casa(['8000000000024'], '8000000000017', '8000000000017', False), False)
 eq('C20 caja: el GS1 largo de la web casa con la C del Excel (GTIN-14 sin indicador ni control)',

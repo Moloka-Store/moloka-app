@@ -60,6 +60,7 @@ PROVEEDOR = 'TCG'
 LOTE = 500
 PAGINA = 1000  # PostgREST devuelve como mucho 1.000 filas por consulta
 FICHAS_MAX = 150
+SIN_FICHA_SEGUIDAS = 5  # tantas fichas seguidas sin producto (404 o a otra pagina) ya no son casualidad: se para
 HORA_LISTADO = 9  # Madrid, de lunes a viernes: la pasada de las 09:00
 _RE_HEX = re.compile(r'[0-9a-fA-F]{24,}')
 _RE_URL = re.compile(r'https?://\S+')
@@ -291,20 +292,27 @@ def leer_tramos_web(sb, web, catalogo, guardados, run_id, fichas_max, hacer_list
                 guardados[k] = dict(guardados[k], pide_relectura=marca)
 
         cola, r['pendientes'] = tr.pendientes(catalogo, guardados, reloj(), fichas_max)
+        seguidas = 0
         for e in cola:
             html = web.ficha(e['url'])
             r['pedidas'] += 1
             base = {'proveedor': PROVEEDOR, 'producto_prov': e['producto_prov'], 'url': e['url'],
                     'intento_en': reloj().isoformat(), 'run_id': run}
-            if html is None:
-                _guardar(sb, dict(base, intento_resultado='sin_ficha'))
-                r['sin_ficha'] += 1
-                continue
             try:
-                ficha = tr.leer_ficha(html)
+                ficha = None if html is None else tr.leer_ficha(html)
             except tr.FichaNoEntendida:
                 _guardar(sb, dict(base, intento_resultado='no_entendida'))
                 raise
+            except tr.FichaNoEsProducto:
+                ficha = None
+            if ficha is None:
+                _guardar(sb, dict(base, intento_resultado='sin_ficha'))
+                r['sin_ficha'] += 1
+                seguidas += 1
+                if seguidas >= SIN_FICHA_SEGUIDAS:
+                    raise Bloqueo(f'{seguidas} fichas seguidas sin producto (404 o a otra página): algo ha cambiado en la web')
+                continue
+            seguidas = 0
             if not tr.ean_casa(ficha['eans'], e['producto_prov'], e['ean_core'], e['es_caja']):
                 _guardar(sb, dict(base, intento_resultado='otro_ean'))
                 r['otro_ean'] += 1

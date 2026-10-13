@@ -384,6 +384,23 @@ eq('C6 una ficha sin sesión: no_entendida, ROJO, para ahí', (codigo, base.tram
    (1, 'no_entendida', None, 1))
 limpio('C7', reg)
 
+# Una ficha que lleva a una categoría: sin ficha y se sigue; cinco seguidas sin producto: para.
+base = Base()
+fcat = dict(FICHAS)
+fcat[EANS['A'].lower()] = ficha_html(tabla=TABLA, eans=(EANS['A'],)).replace('id="product"', 'id="category"')
+web = Web(catalogo(), fcat)
+codigo, reg = correr(base, web)
+eq('C6b la URL lleva a una categoría: sin_ficha y sigue con las demás', (codigo, base.tramo(EANS['A'])['intento_resultado'],
+                                                                       len(web.fichas_pedidas()), base.tramo(EANS['D'])['intento_resultado']),
+   (0, 'sin_ficha', 5, 'ok'))
+base = Base()
+web = Web(catalogo(), {})
+codigo, reg = correr(base, web)
+eq('C6c cinco fichas seguidas sin producto: para, ROJO', (codigo, 'TCG_TRAMOS_PARADO' in reg, len(web.fichas_pedidas()),
+                                                       sum(1 for t in base.t['disp_tramo'] if t['intento_resultado'] == 'sin_ficha')),
+   (1, True, 5, 5))
+limpio('C6d', reg)
+
 telegramas.clear()
 base = Base()
 web = Web(catalogo(), FICHAS, login=403)

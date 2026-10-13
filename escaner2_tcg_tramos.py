@@ -13,7 +13,8 @@ QUE SE LEE DE LA FICHA (parte T1, 2b y 2c, medido en 60 fichas el 12-oct y relei
     (el descuento exacto del tramo: 0.023400). Precio exacto del tramo = rel × (1 − dis);
   · el EAN de la ficha (<label>EAN:</label><span>…</span>), para no guardar el tramo de otro producto;
   · que la pagina es la de alguien CON SESION (clase `usuariologeado` del <body>): sin ella, los precios no son los
-    nuestros.
+    nuestros; y que es la de un PRODUCTO (`<body id="product">`): si la direccion ya no existe, la web manda a la
+    categoria (sonda T2, 13-oct) y eso es «sin ficha», no HTML roto.
 EL SUELTO EXACTO: `rel` si redondeado a 2 decimales es el precio actual (sin oferta); si no (Oferta, Saldo, o sin tabla),
 el precio actual. EL MAS BARATO EXACTO: el minimo entre el suelto exacto (1 ud) y cada tramo (a igual precio, el de
 menos unidades). EL COCIENTE = mas barato exacto ÷ «Precio» del Excel EN ESE MOMENTO (parte T1, 2c): Ultra Pro
@@ -51,6 +52,11 @@ VACIOS = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'm
 
 class FichaNoEntendida(ValueError):
     """La ficha no tiene la forma medida: se para de leer. El texto lo escribe este modulo (sin valores de la pagina)."""
+
+
+class FichaNoEsProducto(ValueError):
+    """La URL de la ficha lleva a otra pagina de la web (una categoria: el producto ya no esta en esa direccion). No es
+    HTML roto: ese producto se apunta 'sin_ficha', como un 404 (sonda T2, 13-oct: 1 de 586)."""
 
 
 class ListadoNoEntendido(ValueError):
@@ -175,6 +181,8 @@ def leer_ficha(html):
     cuerpo = raiz.primero('body')
     if cuerpo is None or 'usuariologeado' not in cuerpo.clases():
         raise FichaNoEntendida('la ficha no es la de una sesión abierta (sin «usuariologeado» en el body)')
+    if cuerpo.attrs.get('id') != 'product':
+        raise FichaNoEsProducto('la URL de la ficha lleva a otra página (body id «%s»)' % (cuerpo.attrs.get('id') or '')[:20])
     precio = None
     for cp in raiz.buscar(clase='current-price'):
         sp = cp.primero('span', itemprop='price')
