@@ -121,8 +121,8 @@ eq('A6 Backorder: en reposición, no disponible', (por['8000000000055']['disponi
 eq('A7 PreOrder: preventa', (por['8000000000062']['disponibilidad'], por['8000000000062']['preorder']), ('Preventa', True))
 eq('A8 Oferta con stock: disponible y en oferta', (por['8000000000079']['disponible'], por['8000000000079']['en_oferta']),
    (True, True))
-eq('A9 Saldo con stock -1 y Disponible con 0: no disponibles',
-   (por['8000000000086']['disponible'], por['8000000000093']['disponible'], c['n_disponible_sin_stock']), (False, False, 2))
+eq('A9 Saldo con stock -1 y Disponible con 0 (y la caja agotada): no disponibles',
+   (por['8000000000086']['disponible'], por['8000000000093']['disponible'], c['n_disponible_sin_stock']), (False, False, 3))
 eq('A10 11 cifras: rellena con ceros hasta 13', por['74427800001']['ean_core'], '0074427800001')
 eq('A11 14 cifras y cola H: forma rara, sin EAN de cruce, contadas',
    (por['08000000000109']['regla'], por['08000000000109']['ean_core'], por['800000000116H']['regla'],
