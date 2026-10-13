@@ -111,7 +111,7 @@ entre medias.
 | 15 | 15 | `CLAUDE.md` | Si tu cambio lo toca, párate y pregunta. |
 | 16 | 16 | `CLAUDE.md` | - **Cualquier cambio que roce la operativa de Elena se avisa ANTES de desplega |
 | 17 | 17 | `CLAUDE.md` | - **Fernando no es programador.** Es economista y contable. Explica en cristia |
-| 18 | 18 | `CLAUDE.md` | contables si ayudan. Él aprueba todos los PR. |
+| 18 | 18 | `CLAUDE.md` | contables si ayudan. Él aprueba todos los PR (hasta el 30-sep-2026; hoy Cowork audita leyendo el PR y Code lo fusiona, `CLAUDE.md`). |
 | 20 | 20 | `CLAUDE.md` | --- |
 | 22 | 8 | `docs/reglas/identidad.md` | ## 1. LAS REGLAS QUE NO SE REINTERPRETAN |
 | 24 | 24 | `CLAUDE.md` | ### 1.1 Identidad: dos ejes, no un maestro único |
@@ -668,7 +668,7 @@ entre medias.
 | 603 | 77 | `CLAUDE.md` | y R2. Una llave que aparece en un chat está quemada y se regenera. |
 | 604 | 78 | `CLAUDE.md` | **Introducir credenciales no es algo que hagas tú: se lo pides a Fernando.** |
 | 605 | 79 | `CLAUDE.md` | - **Supabase es PRODUCCIÓN.** Desde una sesión: **solo lectura**. Toda escritu |
-| 606 | 80 | `CLAUDE.md` | rama → PR → Fernando aprueba → ensayo en staging → producción. |
+| 606 | 80 | `CLAUDE.md` | rama → PR → Fernando aprueba → ensayo en staging → producción (hasta el 30-sep-2026; hoy: rama → PR → auditoría de Cowork leyendo el PR → fusión por Code; no hay base de pruebas y las migraciones se aplican con Fernando delante, `escalera-de-migraciones.md`). |
 | 607 | 81 | `CLAUDE.md` | - **Todo lo NUEVO nace CERRADO:** RLS activo y 0 políticas. Vistas 'security_i |
 | 608 | 82 | `CLAUDE.md` | 'IMMUTABLE', sin 'SECURITY DEFINER'. |
 | 609 | 9 | `docs/reglas/seguridad-permisos.md` | - 🔴 **Pero "nace cerrado" NO es el estado por defecto: hay que REVOCAR antes d |
