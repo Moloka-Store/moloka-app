@@ -84,6 +84,17 @@ QUE SE PRUEBA, Y COMO:
       [dbline_martes_10h] (mudo, con su memoria fresca de señuelo) y
       [dbline_lunes_10h] (del sabado al lunes, verde por el domingo); y sus dos
       roturas en (R).
+  (J) 🆕 TCG EN EL ESCANER 2 (encargo T5c, 14-oct-2026). Deja `escaner_memoria` (su
+      director viejo se apago con el T5) y pasa a `disp_pasada`: 26 h, ningun dia
+      descontado, `ventana_ancha`, y una «al dia» del sabado o del domingo cuenta como
+      señal de vida (`al_dia_cuenta`, reconocida por su huella). `ultima_viva` como
+      funcion pura; [foto_hoy] pasa a la foto de produccion del 14-oct; [tcg_noche]
+      (el hueco normal, verde), [tcg_miercoles_14h] (mudo entre semana: ni sus «al dia»
+      del dia ni su memoria fresca lo salvan), [tcg_finde_al_dia_lunes] y
+      [tcg_finde_al_dia_domingo] (dos «al dia» el fin de semana: verde),
+      [tcg_finde_muerto] (sin nada desde el viernes: rojo el domingo a las 06:00) y
+      [tcg_finde_otra_huella] (una 'rechazada' que no es «al dia» no cuenta); y sus
+      tres roturas en (R).
   (R) ROTURAS A MANO, dentro del banco: se estropea una copia del centinela por
       estructura (HEO mirado otra vez en escaner_memoria, OSMA igual, OSMA sin el
       descuento del sabado) y se exige que la foto de hoy se ponga ROJA; mas la copia
@@ -127,10 +138,11 @@ def _escenario(ahora, memoria, disp):
     # 🆕 07-oct-2026 (OC5): OCIOSTOCK tambien se vigila en `disp_pasada`. Un escenario
     #    que no hable de OcioStock lo trae al dia (una 'aplicada' de hace 2 h), para que
     #    no opine; los suyos lo ponen a mano.
-    # 🆕 10-oct-2026 (DB6): DBLINE, igual.
+    # 🆕 10-oct-2026 (DB6): DBLINE, igual. 🆕 14-oct-2026 (T5c): TCG, igual.
     disp = dict(disp)
     disp.setdefault('OCIOSTOCK', [('aplicada', _u(ahora) - timedelta(hours=2))])
     disp.setdefault('DBLINE', [('aplicada', _u(ahora) - timedelta(hours=2))])
+    disp.setdefault('TCG', [('aplicada', _u(ahora) - timedelta(hours=2), 'h-tcg')])
     return {'ahora': _u(ahora), 'memoria': memoria, 'disp': disp}
 
 
@@ -140,35 +152,41 @@ def _fresco(ahora, horas):
 
 def _tres_al_dia(ahora):
     """DBLINE, OCIOSTOCK y TCG con 2 h de silencio en escaner_memoria: que no opinen.
-    (Desde el 07-oct-2026 la de OCIOSTOCK es un señuelo: se le mira `disp_pasada`; y desde
-    el 10-oct-2026, DB6, la de DBLINE tambien.)"""
+    (Desde el 07-oct-2026 la de OCIOSTOCK es un señuelo: se le mira `disp_pasada`; desde
+    el 10-oct-2026, DB6, la de DBLINE tambien; y desde el 14-oct-2026, T5c, la de TCG.)"""
     return {p: _fresco(ahora, 2) for p in ('DBLINE', 'OCIOSTOCK', 'TCG')}
 
 
-# LA FOTO DE VERDAD: produccion, sabado 10-oct-2026 a las 16:46 Madrid (14:46 UTC),
-# leida con SQL de solo lectura (conector de lectura, encargo DB6). HEO lleva nueve dias
-# sin tocar escaner_memoria (el director viejo se apago el 01-oct) y OSMA dos meses: de
-# mirarlas ahi saldrian MUDOS, y estan vivas en el escaner 2. OSMA no pasa el sabado:
-# su ultima es la del viernes 05:15 (33,5 h de reloj, 18,8 h sin el sabado). OCIOSTOCK y
-# DBLINE tienen su foto y su director viejo aun escribe escaner_memoria (OcioStock 13:01,
-# DBLine 10:31 UTC): aqui las dos fuentes dicen «al dia», asi que la foto NO distingue
-# la fuente de ninguno de los dos; eso lo prueban `ocio_jueves_10h`,
-# `dbline_martes_10h` y sus roturas (R). Las 'rechazada' «al dia» de OcioStock, tal cual.
-# (Hasta el 10-oct esta foto era la del miercoles 07-oct, 15:02 UTC, sin pasadas de DBLine;
-# y hasta el 07-oct, la del sabado 03-oct, 11:36 UTC, sin pasadas de OcioStock.)
+# LA FOTO DE VERDAD: produccion, miercoles 14-oct-2026 a las 15:36 Madrid (13:36 UTC),
+# leida con SQL de solo lectura (conector de lectura, encargo T5c), con el T5 ya aplicado
+# (TCG en la foto desde las 15:28 Madrid y su director viejo apagado). HEO lleva trece
+# dias sin tocar escaner_memoria (el director viejo se apago el 01-oct), OSMA dos meses y
+# DBLINE cuatro dias (desde el DB6): de mirarlas ahi saldrian MUDOS, y estan vivas en el
+# escaner 2. OCIOSTOCK y TCG tienen su foto y aun hay escritura reciente en su
+# escaner_memoria (OcioStock 07:02, el director viejo; TCG 12:02 UTC, la ultima antes de
+# apagarse): aqui las dos fuentes dicen «al dia», asi que la foto NO distingue la fuente
+# de ninguno de los dos; eso lo prueban `ocio_jueves_10h`, `tcg_miercoles_14h` y sus
+# roturas (R). Las 'rechazada' «al dia» de OcioStock y las huellas de TCG (sus 8 primeros
+# caracteres), tal cual.
+# (Hasta el 14-oct esta foto era la del sabado 10-oct, 14:46 UTC, sin pasadas de TCG; hasta
+# el 10-oct, la del miercoles 07-oct, 15:02 UTC, sin pasadas de DBLine; y hasta el 07-oct,
+# la del sabado 03-oct, 11:36 UTC, sin pasadas de OcioStock.)
 _FOTO = _escenario(
-    '2026-10-10T14:46:09',
-    {'DBLINE': _u('2026-10-10T10:31:46'), 'OCIOSTOCK': _u('2026-10-10T13:01:30'),
-     'TCG': _u('2026-10-10T14:01:52'), 'HEO': _u('2026-10-01T05:34:35'),
+    '2026-10-14T13:36:35',
+    {'DBLINE': _u('2026-10-10T10:31:46'), 'OCIOSTOCK': _u('2026-10-14T07:02:20'),
+     'TCG': _u('2026-10-14T12:02:14'), 'HEO': _u('2026-10-01T05:34:35'),
      'OSMA': _u('2026-08-06T15:37:51')},
-    {'HEO': [('aplicada', _u('2026-10-10T07:05:49')), ('aplicada', _u('2026-10-10T06:06:31')),
-             ('aplicada', _u('2026-10-09T19:05:38'))],
-     'OSMA': [('aplicada', _u('2026-10-09T05:15:56')), ('aplicada', _u('2026-10-08T05:15:51')),
-              ('aplicada', _u('2026-10-07T05:15:56'))],
-     'OCIOSTOCK': [('rechazada', _u('2026-10-10T11:12:32')), ('aplicada', _u('2026-10-10T07:13:03')),
-                   ('rechazada', _u('2026-10-09T15:12:38'))],
-     'DBLINE': [('aplicada', _u('2026-10-10T14:06:20')), ('aplicada', _u('2026-10-10T13:06:27')),
-                ('aplicada', _u('2026-10-10T12:06:31'))]})
+    {'HEO': [('aplicada', _u('2026-10-14T13:06:27')), ('aplicada', _u('2026-10-14T12:06:46')),
+             ('aplicada', _u('2026-10-14T11:05:52'))],
+     'OSMA': [('aplicada', _u('2026-10-14T05:15:52')), ('aplicada', _u('2026-10-13T05:15:49')),
+              ('aplicada', _u('2026-10-12T05:15:55'))],
+     'OCIOSTOCK': [('rechazada', _u('2026-10-14T11:12:34')), ('aplicada', _u('2026-10-14T07:12:57')),
+                   ('rechazada', _u('2026-10-13T15:12:35'))],
+     'DBLINE': [('aplicada', _u('2026-10-14T13:06:24')), ('aplicada', _u('2026-10-14T12:06:32')),
+                ('aplicada', _u('2026-10-14T11:06:20'))],
+     'TCG': [('aplicada', _u('2026-10-14T13:22:24'), '99e613e1'),
+             ('aplicada', _u('2026-10-14T12:22:41'), '7247cf2e'),
+             ('aplicada', _u('2026-10-14T11:21:07'), 'b0699c29')]})
 
 
 def _escenario_de(caso):
@@ -246,6 +264,71 @@ def _escenario_de(caso):
                           {'HEO': [('aplicada', _fresco(a, 1))],
                            'OSMA': [('aplicada', _u('2026-10-12T05:15:46'))],
                            'DBLINE': [('aplicada', _u('2026-10-10T19:06:00'))]})
+    # 🆕 TCG (14-oct-2026, T5c): de lunes a viernes cada hora a las :20 de 07 a 17 UTC; sabado
+    # y domingo una, a las 10:20 UTC. La huella va en el tercer campo: una «al dia» es una
+    # 'rechazada' con la MISMA huella que la ultima aplicada.
+    # Miercoles 21-oct 06:00 UTC: la ultima aplicada es la del martes 17:21 (12,7 h). VERDE.
+    if caso == 'tcg_noche':
+        a = '2026-10-21T06:00:00'
+        return _escenario(a, _tres_al_dia(a),
+                          {'HEO': [('aplicada', _fresco(a, 1))],
+                           'OSMA': [('aplicada', _u('2026-10-20T05:15:46'))],
+                           'TCG': [('aplicada', _u('2026-10-20T17:21:00'), 'h-mar')]})
+    # Miercoles 21-oct 14:00 UTC: la ultima aplicada es la del martes 10:21 (27,7 h) y desde
+    # entonces TODO ha salido «al dia» (martes 11:21-17:21 y miercoles 07:21-13:21): entre
+    # semana no cuentan. ROJO. Señuelo: su escaner_memoria (el director viejo), fresco.
+    if caso == 'tcg_miercoles_14h':
+        a = '2026-10-21T14:00:00'
+        m = _tres_al_dia(a)
+        m['TCG'] = _fresco(a, 1)
+        al_dia = ([('rechazada', _u('2026-10-20T%02d:21:00' % h), 'h-mar') for h in range(11, 18)]
+                  + [('rechazada', _u('2026-10-21T%02d:21:00' % h), 'h-mar') for h in range(7, 14)])
+        return _escenario(a, m, {'HEO': [('aplicada', _fresco(a, 1))],
+                                 'OSMA': [('aplicada', _u('2026-10-21T05:15:46'))],
+                                 'TCG': [('aplicada', _u('2026-10-20T10:21:00'), 'h-mar')] + al_dia})
+    # Domingo 18-oct 06:00 UTC: la ultima aplicada es la del viernes 17:21 y la del sabado
+    # 10:21 salio «al dia» (misma huella): cuenta. 19,7 h desde el sabado: VERDE (36,7 h desde
+    # la aplicada: sin la regla, ROJO).
+    if caso == 'tcg_finde_al_dia_domingo':
+        a = '2026-10-18T06:00:00'
+        return _escenario(a, _tres_al_dia(a),
+                          {'HEO': [('aplicada', _fresco(a, 1))],
+                           'OSMA': [('aplicada', _u('2026-10-16T05:15:46'))],
+                           'TCG': [('aplicada', _u('2026-10-16T17:21:00'), 'h-vie'),
+                                   ('rechazada', _u('2026-10-17T10:21:00'), 'h-vie')]})
+    # Lunes 19-oct 10:00 UTC: dos «al dia» el fin de semana (sabado y domingo 10:21) y las
+    # del lunes 07:21-09:21 tambien «al dia» (esas no cuentan). Desde el domingo 10:21, 23,7 h:
+    # VERDE (64,7 h desde la aplicada del viernes: sin la regla, ROJO).
+    if caso == 'tcg_finde_al_dia_lunes':
+        a = '2026-10-19T10:00:00'
+        return _escenario(a, _tres_al_dia(a),
+                          {'HEO': [('aplicada', _fresco(a, 1))],
+                           'OSMA': [('aplicada', _u('2026-10-19T05:15:46'))],
+                           'TCG': [('aplicada', _u('2026-10-16T17:21:00'), 'h-vie'),
+                                   ('rechazada', _u('2026-10-17T10:21:00'), 'h-vie'),
+                                   ('rechazada', _u('2026-10-18T10:21:00'), 'h-vie')]
+                                  + [('rechazada', _u('2026-10-19T%02d:21:00' % h), 'h-vie')
+                                     for h in (7, 8, 9)]})
+    # Domingo 18-oct 06:00 UTC, sin nada desde el viernes 17:21 (36,7 h). ROJO: el fin de
+    # semana se sigue vigilando.
+    if caso == 'tcg_finde_muerto':
+        a = '2026-10-18T06:00:00'
+        return _escenario(a, _tres_al_dia(a),
+                          {'HEO': [('aplicada', _fresco(a, 1))],
+                           'OSMA': [('aplicada', _u('2026-10-16T05:15:46'))],
+                           'TCG': [('aplicada', _u('2026-10-16T17:21:00'), 'h-vie')]})
+    # Domingo 18-oct 06:00 UTC: el sabado 10:21 hubo una 'rechazada' con OTRA huella (el
+    # freno: contenido nuevo que no se aplica), otra SIN huella y una 'fallida'. Ninguna es
+    # «al dia»: 36,7 h. ROJO.
+    if caso == 'tcg_finde_otra_huella':
+        a = '2026-10-18T06:00:00'
+        return _escenario(a, _tres_al_dia(a),
+                          {'HEO': [('aplicada', _fresco(a, 1))],
+                           'OSMA': [('aplicada', _u('2026-10-16T05:15:46'))],
+                           'TCG': [('aplicada', _u('2026-10-16T17:21:00'), 'h-vie'),
+                                   ('rechazada', _u('2026-10-17T10:21:00'), 'h-otra'),
+                                   ('rechazada', _u('2026-10-17T10:25:00'), None),
+                                   ('fallida', _u('2026-10-17T11:21:00'), 'h-vie')]})
     return None
 
 
@@ -311,10 +394,13 @@ def hijo(caso):
                 if self.tabla == 'disp_pasada':
                     # Solo las pasadas del estado pedido: sin `.eq('estado', ...)` el
                     # centinela recibiria tambien las 'rechazada' y 'fallida'.
+                    # 🆕 14-oct-2026 (T5c): una pasada puede llevar su huella en un tercer
+                    #    campo (TCG); sin el, sale sin huella.
                     estado = self.filtros.get('estado')
-                    return _Resp([{'terminada_en': t.isoformat()}
-                                  for (e, t) in ESC['disp'].get(self.proveedor, [])
-                                  if estado is None or e == estado])
+                    return _Resp([{'terminada_en': x[1].isoformat(),
+                                   'huella_contenido': x[2] if len(x) > 2 else None}
+                                  for x in ESC['disp'].get(self.proveedor, [])
+                                  if estado is None or x[0] == estado])
                 t = ESC['memoria'].get(self.proveedor)
                 return _Resp([] if t is None else [{'fecha': t.isoformat()}])
             horas = HORAS.get(self.proveedor)
@@ -406,7 +492,7 @@ def _nodo(nombre):
 
 
 NOMBRES = ('horas_en_dia', 'horas_en_domingo', 'horas_de_silencio', 'esta_mudo',
-           'avisos_de_hoy', 'linea_de_aviso', 'franja_de')
+           'avisos_de_hoy', 'linea_de_aviso', 'franja_de', 'ultima_viva')
 _ns = {'timedelta': timedelta}
 exec(compile(ast.fix_missing_locations(ast.Module(body=[_nodo(n) for n in NOMBRES],
                                                   type_ignores=[])), RUTA, 'exec'), _ns)
@@ -417,7 +503,8 @@ esta_mudo = _ns['esta_mudo']
 avisos_de_hoy = _ns['avisos_de_hoy']
 linea_de_aviso = _ns['linea_de_aviso']
 franja_de = _ns['franja_de']
-HORARIOS = ast.literal_eval(_nodo('HORARIOS').value)
+ultima_viva = _ns['ultima_viva']
+HORARIOS =ast.literal_eval(_nodo('HORARIOS').value)
 print('extraidas de %s: %s, HORARIOS' % (RUTA, ', '.join(NOMBRES)))
 print()
 
@@ -494,6 +581,39 @@ eq('(A) 🔴 [HEO] el domingo NO se descuenta (HEO lo trabaja): el hueco entero 
    horas_de_silencio(utc('2026-10-03T07:06:00'), utc('2026-10-04T06:06:00'),
                      HORARIOS['HEO']['descansa_domingo'], HORARIOS['HEO']['descansa_sabado']),
    23.0)
+
+# 🆕 14-oct-2026 (T5c) · TCG: `ultima_viva`, la ultima señal de vida en `disp_pasada`.
+# Viernes 16-oct 17:21 UTC aplicada (huella 'v'); sabado 17 y domingo 18 a las 10:21, «al dia».
+_VIE, _SAB, _DOM = utc('2026-10-16T17:21:00'), utc('2026-10-17T10:21:00'), utc('2026-10-18T10:21:00')
+_FINDE = tuple(HORARIOS['TCG'].get('al_dia_cuenta', ()))
+eq('(J) [TCG] `al_dia_cuenta` son el sabado y el domingo, y nada mas', tuple(sorted(_FINDE)), (5, 6))
+eq('(J) 🔴 [TCG] sin pasadas aplicadas no hay señal de vida (aunque haya «al dia»)',
+   ultima_viva([], [(_SAB, 'v')], _FINDE), None)
+eq('(J) [TCG] sin rechazadas, la ultima aplicada', ultima_viva([(_VIE, 'v')], [], _FINDE), _VIE)
+eq('(J) 🔴 [TCG] dos «al dia» el fin de semana: la del domingo es la ultima señal de vida',
+   ultima_viva([(_VIE, 'v'), (_VIE - timedelta(hours=1), 'u')], [(_SAB, 'v'), (_DOM, 'v')], _FINDE),
+   _DOM)
+eq('(J) 🔴 [TCG] una «al dia» de un MARTES no cuenta (entre semana, 26 h sin contenido nuevo avisan)',
+   ultima_viva([(_VIE, 'v')], [(utc('2026-10-20T10:21:00'), 'v')], _FINDE), _VIE)
+eq('(J) 🔴 [TCG] una rechazada con OTRA huella (el freno) no es «al dia»',
+   ultima_viva([(_VIE, 'v')], [(_SAB, 'otra')], _FINDE), _VIE)
+eq('(J) 🔴 [TCG] ni una rechazada sin huella (None no casa con None)',
+   ultima_viva([(_VIE, None)], [(_SAB, None)], _FINDE), _VIE)
+eq('(J) [TCG] la huella que vale es la de la ULTIMA aplicada, no la de una anterior',
+   ultima_viva([(_VIE, 'v'), (_VIE - timedelta(hours=1), 'u')], [(_SAB, 'u')], _FINDE), _VIE)
+eq('(J) [TCG] una rechazada ANTERIOR a la ultima aplicada no adelanta nada',
+   ultima_viva([(_DOM, 'v')], [(_SAB, 'v')], _FINDE), _DOM)
+eq('(J) 🔴 [los demas] sin `al_dia_cuenta` una «al dia» del sabado NO cuenta',
+   ultima_viva([(_VIE, 'v')], [(_SAB, 'v')], ()), _VIE)
+_x_tcg = HORARIOS['TCG']['umbral_h']
+eq('(J) 🔴 [TCG] el fin de semana sin nada desde el viernes 17:21: el sabado a las 18:00 aun no '
+   '(24,65 h), el domingo a las 06:00 SI (36,65 h)',
+   (esta_mudo(horas_de_silencio(_VIE, utc('2026-10-17T18:00:00'), False, False), _x_tcg),
+    esta_mudo(horas_de_silencio(_VIE, utc('2026-10-18T06:00:00'), False, False), _x_tcg)),
+   (False, True))
+eq('(J) [TCG] los huecos del horario: noche 14 h, viernes-sabado 17, sabado-domingo 24 y '
+   'domingo-lunes 21: ninguno llega a la X',
+   [esta_mudo(h, _x_tcg) for h in (14.0, 17.0, 24.0, 21.0)], [False] * 4)
 
 # ---------------------------------------------------------------------------
 # (D) Las dos direcciones del descuento: el MISMO hueco, los DOS calendarios
@@ -576,20 +696,28 @@ eq('(B) 🔴 todo director que existe tiene su linea en la tabla (si no, saldria
    [p for p in _directores if p not in HORARIOS], [])
 eq('(B) 🔴 y toda linea sin director es del escaner 2 (`disp_pasada`), no un despiste',
    sorted(p for p in HORARIOS if p not in _directores and p not in _de_disp), [])
-eq('(B) 🔴 las fuentes son dos y se escriben bien (una fuente mal escrita leeria la otra)',
-   sorted(set(c['fuente'] for c in HORARIOS.values())), ['disp_pasada', 'escaner_memoria'])
+# 🆕 14-oct-2026 (T5c): con TCG en `disp_pasada` ya nadie usa 'escaner_memoria' (el codigo
+#    la conserva: las roturas (R) la usan). Lo que se exige es que no haya una mal escrita.
+eq('(B) 🔴 las fuentes se escriben bien (una fuente mal escrita leeria la otra)',
+   sorted(set(c['fuente'] for c in HORARIOS.values()) - {'disp_pasada', 'escaner_memoria'}), [])
 # 🆕 07-oct-2026 (OC5): OCIOSTOCK pasa a `disp_pasada`. Su director viejo SIGUE en
 #    .github/workflows (director-ociostock.yml) y tiene su linea: la regla de arriba se
 #    cumple igual (todo director tiene linea; las lineas sin director son de disp_pasada).
 # 🆕 10-oct-2026 (DB6): DBLINE pasa a `disp_pasada`, como OCIOSTOCK el 07-oct.
-eq('(B) 🔴 DBLINE, HEO, OCIOSTOCK y OSMA se vigilan en `disp_pasada` (lo que leen Reponer y el Trackeador)',
-   _de_disp, ['DBLINE', 'HEO', 'OCIOSTOCK', 'OSMA'])
-eq('(B) 🔴 TCG sigue EXACTAMENTE como estaba: `escaner_memoria`',
-   sorted(p for p in HORARIOS if HORARIOS[p]['fuente'] == 'escaner_memoria'), ['TCG'])
-eq('(B) 🔴 …con su plazo de siempre (22 h) y sin descontar nada',
-   [(p, HORARIOS[p]['umbral_h'], HORARIOS[p]['descansa_domingo'], HORARIOS[p]['descansa_sabado'])
-    for p in ('TCG',)],
-   [('TCG', 22, False, False)])
+# 🆕 14-oct-2026 (T5c): TCG pasa a `disp_pasada`, como DBLINE el 10-oct.
+eq('(B) 🔴 los CINCO se vigilan en `disp_pasada` (lo que leen Reponer y el Trackeador)',
+   _de_disp, ['DBLINE', 'HEO', 'OCIOSTOCK', 'OSMA', 'TCG'])
+eq('(B) 🔴 y ninguno sigue en `escaner_memoria` (TCG la dejo el 14-oct: su director viejo se apago)',
+   sorted(p for p in HORARIOS if HORARIOS[p]['fuente'] == 'escaner_memoria'), [])
+eq('(B) 🔴 TCG (T5c): 26 h, ningun dia descontado, franja 07-17 UTC con `ventana_ancha`',
+   (HORARIOS['TCG']['umbral_h'], HORARIOS['TCG']['descansa_domingo'],
+    HORARIOS['TCG']['descansa_sabado'], HORARIOS['TCG'].get('ventana_ancha'),
+    HORARIOS['TCG']['primera_h'], HORARIOS['TCG']['ultima_h']), (26, False, False, True, 7, 17))
+eq('(B) 🔴 …y TCG es el UNICO al que le cuenta una «al dia» (a OcioStock, por ejemplo, NO: su '
+   'fichero se rehace cada noche y un dia entero «al dia» es lo que hay que saber)',
+   sorted(p for p in HORARIOS if HORARIOS[p].get('al_dia_cuenta')), ['TCG'])
+eq('(B) 🔴 …y su director viejo sigue existiendo y con linea (el .yml queda; se apaga en la base)',
+   'TCG' in _directores and 'TCG' in HORARIOS, True)
 eq('(B) 🔴 DBLINE (DB6): cada hora de lunes a sabado -> 26 h, el domingo descontado y el sabado no, '
    'franja 05-19 UTC con `ventana_ancha`',
    (HORARIOS['DBLINE']['umbral_h'], HORARIOS['DBLINE']['descansa_domingo'],
@@ -715,6 +843,13 @@ for _p in sorted(HORARIOS):
            % (_p, _i2, _f2), (_d2 <= 4.0, 4 <= _i2 and _f2 <= 15), (True, True))
 
 # La otra direccion: un cron que se dejara la tarde SI tendria que salir mal.
+# 🆕 14-oct-2026 (T5c) · TCG pasa tambien el fin de semana, UNA vez, a las 12:20 Madrid (10:20
+#    UTC en verano, 11:20 en invierno: `disp_parametros.horario_finde` = [12]). Si esa se cae,
+#    su plazo vence a las 12-13 UTC del dia siguiente: dentro del dia, y avisado en 4 h.
+for _h_finde in (10, 11):
+    _vf = (_h_finde + HORARIOS['TCG']['umbral_h']) % 24
+    eq('(G) [TCG] 🔴 la pasada del fin de semana (%02d UTC) vence a las %02d:00 y se avisa en 4 h'
+       % (_h_finde, _vf), (demora_maxima(_vf, _vf + 1, _horas_cron) <= 4.0, 4 <= _vf <= 15), (True, True))
 eq('(G) 🔴 …y un cron que se dejara la tarde daria una demora enorme',
    demora_maxima(*ventana_de_vencimiento(HORARIOS['HEO']), horas_cron=[6, 8]) > 4.0, True)
 
@@ -825,18 +960,49 @@ _foto = correr('foto_hoy')
 eq('(C) [foto_hoy] 🔴 con la foto de PRODUCCION de hoy, nada en rojo (exit 0)', _foto['codigo'], 0)
 eq('(C) [foto_hoy] 🔴 los cinco al dia, HEO y OSMA incluidos', _foto['veredicto'], _AL_DIA)
 eq('(C) [foto_hoy] cero Telegram', _foto['telegrams'], 0)
-eq('(C) [foto_hoy] y el log dice DE DONDE sale la fecha de DBLINE, HEO, OCIOSTOCK y OSMA',
+eq('(C) [foto_hoy] y el log dice DE DONDE sale la fecha de los cinco: disp_pasada',
    [bool(re.search(r'^  %s .*fuente disp_pasada$' % p, _foto['salida'], re.M))
-    for p in ('DBLINE', 'HEO', 'OCIOSTOCK', 'OSMA')], [True, True, True, True])
-eq('(C) [foto_hoy] …y la de TCG sigue siendo escaner_memoria',
-   bool(re.search(r'^  TCG .*fuente escaner_memoria$', _foto['salida'], re.M)), True)
-eq('(C) [foto_hoy] 🔴 OCIOSTOCK lee SU pasada aplicada (07:13 UTC), no su rechazada «al dia» (11:12) '
-   'ni la memoria del viejo (13:01)',
-   bool(re.search(r'^  OCIOSTOCK +ultima 2026-10-10 07:13 UTC .*fuente disp_pasada$',
+    for p in ('DBLINE', 'HEO', 'OCIOSTOCK', 'OSMA', 'TCG')], [True] * 5)
+eq('(C) [foto_hoy] 🔴 OCIOSTOCK lee SU pasada aplicada (07:12 UTC), no su rechazada «al dia» (11:12) '
+   'ni la memoria del viejo (07:02)',
+   bool(re.search(r'^  OCIOSTOCK +ultima 2026-10-14 07:12 UTC .*fuente disp_pasada$',
                   _foto['salida'], re.M)), True)
-eq('(C) [foto_hoy] 🔴 DBLINE (DB6) lee SU pasada aplicada (14:06 UTC), no la memoria del viejo (10:31)',
-   bool(re.search(r'^  DBLINE +ultima 2026-10-10 14:06 UTC .*fuente disp_pasada$',
+eq('(C) [foto_hoy] 🔴 DBLINE (DB6) lee SU pasada aplicada (13:06 UTC), no la memoria del viejo (10-oct)',
+   bool(re.search(r'^  DBLINE +ultima 2026-10-14 13:06 UTC .*fuente disp_pasada$',
                   _foto['salida'], re.M)), True)
+eq('(C) [foto_hoy] 🔴 TCG (T5c) lee SU pasada aplicada (13:22 UTC), no la memoria del viejo (12:02)',
+   bool(re.search(r'^  TCG +ultima 2026-10-14 13:22 UTC .*fuente disp_pasada$',
+                  _foto['salida'], re.M)), True)
+
+# 🆕 14-oct-2026 (T5c) · TCG en la foto, con el reloj fijo.
+_tn = correr('tcg_noche')
+eq('(C) [tcg_noche] 🔴 el hueco de la noche (martes 17:21 a miercoles 06:00, 12,7 h): VERDE',
+   (_tn['codigo'], _tn['telegrams'], _tn['veredicto']), (0, 0, _AL_DIA))
+_tm = correr('tcg_miercoles_14h')
+eq('(C) [tcg_miercoles_14h] 🔴 TCG con 27,7 h sin aplicada y todo «al dia» desde entonces, entre semana: '
+   'ROJO y SOLO TCG', (_tm['codigo'], _tm['veredicto']), (1, dict(_AL_DIA, TCG='MUDO')))
+eq('(C) [tcg_miercoles_14h] 🔴 un Telegram que dice cuanto lleva, que es del escaner 2 y lo del fin de semana',
+   (_tm['telegrams'], 'lleva 28 h sin escribir' in _tm['texto'], 'disp_pasada' in _tm['texto'],
+    'a TCG, el fin de semana, también vale una «al día»' in _tm['texto']), (1, True, True, True))
+eq('(C) [tcg_miercoles_14h] 🔴 su escaner_memoria FRESCO (señuelo) no lo salva',
+   _tm['marca'], {'TCG': _tm['hoy']})
+_tfd = correr('tcg_finde_al_dia_domingo')
+eq('(C) [tcg_finde_al_dia_domingo] 🔴 el sabado «al dia» cuenta: el domingo a las 06:00, VERDE',
+   (_tfd['codigo'], _tfd['telegrams'], _tfd['veredicto']), (0, 0, _AL_DIA))
+eq('(C) [tcg_finde_al_dia_domingo] …y el log da como ultima la «al dia» del sabado 10:21',
+   bool(re.search(r'^  TCG +ultima 2026-10-17 10:21 UTC ', _tfd['salida'], re.M)), True)
+_tfl = correr('tcg_finde_al_dia_lunes')
+eq('(C) [tcg_finde_al_dia_lunes] 🔴 dos «al dia» el fin de semana: el lunes a las 10:00, VERDE '
+   '(desde el domingo 10:21; las del lunes no cuentan)',
+   (_tfl['codigo'], _tfl['telegrams'], _tfl['veredicto'],
+    bool(re.search(r'^  TCG +ultima 2026-10-18 10:21 UTC ', _tfl['salida'], re.M))),
+   (0, 0, _AL_DIA, True))
+_tfm = correr('tcg_finde_muerto')
+eq('(C) [tcg_finde_muerto] 🔴 nada desde el viernes 17:21: el domingo a las 06:00, ROJO y SOLO TCG',
+   (_tfm['codigo'], _tfm['veredicto'], _tfm['telegrams']), (1, dict(_AL_DIA, TCG='MUDO'), 1))
+_tfo = correr('tcg_finde_otra_huella')
+eq('(C) [tcg_finde_otra_huella] 🔴 una rechazada con otra huella, otra sin huella y una fallida NO son '
+   '«al dia»: ROJO', (_tfo['codigo'], _tfo['veredicto']['TCG']), (1, 'MUDO'))
 
 # 🆕 10-oct-2026 (DB6) · DBLINE en la foto, con el reloj fijo.
 _dbm = correr('dbline_martes_10h')
@@ -973,6 +1139,29 @@ eq('(R) 🔴 DBLINE mirado otra vez en escaner_memoria: el mudo del martes sale 
 _r8 = correr('dbline_lunes_10h', ruta=estropeado(_dbline_sin_domingo))
 eq('(R) 🔴 DBLINE sin descontar el domingo: el lunes daria aviso falso (ROJO, el banco lo caza)',
    (_r8['codigo'], _r8['veredicto']['DBLINE']), (1, 'MUDO'))
+def _tcg_a_memoria(tabla):
+    tabla['TCG']['fuente'] = 'escaner_memoria'
+
+
+def _tcg_sin_al_dia(tabla):
+    del tabla['TCG']['al_dia_cuenta']
+
+
+def _tcg_al_dia_siempre(tabla):
+    tabla['TCG']['al_dia_cuenta'] = (0, 1, 2, 3, 4, 5, 6)
+
+
+# 🆕 14-oct-2026 (T5c) · Las roturas de TCG, sobre SUS escenarios (en la foto de hoy las dos
+#    fuentes dicen «al dia», como las de OcioStock).
+_r9 = correr('tcg_miercoles_14h', ruta=estropeado(_tcg_a_memoria))
+eq('(R) 🔴 TCG mirado otra vez en escaner_memoria: el mudo del miercoles sale VERDE (el banco lo caza)',
+   (_r9['codigo'], _r9['veredicto']['TCG']), (0, 'al dia'))
+_r10 = correr('tcg_finde_al_dia_lunes', ruta=estropeado(_tcg_sin_al_dia))
+eq('(R) 🔴 TCG sin contar las «al dia» del fin de semana: el lunes daria aviso falso (ROJO, el banco lo caza)',
+   (_r10['codigo'], _r10['veredicto']['TCG']), (1, 'MUDO'))
+_r11 = correr('tcg_miercoles_14h', ruta=estropeado(_tcg_al_dia_siempre))
+eq('(R) 🔴 TCG contando las «al dia» TAMBIEN entre semana: el mudo del miercoles sale VERDE (el banco lo caza)',
+   (_r11['codigo'], _r11['veredicto']['TCG']), (0, 'al dia'))
 _r4 = correr('foto_hoy', ruta=estropeado(lambda t: None))
 eq('(R) …y la copia SIN estropear (control) sale verde: las roturas no son un banco roto',
    (_r4['codigo'], _r4['veredicto']), (0, _AL_DIA))
