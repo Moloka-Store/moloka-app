@@ -9,6 +9,8 @@ listado filtrado (el POST de solo consulta del filtro de la web, 111 tarjetas po
    peticiones (al azar) una mas larga, de 8 a 20 s.
 🔴 AL PRIMER BLOQUEO, PARA: un 403, 429 o 503, una pagina de captcha o de «comprobando tu navegador», un fallo de red
    o una respuesta que no es lo que se pidio → `Bloqueo`, y quien llama deja de pedir nada a la web. Nunca se reintenta.
+🆕 (Encargo T4, 14-oct-2026) El listado de UNA MARCA (Funko): el mismo POST con la casilla de marca del filtro, y
+   `total_listado`, lo que la web dice tener (para saber si se ha leido entero).
 🔴 REPO PUBLICO: este modulo NO imprime. Los textos de `Bloqueo` los escribe el (codigos y que se pedia), nunca una URL
    con datos, la respuesta, el usuario o la clave.
 """
@@ -47,6 +49,8 @@ class Web:
         self.azar = azar or random.Random()
         self.peticiones = 0
         self._siguiente_larga = self.azar.randint(*CADA_LARGA)
+        # (Encargo T4) Cuantos productos dice la web que tiene el ultimo listado (products_num de su primera pagina).
+        self.total_listado = None
 
     def pausa(self):
         espera = self.azar.uniform(*PAUSA)
@@ -118,21 +122,24 @@ class Web:
             raise Bloqueo(f'ficha: la web responde HTTP {r.status_code}')
         return r.text
 
-    def listado(self, categoria):
-        """Las tarjetas (HTML) del listado filtrado (Disponible, Oferta y Saldo) de una categoria, pagina a pagina.
-        Devuelve (trozos_html, n_paginas). ListadoNoEntendido (de escaner2_tcg_tramos) si la forma no es la medida."""
-        from escaner2_tcg_tramos import ListadoNoEntendido, formulario_filtro, tarjetas
+    def listado(self, categoria, marca=None):
+        """Las tarjetas (HTML) del listado filtrado (Disponible, Oferta y Saldo) de una categoria, pagina a pagina; con
+        `marca` (encargo T4), solo las de esa marca. Devuelve (trozos_html, n_paginas) y deja en `total_listado` lo que
+        la web dice tener. ListadoNoEntendido (de escaner2_tcg_tramos) si la forma no es la medida."""
+        from escaner2_tcg_tramos import ListadoNoEntendido, formulario_filtro, tarjetas, valor_de_marca
         url_cat = f'{BASE}/es/{categoria}'
         r = self._pedir('listado (categoría)', 'GET', url_cat, timeout=ESPERA_S)
         if r.status_code != 200:
             raise Bloqueo(f'listado: la categoría responde HTTP {r.status_code}')
         ocultos, campo, valores = formulario_filtro(r.text)
+        con_marca = [('m[]', valor_de_marca(r.text, marca))] if marca else []
+        self.total_listado = None
         trozos, vistas = [], set()
         disparo = 'f' + ''.join(ch for ch in campo if ch.isdigit())  # «f[53][]» → «f53», como lo manda la web
         for pagina in range(1, MAX_PAGINAS + 1):
             campos = [(k, (str(POR_PAGINA) if k == 'nb_items' else str(pagina) if k == 'page' else v))
                       for k, v in ocultos]
-            campos += [(campo, v) for v in valores]
+            campos += [(campo, v) for v in valores] + con_marca
             datos = {'params': urlencode(campos) + '&primary_filter=', 'current_url': url_cat,
                      'trigger': 'af_page' if pagina > 1 else disparo}
             rr = self._pedir('listado (página)', 'POST', FILTRO_URL, data=datos, headers=_XHR, timeout=90)
@@ -145,6 +152,9 @@ class Web:
             html = j.get('product_list_html') if isinstance(j, dict) else None
             if not isinstance(html, str):
                 raise ListadoNoEntendido('listado: el JSON no trae product_list_html')
+            if pagina == 1:
+                total = j.get('products_num')
+                self.total_listado = total if isinstance(total, int) and not isinstance(total, bool) else None
             cards = tarjetas(html)
             nuevas = [t for t in cards if t['url'] and t['url'] not in vistas]
             vistas.update(t['url'] for t in nuevas)

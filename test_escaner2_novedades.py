@@ -43,6 +43,9 @@ QUE PRUEBA:
       sin ellas); su Telegram «Novedades OcioStock Funko»; la seleccion + valoracion de una pasada
       (`novedades_tras_la_pasada`, que apunta el fallo de la seleccion como la foto de HEO); y el registro discreto (ni
       EAN, ni ASIN, ni el texto de un error). Datos inventados.
+  (TC) (encargo T4) TCG, solo Funko: su Excel en tcg/novedades/ (Novedades_TCG_Funko_…), «Novedades TCG Funko» en el
+       Telegram, las dos columnas del escalón al final y el PA = el precio de compra de la foto tal cual; sus cuentas
+       (escaner2_tcg_novedades_cuentas.py), enteras, como las de DBLine.
   (DB) (encargo DB4) DBLINE con DOS marcas: su Excel en dbline/novedades/ (Novedades_DBLINE_FunkoPyramid_…, la forma que
       exige la base), con la marca de la foto en cada fila y «Fin de la oferta» al final; su Telegram «Novedades DBLine
       Funko y Pyramid»; la comprobación del título que no aparta las fichas de Pyramid (y sí las de Funko); su selección
@@ -1205,6 +1208,86 @@ eq('(DB6) entero: a mano, la selección de esa pasada (en minúsculas) y verde; 
    (cod_db1, b_db1.llamadas('nov_seleccionar_pasada'), cod_db2, b_db2.rpcs, 'APAGADO' in out_db2, cod_db3, b_db3.rpcs, b_db3.ops,
     'NOVEDADES_CUENTAS_NO_EJECUTADAS' in out_db3),
    (0, [{'p_pasada': '0db40000-0000-0000-0000-000000000001'}], 0, [], True, 1, [], [], True))
+
+# ── (TC) (encargo T4) TCG, SOLO FUNKO, POR EL MISMO CAMINO ─────────────────────────────────────────
+#    Datos inventados. Lo propio de TCG: «TCG Funko» en lo que se lee, su carpeta y su nombre de Excel (el que la base
+#    admitirá con 20261014150000: tcg/novedades/…/Novedades_TCG_Funko_…), las dos columnas del escalón al final de la hoja
+#    «Novedades» (las uds del tramo más barato y el suelto del Excel) y el PA = el precio de compra de la foto, tal cual.
+def con_tcg(base, novedades_tc=(), valoraciones_tc=(), valorar=True, escalon=None):
+    base.tablas['nov_parametros'].append({'proveedor': 'TCG', 'marcas': ['Funko'], 'valorar': valorar, 'keepa_reserva': 20,
+                                          'keepa_tope_peticion': 3, 'keepa_horas_nuevo': 360, 'keepa_dias_precio': 15,
+                                          'escaneo_pro_dias': 15})
+    base.tablas['escaner2_parametros'].append({'proveedor': 'TCG', 'umbral_caidas_30d': 6,
+                                               'paises_filtro': ['ES', 'IT', 'FR', 'DE'], 'paises_calculo': ['ES', 'IT', 'FR', 'DE']})
+    for n in novedades_tc:
+        base.tablas['nov_novedad'].append(dict(n, proveedor='TCG', **(escalon or {}).get(n['id'], {})))
+        base.tablas['disp_estado'].append({'proveedor': 'TCG', 'producto_prov': n['producto_prov'], 'ean_core': n['ean_norm'],
+                                           'ean_norm': n['ean_norm'], 'nombre': n['nombre'], 'disponible': True, 'ausencias': 0,
+                                           'es_chase': n['es_chase'], 'precio_catalogo': n['precio_ahora'], 'marca': 'Funko'})
+    base.tablas['nov_valoracion'] += [dict(v) for v in valoraciones_tc]
+    return base
+
+
+eq('(TC1) el Excel de TCG va a tcg/novedades/<día>/Novedades_TCG_Funko_<hora de Madrid> (la forma de nov_excel_ruta_excel_check '
+   'que pone 20261014150000); los demás, con su nombre de siempre',
+   (nv.ruta_del_excel(AHORA, 'TCG'), bool(_re.match(_RUTA_BASE % 'tcg', nv.ruta_del_excel(AHORA, 'TCG'))),
+    nv.ruta_del_excel(AHORA, 'DBLINE'), nv.ruta_del_excel(AHORA)),
+   ('tcg/novedades/2026-09-29/Novedades_TCG_Funko_2026-09-29_2005.xlsx', True,
+    'dbline/novedades/2026-09-29/Novedades_DBLINE_FunkoPyramid_2026-09-29_2005.xlsx',
+    'heo/novedades/2026-09-29/Novedades_HEO_Funko_2026-09-29_2005.xlsx'))
+eq('(TC2) el Telegram dice «Novedades TCG Funko»; sin COMPRAR (y completo, sin avalancha) no se manda',
+   (nv.mensaje_telegram([v_compra(1)], proveedor='TCG').split('\n')[0],
+    nv.mensaje_telegram([dict(v_compra(1), decision='VALORAR')], proveedor='TCG'),
+    'TCG Funko' in nv.mensaje_telegram([], avalancha=150, proveedor='TCG')),
+   ('🟢 <b>Novedades TCG Funko</b>: 1 para COMPRAR', None, True))
+# Una de TCG «lista» que sale COMPRAR: el Excel en tcg/novedades/ con las uds del tramo y el suelto al final; el PA, el
+# precio de compra de la foto (precio_ahora: el del tramo más barato), tal cual, sin el × 0,99.
+VALS_TC = [dict(v, novedad_id='tc-49') for v in VALS_COMPRA]
+_tc9 = dict(novedad(9, estado='lista'), id='tc-49', producto_prov='889698100491', ean_norm='889698100491')
+b = con_tcg(Base(), [_tc9], VALS_TC, escalon={'tc-49': {'uds_escalon': 12, 'precio_unidad': 8.55}})
+ok, res_tc = nv.valorar_pasada(b, 'PASADA-TC', keepa_llave=LLAVE, http=KeepaFalso(), dormir=lambda s: None, ahora=lambda: AHORA,
+                               imprimir=lambda *a, **k: None, run_id='36700000049', env={}, post=post_falso, proveedor='TCG')
+eq('(TC3) 🔑 el Excel de TCG: en tcg/novedades/<día>/, Novedades_TCG_Funko_<hora>, y su fila en nov_excel con SU proveedor',
+   ([ruta for _c, ruta, _x, _o in b.subidos], [(x['proveedor'], x['ruta_excel'], x['pasada_id']) for x in b.tablas['nov_excel']], ok),
+   (['tcg/novedades/2026-09-29/Novedades_TCG_Funko_2026-09-29_2005.xlsx'],
+    [('TCG', 'tcg/novedades/2026-09-29/Novedades_TCG_Funko_2026-09-29_2005.xlsx', 'PASADA-TC')], True))
+hoja = [list(r) for r in load_workbook(_io.BytesIO(b.subidos[0][2]))['Novedades'].iter_rows(values_only=True)]
+eq('(TC3) …la hoja «Novedades» lleva AL FINAL «Uds. escalón» y «Precio unidad» (las del tramo y el suelto que guardó la '
+   'selección)', (hoja[0][-2:], hoja[1][-2:]), (['Uds. escalón', 'Precio unidad'], [12, 8.55]))
+_cuenta_tc = next(p for p in b.llamadas('nov_guardar_cuenta') if p['p_novedad'] == 'tc-49')
+eq('(TC4) 🔑 el PA de la cuenta es el precio de compra de la novedad tal cual (sin × 0,99)',
+   sorted({x['pa'] for x in _cuenta_tc['p_paises']}), [_tc9['precio_ahora']])
+b = con_tcg(Base(), valorar=False)
+ok, sel = nv.novedades_tras_la_pasada(b, 'PASADA-TC', 'TCG', keepa_llave=LLAVE, imprimir=lambda *a, **k: None,
+                                      http=KeepaFalso(), dormir=lambda s: None, ahora=lambda: AHORA, env={}, post=post_falso)
+eq('(TC5) la selección de una pasada de TCG y su valoración APAGADA (como nace): cerrada «apagada», sin Keepa',
+   (ok, [n for n, _p in b.rpcs], cierre(b)['estado'], b.tablas['nov_keepa']),
+   (True, ['nov_seleccionar_pasada', 'nov_cerrar_valoracion'], 'apagada', []))
+
+# (TC6) escaner2_tcg_novedades_cuentas.py: el MISMO solo_cuentas con proveedor TCG y el registro discreto; entero (runpy).
+with open(os.path.join(AQUI, 'escaner2_tcg_novedades_cuentas.py'), encoding='utf-8') as fh:
+    _fuente_tc = fh.read()
+_llamadas_tc = [n for n in ast.walk(ast.parse(_fuente_tc)) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr in ('solo_cuentas', 'novedades_tras_la_pasada')]
+eq('(TC6) las cuentas de TCG: solo_cuentas con proveedor=TCG y novedades_tras_la_pasada con TCG, las dos con el registro '
+   'discreto; sin el texto de los avisos',
+   (sorted((n.func.attr, ast.unparse(n.args[2]) if len(n.args) > 2 else
+            dict((k.arg, ast.unparse(k.value)) for k in n.keywords).get('proveedor'),
+            dict((k.arg, ast.unparse(k.value)) for k in n.keywords).get('imprimir')) for n in _llamadas_tc),
+    "res.get('avisos') or res}" in _fuente_tc),
+   ([('novedades_tras_la_pasada', "'TCG'", 'nv.imprimir_discreto'), ('solo_cuentas', "'TCG'", 'nv.imprimir_discreto')], False))
+b_tc1 = con_tcg(Base(valorar=False), valorar=False)
+cod_tc1, _out = correr_cuentas_oc(dict(_ENT, NOVEDADES_PASADA='0AC40000-0000-0000-0000-000000000001'), b_tc1,
+                                  'escaner2_tcg_novedades_cuentas.py')
+b_tc2 = con_tcg(Base(valorar=False), valorar=False)
+cod_tc2, out_tc2 = correr_cuentas_oc(dict(_ENT, NOVEDADES_PASADA=''), b_tc2, 'escaner2_tcg_novedades_cuentas.py')
+b_tc3 = con_tcg(Base())
+cod_tc3, out_tc3 = correr_cuentas_oc(dict(_ENT, NOVEDADES_PASADA='no-es-un-uuid'), b_tc3, 'escaner2_tcg_novedades_cuentas.py')
+eq('(TC6) entero: a mano, la selección de esa pasada (en minúsculas) y verde; vacía y TCG apagado, ni una función y verde '
+   '(lo dice); con algo que no es un uuid, ROJO sin tocar la base',
+   (cod_tc1, b_tc1.llamadas('nov_seleccionar_pasada'), cod_tc2, b_tc2.rpcs, 'APAGADO' in out_tc2, cod_tc3, b_tc3.rpcs,
+    b_tc3.ops, 'NOVEDADES_CUENTAS_NO_EJECUTADAS' in out_tc3),
+   (0, [{'p_pasada': '0ac40000-0000-0000-0000-000000000001'}], 0, [], True, 1, [], [], True))
 
 print()
 if fallos:

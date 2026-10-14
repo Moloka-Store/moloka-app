@@ -137,7 +137,8 @@ print('    miro %d ficheros .py (%s) y %d workflows' % (len(_PY), ', '.join(_PY)
 # (Encargo BE4, 10-oct-2026) Y el Escaneo PRO de BEMS: su modulo, su barrido, su cruce y sus dos workflows.
 # (Encargo T2, 13-oct-2026) Y la foto de disponibilidad de TCG con su lector de tramos: sus reglas, su web, su pasada y su workflow.
 # (Encargo T3, 14-oct-2026) Y el Escaneo PRO de TCG: su modulo, su barrido, su cruce y sus dos workflows.
-eq('(A) hay qué mirar: los programas, el motor, la huella y los cinco heredados, y los veintitrés workflows',
+# (Encargo T4, 14-oct-2026) Y las cuentas de las novedades de Funko de TCG: su programa y su workflow.
+eq('(A) hay qué mirar: los programas, el motor, la huella y los cinco heredados, y los veinticuatro workflows',
    ({'escaner2_motor.py', 'escaner2_heo_barrido.py', 'escaner2_heo_cruce.py', 'escaner2_heo_disponibilidad.py',
      'escaner2_disponibilidad.py', 'escaner2_novedades.py', 'escaner2_heo_novedades_cuentas.py',
      'escaner2_osma_disponibilidad.py', 'escaner2_osma.py', 'escaner2_osma_barrido.py',
@@ -149,7 +150,7 @@ eq('(A) hay qué mirar: los programas, el motor, la huella y los cinco heredados
      'escaner2_dbline_novedades_cuentas.py', 'escaner2_bems.py', 'escaner2_bems_disponibilidad.py',
      'escaner2_bems_pro.py', 'escaner2_bems_barrido.py', 'escaner2_bems_cruce.py', 'escaner2_tcg.py',
      'escaner2_tcg_tramos.py', 'escaner2_tcg_web.py', 'escaner2_tcg_disponibilidad.py', 'escaner2_tcg_pro.py',
-     'escaner2_tcg_barrido.py', 'escaner2_tcg_cruce.py'}
+     'escaner2_tcg_barrido.py', 'escaner2_tcg_cruce.py', 'escaner2_tcg_novedades_cuentas.py'}
     | {h for h, _v in HEREDADOS}) <= set(_PY)
    and [os.path.basename(y) for y in _YML] == ['escaner2-bems-barrido.yml', 'escaner2-bems-cruce.yml',
                                                'escaner2-bems-disponibilidad.yml',
@@ -162,7 +163,7 @@ eq('(A) hay qué mirar: los programas, el motor, la huella y los cinco heredados
                                                'escaner2-osma-barrido.yml', 'escaner2-osma-cruce.yml',
                                                'escaner2-osma-disponibilidad.yml', 'escaner2-tcg-barrido.yml',
                                                'escaner2-tcg-cruce.yml', 'escaner2-tcg-disponibilidad.yml',
-                                               'escaner2-zentrada-barrido.yml',
+                                               'escaner2-tcg-novedades-cuentas.yml', 'escaner2-zentrada-barrido.yml',
                                                'escaner2-zentrada-cruce.yml'], True)
 _hallado = {f: lecturas_del_viejo(leer(f)) for f in _PY}
 _hallado.update({f: lecturas_yml(leer(f)) for f in _YML})

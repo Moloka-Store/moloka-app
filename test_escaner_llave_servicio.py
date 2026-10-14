@@ -185,6 +185,8 @@ PROGRAMAS = [
     ('escaner2_ociostock_novedades_cuentas.py', 'solo-servicio', 1),   # escaner2-ociostock-novedades-cuentas
     # 🆕 09-oct-2026 (encargo DB4): las de DBLine, igual (el mismo modulo con proveedor='DBLINE').
     ('escaner2_dbline_novedades_cuentas.py', 'solo-servicio', 1),   # escaner2-dbline-novedades-cuentas
+    # 🆕 14-oct-2026 (encargo T4): las de TCG, igual (el mismo modulo con proveedor='TCG').
+    ('escaner2_tcg_novedades_cuentas.py', 'solo-servicio', 1),   # escaner2-tcg-novedades-cuentas
     # 🆕 02-oct-2026 (encargo AG, Escaneo PRO de OSMA): el barrido lee `productos` (los enlaces por código) y el
     #    cruce tambien (el IVA de la ficha y el factor de nuestros packs); los dos corren desatendidos.
     ('escaner2_osma_barrido.py',   'solo-servicio',         1),   # escaner2-osma-barrido
@@ -633,7 +635,8 @@ eq('(B) 🔴 ningun paso lanza ninguno de estos programas sin la llave de servic
 # (OC3) +1, el cruce de OcioStock · (Encargo OC4, 07-oct-2026) +1, el paso de las cuentas de las novedades de OcioStock.
 # (Encargo DB3, 09-oct-2026) +1, el cruce de DBLine. (Encargo DB4, 09-oct-2026) +1, el paso de las cuentas de las novedades de DBLine.
 # (Encargo BE4, 10-oct-2026) +1, el cruce de BEMS. (Encargo T3, 14-oct-2026) +1, el cruce de TCG.
-eq('(D) …y en total se han mirado los VEINTE pasos que existen, no cero', _total, 20)
+# (Encargo T4, 14-oct-2026) +1, el paso de las cuentas de las novedades de TCG.
+eq('(D) …y en total se han mirado los VEINTIÚN pasos que existen, no cero', _total, 21)
 
 # (C) la otra direccion: un paso que lanza el escaner sin la llave tiene que
 # salir en la lista. Este es el estado exacto de `director-dbline.yml` ayer.
