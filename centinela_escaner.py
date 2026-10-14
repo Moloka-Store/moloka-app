@@ -4,8 +4,9 @@
 # MOLOKA - CENTINELA DEL PROVEEDOR MUDO
 # ------------------------------------------------------------
 # QUE VIGILA: la ULTIMA escritura de cada proveedor. Si uno lleva mas horas que su
-# umbral sin escribir, avisa por Telegram y el run sale en ROJO.
-#   - TCG (escaner viejo): el MAXIMO de `fecha` en `escaner_memoria`.
+# umbral sin escribir, avisa por Telegram y el run sale en ROJO. Desde el 14-oct-2026
+# (encargo T5c) los cinco se vigilan en `disp_pasada`; la fuente 'escaner_memoria' (el
+# MAXIMO de `fecha` del escaner viejo) sigue en el codigo, pero ya no la usa ninguno.
 #   - HEO y OSMA (escaner 2, desde el 03-oct-2026): la ultima pasada 'aplicada'
 #     de `disp_pasada` (`terminada_en`). El director viejo de HEO se apago a
 #     proposito el 01-oct y `escaner_memoria` ya no se mueve para HEO ni para OSMA:
@@ -19,6 +20,12 @@
 #     del catalogo general, el dia que se pulsa su interruptor y se apaga su
 #     director viejo (`reglas_director` DBLINE inactivo): su `escaner_memoria` deja
 #     de moverse, y mirarla daria MUDO a las 26 h.
+#   - TCG (escaner 2, encargo T5c, 14-oct-2026): tambien `disp_pasada`, la foto
+#     horaria del Excel. Su director viejo se apago con el T5 (`reglas_director` TCG
+#     inactivo, 14-oct 15:28 Madrid) y su `escaner_memoria` dejo de moverse a las
+#     12:02 UTC: mirarla daria MUDO a las 22 h. 🔑 A TCG, y solo a el, una pasada
+#     «al dia» del SABADO o del DOMINGO le cuenta como señal de vida (`al_dia_cuenta`):
+#     el porque, mas abajo.
 #
 # CUANDO MIRA: 06:00, 10:00, 14:00 y 18:00 UTC. Cuatro pasadas, ninguna de noche
 # -- el porque, y por que el hueco nocturno no retrasa nada, esta en el cron de
@@ -39,7 +46,7 @@
 #
 # 🔴 SE MIRA LA TABLA, NO EL COLOR DEL RUN. Un run verde que no ha escrito nada
 #    es exactamente el fallo que se viene a cazar: la unica cifra que no opina es
-#    la fecha que hay en `escaner_memoria`.
+#    la fecha que hay en la tabla (hoy, `terminada_en` en `disp_pasada`).
 #
 # Variables de entorno: SUPABASE_URL, SUPABASE_SERVICE_KEY, TELEGRAM_TOKEN,
 # TELEGRAM_CHAT_ID.
@@ -71,9 +78,9 @@ from datetime import datetime, timedelta, timezone
 #   TCG        | 06-16, todos los dias|   ~6    |   18,00 h   |   18,00 h   | 22
 #   DBLINE     | 06-11, L a S         |   ~4    |   44,00 h   |   23,00 h   | 26
 #   OCIOSTOCK  | 07-15, L a S         |   ~5    |   40,00 h   |   18,00 h   | 22
-#   (HEO, OSMA y, desde el 07-oct-2026, OCIOSTOCK y, desde el 10-oct-2026, DBLINE:
-#   tabla propia, mas abajo; ya no salen de `escaner_memoria`. Las filas de OCIOSTOCK
-#   y DBLINE de aqui son las del escaner viejo.)
+#   (HEO, OSMA y, desde el 07-oct-2026, OCIOSTOCK, desde el 10-oct-2026, DBLINE y,
+#   desde el 14-oct-2026, TCG: tabla propia, mas abajo; ya no salen de
+#   `escaner_memoria`. Las tres filas de aqui son las del escaner viejo.)
 #
 # Con esas X, en los 28 dias medidos NO habria saltado ni un aviso falso:
 # ningun hueco descontado llego a la X de su proveedor (DBLine tuvo 2 por encima
@@ -115,7 +122,53 @@ from datetime import datetime, timedelta, timezone
 #      OSMA      | disp_pasada      | 05, L a V          |  24,00 h *  |  sab y dom  | 26
 #      OCIOSTOCK | disp_pasada      | 07, todos          |  24,00 h *  |  (ninguno)  | 26
 #      DBLINE    | disp_pasada      | 05-19, L a S       |  24,00 h *  |  domingo    | 26
-#      (* derivado del horario, no medido en la pelicula: ver arriba y abajo.)
+#      TCG       | disp_pasada (+)  | 07-17 L a V; 10 S-D|  24,00 h *  |  (ninguno)  | 26
+#      (* derivado del horario, no medido en la pelicula: ver arriba y abajo.
+#       + con las «al dia» del sabado y el domingo: ver TCG, abajo.)
+#
+# 🆕 TCG EN EL ESCANER 2 (14-oct-2026, encargo T5c). Medido el 14-oct a las 13:3x UTC
+#    (15:3x Madrid) con el conector de lectura.
+#    · EL RELOJ: cron-job.org, segun `disp_parametros` de TCG: de lunes a viernes cada
+#      hora a las :20 de 09 a 19 Madrid (07:20-17:20 UTC en verano) y sabado y domingo
+#      UNA, a las 12:20 Madrid (10:20 UTC). Huecos del horario: la noche, 17:20 a 07:20
+#      UTC = 14 h; del viernes al sabado 17 h; del sabado al domingo 24 h; del domingo
+#      al lunes 21 h. El mayor, 24 h (de ahi los 24,00 h, derivados). X = 24 + 2 = 26 h,
+#      como los otros cuatro.
+#    🔴 SIN PELICULA: 7 pasadas en `disp_pasada`, todas del 14-oct (06:38 y 08:43 UTC,
+#      a mano; y de 09:21 a 13:22 UTC una por hora), las 7 'aplicada' y con contenido
+#      nuevo cada una (siete huellas distintas): CERO «al dia» todavia, y cero del 13-oct.
+#    · «AL DIA» ES 'rechazada' Y NO CUENTA COMO ESCRITURA: si la huella del contenido es
+#      la de la ultima aplicada, la pasada se cierra 'rechazada' «al dia» (y deja SU
+#      `huella_contenido`, la misma que la de esa aplicada; escaner2_tcg_disponibilidad).
+#      Entre semana, con una pasada por hora, un Excel que no cambia en 26 h es algo que
+#      hay que saber (el Excel de TCG es la foto de Reponer). Pero el FIN DE SEMANA hay
+#      UNA pasada al dia, y una sola «al dia» basta para el aviso falso: con el viernes
+#      17:21 UTC aplicado y el sabado «al dia», el domingo a las 06:00 UTC van 36,6 h; y si
+#      el domingo tambien sale «al dia», el hueco entre aplicadas va del viernes 17:21 al
+#      lunes 07:21 UTC = 62 h.
+#    · ¿PASA? Medido en la pelicula del escaner viejo (`escaner_resultados`, 389 pasadas
+#      de TCG del 01-ago al 14-oct, cada 2 h los siete dias), sumando altas, bajas,
+#      vueltas y cambios: en 10 fines de semana (07-ago a 11-oct), la ventana viernes
+#      19:20 -> sabado 12:20 salio a CERO una vez (25/26-sep) y la del sabado al domingo,
+#      ninguna; dos «al dia» seguidas en un fin de semana, ninguna. Pasa poco, pero pasa,
+#      y la huella nueva no es la misma cuenta (lleva precios y cocientes, y la web de
+#      Funko encima cada hora), asi que la vieja solo da una idea.
+#    🔑 LA DECISION: a TCG, una pasada «al dia» TERMINADA en sabado o domingo (UTC) cuenta
+#       como señal de vida. Por que no rompe nada:
+#         - el Excel de TCG se genera en cada descarga (los bytes cambian siempre: parte
+#           T1, 1.3): una «al dia» es TCG contestando AHORA con el mismo contenido, o sea
+#           que la foto esta al dia, no que alguien se haya callado;
+#         - se reconoce POR ESTRUCTURA, no por el texto del motivo: estado 'rechazada' Y
+#           la misma `huella_contenido` que la ultima 'aplicada' (`ultima_viva`). Una
+#           'rechazada' con otra huella (el freno del 90 %) no cuenta, ni una 'fallida';
+#         - entre semana NO cuenta: ahi una tarde entera de «al dia» seguidas sigue
+#           acabando en aviso a las 26 h.
+#       Por que no se descuenta el fin de semana, como el domingo de DBLINE: TCG SI pasa
+#       el sabado y el domingo, y descontarlos seria dejar de vigilarle dos dias de cada
+#       siete (un apagon del viernes por la tarde no se veria hasta el martes). Asi, con
+#       el viernes 17:21 UTC como ultima señal, el aviso sale el domingo a las 06:00 UTC.
+#    · Con el cambio de hora del 25-oct la franja se corre una hora (08-18 UTC entre
+#      semana, 11 UTC el fin de semana); los huecos no cambian.
 #
 # 🆕 DBLINE EN EL ESCANER 2 (10-oct-2026, encargo DB6). Medido el 10-oct a las
 #    14:46 UTC en `disp_pasada`: 7 'aplicadas' en total (9-oct 17:37 y 17:39 UTC, a
@@ -162,12 +215,13 @@ from datetime import datetime, timedelta, timezone
 #
 #      proveedor  | escribe (UTC) |  X   | su plazo vence entre | demora | detectado en
 #      -----------+---------------+------+----------------------+--------+-------------
-#      TCG        | 06-16         | 22 h |   04:00 y 14:00      |  ≤ 4 h |   ≤ 26 h
 #      OCIOSTOCK  | 07 (una)      | 26 h |   09:00 y 09:00      |  ≤ 1 h |   ≤ 27 h
 #      OSMA       | 05 (una)      | 26 h |   07:00 y 07:00      |  ≤ 3 h |   ≤ 29 h
 #      HEO        | 06-19         | 26 h |   08:00 y 21:00      | ≤ 12 h |   ≤ 38 h  <- ver abajo
 #      DBLINE     | 05-19         | 26 h |   07:00 y 21:00      | ≤ 12 h |   ≤ 38 h  <- como HEO (DB6)
-#      (Hasta el 10-oct-2026, DBLINE en escaner_memoria: 06-11 UTC, vencia 08:00-13:00.)
+#      TCG        | 07-17         | 26 h |   09:00 y 19:00      | ≤ 12 h |   ≤ 38 h  <- como HEO (T5c)
+#      (Hasta el 10-oct-2026, DBLINE en escaner_memoria: 06-11 UTC, vencia 08:00-13:00.
+#       Hasta el 14-oct-2026, TCG en escaner_memoria: 06-16 UTC, X 22 h, vencia 04:00-14:00.)
 #
 #    🔴 HEO ES LA EXCEPCION y se dice: escribe 13 h seguidas (06-19 UTC), asi que su
 #       plazo puede vencerse en CUALQUIER hora entre las 08:00 y las 21:00 UTC, una
@@ -183,7 +237,9 @@ from datetime import datetime, timedelta, timezone
 #       parte diurna), no le quita la comprobacion. DBLINE (desde el 10-oct-2026, DB6)
 #       lleva la misma marca y por lo mismo: escribe 05-19 UTC y su plazo vence entre
 #       las 07:00 y las 21:00. Y como descansa el domingo, el banco le exige lo mismo
-#       en la ventana del lunes.
+#       en la ventana del lunes. TCG (desde el 14-oct-2026, T5c) tambien: escribe 07-17
+#       UTC entre semana y vence entre las 09:00 y las 19:00; lo de 18:00 a 19:00 espera
+#       a las 06:00. Su pasada del fin de semana (10 UTC) cae dentro de esa franja.
 #
 #    Con un domingo por medio la ventana se corre al lunes (el reloj descontado
 #    esta parado el domingo entero) y cae entre las 05:00 y las 15:00 UTC del
@@ -214,11 +270,15 @@ from datetime import datetime, timedelta, timezone
 # mire. El banco lo comprueba contra el cron del workflow.
 # `fuente` dice DE DONDE sale la fecha: 'escaner_memoria' (el MAXIMO de `fecha`) o
 # 'disp_pasada' (la ultima pasada 'aplicada'). `descansa_sabado` descuenta ademas
-# los sabados (OSMA: de lunes a viernes). `ventana_ancha` (HEO y DBLINE): ver arriba.
+# los sabados (OSMA: de lunes a viernes). `ventana_ancha` (HEO, DBLINE y TCG): ver
+# arriba. `al_dia_cuenta` (solo TCG): los dias de la semana (UTC, weekday(): sabado 5,
+# domingo 6) en los que una pasada «al dia» cuenta como señal de vida; ver TCG, arriba.
 HORARIOS = {
-    'TCG':       {'fuente': 'escaner_memoria', 'umbral_h': 22, 'descansa_domingo': False,
-                  'descansa_sabado': False, 'medido_h': 18.00,
-                  'primera_h': 6, 'ultima_h': 16, 'dias': 'todos los dias'},
+    'TCG':       {'fuente': 'disp_pasada', 'umbral_h': 26, 'descansa_domingo': False,
+                  'descansa_sabado': False, 'medido_h': 24.00, 'ventana_ancha': True,
+                  'al_dia_cuenta': (5, 6),
+                  'primera_h': 7, 'ultima_h': 17,
+                  'dias': 'L a V cada hora (:20 de 09 a 19 Madrid); sábado y domingo una (12:20)'},
     'DBLINE':    {'fuente': 'disp_pasada', 'umbral_h': 26, 'descansa_domingo': True,
                   'descansa_sabado': False, 'medido_h': 24.00, 'ventana_ancha': True,
                   'primera_h': 5, 'ultima_h': 19, 'dias': 'L a S (cada hora, :05 de 07 a 21 Madrid)'},
@@ -374,6 +434,23 @@ def linea_de_aviso(fila):
     return cabeza + plazo + 'Horario: %s.' % fila['franja']
 
 
+def ultima_viva(aplicadas, rechazadas, al_dia_cuenta):
+    """La ultima señal de vida de un proveedor del escaner 2, o None si no tiene ni una
+    pasada aplicada. `aplicadas` y `rechazadas` son listas de (terminada_en, huella).
+
+    Sin `al_dia_cuenta`, es la ultima 'aplicada'. Con el (TCG: sabado y domingo), una
+    'rechazada' posterior cuenta tambien si es «al dia» Y termino en uno de esos dias.
+    🔴 «Al dia» se reconoce POR ESTRUCTURA: su huella es la de la ultima aplicada (es
+       justo como el escaner decide que esta al dia). Una 'rechazada' sin huella, o con
+       otra (el freno del 90 %), no es una «al dia»: no cuenta."""
+    if not aplicadas:
+        return None
+    ultima, huella = max(aplicadas, key=lambda x: x[0])
+    vivas = [t for (t, h) in rechazadas
+             if t > ultima and h and h == huella and t.weekday() in al_dia_cuenta]
+    return max([ultima] + vivas)
+
+
 # ============================================================
 # LA MARCA EN STORAGE (lo unico de aqui que toca la red aparte de la consulta)
 # ============================================================
@@ -419,7 +496,21 @@ def _fecha(valor):
     return datetime.fromisoformat(str(valor).replace('Z', '+00:00'))
 
 
-def ultima_escritura(sb, proveedor, fuente):
+def _pasadas(sb, proveedor, estado):
+    """[(terminada_en, huella)] de las ultimas pasadas de ese estado. Se piden unas
+    filas y se coge el maximo despues, no `limit(1)`: ordenado en descendente Postgres
+    pone los NULL primero, y un `terminada_en` vacio no es una fecha."""
+    res = (sb.table('disp_pasada')
+             .select('terminada_en,huella_contenido')
+             .eq('proveedor', proveedor)
+             .eq('estado', estado)
+             .order('terminada_en', desc=True)
+             .limit(20).execute())
+    return [(_fecha(r['terminada_en']), r.get('huella_contenido')) for r in (res.data or [])
+            if r.get('terminada_en')]
+
+
+def ultima_escritura(sb, proveedor, fuente, al_dia_cuenta=()):
     """Devuelve (ultima, motivo): la fecha UTC de la ultima escritura de ese
     proveedor segun su `fuente`, o (None, por_que_no_hay). Si no se puede leer,
     LANZA: quien llama lo apunta como fallo de lectura (no saber no es estar bien).
@@ -428,21 +519,14 @@ def ultima_escritura(sb, proveedor, fuente):
     'disp_pasada': la ultima pasada 'aplicada' del escaner 2 (`terminada_en`).
        🔴 SOLO 'aplicada': una pasada 'rechazada' o 'fallida' es el escaner 2
        hablando pero SIN haber escrito, que es justo el silencio que se vigila.
-       Se piden unas filas y se coge el maximo aqui, no `limit(1)`: ordenado en
-       descendente Postgres pone los NULL primero, y un `terminada_en` vacio no es
-       una fecha."""
+       La unica excepcion es `al_dia_cuenta` (TCG, el fin de semana): ver
+       `ultima_viva` y la cabecera."""
     if fuente == 'disp_pasada':
-        res = (sb.table('disp_pasada')
-                 .select('terminada_en')
-                 .eq('proveedor', proveedor)
-                 .eq('estado', 'aplicada')
-                 .order('terminada_en', desc=True)
-                 .limit(20).execute())
-        fechas = [_fecha(r['terminada_en']) for r in (res.data or [])
-                  if r.get('terminada_en')]
-        if not fechas:
+        aplicadas = _pasadas(sb, proveedor, 'aplicada')
+        if not aplicadas:
             return None, 'ni una pasada aplicada en disp_pasada'
-        return max(fechas), None
+        rechazadas = _pasadas(sb, proveedor, 'rechazada') if al_dia_cuenta else []
+        return ultima_viva(aplicadas, rechazadas, al_dia_cuenta), None
     res = (sb.table('escaner_memoria')
              .select('fecha')
              .eq('proveedor', proveedor)
@@ -477,7 +561,8 @@ def main():
         cfg = HORARIOS[proveedor]
         ultima, motivo = None, None
         try:
-            ultima, motivo = ultima_escritura(sb, proveedor, cfg['fuente'])
+            ultima, motivo = ultima_escritura(sb, proveedor, cfg['fuente'],
+                                              cfg.get('al_dia_cuenta', ()))
         except Exception as ex:
             motivo = 'no se pudo leer: %s' % ex
             fallo_lectura = True
@@ -534,9 +619,12 @@ def main():
     del_escaner2 = [f['proveedor'] for f in mudos
                     if f['proveedor'] in a_avisar and f['fuente'] == 'disp_pasada']
     if del_escaner2:
+        con_al_dia = [p for p in del_escaner2 if HORARIOS[p].get('al_dia_cuenta')]
         lineas.append('%s es del escáner 2: la fecha es la de la última pasada aplicada '
-                      '(disp_pasada), y el reloj es cron-job.org, no GitHub.'
-                      % ', '.join(del_escaner2))
+                      '(disp_pasada)%s, y el reloj es cron-job.org, no GitHub.'
+                      % (', '.join(del_escaner2),
+                         '; a %s, el fin de semana, también vale una «al día»'
+                         % ', '.join(con_al_dia) if con_al_dia else ''))
     texto = '\n'.join(lineas)
 
     tg_token = os.environ.get('TELEGRAM_TOKEN')
