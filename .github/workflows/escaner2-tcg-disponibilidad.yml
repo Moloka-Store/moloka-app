@@ -1,0 +1,116 @@
+# ============================================================
+# Moloka - Escaner 2 · DISPONIBILIDAD DE TCG, EN SOMBRA, Y SU LECTOR DE TRAMOS (encargo T2, 13-oct-2026)
+#
+# Entra en la web de TCG con TCG_USER/TCG_PASS, baja el Excel del catalogo (lo mismo que el director viejo), lo lee con
+# las reglas de escaner2_tcg.py y deja en la base lo que tiene TCG ahora (disp_estado) y lo que ha cambiado
+# (disp_cambio), con la MISMA funcion que HEO, OSMA, OcioStock, DBLine y BEMS (disp_aplicar_pasada). Despues, con la
+# misma sesion, el LECTOR DE TRAMOS (escaner2_tcg_tramos.py): el listado filtrado de la web (16 paginas, de lunes a
+# viernes en la pasada de las 09) y las fichas que tocan (nuevas, marcadas por el listado o leidas hace mas de 7 dias),
+# a ritmo humano, guardando el cociente de cada producto en disp_tramo. Al primer bloqueo o HTML que no se entienda,
+# para, guarda lo leido, Telegram y rojo.
+#
+# 🔑 EN SOMBRA: TCG no tiene fila en disp_fuente. Reponer, el Trackeador y la lista de precios siguen con la memoria del
+#    escaner viejo (director-tcg.yml, sin tocar). El interruptor es otro encargo, con Fernando delante. Sin Keepa y sin
+#    sondeo_keepa (Fernando, 13-oct).
+#
+# 🔴 NECESITA LA MIGRACION 20261013190000_disp_tcg_en_sombra.sql DE LA V2 (la fila TCG de disp_parametros y la tabla
+#    disp_tramo), que se aplica con Fernando delante ANTES de lanzar esto. Sin ella, rojo y la pasada 'fallida'.
+#
+# 🔴 REPO PUBLICO: este registro lo ve cualquiera. El programa SOLO imprime estados y recuentos (ni precios, ni EAN, ni
+#    URLs, ni el texto de un error). No sube artefactos. Lo comprueba test_escaner2_tcg_disponibilidad.py.
+#
+# 🔒 SOLO TOCA disp_pasada, disp_lectura, la funcion disp_aplicar_pasada y disp_tramo; lee disp_parametros.
+#
+# >>> SIN RELOJ AQUI, A PROPOSITO <<<  Como OcioStock y DBLine: un `schedule:` de GitHub llega horas tarde en esta
+#     cuenta; el reloj es cron-job.org (POST a la API de dispatches con {"ref":"main"}, sin inputs), y lo dan de alta
+#     Fernando y Cowork cuando la migracion este aplicada: de LUNES A VIERNES cada hora de 09:20 a 19:20 (Madrid) y
+#     SABADO Y DOMINGO una sola a las 12:20 (decidido por Cowork el 13-oct con la historia de escaner_resultados; el
+#     minuto 20, para no entrar a la vez que el director viejo, que lo hace a las horas en punto). Tiene que coincidir
+#     con disp_parametros.horario_* de TCG.
+#     A MANO: la PRIMERA LECTURA de todas las fichas disponibles (~1.640, ~100 min) con fichas_max = 2000.
+# ============================================================
+name: Moloka - Escaner 2 · Disponibilidad TCG
+
+on:
+  workflow_dispatch:
+    inputs:
+      fichas_max:
+        description: 'Fichas como mucho en esta corrida (150 por defecto; la primera lectura, 2000)'
+        type: string
+        default: '150'
+      listado:
+        description: 'Listado filtrado de la web: auto (L-V en la pasada de las 09), si o no'
+        type: choice
+        options: [auto, si, 'no']
+        default: auto
+
+# 🔒 GRUPO PROPIO: nunca dos pasadas de TCG a la vez, sin cancelar la que corre.
+concurrency:
+  group: escaner2-tcg
+  cancel-in-progress: false
+
+jobs:
+  leer:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 170
+    steps:
+      # 🔴 PRIMERO, LOS SECRETOS: sin ellos, rojo aqui y sin tocar la base (el rescate tampoco corre).
+      - name: Comprobar los secretos
+        id: secretos
+        env:
+          TCG_USER:             ${{ secrets.TCG_USER }}
+          TCG_PASS:             ${{ secrets.TCG_PASS }}
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          if [ -z "$TCG_USER" ] || [ -z "$TCG_PASS" ]; then
+            echo "::error title=Faltan secretos::faltan TCG_USER/TCG_PASS en los secretos de moloka-app; no se abre ninguna pasada"
+            exit 1
+          fi
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_KEY" ]; then
+            echo "::error title=Faltan secretos::faltan SUPABASE_URL/SUPABASE_SERVICE_KEY; no se abre ninguna pasada"
+            exit 1
+          fi
+          echo "secretos: presentes"
+
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        # curl_cffi: la web de TCG (la version de requirements.txt) · openpyxl: el Excel · supabase: la base ·
+        # requests: el Telegram de una parada (escaner2_novedades.enviar_telegram). El HTML se lee con la biblioteca
+        # estandar (sin beautifulsoup).
+        run: pip install --quiet supabase==2.31.0 openpyxl==3.1.5 curl_cffi==0.15.0 requests==2.34.2
+
+      - name: Leer TCG, aplicar la pasada y leer los tramos
+        # El tope va en el PASO (160 min: la primera lectura entera son ~100), no solo en el job: si se agota, el rescate corre.
+        timeout-minutes: 160
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          TCG_USER:             ${{ secrets.TCG_USER }}
+          TCG_PASS:             ${{ secrets.TCG_PASS }}
+          # 🔑 El aviso de una parada, como el resto del escaner. Solo en este paso; no en el rescate.
+          TELEGRAM_TOKEN:       ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Los inputs llegan por env:, nunca dentro del run: (cron-job.org no manda ninguno: valen los de defecto).
+          FICHAS_MAX:           ${{ inputs.fichas_max }}
+          LISTADO:              ${{ inputs.listado }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_tcg_disponibilidad.py
+
+      # 🔴 SI EL RUN MUERE A MEDIAS, LA PASADA NO SE QUEDA 'leyendo' PARA SIEMPRE. Solo si los secretos estaban.
+      - name: Rescate · si el run ha fallado, la pasada de este run queda 'fallida'
+        if: (failure() || cancelled()) && steps.secretos.outcome == 'success'
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_tcg_disponibilidad.py --rescate
