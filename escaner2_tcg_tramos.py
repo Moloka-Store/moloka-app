@@ -30,6 +30,11 @@ EL LISTADO FILTRADO (parte T1, 2a y 2d: 16 paginas de 111 tarjetas, el filtro de
 tarjeta, la URL de su ficha, el «desde X» (solo si tiene tramo: el mas barato, REDONDEADO) y el suelto. Sirve para
 saber, sin abrir fichas, que un tramo guardado ya no cuadra (el tapete ABYstyle del 13-oct: «desde» de 13,09 a 13,36).
 Se compara redondeado con redondeado (0,5262816 da «desde 0,53»: no salta en falso).
+🆕 (Encargo T4, 14-oct-2026) EL LISTADO DE UNA MARCA (Funko), CADA HORA Y ANTES DE LA FOTO: el mismo filtro con la marca
+(`valor_de_marca`: la casilla «m[]» cuyo nombre es la marca) — medido en la sonda T4 del 14-oct a las 13:02: 8 paginas,
+787 tarjetas en 38 s, las 787 casan con el Excel por la URL de su ficha. Y las fichas de esa marca que hay que leer ANTES
+de la foto (`pendientes_antes_de_la_foto`), para que una novedad salga ya con el precio de su tramo y no se cuente dos
+veces (una con el suelto y otra «baja» la hora siguiente).
 
 🔴 REPO PUBLICO: nada de este modulo imprime.
 """
@@ -345,6 +350,27 @@ def desajustes(cards, guardados_por_url):
     return malas
 
 
+def valor_de_marca(html, marca):
+    """(Encargo T4) El valor de la casilla de MARCA del filtro (#af_form, «m[]») cuyo nombre es `marca`.
+    ListadoNoEntendido si no sale exactamente una vez."""
+    form = arbol(html).primero('form', id='af_form')
+    if form is None:
+        raise ListadoNoEntendido('la página de la categoría no trae el filtro (#af_form)')
+    valores = []
+    for i in form.buscar('input'):
+        if i.attrs.get('name') != 'm[]':
+            continue
+        lab = i.padre
+        while lab is not None and lab.tag != 'label':
+            lab = lab.padre
+        nom = lab.primero(clase='name') if lab is not None else None
+        if nom is not None and nom.texto().strip() == marca:
+            valores.append(i.attrs.get('value', ''))
+    if len(valores) != 1:
+        raise ListadoNoEntendido('el filtro no trae la marca buscada una sola vez (%d)' % len(valores))
+    return valores[0]
+
+
 # ── Que fichas toca leer ──────────────────────────────────────────────────────────────────
 def _cuando(v):
     if v is None:
@@ -382,4 +408,40 @@ def pendientes(catalogo, guardados, ahora, n_max):
     marcadas.sort(key=lambda x: x[0])
     viejas.sort(key=lambda x: x[0])
     orden = nuevas + [e for _t, e in marcadas] + [e for _t, e in viejas]
+    return orden[:max(0, n_max)], len(orden)
+
+
+def _precio_cambiado(g, precio_excel):
+    """True si el Precio del Excel de ahora no es el que habia al leer la ficha (el cociente ya no vale)."""
+    if g is None or precio_excel is None or g.get('precio_excel') is None:
+        return False
+    try:
+        return Decimal(str(g['precio_excel'])) != Decimal(str(precio_excel))
+    except InvalidOperation:
+        return True
+
+
+def pendientes_antes_de_la_foto(catalogo, guardados, desajustadas, ahora, n_max, marca):
+    """(Encargo T4) Las fichas de `marca` que hay que leer ANTES de la foto, en orden y hasta `n_max`: de las
+    disponibles con URL (ya con la web encima), 1) las nunca leidas (sin cociente), 2) las que el listado de esta hora da
+    por desajustadas (`desajustadas`: su «desde» o su suelto ya no son los guardados), 3) las que tienen OTRO Precio en el
+    Excel que cuando se leyeron (el cociente es «tramo ÷ Precio de entonces»: con el Precio nuevo daria otro precio
+    falso, o una bajada que no es). Un intento fallido no se repite antes de HORAS_REINTENTO horas. Devuelve
+    (cola, cuantas tocaban)."""
+    nuevas, marcadas, precio = [], [], []
+    for e in catalogo:
+        if e.get('marca') != marca or not e['disponible'] or not e['url']:
+            continue
+        g = guardados.get(e['producto_prov'])
+        if g is not None and g.get('intento_resultado') not in (None, 'ok'):
+            intento = _cuando(g.get('intento_en'))
+            if intento is not None and ahora - intento < timedelta(hours=HORAS_REINTENTO):
+                continue
+        if g is None or _cuando(g.get('leido_en')) is None or g.get('cociente') is None:
+            nuevas.append(e)
+        elif e['producto_prov'] in desajustadas:
+            marcadas.append(e)
+        elif _precio_cambiado(g, e.get('precio_excel')):
+            precio.append(e)
+    orden = nuevas + marcadas + precio
     return orden[:max(0, n_max)], len(orden)

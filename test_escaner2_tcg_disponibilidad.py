@@ -21,6 +21,13 @@ QUE PRUEBA:
   (G) el ritmo: cada peticion lleva su pausa de 1,5 a 4 s y, cada 20 a 40, una mas larga;
   (H) por estructura: el workflow solo se lanza a mano, con grupo propio, los secretos en el primer paso, los inputs
       por env:, el rescate solo si los secretos estaban, y sin artefactos; descargar-tcg.yml ya no esta.
+  (J) 🆕 (encargo T4) LA WEB DE FUNKO ANTES DE LA FOTO Y LAS NOVEDADES: el listado de la marca Funko cada hora; las fichas
+      de Funko que tocan (nueva, desajustada, con otro Precio en el Excel) se leen ANTES de subir la foto, que sale ya con
+      su tramo; la web manda en lo disponible de Funko (lo que da disponible, lo es; lo que no sale con el listado
+      entero, no; a medias no quita nada); las novedades se sacan con la pasada aplicada (no «al día») y antes del
+      lector; un bloqueo en el listado o en una ficha de Funko deja la pasada 'fallida' (la foto como estaba), Telegram
+      y ROJO; un listado con menos de la mitad de lo que da el Excel no se cree; unas novedades que fallan: ROJO con la
+      pasada aplicada; y el registro, limpio.
 """
 import contextlib
 import io
@@ -89,7 +96,7 @@ class _Q:
     def update(self, d):
         self.op, self.datos = 'update', d; return self
 
-    def upsert(self, d, on_conflict=None):
+    def upsert(self, d, on_conflict=None, **_k):
         self.op, self.datos, self.conflicto = 'upsert', d, on_conflict; return self
 
     def delete(self):
@@ -158,9 +165,13 @@ class _Q:
 class Base:
     def __init__(self, crudo_minimo=5, disponibles_minimo=2):
         self.t = {'disp_parametros': [{'proveedor': 'TCG', 'crudo_minimo': crudo_minimo,
-                                       'disponibles_minimo': disponibles_minimo}]}
+                                       'disponibles_minimo': disponibles_minimo}],
+                  # (Encargo T4) La fila de novedades de TCG, APAGADA (como nace): la valoración se cierra sin Keepa.
+                  'nov_parametros': [{'proveedor': 'TCG', 'marcas': ['Funko'], 'valorar': False}]}
         self.lotes, self.rpcs, self.llamadas = [], [], []
         self.falla_lectura = None
+        self.falla_novedades = False
+        self.marca_parecida = 0
         self.lectura_aplicada = {}
 
     def table(self, n):
@@ -172,6 +183,14 @@ class Base:
         class _L:
             def execute(self):
                 base.rpcs.append((nombre, params))
+                base.llamadas.append(('rpc', nombre))
+                if nombre == 'nov_seleccionar_pasada':
+                    if base.falla_novedades:
+                        raise RuntimeError('SIN_PARAMETROS_NOV: Failing row contains (8000000000017, 9.77)')
+                    return _R({'pasada': params['p_pasada'], 'estado': 'hecha', 'novedades': 1, 'subidas_fuera': 0,
+                               'marca_parecida': base.marca_parecida})
+                if nombre == 'nov_cerrar_valoracion':
+                    return _R({'estado': params['p_datos']['estado']})
                 pid = params['p_pasada']
                 lect = [f for f in base.t.get('disp_lectura', []) if f['pasada_id'] == pid]
                 base.lectura_aplicada[pid] = lect
@@ -211,17 +230,24 @@ SLUG = 'cosa-inventada-%s'
 URL_FICHA = 'https://tcgfactory.com/es/distribucion/' + SLUG + '.html'
 FORM = ('<html><body><form id="af_form"><input type="hidden" name="id_category" value="70">'
         '<input type="hidden" name="nb_items" value="27"><input type="hidden" name="page" value="1">'
-        '<label><input type="checkbox" name="f[53][]" value="a1"><span class="name">Disponible</span></label></form>'
+        '<label><input type="checkbox" name="f[53][]" value="a1"><span class="name">Disponible</span></label>'
+        # (Encargo T4) El filtro de marca: «m[]», con su nombre (medido en la sonda T4: una sola casilla «Funko»).
+        '<label><input type="checkbox" name="m[]" value="m9"><span class="name">Funko</span></label>'
+        '<label><input type="checkbox" name="m[]" value="m8"><span class="name">Funko Games</span></label></form>'
         '</body></html>')
 
 
 class Web:
     """La web de TCG inventada. `fichas`: {ean: html | 404 | 429}; `tarjetas`: html del listado (todas en una pagina)."""
 
-    def __init__(self, contenido, fichas, login=200, tarjetas=''):
+    def __init__(self, contenido, fichas, login=200, tarjetas='', funko='', funko_total=None, funko_codigo=200):
         self.contenido, self.fichas, self.login, self.tarjetas = contenido, fichas, login, tarjetas
+        # (Encargo T4) El listado de la marca Funko: sus tarjetas, lo que dice tener (por defecto, las que trae) y su código.
+        self.funko, self.funko_codigo = funko, funko_codigo
+        self.funko_total = funko_total if funko_total is not None else funko.count('<article')
         self.dentro = False
         self.pedidas = []
+        self.filtros = []
 
     def get(self, url, **_k):
         self.pedidas.append(('GET', url))
@@ -248,6 +274,12 @@ class Web:
             self.dentro = ok
             return _Resp(200, DENTRO if ok else LOGIN)
         if url == tw.FILTRO_URL:
+            con_marca = 'm%5B%5D=m9' in data['params']
+            self.filtros.append('funko' if con_marca else 'todo')
+            if con_marca:
+                if self.funko_codigo != 200:
+                    return _Resp(self.funko_codigo, 'Too Many Requests')
+                return _Resp(200, '{}', js={'product_list_html': self.funko, 'products_num': self.funko_total})
             return _Resp(200, '{}', js={'product_list_html': self.tarjetas, 'products_num': 3})
         return _Resp(404, 'no')
 
@@ -312,7 +344,8 @@ p1 = base.pasadas()[0]
 eq('B1 primera: código 0 y la pasada aplicada', (codigo, p1['estado']), (0, 'aplicada'))
 eq('B2 recuentos: crudo 6, sin repetidas, leídas 6, disponibles 5', (p1['n_crudo'], p1['n_duplicados'], p1['n_leidas'],
                                                                      p1['n_disponibles']), (6, 0, 6, 5))
-eq('B3 una llamada a disp_aplicar_pasada, un lote', ([n for n, _p in base.rpcs], base.lotes), (['disp_aplicar_pasada'], [6]))
+eq('B3 una llamada a disp_aplicar_pasada, un lote (y, encargo T4, después las novedades)', ([n for n, _p in base.rpcs], base.lotes),
+   (['disp_aplicar_pasada', 'nov_seleccionar_pasada', 'nov_cerrar_valoracion'], [6]))
 lect = {f['producto_prov']: f for f in base.lectura_aplicada[p1['id']]}
 eq('B4 sin cociente todavía: el suelto, 1 ud y «sin tramo leído»', (lect[EANS['A']]['precio_pa'], lect[EANS['A']]['uds_escalon'],
                                                                    lect[EANS['A']]['aviso']), (10.0, 1, 'sin tramo leído'))
@@ -489,6 +522,131 @@ try:
 except tw.Bloqueo as ex:
     eq('G3 un captcha para, y el texto no lleva la URL', 'tcgfactory' in str(ex), False)
 
+# ── (J) (Encargo T4) La web de Funko antes de la foto, y las novedades ──────────────────────
+#    Seis filas: cinco de Funko y una de otra marca. FA ya leída y la web igual; FB «Disponible» con stock 0 en el Excel
+#    y disponible en la web (sin ficha leída); FC disponible en el Excel y fuera del listado; FD leída cuando el Excel
+#    decía otro Precio; FE leída, pero la web dice ahora «desde 9,50»; X, de otra marca, sin leer.
+JE = {'FA': '8000000001017', 'FB': '8000000001024', 'FC': '8000000001031', 'FD': '8000000001048', 'FE': '8000000001055',
+      'X': '8000000001062'}
+UJ = {k: URL_FICHA % v.lower() for k, v in JE.items()}
+
+
+def cat_j(fb_stock=0):
+    filas = []
+    for i, k in enumerate(('FA', 'FB', 'FC', 'FD', 'FE', 'X')):
+        filas.append(fila(JE[k], marca='Funko' if k != 'X' else 'Marca X', stock=fb_stock if k == 'FB' else 50,
+                          imagen='https://tcgfactory.com/%d-large_default/%s.jpg' % (40 + i, SLUG % JE[k].lower())))
+    return excel(filas)
+
+
+def guardado_j(k, cociente='0.976600000000', mas_barato='9.766000', precio_excel='10', uds=12):
+    hace = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    return {'proveedor': 'TCG', 'producto_prov': JE[k], 'url': UJ[k], 'intento_en': hace, 'intento_resultado': 'ok',
+            'leido_en': hace, 'cociente': cociente, 'uds_mas_barato': uds, 'suelto_web': '10.00', 'mas_barato': mas_barato,
+            'precio_excel': precio_excel, 'pide_relectura': None}
+
+
+def base_j(**k):
+    b = Base(**k)
+    # FD se leyó con el Excel a 9 € (el cociente de entonces: 9,766 ÷ 9); hoy el Excel dice 10.
+    b.t['disp_tramo'] = [guardado_j('FA'), guardado_j('FD', cociente='1.085111111111', precio_excel='9'), guardado_j('FE')]
+    return b
+
+
+FICHAS_J = {JE[k].lower(): ficha_html(tabla=TABLA, eans=(JE[k],)) for k in ('FA', 'FB', 'FC', 'FD', 'X')}
+FICHAS_J[JE['FE'].lower()] = ficha_html(tabla=[(12, '10.000000', '0.050000')], eans=(JE['FE'],))
+LISTADO_J = (tarjeta(UJ['FA'], '9,77') + tarjeta(UJ['FB'], '9,77') + tarjeta(UJ['FD'], '9,77')
+             + tarjeta(UJ['FE'], '9,50'))
+PROHIBIDO += ['80000000010', '9,50', '9.766']
+
+telegramas.clear()
+base = base_j()
+web = Web(cat_j(), FICHAS_J, funko=LISTADO_J)
+codigo, reg = correr(base, web)
+pj = base.pasadas()[0]
+lj = {f['producto_prov']: f for f in base.lectura_aplicada[pj['id']]}
+eq('J1 el listado de la marca Funko (con su casilla del filtro), una vez; y la pasada aplicada, en VERDE',
+   (web.filtros, pj['estado'], codigo), (['funko'], 'aplicada', 0))
+eq('J2 🔑 antes de la foto se leen las de Funko que tocan, en orden (nueva, desajustada, con otro Precio); después, la '
+   'de otra marca; ni FA (al día) ni FC (agotada por la web)',
+   web.fichas_pedidas(), [UJ['FB'], UJ['FE'], UJ['FD'], UJ['X']])
+llam = base.llamadas
+eq('J3 🔑 …y se guardan ANTES de subir la foto', llam.index(('disp_tramo', 'upsert')) < llam.index(('disp_lectura', 'insert')),
+   True)
+eq('J4 🔑 la foto sale ya con su tramo: FB (nueva) 9,766 × 12; FE (desajustada) 9,50; FD (otro Precio) 10 × el cociente '
+   'nuevo = 9,766, no 10 × el viejo',
+   [(round(lj[JE[k]]['precio_pa'], 6), lj[JE[k]]['uds_escalon'], lj[JE[k]]['aviso']) for k in ('FB', 'FE', 'FD')],
+   [(9.766, 12, None), (9.5, 12, None), (9.766, 12, None)])
+eq('J5 🔑 la web manda en lo disponible de Funko: FB (stock 0 en el Excel) disponible con la palabra de la web; FC (fuera '
+   'del listado entero) agotada; X, de otra marca, como dice el Excel',
+   [(lj[JE[k]]['disponible'], lj[JE[k]]['disponibilidad']) for k in ('FB', 'FC', 'X')],
+   [(True, 'Disponible'), (False, 'Disponible'), (True, 'Disponible')])
+eq('J6 el registro lo cuenta', ('a disponible 1, a agotado 1' in reg, '4 tarjetas (la web dice 4, entero), 1 ya no cuadran' in reg,
+                               'pendientes 3, pedidas 3' in reg), (True, True, True))
+i_nov = llam.index(('rpc', 'nov_seleccionar_pasada'))
+eq('J7 🔑 las novedades, con la pasada aplicada y ANTES del lector de tramos (la ficha de X se lee después)',
+   (llam.index(('rpc', 'disp_aplicar_pasada')) < i_nov < len(llam) - 1 - llam[::-1].index(('disp_tramo', 'upsert')),
+    [n for n, _p in base.rpcs], base.rpcs[1][1]),
+   (True, ['disp_aplicar_pasada', 'nov_seleccionar_pasada', 'nov_cerrar_valoracion'], {'p_pasada': pj['id']}))
+eq('J8 apagada (como nace): la valoración se cierra «apagada»', base.rpcs[2][1]['p_datos']['estado'], 'apagada')
+limpio('J9', reg)
+web2 = Web(cat_j(), FICHAS_J, funko=LISTADO_J)
+correr(base, web2)
+web3 = Web(cat_j(), FICHAS_J, funko=LISTADO_J)
+codigo, reg = correr(base, web3)
+eq('J10 al día (mismo contenido y la misma web): VERDE y sin novedades', (codigo, 'TCG_AL_DIA' in reg,
+                                                                        [n for n, _p in base.rpcs].count('nov_seleccionar_pasada')),
+   (0, True, 2))
+
+base = base_j()
+web = Web(cat_j(), FICHAS_J, funko=LISTADO_J, funko_total=5)
+codigo, reg = correr(base, web)
+lj = {f['producto_prov']: f for f in base.lectura_aplicada[base.pasadas()[0]['id']]}
+eq('J11 un listado A MEDIAS (5 dice la web, 4 trae): no quita nada (FC sigue disponible) y sí da lo que ve (FB)',
+   (lj[JE['FC']]['disponible'], lj[JE['FB']]['disponible'], 'A MEDIAS' in reg, codigo), (True, True, True, 0))
+
+telegramas.clear()
+base = base_j()
+web = Web(cat_j(), FICHAS_J, funko=LISTADO_J, funko_codigo=429)
+codigo, reg = correr(base, web)
+eq('J12 🔴 un 429 en el listado de Funko: para, la pasada «fallida» (la foto como estaba), ni una ficha, Telegram y ROJO',
+   (codigo, base.pasadas()[0]['estado'], ('disp_lectura', 'insert') in base.llamadas, web.fichas_pedidas(), len(telegramas),
+    'nov_seleccionar_pasada' in [n for n, _p in base.rpcs]),
+   (1, 'fallida', False, [], 1, False))
+eq('J13 …y el motivo lo dice, sin la URL', ('429' in base.pasadas()[0]['motivo'], 'tcgfactory' in base.pasadas()[0]['motivo']),
+   (True, False))
+limpio('J14', reg)
+
+telegramas.clear()
+base = base_j()
+f429 = dict(FICHAS_J)
+f429[JE['FE'].lower()] = 429
+web = Web(cat_j(), f429, funko=LISTADO_J)
+codigo, reg = correr(base, web)
+eq('J15 🔴 un 429 en una ficha de Funko antes de la foto: lo leído (FB) queda guardado, ni una más, «fallida», Telegram y '
+   'ROJO', (codigo, base.tramo(JE['FB'])['intento_resultado'], web.fichas_pedidas(), base.pasadas()[0]['estado'],
+            len(telegramas)), (1, 'ok', [UJ['FB'], UJ['FE']], 'fallida', 1))
+
+base = base_j()
+web = Web(cat_j(), FICHAS_J, funko=tarjeta(UJ['FA'], '9,77'))
+codigo, reg = correr(base, web)
+eq('J16 🔴 un listado con menos de la mitad de lo que el Excel da disponible (1 frente a 4) no se cree: para y ROJO',
+   (codigo, base.pasadas()[0]['estado'], web.fichas_pedidas()), (1, 'fallida', []))
+
+base = base_j()
+base.falla_novedades = True
+web = Web(cat_j(), FICHAS_J, funko=LISTADO_J)
+codigo, reg = correr(base, web)
+eq('J17 🔴 si las novedades fallan: ROJO, con la pasada aplicada y el lector, que sigue', (codigo, base.pasadas()[0]['estado'],
+                                                                                        UJ['X'] in web.fichas_pedidas(),
+                                                                                        'TCG_NOVEDADES_EN_ROJO' in reg),
+   (1, 'aplicada', True, True))
+limpio('J18 (el error de las novedades lleva un EAN y un precio)', reg)
+base = base_j()
+base.marca_parecida = 2
+codigo, reg = correr(base, Web(cat_j(), FICHAS_J, funko=LISTADO_J))
+eq('J19 🔴 el vigía de la marca (algo que se parece a Funko y no lo es): ROJO', (codigo, 'MARCA_PARECIDA' in reg), (1, True))
+
 # ── (H) El workflow ──────────────────────────────────────────────────────────────────────
 wf = yaml.safe_load(open(WORKFLOW, encoding='utf-8'))
 on = wf.get('on', wf.get(True))
@@ -502,6 +660,8 @@ eq('H4 los inputs llegan por env:, nunca dentro del run:', (paso['env']['FICHAS_
                                                             '${{' in paso['run']), ('${{ inputs.fichas_max }}', '${{ inputs.listado }}', False))
 eq('H5 el Telegram solo en el paso de la pasada', sorted(k for k in paso['env'] if k.startswith('TELEGRAM')),
    ['TELEGRAM_CHAT_ID', 'TELEGRAM_TOKEN'])
+eq('H5b (encargo T4) la llave de Keepa (la valoración de las novedades), en el paso de la pasada y no en el rescate',
+   (paso['env'].get('KEEPA_API_KEY'), 'KEEPA_API_KEY' in pasos[-1]['env']), ('${{ secrets.KEEPA_API_KEY }}', False))
 resc = pasos[-1]
 eq('H6 el rescate: si falla o se cancela y los secretos estaban; sin Telegram ni TCG',
    (resc['run'], resc['if'], sorted(resc['env'])),

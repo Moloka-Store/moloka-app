@@ -32,8 +32,10 @@ mismo que baja el director viejo (login + smcatalog downloadcatalog?format=excel
      caja (como HEO). PRECIO DE COMPRA = EL TRAMO MAS BARATO (Fernando, 7 y 8-oct): `precio_escalon` = `precio_pa` =
      Precio × COCIENTE (÷ 6 en caja), con `uds_escalon` = las unidades de ese tramo (× 6 en caja: figuras). El cociente
      lo pone el lector de tramos (escaner2_tcg_tramos.py: mas barato exacto de la ficha ÷ Precio del Excel al leerla).
-     SIN COCIENTE LEIDO: el suelto (`precio_escalon` = `precio_pa` = `precio_unidad`, `uds_escalon` 1) y el aviso
-     «sin tramo leído». Cociente de hace mas de 7 dias: se usa y se avisa «tramo leído hace más de 7 días».
+     SIN COCIENTE LEIDO: el suelto (`precio_escalon` = `precio_pa` = `precio_unidad`, `uds_escalon` 1; en una caja, 6:
+     se compra la caja, y sus uds van en figuras como las de las cajas con tramo —encargo T4, 14-oct-2026; hasta entonces
+     salia 1—) y el aviso «sin tramo leído». Cociente de hace mas de 7 dias: se usa y se avisa «tramo leído hace más de
+     7 días».
      Portes: gratis desde 150 € sin IVA y plazo 3 dias laborables (12-oct): viven en `proveedores`, no aqui.
   6. CHASE SUELTO: el Excel no lo trae (solo dentro de la caja C, «5 + 1»). No hay regla de chase suelto.
   7. LA URL DE LA FICHA sale del nombre de la PRIMERA imagen (parte T1, 1.2: 1.366 de 1.366 casan):
@@ -42,6 +44,18 @@ mismo que baja el director viejo (login + smcatalog downloadcatalog?format=excel
   8. «AL DIA» POR CONTENIDO, NO POR BYTES (parte T1, 1.3: la huella de bytes cambia en cada descarga): md5 de las filas
      que se suben, ordenadas por la llave, con todos sus campos (precios ya con el cociente). Si no cambia nada de lo
      que se sube, «al día»; un cambio de stock que no cambia «disponible» no es contenido nuevo.
+  9. 🆕 LA WEB MANDA EN LO DISPONIBLE DE FUNKO (encargo T4, 14-oct-2026: «una novedad la detecta lo primero que la vea,
+     la web o el Excel, y no se cuenta dos veces»). El Excel va horas por detras de la web (parte T1, 1.3: un Funko
+     disponible en la web a las 18:00 y en el Excel a las 22:06; sonda T4 del 14-oct a las 13:02: 9 Funko disponibles en
+     la web que el Excel da «Disponible» con stock 0). La corrida lee cada hora el listado filtrado de la web (marca
+     Funko; Disponible, Oferta y Saldo) y, ANTES de la foto, se lo pone encima (`web`, ver `veredicto_web`):
+       · una fila cuya URL de ficha sale en el listado → DISPONIBLE, con la palabra de la web (y sin preventa: la web ya
+         no la da como preventa);
+       · una fila de la marca, disponible en el Excel, que NO sale en el listado → AGOTADA, solo si el listado esta
+         ENTERO (las tarjetas leidas = las que la web dice tener); con uno a medias, no se quita nada.
+     Asi lo ve primero quien lo vea primero, y la foto tiene UN solo estado: cuando el Excel se pone al dia, no hay
+     cambio (ni una segunda novedad). Lo que la web tiene y el Excel aun no (una URL que no esta en el Excel), se cuenta
+     y espera al Excel: sin su llave del Excel no se inventa una fila.
 
 🔴 REPO PUBLICO: nada de este modulo imprime. Sus errores (`LecturaInvalida`) dicen RECUENTOS y nombres de columna,
    nunca un valor del fichero.
@@ -225,7 +239,8 @@ def precio_de_compra(precio, es_caja, tramo, ahora):
         cociente = Decimal(str(cociente))
     if cociente is None or not cociente.is_finite() or cociente <= 0 or not tramo.get('uds'):
         unidad = precio / div
-        return unidad, 1, unidad, AVISO_SIN_TRAMO
+        # (Encargo T4) La caja sin tramo, en figuras como las demas: 6 (se compra la caja entera), no 1.
+        return unidad, div, unidad, AVISO_SIN_TRAMO
     pa = precio * cociente / div
     aviso = None
     leido = _cuando(tramo.get('leido_en'))
@@ -234,20 +249,36 @@ def precio_de_compra(precio, es_caja, tramo, ahora):
     return pa, int(tramo['uds']) * div, pa, aviso
 
 
+# ── (Encargo T4) La web encima del Excel, en lo disponible de una marca ────────────────────
+def veredicto_web(disponible, url, marca, web):
+    """(disponible, estado_web, cambio) de una fila con la web encima (regla 9). `web`: {'marca', 'disponibles': {url:
+    estado de la tarjeta}, 'completo'} o None. `cambio`: None, 'a_disponible' o 'a_agotado'. Puro."""
+    if not web:
+        return disponible, None, None
+    estado = web['disponibles'].get(url) if url else None
+    if estado is not None:
+        return True, estado, (None if disponible else 'a_disponible')
+    if disponible and url and web.get('completo') and marca == web['marca']:
+        return False, None, 'a_agotado'
+    return disponible, None, None
+
+
 # ── El fichero entero → filas de disp_lectura ─────────────────────────────────────────────
-def convertir(contenido, tramos=None, ahora=None):
+def convertir(contenido, tramos=None, ahora=None, web=None):
     """De los bytes del .xlsx a las filas de disp_lectura, UNA por EAN crudo, con TODAS las marcas y disponibles o no.
     `tramos`: {producto_prov: {'cociente', 'uds', 'leido_en'}} del lector de tramos (los que no esten, sin cociente).
+    `web` (encargo T4): el listado filtrado de la web, que manda en lo disponible de su marca (regla 9; ver
+    `veredicto_web`).
     Devuelve (filas, cuentas, catalogo); `catalogo` es, por fila que entra, lo que necesita el lector de tramos
-    ({producto_prov, url, precio_excel (Decimal), disponible, ean_core, es_caja}). LecturaInvalida si la cabecera, un
-    stock, un precio o un estado no se entienden (se dicen los recuentos, no los valores).
+    ({producto_prov, url, precio_excel (Decimal), disponible —ya con la web—, ean_core, es_caja, marca}). LecturaInvalida
+    si la cabecera, un stock, un precio o un estado no se entienden (se dicen los recuentos, no los valores).
     🔴 Ningun aviso (warnings) sale de aqui: los de openpyxl se tragan (pueden citar el fichero)."""
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
-        return _convertir(contenido, tramos or {}, ahora or datetime.now(timezone.utc))
+        return _convertir(contenido, tramos or {}, ahora or datetime.now(timezone.utc), web)
 
 
-def _convertir(contenido, tramos, ahora):
+def _convertir(contenido, tramos, ahora, web=None):
     cabecera, crudas = leer_excel(contenido)
     comprobar_cabecera(cabecera)
     n_col = len(COLUMNAS)
@@ -256,7 +287,7 @@ def _convertir(contenido, tramos, ahora):
          'n_agotados': 0, 'n_sin_dato_precio': 0, 'n_disponible_sin_stock': 0, 'n_preventa': 0, 'n_reposicion': 0,
          'n_oferta': 0, 'n_saldo': 0, 'n_cajas': 0, 'n_cajas_disponibles': 0, 'n_ean_forma_rara': 0, 'n_sin_url': 0,
          'n_disponibles_sin_url': 0, 'n_con_tramo': 0, 'n_disponibles_con_tramo': 0, 'n_disponibles_sin_tramo': 0,
-         'n_tramo_viejo': 0}
+         'n_tramo_viejo': 0, 'n_web_a_disponible': 0, 'n_web_a_agotado': 0, 'n_web_sin_excel': 0}
     elegidas = {}   # producto_prov → (fila, disponible)
     orden = []
     for f in crudas:
@@ -314,28 +345,37 @@ def _convertir(contenido, tramos, ahora):
         nombre = _texto(v('Cabecera'))
         es_chase = es_caja and bool(_RE_CINCO_MAS_UNO.search(nombre or ''))
         url, _img = url_de_ficha(v('Imágenes'))
+        marca = _texto(v('Marca'))
+        sin_stock_excel = ESTADOS[estado][1] and not disponible
+        # (Encargo T4) Regla 9: la web encima, en lo disponible de su marca.
+        disponible, estado_web, cambio = veredicto_web(disponible, url, marca, web)
+        if estado_web is not None:
+            disp_txt, preventa = (ESTADOS[estado_web][0] if estado_web in ESTADOS else estado_web), False
+        en_oferta = (estado_web or estado) == 'Oferta'
+        c['n_web_a_disponible'] += cambio == 'a_disponible'
+        c['n_web_a_agotado'] += cambio == 'a_agotado'
         tramo = tramos.get(llave)
         p_escalon, uds_escalon, pa, aviso = precio_de_compra(precio, es_caja, tramo, ahora)
         unidad = None if precio is None else precio / (UDS_CAJA if es_caja else 1)
         salida.append({
             'producto_prov': llave,
             'ean_original': llave, 'ean_core': core,
-            'marca': _texto(v('Marca')), 'nombre': nombre, 'categoria': _texto(v('Tipo Producto')),
+            'marca': marca, 'nombre': nombre, 'categoria': _texto(v('Tipo Producto')),
             'es_caja': es_caja, 'uds_caja': UDS_CAJA if es_caja else None, 'es_chase': es_chase,
             'precio_catalogo': _f(precio), 'precio_unidad': _f(unidad),
             'precio_escalon': _f(p_escalon), 'uds_escalon': uds_escalon, 'precio_pa': _f(pa),
             'disponible': disponible, 'disponibilidad': disp_txt,
-            'en_oferta': estado == 'Oferta', 'preorder': preventa, 'fin_de_vida': None,
+            'en_oferta': en_oferta, 'preorder': preventa, 'fin_de_vida': None,
             'regla': regla, 'aviso': aviso,
             'sin_dato_disponibilidad': False, 'sin_dato_precio': precio is None,
         })
         catalogo.append({'producto_prov': llave, 'url': url, 'precio_excel': precio, 'disponible': disponible,
-                         'ean_core': core, 'es_caja': es_caja})
+                         'ean_core': core, 'es_caja': es_caja, 'marca': marca})
         con_tramo = aviso != AVISO_SIN_TRAMO and precio is not None
         c['n_leidas'] += 1
         c['n_disponibles' if disponible else 'n_agotados'] += 1
         c['n_sin_dato_precio'] += precio is None
-        c['n_disponible_sin_stock'] += ESTADOS[estado][1] and not disponible
+        c['n_disponible_sin_stock'] += sin_stock_excel
         c['n_preventa'] += preventa
         c['n_reposicion'] += estado == 'Backorder'
         c['n_oferta'] += estado == 'Oferta'
@@ -353,6 +393,8 @@ def _convertir(contenido, tramos, ahora):
     if c['n_crudo'] != c['n_sin_gtin'] + c['n_leidas'] + c['n_duplicados']:
         raise LecturaInvalida(f"no cuadra: crudo {c['n_crudo']} ≠ sin EAN {c['n_sin_gtin']} + leídas {c['n_leidas']} + "
                               f"repetidas {c['n_duplicados']}")
+    if web:
+        c['n_web_sin_excel'] = len(set(web['disponibles']) - {e['url'] for e in catalogo if e['url']})
     c['huella_contenido'] = huella_contenido(salida)
     return salida, c, catalogo
 

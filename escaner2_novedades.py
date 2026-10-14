@@ -21,6 +21,13 @@ seleccion siguen aplicadas, el fallo queda apuntado (nov_pasada.valoracion_*) y 
    la hoja «Novedades», «Fin de la oferta» (nov_novedad.fin_oferta: el ultimo dia de la oferta con la que salio). La
    comprobacion del titulo de la ficha (encargo T) es la de Funko para Funko; para Pyramid NO hay (ver
    MARCAS_SIN_COMPROBAR_TITULO). Sus cuentas sueltas: escaner2_dbline_novedades_cuentas.py.
+🆕 TCG, SOLO FUNKO (encargo T4, 14-oct-2026; Fernando, 13-oct: «el escnear automatico solo de Funko»): las novedades de
+   Funko de TCG, con proveedor='TCG'. Las saca la foto horaria de TCG (escaner2_tcg_disponibilidad.py), que antes de la
+   foto lee el listado de Funko de la web y las fichas que tocan: la novedad sale una vez, la vea primero la web o el
+   Excel, y ya con el precio del tramo mas barato. Como OcioStock: el PA es el precio de compra de la foto (precio_pa,
+   que en TCG es el del tramo mas barato, SIN el × 0,99: Fernando, T3) y el Excel lleva al final «Uds. escalón» (las
+   del tramo) y «Precio unidad» (el suelto del Excel de TCG); «Novedades TCG Funko» en el Telegram, el Excel en
+   tcg/novedades/ (Novedades_TCG_Funko_…). Sus cuentas sueltas: escaner2_tcg_novedades_cuentas.py.
 
 QUE HACE, EN ORDEN:
   0. EL INTERRUPTOR (nov_parametros.valorar). Apagado: ni una llamada a Keepa, ni una cuenta; solo se cierra la
@@ -111,6 +118,8 @@ PROVEEDORES = {
     # la oferta» (`fin_oferta`). Sin escalon. Los que no lo dicen: Funko, Funko, no y no (HEO y OcioStock, como siempre).
     'DBLINE': {'nombre': 'DBLine', 'carpeta': 'dbline/novedades', 'escalon': False, 'marcas': 'Funko y Pyramid',
                'marca_ruta': 'FunkoPyramid', 'marca_de_la_foto': True, 'fin_oferta': True},
+    # (Encargo T4) TCG, solo Funko, con las dos columnas del escalon (las uds del tramo mas barato y el suelto).
+    'TCG': {'nombre': 'TCG', 'carpeta': 'tcg/novedades', 'escalon': True},
 }
 
 
@@ -906,7 +915,7 @@ def _madrid(d):
 def ruta_del_excel(momento, proveedor=PROVEEDOR):
     """heo/novedades/<AAAA-MM-DD>/Novedades_HEO_Funko_<AAAA-MM-DD_HHMM>.xlsx, en hora de Madrid (encargo OC4: la carpeta
     y el nombre, los del proveedor: ociostock/novedades/…/Novedades_OCIOSTOCK_Funko_…; encargo DB4:
-    dbline/novedades/…/Novedades_DBLINE_FunkoPyramid_…). Puro."""
+    dbline/novedades/…/Novedades_DBLINE_FunkoPyramid_…; encargo T4: tcg/novedades/…/Novedades_TCG_Funko_…). Puro."""
     m = _madrid(momento)
     return '%s/%s/Novedades_%s_%s_%s.xlsx' % (PROVEEDORES[proveedor]['carpeta'], m.strftime('%Y-%m-%d'), proveedor,
                                               _de(proveedor, 'marca_ruta', 'Funko'), m.strftime('%Y-%m-%d_%H%M'))

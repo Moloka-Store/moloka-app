@@ -9,6 +9,15 @@
 # a ritmo humano, guardando el cociente de cada producto en disp_tramo. Al primer bloqueo o HTML que no se entienda,
 # para, guarda lo leido, Telegram y rojo.
 #
+# 🆕 NOVEDADES DE FUNKO (encargo T4, 14-oct-2026): ANTES de la foto, cada hora, el listado de la web filtrado a Funko
+#    disponible (8 paginas, ~40 s) y las fichas de Funko que tocan ya; la web manda en lo disponible de Funko, asi una
+#    novedad la ve primero quien la vea primero (la web o el Excel) y sale una sola vez, con el precio de su tramo. Con la
+#    pasada aplicada, las novedades (escaner2_novedades.py, como DBLine y OcioStock): la seleccion en la base y su
+#    valoracion (Keepa con KEEPA_API_KEY; Excel «TCG · Funko» y Telegram «Novedades TCG Funko» si sale algun COMPRAR).
+#    Con el interruptor de la base apagado (nov_parametros.valorar de TCG, que NACE apagado), cero Keepa. Las cuentas que
+#    llegan despues del cartero de la v2, en escaner2-tcg-novedades-cuentas.yml.
+#    🔴 NECESITA 20261014150000_nov_novedades_tcg.sql DE LA V2 aplicada ANTES de fusionar: sin ella, rojo al final.
+#
 # 🔑 EN SOMBRA: TCG no tiene fila en disp_fuente. Reponer, el Trackeador y la lista de precios siguen con la memoria del
 #    escaner viejo (director-tcg.yml, sin tocar). El interruptor es otro encargo, con Fernando delante. Sin Keepa y sin
 #    sondeo_keepa (Fernando, 13-oct).
@@ -97,7 +106,10 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           TCG_USER:             ${{ secrets.TCG_USER }}
           TCG_PASS:             ${{ secrets.TCG_PASS }}
-          # 🔑 El aviso de una parada, como el resto del escaner. Solo en este paso; no en el rescate.
+          # 🔑 (Encargo T4) La valoracion de las novedades de Funko: la misma llave, saldo y reserva que HEO, OcioStock y
+          #    DBLine. Solo en este paso; no en el rescate. Con el interruptor de la base apagado, no se usa.
+          KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}
+          # 🔑 El aviso de una parada (y el de las novedades), como el resto del escaner. Solo en este paso; no en el rescate.
           TELEGRAM_TOKEN:       ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
           # Los inputs llegan por env:, nunca dentro del run: (cron-job.org no manda ninguno: valen los de defecto).

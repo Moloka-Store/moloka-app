@@ -18,7 +18,12 @@ QUE PRUEBA:
       no casan); el EAN de la ficha (normal y caja con GS1 largo);
   (D) el listado: el filtro de estado, las tarjetas («desde» y suelto) y los desajustes con lo guardado;
   (E) que fichas tocan y en que orden (nuevas, marcadas, viejas; disponibles con URL; intentos fallidos esperan 24 h).
-  Y la mitad roja: mutantes de cinco reglas (repetido, caja, cociente, oferta, desajuste) ponen el banco en rojo.
+  (K) 🆕 (encargo T4) la web encima del Excel en lo disponible de Funko (da lo que ve; quita solo con el listado entero;
+      no toca otras marcas ni lo que no tiene URL), la casilla de marca del filtro y las fichas de Funko que tocan antes
+      de la foto (nueva, desajustada, con otro Precio en el Excel);
+  Y la mitad roja: mutantes de nueve reglas (repetido, caja, cociente, oferta, desajuste; y, encargo T4, la caja sin
+  tramo con 1 ud, la web que no manda, la web que quita a medias y el Precio cambiado que no se relee) ponen el banco en
+  rojo.
 """
 import io
 import os
@@ -157,6 +162,10 @@ pe, uds, pa, aviso = tcg.precio_de_compra(Decimal('60.00'), True, TRAMO, AHORA)
 eq('B2 caja: por figura (÷ 6) y uds en figuras (× 6)', (round(pa, 6), uds), (Decimal('9.766661'), 72))
 pe, uds, pa, aviso = tcg.precio_de_compra(P, False, None, AHORA)
 eq('B3 sin cociente: el suelto, 1 ud y «sin tramo leído»', (pa, uds, aviso), (P, 1, 'sin tramo leído'))
+pe, uds, pa, aviso = tcg.precio_de_compra(Decimal('60.00'), True, None, AHORA)
+eq('B3b (encargo T4) caja sin cociente: el suelto por figura y 6 uds (la caja, en figuras), no 1',
+   (pa, uds, aviso), (Decimal('10.00'), 6, 'sin tramo leído'))
+eq('B3c …y así sale en la foto de la caja C sin tramo', {f['producto_prov']: f for f in lect}['800000000031C']['uds_escalon'], 6)
 viejo = dict(TRAMO, leido_en=(AHORA - timedelta(days=8)).isoformat())
 eq('B4 cociente de hace 8 días: se usa y se avisa', tcg.precio_de_compra(P, False, viejo, AHORA)[2:],
    (P * Decimal('0.976666134667'), 'tramo leído hace más de 7 días'))
@@ -311,6 +320,73 @@ eq('E2 el tope corta la cola y dice cuántas tocaban', ([x['producto_prov'] for 
                                                        tr.pendientes(CAT, GUARD, AHORA, 2)[1]), (['nueva', 'fallo_antiguo'], 5))
 eq('E3 con tope 0, ninguna', tr.pendientes(CAT, GUARD, AHORA, 0)[0], [])
 
+# ── (K) (Encargo T4) La web encima del Excel, la marca del filtro y las fichas antes de la foto ─────
+FK = [fila('8000000002017', marca='Funko'),                                   # disponible y en la web
+      fila('8000000002024', marca='Funko', stock=0),                          # Disponible sin stock: la web la da
+      fila('8000000002031', marca='Funko', estado='PreOrder', stock=0),       # preventa en el Excel, Oferta en la web
+      fila('8000000002048', marca='Funko'),                                   # disponible y fuera del listado
+      fila('8000000002055', marca='Otra'),                                    # otra marca, fuera del listado
+      fila('8000000002062', marca='Funko', imagen='https://otra.invalid/x.png')]  # sin URL
+_uk = {f['EAN']: 'https://tcgfactory.com/es/distribucion/cosa-inventada-%s.html' % f['EAN'] for f in FK}
+WEBK = {'marca': 'Funko', 'completo': True,
+        'disponibles': {_uk['8000000002017']: 'Disponible', _uk['8000000002024']: 'Disponible',
+                        _uk['8000000002031']: 'Oferta', 'https://tcgfactory.com/es/distribucion/no-esta.html': 'Disponible'}}
+lk, ck, catk = tcg.convertir(excel(FK), {}, AHORA, web=WEBK)
+pk = {f['producto_prov']: f for f in lk}
+eq('K1 🔑 lo que la web da disponible, lo es: la de stock 0 (con la palabra de la web) y la preventa (Oferta, sin '
+   'preventa, en oferta)', [(pk[e]['disponible'], pk[e]['disponibilidad'], pk[e]['preorder'], pk[e]['en_oferta'])
+                            for e in ('8000000002024', '8000000002031')],
+   [(True, 'Disponible', False, False), (True, 'Oferta', False, True)])
+eq('K2 🔑 con el listado entero, la de la marca que no sale se agota; la de otra marca y la que no tiene URL, como dice el '
+   'Excel', [pk[e]['disponible'] for e in ('8000000002048', '8000000002055', '8000000002062')], [False, True, True])
+eq('K3 los recuentos: 2 a disponible, 1 a agotado, 1 de la web que el Excel aún no tiene; el catálogo lleva la marca y '
+   'lo disponible ya con la web', (ck['n_web_a_disponible'], ck['n_web_a_agotado'], ck['n_web_sin_excel'],
+                                   {e['producto_prov']: (e['marca'], e['disponible']) for e in catk}['8000000002024']),
+   (2, 1, 1, ('Funko', True)))
+eq('K4 «disponible sin stock» sigue contando lo que dice el Excel', ck['n_disponible_sin_stock'], 1)
+lk2, ck2, _ = tcg.convertir(excel(FK), {}, AHORA, web=dict(WEBK, completo=False))
+eq('K5 🔑 con el listado a medias, no se quita nada (y sí se da lo que la web ve)',
+   ({f['producto_prov']: f['disponible'] for f in lk2}['8000000002048'], ck2['n_web_a_agotado'], ck2['n_web_a_disponible']),
+   (True, 0, 2))
+eq('K6 sin web, lo de siempre (y la misma huella que antes de T4 con las mismas filas)',
+   (tcg.convertir(excel(FK), {}, AHORA)[1]['n_disponibles'], tcg.convertir(excel(FK), {}, AHORA, web=None)[1]['huella_contenido']
+    == tcg.convertir(excel(FK), {}, AHORA)[1]['huella_contenido']), (4, True))
+eq('K7 la web cambia la huella (una foto distinta es contenido nuevo)', ck['huella_contenido'] !=
+   tcg.convertir(excel(FK), {}, AHORA)[1]['huella_contenido'], True)
+eq('K8 veredicto_web, puro', [tcg.veredicto_web(True, 'u1', 'Funko', {'marca': 'Funko', 'disponibles': {'u1': 'Saldo'}}),
+                              tcg.veredicto_web(True, 'u2', 'Funko', {'marca': 'Funko', 'disponibles': {}, 'completo': True}),
+                              tcg.veredicto_web(False, None, 'Funko', {'marca': 'Funko', 'disponibles': {}, 'completo': True}),
+                              tcg.veredicto_web(True, 'u3', 'Funko', None)],
+   [(True, 'Saldo', None), (False, None, 'a_agotado'), (False, None, None), (True, None, None)])
+
+FORMK = FORM.replace('</form>', '<label><input type="checkbox" name="m[]" value="m9"><span class="name">Funko</span></label>'
+                     '<label><input type="checkbox" name="m[]" value="m7"><span class="name">Funko Games</span></label></form>')
+eq('K9 la casilla de la marca: la de nombre exacto (no «Funko Games»)', tr.valor_de_marca(FORMK, 'Funko'), 'm9')
+lanza('K10 sin la marca en el filtro: para', tr.ListadoNoEntendido, tr.valor_de_marca, FORM, 'Funko')
+lanza('K11 la marca dos veces: para', tr.ListadoNoEntendido, tr.valor_de_marca,
+      FORMK.replace('value="m7"><span class="name">Funko Games', 'value="m7"><span class="name">Funko'), 'Funko')
+
+
+def ek(k, marca='Funko', disponible=True, url=True, precio=P):
+    return {'producto_prov': k, 'url': (U % abs(hash(k))) if url else None, 'disponible': disponible, 'precio_excel': precio,
+            'ean_core': k, 'es_caja': False, 'marca': marca}
+
+
+CATK = [ek('nueva'), ek('desajustada'), ek('otro_precio'), ek('igual'), ek('otra_marca', marca='Otra'),
+        ek('agotada', disponible=False), ek('fallo_reciente'), ek('sin_precio_excel', precio=None)]
+_ok = {'leido_en': (AHORA - timedelta(hours=2)).isoformat(), 'cociente': 0.9, 'intento_resultado': 'ok', 'precio_excel': '10'}
+GK = {'desajustada': dict(_ok), 'otro_precio': dict(_ok, precio_excel='9.50'), 'igual': dict(_ok, precio_excel='10.000'),
+      'otra_marca': None, 'fallo_reciente': {'intento_en': (AHORA - timedelta(hours=1)).isoformat(), 'intento_resultado': 'sin_ficha'},
+      'sin_precio_excel': dict(_ok)}
+GK = {k: v for k, v in GK.items() if v is not None}
+colak, totk = tr.pendientes_antes_de_la_foto(CATK, GK, {'desajustada'}, AHORA, 10, 'Funko')
+eq('K12 🔑 antes de la foto: de la marca y disponibles, la nueva, la desajustada y la de otro Precio (en ese orden); ni '
+   'la igual (10 = 10,000), ni la de otra marca, ni la agotada, ni un fallo de hace 1 h, ni una sin Precio en el Excel',
+   ([e['producto_prov'] for e in colak], totk), (['nueva', 'desajustada', 'otro_precio'], 3))
+eq('K13 el tope corta y dice cuántas tocaban', ([e['producto_prov'] for e in tr.pendientes_antes_de_la_foto(
+    CATK, GK, {'desajustada'}, AHORA, 1, 'Funko')[0]], tr.pendientes_antes_de_la_foto(CATK, GK, set(), AHORA, 1, 'Funko')[1]),
+   (['nueva'], 2))
+
 # ── La mitad roja: cinco reglas rotas, cinco rojos ───────────────────────────────────────
 def muta(modulo, nombre, sustituto, prueba):
     viejo = getattr(modulo, nombre)
@@ -336,6 +412,19 @@ muta(tr, 'redondeo', lambda d: d,
                                Decimal('16.00'))['suelto_exacto'] == Decimal('16.00')
      and tr.desajustes(cards[:2], G) == set())
 muta(tr, 'desajustes', lambda cards, g: set(), lambda: tr.desajustes(tr.tarjetas(tarjeta(U % 1, '9,80')), G) == {'A'})
+# (Encargo T4) La caja sin tramo con 1 ud (como salia en T2): rojo.
+_pc = tcg.precio_de_compra
+muta(tcg, 'precio_de_compra', lambda p, caja, t, a: (lambda r: (r[0], 1, r[2], r[3]) if r[3] == tcg.AVISO_SIN_TRAMO else r)(_pc(p, caja, t, a)),
+     lambda: {f['producto_prov']: f for f in tcg.convertir(excel(FILAS), {}, AHORA)[0]}['800000000031C']['uds_escalon'] == 6)
+# (Encargo T4) La web que no manda (o que quita con el listado a medias): rojo.
+muta(tcg, 'veredicto_web', lambda d, u, m, w: (d, None, None),
+     lambda: {f['producto_prov']: f['disponible'] for f in tcg.convertir(excel(FK), {}, AHORA, web=WEBK)[0]}['8000000002024'])
+muta(tcg, 'veredicto_web', lambda d, u, m, w: ((u in w['disponibles']) if (w and u) else d, None, None),
+     lambda: {f['producto_prov']: f['disponible'] for f in tcg.convertir(excel(FK), {}, AHORA,
+                                                                          web=dict(WEBK, completo=False))[0]}['8000000002048'])
+muta(tr, '_precio_cambiado', lambda g, p: False,
+     lambda: [e['producto_prov'] for e in tr.pendientes_antes_de_la_foto(CATK, GK, set(), AHORA, 10, 'Funko')[0]]
+     == ['nueva', 'otro_precio'])
 
 print()
 print('TODO OK' if not fallos else 'FALLOS: %d (%s)' % (len(fallos), ', '.join(fallos)))
