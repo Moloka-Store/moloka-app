@@ -685,7 +685,10 @@ _directores = sorted(f[len('director-'):-len('.yml')].upper()
                      for f in os.listdir(_dir)
                      if f.startswith('director-') and f.endswith('.yml'))
 print('    directores en .github/workflows: %s' % ', '.join(_directores))
-eq('(B) 🔴 hay directores que mirar, no cero', len(_directores) > 0, True)
+# 🆕 16-oct-2026 (jubilar los escaneres viejos, fase 1): los cuatro director-*.yml se borran. Los CINCO
+#    se vigilan en `disp_pasada` (abajo), asi que lo que se exige ahora es que no vuelva ninguno sin su
+#    linea: la regla de debajo («todo director tiene su linea») sigue en pie para el que naciera.
+eq('(B) 🔴 ya no queda ningun director viejo en .github/workflows (jubilados el 16-oct)', _directores, [])
 # 🆕 03-oct-2026: HEO y OSMA salen de `escaner_memoria` y se vigilan en `disp_pasada`.
 #    El director viejo de HEO sigue en .github/workflows (apagado en cron-job.org) y
 #    OSMA nunca tuvo director viejo (nacio en el escaner 2): por eso la regla ya no es
@@ -716,20 +719,14 @@ eq('(B) 🔴 TCG (T5c): 26 h, ningun dia descontado, franja 07-17 UTC con `venta
 eq('(B) 🔴 …y TCG es el UNICO al que le cuenta una «al dia» (a OcioStock, por ejemplo, NO: su '
    'fichero se rehace cada noche y un dia entero «al dia» es lo que hay que saber)',
    sorted(p for p in HORARIOS if HORARIOS[p].get('al_dia_cuenta')), ['TCG'])
-eq('(B) 🔴 …y su director viejo sigue existiendo y con linea (el .yml queda; se apaga en la base)',
-   'TCG' in _directores and 'TCG' in HORARIOS, True)
 eq('(B) 🔴 DBLINE (DB6): cada hora de lunes a sabado -> 26 h, el domingo descontado y el sabado no, '
    'franja 05-19 UTC con `ventana_ancha`',
    (HORARIOS['DBLINE']['umbral_h'], HORARIOS['DBLINE']['descansa_domingo'],
     HORARIOS['DBLINE']['descansa_sabado'], HORARIOS['DBLINE'].get('ventana_ancha'),
     HORARIOS['DBLINE']['primera_h'], HORARIOS['DBLINE']['ultima_h']), (26, True, False, True, 5, 19))
-eq('(B) 🔴 …y su director viejo sigue existiendo y con linea (el .yml queda; se apaga en la base)',
-   'DBLINE' in _directores and 'DBLINE' in HORARIOS, True)
 eq('(B) 🔴 OCIOSTOCK: una aplicada al dia los siete dias -> 26 h y ningun dia descontado',
    (HORARIOS['OCIOSTOCK']['umbral_h'], HORARIOS['OCIOSTOCK']['descansa_sabado'],
     HORARIOS['OCIOSTOCK']['descansa_domingo']), (26, False, False))
-eq('(B) 🔴 …y su director viejo sigue existiendo y con linea (mientras no se apague)',
-   'OCIOSTOCK' in _directores and 'OCIOSTOCK' in HORARIOS, True)
 eq('(B) 🔴 OSMA: de lunes a viernes, el sabado Y el domingo no cuentan',
    (HORARIOS['OSMA']['descansa_sabado'], HORARIOS['OSMA']['descansa_domingo']), (True, True))
 eq('(B) 🔴 HEO trabaja los siete dias: no se le descuenta ninguno',

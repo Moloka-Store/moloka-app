@@ -41,7 +41,7 @@
 import { timingSafeEqual } from 'node:crypto';
 
 const REPO = 'Moloka-Store/moloka-app';
-const WORKFLOWS_OK = ['actualizar-app.yml', 'escaner-app.yml', 'escaner-pro.yml', 'fabrica-preparar.yml', 'fabrica-generar.yml', 'fabrica-redactar.yml', 'fabrica-rehacer.yml', 'web-rebuild.yml', 'web-rank.yml', 'fabrica-lote.yml', 'actualizar-tcg.yml', 'miravia-excel.yml', 'miravia-resultado.yml', 'sync-stock-web.yml', 'tracker-app.yml', 'tracker-cerebro.yml',
+const WORKFLOWS_OK = ['actualizar-app.yml', 'escaner-app.yml', 'fabrica-preparar.yml', 'fabrica-generar.yml', 'fabrica-redactar.yml', 'fabrica-rehacer.yml', 'web-rebuild.yml', 'web-rank.yml', 'fabrica-lote.yml', 'actualizar-tcg.yml', 'miravia-excel.yml', 'miravia-resultado.yml', 'sync-stock-web.yml', 'tracker-app.yml', 'tracker-cerebro.yml',
   // 23-ago-2026 · EL BUZON DE INVENTARIO_FBA. Es el primer informe de la Fase 0 que
   // se puede cargar DESDE la app, y nace por lo del 16-ago: Amazon rompio el informe
   // de salud, la tabla se quedo congelada siete dias y nadie tenia un boton para

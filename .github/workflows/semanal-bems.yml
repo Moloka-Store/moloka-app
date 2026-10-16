@@ -17,18 +17,16 @@
 # ============================================================
 name: Moloka - Repaso semanal BEMS
 
-# 🔴 BEMS ESTA EN PAUSA: el 'schedule' esta COMENTADO a proposito, igual que el de
-#    detector-bems.yml. Hasta el 11-ago-2026 este corria los jueves, salia en VERDE y no
+# 🔴 BEMS ESTA EN PAUSA: el 'schedule' esta COMENTADO a proposito, igual que lo estaba el
+#    de detector-bems.yml (borrado el 16-oct-2026, jubilar los escaneres viejos, fase 1). Hasta el 11-ago-2026 este corria los jueves, salia en VERDE y no
 #    hacia nada: su propio resumen decia «Funko: no lanzado · Bandai Model Kit: no lanzado
 #    · Pyramid Int.: no lanzado». Un run verde que no ejecuta nada es peor que uno rojo,
 #    porque nadie lo mira — y ademas era incoherente que el detector estuviera apagado y
 #    este no, siendo del mismo proveedor y por la misma causa.
 #
-# 🔑 CUANDO BEMS DESPIERTE HAY QUE DESCOMENTAR **DOS** SCHEDULES:
-#      · este fichero
-#      · .github/workflows/detector-bems.yml
-#    Y el recordatorio vive en el README, en «Cuando BEMS despierte», que es el sitio
-#    unico donde mirar. Si solo se descomenta uno, el otro se queda dormido en silencio.
+# 🔑 CUANDO BEMS DESPIERTE HAY QUE DESCOMENTAR EL SCHEDULE DE ESTE FICHERO (el de
+#    detector-bems.yml ya no existe). El recordatorio vive en el README, en «Cuando BEMS
+#    despierte», que es el sitio unico donde mirar.
 on:
   # schedule:
   #   - cron: '0 0 * * 4'      # jueves 00:00 UTC = 02:00 peninsular (verano)

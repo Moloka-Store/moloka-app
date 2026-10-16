@@ -262,26 +262,11 @@ if len(bloques_v) == 1:
                                        'ruta_storage': 'resultados/' + OBJETIVO}, bv2)
     chk('viejo: si el fichero NO llegó, el bloque REAL deja subido_ok False', ns2['subido_ok'] is False)
 
-# 7b) El Pro: el `try` de main() que sube y verifica.
-src_p = fuente('moloka_escaner_pro_nube.py')
-arbol_p = ast.parse(src_p)
-main_p = [n for n in arbol_p.body if isinstance(n, ast.FunctionDef) and n.name == 'main']
-bloques_p = [n for n in ast.walk(main_p[0]) if isinstance(n, ast.Try) and asigna_subido_ok(n)] if main_p else []
-chk('pro: hay UN try en main() que asigna subido_ok', len(bloques_p) == 1)
-chk('pro: importa fichero_en_storage de verificar_subida', importa_la_funcion(arbol_p))
-if len(bloques_p) == 1:
-    nombre_pro = 'Escaneo_PRO_TCG_Funko_20260930_1204.xlsx'
-    bp = Balde(resultados_reales(150) + [f'resultados/Escaneo_TCG_Funko_202609{d:02d}_1204.xlsx'
-                                         for d in range(1, 30)])
-    ns = ejecutar_bloque(segmento(src_p, bloques_p[0]),
-                         lambda tmp: {'out': tmp, 'nombre': nombre_pro,
-                                      'ruta_storage': 'resultados/' + nombre_pro}, bp)
-    chk('pro, 179 en la carpeta y el suyo fuera de los 100 primeros: subido_ok True',
-        nombre_pro not in [o['name'] for o in Balde(bp.rutas).list('resultados')]
-        and ns['subido_ok'] is True)
+# 7b) El Pro de la nube (moloka_escaner_pro_nube.py) se borro el 16-oct-2026 con escaner-pro.yml
+#     (jubilar los escaneres viejos, fase 1): queda solo el escaner viejo de tokens, el de las facturas.
 
-# 7c) Ningún sitio de los dos escáneres vuelve a verificar listando resultados/ a secas.
-for fichero, arbol in (('moloka_escaner_nube.py', arbol_v), ('moloka_escaner_pro_nube.py', arbol_p)):
+# 7c) Ningún sitio del escáner viejo vuelve a verificar listando resultados/ a secas.
+for fichero, arbol in (('moloka_escaner_nube.py', arbol_v),):
     a_secas = [n.lineno for n in ast.walk(arbol) if isinstance(n, ast.Call)
                and isinstance(n.func, ast.Attribute) and n.func.attr == 'list'
                and len(n.args) == 1 and not n.keywords

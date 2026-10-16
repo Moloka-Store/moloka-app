@@ -308,7 +308,8 @@ def _def(arbol, nombre, clase=None):
     return defs[0] if len(defs) == 1 else None
 
 
-PROGRAMAS = ('moloka_escaner_nube.py', 'moloka_escaner_pro.py', 'moloka_escaner_pro_nube.py', 'escaner2_motor.py',
+# 16-oct-2026: fuera moloka_escaner_pro_nube.py, borrado con escaner-pro.yml (jubilar los escaneres viejos, fase 1).
+PROGRAMAS = ('moloka_escaner_nube.py', 'moloka_escaner_pro.py', 'escaner2_motor.py',
              'escaner2_heo_cruce.py', 'escaner2_novedades.py', 'en_mi_bd.py')
 eq('(D) 🔴 ninguno de los programas de la columna pide ni lee `stock_fba` (en el código, no en los comentarios)',
    {p: _textos_con(p, 'stock_fba') for p in PROGRAMAS if _textos_con(p, 'stock_fba')}, {})
@@ -322,11 +323,6 @@ eq('(D) …y la foto se lee a nivel superior, en la Celda 5 (FOTO_FBA = en_mi_bd
    ['FOTO_FBA = en_mi_bd.leer_foto_fba(sb)'])
 eq('(D) 🔴 el Pro: `escanear_pro` llama a en_mi_bd.texto_en_mi_bd',
    _llama(_def(_arbol('moloka_escaner_pro.py'), 'escanear_pro'), 'en_mi_bd', 'texto_en_mi_bd'), True)
-_main_pro = _def(_arbol('moloka_escaner_pro_nube.py'), 'main')
-eq('(D) …y el Pro de la nube le pasa la foto que lee (foto_fba=… de en_mi_bd.leer_foto_fba)',
-   (_llama(_main_pro, 'en_mi_bd', 'leer_foto_fba'),
-    any(isinstance(c, ast.Call) and getattr(c.func, 'id', None) == 'escanear_pro' and
-        any(k.arg == 'foto_fba' for k in c.keywords) for c in ast.walk(_main_pro))), (True, True))
 eq('(D) 🔴 el escáner 2: Motor.en_bd_txt llama a en_mi_bd.texto_en_mi_bd',
    _llama(_def(_arbol('escaner2_motor.py'), 'en_bd_txt', clase='Motor'), 'en_mi_bd', 'texto_en_mi_bd'), True)
 eq('(D) 🔴 el heredado del escáner 2 ya no trae el `en_bd_txt` del viejo',
