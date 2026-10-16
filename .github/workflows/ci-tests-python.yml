@@ -89,7 +89,7 @@ jobs:
         #    solo su banco --, asi que la version se fija aqui y punto. Desde el
         #    10-sep lo usan DOS: `test_centinela_mudo.py` lee el cron del workflow
         #    del centinela por estructura, para cruzarlo con los horarios medidos.
-        run: pip install --quiet psycopg2-binary openpyxl==3.1.5 supabase==2.31.0 pandas==3.0.0 pyyaml==6.0.3
+        run: pip install --quiet psycopg2-binary openpyxl==3.1.5 supabase==2.31.0 pandas==3.0.0 pyyaml==6.0.3 cryptography==49.0.0
 
       - name: 4) Los modulos importan
         # Va ANTES de los tests para que un fallo de dependencia se lea como lo
@@ -524,6 +524,12 @@ jobs:
       # fallo, continue-on-error, actions: write solo en el); la decision con el buzon, las cargas y las corridas
       # REALES del 01-oct-2026; cuatro ficheros en serie con la pagina cerrada; un fichero que falla se intenta dos
       # veces y no hay bucle; y los dos saltos del procesador (ya cargado, superado). Sin red y sin secretos.
+      # (Encargo F2, 16-oct-2026) El escaneo de una factura en el escaner 2 (escaner2_factura.py): los datos de HOY de
+      # la app o Keepa en el momento, la cuenta del viejo al centimo, el chase fuera, NL/BE al 12 % con la funcion de
+      # la base, las ventas al mes de lo rentable, Keepa sin saldo, la grabacion de la sombra y que muerde.
+      - name: 25 septendecies sexdecies) test_escaner2_factura.py
+        run: python -u test_escaner2_factura.py
+
       - name: 25 duodevicies) test_encadenar_keepa.py
         run: python -u test_encadenar_keepa.py
 
@@ -598,6 +604,7 @@ jobs:
             test_escaner2_tcg_disponibilidad.py
             test_escaner2_tcg_pro.py
             test_encadenar_keepa.py
+            test_escaner2_factura.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).
