@@ -567,9 +567,83 @@ def origen_iva_fila(dom, iva, core):
 def es_propio(core): return _sup(core) is not None
 
 
+# ── ORIGEN: moloka_escaner_nube.py, líneas 1598-1601 · commit 2f9c06a · blob 21ec2016ef · md5 003800311f25871bfe4cc78bef15da57 ──
+# ============================================================
+# Celda 6 - FASE 1: filtro de rank (Keepa ES, 1 token)
+# ============================================================
+IDX_RANK, IDX_NEW, IDX_BBOX_LAND = 3, 1, 18   # 18 = BUY_BOX_SHIPPING (buy box CON envio = aterrizada, como el v1)
+
+
 # ── ORIGEN: moloka_escaner_nube.py, líneas 1617-1617 · commit 2f9c06a · blob 21ec2016ef · md5 4b708d33bb7eda285751d1193994db38 ──
 # ── (anidada en el original: aquí va sin su sangría de 4 espacios, nada más)
 def keyrank(c): return c['r_90'] if c['r_90'] and c['r_90']>0 else 10**12
+
+
+# ── ORIGEN: moloka_escaner_nube.py, líneas 1771-1794 · commit 2f9c06a · blob 21ec2016ef · md5 f08b74d98ad396dc0b257081fc4c54db ──
+# ============================================================
+# Celda 7 - FASE 2: informe por pais (PAISES) (3 tok/pais, buybox sin offers)
+# ============================================================
+def _url_imagen(prod):
+    # Mismo montaje VERIFICADO que el v1 en produccion (moloka_actualizar_nube.py:1882): Keepa marco
+    # imagesCSV como DEPRECATED; el campo bueno es 'images' (lista), con imagesCSV de reserva. La URL
+    # es https://m.media-amazon.com/images/I/<nombre>. None si no hay imagen (hueco vacio, no icono roto).
+    imgs = prod.get('images')
+    if isinstance(imgs, list) and imgs:
+        el = imgs[0]; nombre = None
+        if isinstance(el, dict):
+            for k in ('l', 'large', 'hiRes', 'm', 'medium', 'image', 'name'):
+                if el.get(k): nombre = el[k]; break
+        elif isinstance(el, str):
+            nombre = el
+        if nombre:
+            nombre = str(nombre)
+            return nombre if nombre.startswith('http') else ('https://m.media-amazon.com/images/I/' + nombre)
+    csv = prod.get('imagesCSV')   # campo viejo, de reserva
+    if csv:
+        primer = str(csv).split(',')[0].strip()
+        if primer:
+            return 'https://m.media-amazon.com/images/I/' + primer
+    return None
+
+
+# ── ORIGEN: moloka_escaner_nube.py, líneas 1796-1832 · commit 2f9c06a · blob 21ec2016ef · md5 c63ed92ea0c6a01ba0ffbc5348b3726b ──
+def datos_pais(asin, dom):
+    res = keepa_query([asin], product_code_is_asin=True, domain=dom, stats=90, history=0, buybox=True)
+    # 🔒 None (fallo de red tras reintentos) NO es lo mismo que [] (Keepa no
+    # tiene ese ASIN en ese pais). Antes se mezclaban y el pais perdido por red
+    # desaparecia en silencio del informe.
+    if res is None:
+        PAISES_PERDIDOS.append((asin, dom))
+        return None
+    if not res: return None
+    p = res[0]; st = p.get('stats') or {}
+    cur, a90 = st.get('current') or [], st.get('avg90') or []
+    # Buy box ATERRIZADA: current[18] (BUY_BOX_SHIPPING) es el precio CON envio,
+    # lo que paga el cliente. Fallback a buyBoxPrice (pelado) si el 18 no viene.
+    # Mismo mecanismo que el v1 en produccion (moloka_actualizar_nube.py, 1932-1943).
+    bb_land = cur[IDX_BBOX_LAND] if len(cur)>IDX_BBOX_LAND else None
+    bb_pel  = st.get('buyBoxPrice')
+    if bb_land and bb_land>0:
+        precio = bb_land/100
+        canal = 'BB-FBA' if st.get('buyBoxIsFBA') else 'BB-FBM'
+    elif bb_pel and bb_pel>0:
+        precio = bb_pel/100
+        canal = 'BB-FBA' if st.get('buyBoxIsFBA') else 'BB-FBM'
+    else:
+        new = cur[IDX_NEW] if len(cur)>IDX_NEW else -1
+        precio = new/100 if new and new>0 else None
+        canal = 'SIN BB' if precio else 'sin precio'
+    fba = p.get('fbaFees') or {}
+    fee = fba.get('pickAndPackFee')
+    def _pos(x): return x if (x is not None and x>=0) else None
+    return {'precio':precio,'canal':canal,'ref_pct':p.get('referralFeePercentage'),
+            'fee':fee/100 if fee else None,
+            'rank_act':cur[IDX_RANK] if len(cur)>IDX_RANK else -1,
+            'rank90':a90[IDX_RANK] if len(a90)>IDX_RANK else -1,
+            'n_of':_pos(st.get('totalOfferCount')),
+            'vendidos':p.get('monthlySold'),
+            'imagen':_url_imagen(p),
+            'titulo':(p.get('title') or '')}
 
 
 # ── ORIGEN: moloka_escaner_nube.py, líneas 1941-1948 · commit 2f9c06a · blob 21ec2016ef · md5 7d53ece74eeee15ba65686348f4a9c8e ──

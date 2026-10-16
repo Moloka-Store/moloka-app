@@ -1,0 +1,55 @@
+# ============================================================
+# Moloka - Escaner 2 · EL ESCANEO DE UNA FACTURA (encargo F2, 16-oct-2026)
+#
+# La v2 lo dispara al pulsar «Escanear» en Entrada de facturas (escanear.ts): antes deja en la base la peticion
+# (escaner2_factura_pasada, con las lineas y su coste) y aqui solo llega la `ejecucion`. El programa
+# (escaner2_factura_nube.py -> escaner2_factura.escanear) usa los datos de HOY que ya tiene la app y, si faltan,
+# pregunta a Keepa en el momento; deja el resultado en escaner2_factura_pais, que es lo que lee la factura.
+# Sustituye, para las facturas, a escaner-app.yml (que no se toca: sigue para lo demas hasta la fase 2).
+#
+# 🔒 El repo es PUBLICO: el disparo solo lleva la ejecucion. Ni costes ni lineas en los inputs ni en el log.
+# >>> SIN RELOJ <<<  Solo se ejecuta cuando la app lo dispara (o a mano, con la ejecucion de una pasada «pedida»).
+# Sin `concurrency`, a proposito: cada pasada es SU factura y dos facturas pueden escanearse a la vez (la barrera
+# de la v2 ya no deja lanzar otra mientras hay una en marcha). Un grupo dejaria solo UNA esperando y la orden nueva
+# cancelaria la que espera.
+# ============================================================
+name: Moloka - Escaner 2 · Escaneo de factura
+
+on:
+  workflow_dispatch:
+    inputs:
+      ejecucion:
+        description: 'La ejecucion de la pasada (escaner2_factura_pasada.ejecucion), en estado «pedida»'
+        required: true
+        type: string
+
+jobs:
+  escanear:
+    runs-on: ubuntu-24.04
+    # Solo leer el repo: lo demas lo hace con la llave de servicio de Supabase.
+    permissions:
+      contents: read
+    timeout-minutes: 20
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        # Las mismas versiones FIJADAS que las cuentas de las novedades (supabase: base · requests: Keepa).
+        run: pip install supabase==2.31.0 requests==2.34.2
+
+      - name: Escanear la factura
+        timeout-minutes: 15
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}
+          EJECUCION:            ${{ inputs.ejecucion }}
+          PYTHONIOENCODING:     utf-8
+        # 🔒 La ejecucion entra por el entorno y no pegada en la linea: un input no se interpola dentro de `run`.
+        run: python -u escaner2_factura_nube.py --ejecucion "$EJECUCION"

@@ -168,8 +168,14 @@ def celda9(texto, lineas, sha):
     return [(cuerpo[ini].lineno, cab + '\n' + '\n'.join(cuerpo_fn) + '\n')]
 
 
-piezas, sha_nube = por_nombre('moloka_escaner_nube.py', DEFS_MOTOR + DEFS_EXCEL + DEFS_ELECCION,
-                              NOMBRES_MOTOR + NOMBRES_ELECCION, anidadas=('keyrank',), extra=celda9,
+# (encargo F2, 16-oct-2026) El escaneo de una FACTURA en el escaner 2 (escaner2_factura.py) pregunta a Keepa en el
+# momento, pais a pais, como la Fase 2 del viejo: su `datos_pais` (precio de la caja de compra ATERRIZADA, comision,
+# tarifa, caidas) con `_url_imagen` y los indices de `stats.current`. `keepa_query` y `PAISES_PERDIDOS` NO se heredan:
+# los pone quien la ejecuta (la llamada a Keepa es de escaner2_factura.py, por la API y no por la libreria).
+DEFS_FACTURA = ('_url_imagen', 'datos_pais')
+NOMBRES_FACTURA = ('IDX_RANK', 'IDX_NEW', 'IDX_BBOX_LAND')
+piezas, sha_nube = por_nombre('moloka_escaner_nube.py', DEFS_MOTOR + DEFS_EXCEL + DEFS_ELECCION + DEFS_FACTURA,
+                              NOMBRES_MOTOR + NOMBRES_ELECCION + NOMBRES_FACTURA, anidadas=('keyrank',), extra=celda9,
                               heredado='escaner2_heredado_nube.py')
 escribir('escaner2_heredado_nube.py',
          'ESCANER 2 · LO HEREDADO DE moloka_escaner_nube.py (el escaner viejo), COPIADO LITERALMENTE.\n\n'
