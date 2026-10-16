@@ -16,5 +16,5 @@ dos verdades y un descuadre garantizado.
 (repo, pantallas, Auth) no hay nada todavía»*: eso era cierto al arrancar el proyecto y **hoy no lo
 es**. La app existe en el repo `moloka-app-v2`, se despliega en Vercel, tiene Auth por
 `@supabase/ssr`, y su Inventario está en marcha — hasta el punto de que un workflow lo comprueba una vez al día
-en laborables (el reloj de GitHub lo lanza a media mañana, no antes de que entre Elena). Lo que sigue siendo verdad es el orden: la capa de datos
+en laborables (lo lanza con horas de retraso y sin hora fija (de 2 a 9 h tarde, medido el 15-oct-2026)). Lo que sigue siendo verdad es el orden: la capa de datos
 va primero.
