@@ -166,16 +166,15 @@ antes de volver a cerrarlas.
 
 ## 😴 Cuando BEMS despierte
 
-BEMS está **en pausa** (su API no responde). Los dos workflows tienen el `schedule:`
-**comentado a propósito**. El día que vuelva, hay que descomentar **los dos**:
+BEMS está **en pausa** (su API no responde). El workflow tiene el `schedule:`
+**comentado a propósito**. El día que vuelva, hay que descomentarlo:
 
 | Fichero | Cron que hay que descomentar |
 |---|---|
-| `.github/workflows/detector-bems.yml` | `0,30 7-12 * * 1-5` + los repasos de 13:00 y 15:00 |
 | `.github/workflows/semanal-bems.yml` | `0 0 * * 4` (jueves) |
 
-🔴 **Si solo se descomenta uno, el otro se queda dormido en silencio.** Por eso están
-en la misma tabla y cada fichero cita al otro.
+*(16-oct-2026: `detector-bems.yml` y `moloka_detector_bems.py` se borraron al jubilar los
+escáneres viejos, fase 1. BEMS lo lleva el escáner 2: `escaner2-bems-*.yml`.)*
 
 ⚠️ **Y antes de darlo por vivo, comprobar que ESCRIBE**, no que corre. Hasta el
 11-ago-2026 el semanal corría los jueves, salía en **verde** y no hacía nada: su propio

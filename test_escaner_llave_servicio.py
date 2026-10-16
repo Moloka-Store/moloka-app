@@ -120,11 +120,10 @@ QUE SE PRUEBA, Y COMO:
            con OTRA linea. Sin este segundo caso, el primero saldria verde
            tambien si el escaner abortase siempre.
 
-  (F) LA GUARDA DEL CATALOGO PROPIO DEL ESCANER PRO, EJECUTADA. La llave es la
-      mitad que arregla; la guarda es la que AVISA el dia que la llave falte. Se
-      sacan `abortar` y `leer_productos_propios` del fichero real con `ast` y se
-      corren con un Supabase de mentira: cero filas tiene que abortar en ROJO, y
-      la version de antes -- guardada ahi tal cual estaba -- tiene que NO abortar.
+  (F) LA GUARDA DEL CATALOGO PROPIO DEL ESCANER PRO, EJECUTADA. Retirada el
+      16-oct-2026 con el propio Pro (`moloka_escaner_pro_nube.py` y
+      `escaner-pro.yml` se borran al jubilar los escaneres viejos, fase 1): ya no
+      queda fichero del que sacar la guarda.
 
 LAS DOS DIRECCIONES, MEDIDAS. (E1) se ha visto rojo devolviendo a mano el
 respaldo del #291 (`_llave_svc or os.environ['SUPABASE_KEY']`): el proceso deja
@@ -140,7 +139,6 @@ import re
 import subprocess
 import sys
 import types
-from contextlib import redirect_stdout
 
 import yaml
 
@@ -168,10 +166,11 @@ RUTA = 'moloka_escaner_nube.py'
 #    `.table('productos')` lo veia. Esa es la razon de que este censo se haga por
 #    el cliente y no por el nombre de la tabla.
 PROGRAMAS = [
-    (RUTA,                         'solo-servicio',         5),   # 4 directores + escaner-app
-    ('moloka_escaner_pro_nube.py', 'solo-servicio',         1),   # escaner-pro
+    # 🆕 16-oct-2026 (jubilar los escaneres viejos, fase 1): se borran los cuatro directores, escaner-pro.yml
+    #    y detector-bems.yml, con moloka_escaner_pro_nube.py y moloka_detector_bems.py. El escaner de tokens
+    #    queda con UN paso, el de escaner-app.yml (el escaneo de facturas, que sigue en uso).
+    (RUTA,                         'solo-servicio',         1),   # escaner-app
     ('moloka_actualizar_nube.py',  'solo-servicio',         1),   # actualizar-app
-    ('moloka_detector_bems.py',    'solo-servicio',         1),   # detector-bems
     ('robot_generar.py',           'solo-servicio',         1),   # fabrica-generar
     ('moloka_sync_stock_web.py',   'solo-servicio',         1),   # sync-stock-web
     ('moloka_tracker_snapshot.py', 'servicio-con-respaldo', 0),   # a mano: ningun workflow
@@ -636,7 +635,8 @@ eq('(B) 🔴 ningun paso lanza ninguno de estos programas sin la llave de servic
 # (Encargo DB3, 09-oct-2026) +1, el cruce de DBLine. (Encargo DB4, 09-oct-2026) +1, el paso de las cuentas de las novedades de DBLine.
 # (Encargo BE4, 10-oct-2026) +1, el cruce de BEMS. (Encargo T3, 14-oct-2026) +1, el cruce de TCG.
 # (Encargo T4, 14-oct-2026) +1, el paso de las cuentas de las novedades de TCG.
-eq('(D) …y en total se han mirado los VEINTIÚN pasos que existen, no cero', _total, 21)
+# (16-oct-2026, jubilar los viejos) -6: los cuatro directores, escaner-pro y detector-bems.
+eq('(D) …y en total se han mirado los QUINCE pasos que existen, no cero', _total, 15)
 
 # (C) la otra direccion: un paso que lanza el escaner sin la llave tiene que
 # salir en la lista. Este es el estado exacto de `director-dbline.yml` ayer.
@@ -703,141 +703,12 @@ eq('(E2) 🔴 el escaner muere mas abajo y por OTRO motivo (buzon vacio)',
     and 'ESCANEO_NO_EJECUTADO: recado ilegible o ausente' in _con['salida']), True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# (F) LA GUARDA DEL CATALOGO PROPIO DEL ESCANER PRO, EJECUTADA
-# ─────────────────────────────────────────────────────────────────────────────
-# `moloka_escaner_pro_nube.py` no se puede importar: crea el cliente de Supabase
-# con la llave del entorno nada mas arrancar. Asi que las dos funciones se sacan
-# del fichero REAL con `ast` -- por estructura, buscando el `def` por su nombre en
-# el arbol -- y se EJECUTAN. No se prueba una copia: se prueba lo que corre.
-PRO = 'moloka_escaner_pro_nube.py'
-_ARBOL_PRO = ast.parse(io.open(PRO, encoding='utf-8').read(), PRO)
-
-
-def sacar_def(nombre):
-    for n in _ARBOL_PRO.body:
-        if isinstance(n, ast.FunctionDef) and n.name == nombre:
-            return n
-    print('  FALLA  (F) la funcion %s() ya no esta en %s (o dejo de ser de nivel superior)'
-          % (nombre, PRO))
-    sys.exit(1)
-
-
-class _Resp:
-    def __init__(self, data):
-        self.data = data
-
-
-class _Consulta:
-    """Imita la cadena select().eq().range().execute() de supabase-py."""
-
-    def __init__(self, filas, error):
-        self._filas, self._error, self._desde = filas, error, 0
-
-    def select(self, *a, **k):
-        return self
-
-    def eq(self, *a, **k):
-        return self
-
-    def range(self, desde, hasta):
-        self._desde = desde
-        return self
-
-    def execute(self):
-        if self._error is not None:
-            raise self._error
-        # La primera pagina trae todo; la segunda viene vacia, como en la vida real.
-        return _Resp(self._filas if self._desde == 0 else [])
-
-
-class _SB:
-    def __init__(self, filas=(), error=None):
-        self._filas, self._error = list(filas), error
-
-    def table(self, nombre):
-        assert nombre == 'productos', 'la guarda no deberia mirar otra tabla: ' + nombre
-        return _Consulta(self._filas, self._error)
-
-
-def correr_guarda(fuente_defs, sb, llave='ANONIMA (la RLS decide)'):
-    """Ejecuta `leer_productos_propios()` -> (resultado, salida, codigo de salida).
-
-    `codigo` es None si NO aborto, o el codigo con el que salio si aborto."""
-    ns = {'sys': sys, 'sb': sb, '_ORIGEN_LLAVE': llave,
-          'norm': lambda v: str(v or '').strip().lstrip('0')}
-    exec(compile(fuente_defs, PRO, 'exec'), ns)
-    buf = io.StringIO()
-    try:
-        with redirect_stdout(buf):
-            return ns['leer_productos_propios'](), buf.getvalue(), None
-    except SystemExit as ex:
-        return None, buf.getvalue(), ex.code
-
-
-_MOD_PRO = ast.fix_missing_locations(
-    ast.Module(body=[sacar_def('abortar'), sacar_def('leer_productos_propios')], type_ignores=[]))
-
-print("\n(F) la guarda del catalogo propio del escaner Pro, ejecutada")
-
-_FICHAS = [{'ean': '0074427811266', 'stock_moloka': 3, 'stock_fba': 7},
-           {'ean': '8412345678905', 'stock_moloka': 0, 'stock_fba': 1}]
-
-_sup, _log, _codigo = correr_guarda(_MOD_PRO, _SB(_FICHAS), llave='SERVICIO')
-eq('(F) con fichas: NO aborta', _codigo, None)
-eq('(F) …y devuelve las dos fichas indexadas por EAN normalizado', sorted(_sup or {}),
-   ['74427811266', '8412345678905'])
-eq('(F) …y el log deja las cifras y la llave',
-   'CATALOGO_PROPIO: filas=2 | con_ean=2 | llave=SERVICIO' in _log, True)
-
-# Con la llave de servicio, cero filas ya no puede ser una puerta cerrada
-# (`service_role` es BYPASSRLS): seria un catalogo vacio, que tampoco existe. Aborta igual.
-_sup, _log, _codigo = correr_guarda(_MOD_PRO, _SB([]), llave='SERVICIO')
-eq('(F) 🔴 CERO FILAS aunque la llave sea la de SERVICIO: aborta en ROJO', _codigo, 1)
-eq('(F) …con la linea grepable de los dos escaneres',
-   'ESCANEO_NO_EJECUTADO' in _log, True)
-eq('(F) …y el motivo dice con que llave se leyo',
-   'SERVICIO' in _log.split('ESCANEO_NO_EJECUTADO')[-1], True)
-# Y el rotulo es DERIVADO, no fijo: si manana alguien quita la guarda de la llave,
-# el log tiene que contarlo en vez de seguir diciendo SERVICIO.
-_sup, _log, _codigo = correr_guarda(_MOD_PRO, _SB([]))
-eq('(F) …y si se leyera con la anonima, el motivo lo diria',
-   'ANONIMA' in _log.split('ESCANEO_NO_EJECUTADO')[-1], True)
-
-_sup, _log, _codigo = correr_guarda(_MOD_PRO, _SB([], error=RuntimeError('conexion caida')))
-eq('(F) 🔴 y si la lectura LANZA, tambien aborta en ROJO', _codigo, 1)
-eq('(F) …diciendo que lanzo, no que venia vacia',
-   'RuntimeError' in _log and 'conexion caida' in _log, True)
-
-# (C) la otra direccion, y es la que importa: EL CODIGO DE ANTES DEL ARREGLO,
-# copiado tal cual estaba en `a981a69`. Con cero filas devolvia {} tan tranquilo,
-# el boton salia VERDE y el Excel llevaba la columna «En mi BD» vacia entera.
-_ANTES_GUARDA = '''
-def leer_productos_propios():
-    sup = {}
-    try:
-        d = 0
-        while True:
-            res = sb.table('productos').select('ean,stock_moloka,stock_fba').eq('activo', True).range(d, d+999).execute()
-            if not res.data: break
-            for p in res.data:
-                if p.get('ean'): sup[norm(p['ean'])] = p
-            if len(res.data) < 1000: break
-            d += 1000
-    except Exception as ex:
-        print('AVISO: no se pudieron leer productos propios:', ex)
-    return sup
-'''
-_sup, _log, _codigo = correr_guarda(_ANTES_GUARDA, _SB([]))
-eq('(C) 🔴 …y el codigo de antes NO abortaba: seguia con el catalogo vacio', _codigo, None)
-eq('(C) …devolviendo {} y sin imprimir ni un aviso', (_sup, _log.strip()), ({}, ''))
-
-# ─────────────────────────────────────────────────────────────────────────────
 print()
 if FALLOS:
     print("ROJO: %d comprobacion(es) fallan:" % len(FALLOS))
     for _f in FALLOS:
         print("  - " + _f)
     sys.exit(1)
-print("VERDE: los %d programas piden su llave y abortan si falta, los %d\n"
-      "       pasos se la dan, y la guarda del Pro aborta con `productos` vacio."
+print("VERDE: los %d programas piden su llave y abortan si falta, y los %d\n"
+      "       pasos se la dan."
       % (len(PROGRAMAS), _total))
