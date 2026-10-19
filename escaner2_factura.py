@@ -260,11 +260,50 @@ def _cuenta(fila, pais, precio, canal, ref_pct, fee, core, M, asin):
                           'sin precio de venta' if not r['precio_venta'] else 'sin comisión o tarifa')
 
 
-def resolver_asin(lineas, keepa, M, eleccion):
+def _km_a_fecha(km):
+    """`listedSince` de Keepa (minutos Keepa: epoca 2011-01-01 = +21564000 min sobre Unix) -> 'AAAA-MM-DD', o None si
+    no lo sabe (0 o negativo). La misma cuenta que el viejo al escribir `sondeo_keepa.listado_desde`."""
+    if not isinstance(km, (int, float)) or km <= 0:
+        return None
+    from datetime import datetime, timezone
+    try:
+        return datetime.fromtimestamp((km + 21564000) * 60, timezone.utc).date().isoformat()
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _candidato_sondeo(l, p, posicion, elegido):
+    """Un producto de Keepa que casa con el codigo de barras de la linea -> la fila de `sondeo_keepa` (sin `lote` ni
+    fecha: los pone quien escribe). Los MISMOS campos que dejaba el viejo (Celda 9c de moloka_escaner_nube.py), para
+    que el clasificador de la v2 (lib/sondeo/clasificar.ts) los lea sin cambiar nada."""
+    st = p.get('stats') or {}
+    f = nv.ficha_de_keepa(p)
+    cur, a90 = st.get('current') or [], st.get('avg90') or []
+    return {'ean_consultado': l['ean'], 'asin_candidato': p['asin'], 'posicion': posicion,
+            'titulo': f['titulo'] or None, 'rank': f['rank'], 'rank_drops_30d': f['caidas_30d'],
+            'listado_desde': _km_a_fecha(p.get('listedSince')),
+            'crudo': {'asin': p['asin'], 'title': p.get('title'),
+                      'r_act': cur[nv.IDX_RANK] if len(cur) > nv.IDX_RANK else -1,
+                      'r_90': a90[nv.IDX_RANK] if len(a90) > nv.IDX_RANK else -1,
+                      'ean_in': l['ean'], 'rank_drops_30d': st.get('salesRankDrops30'),
+                      'listedSince': p.get('listedSince'),
+                      # Lo que el viejo no tenia: quien escribio la fila y si fue el que eligio el cotejo por nombre
+                      # (para ESTE escaneo). La v2 NO lo usa para escribir: con varios candidatos decide una persona.
+                      'escaner': 'escaner2_factura', 'elegido_por_nombre': elegido}}
+
+
+def resolver_asin(lineas, keepa, M, eleccion, sondeo=None):
     """{linea: (asin, origen, motivo)}. Con ASIN de la ficha, ese (origen 'ficha'). Sin el, Keepa ES por el codigo de
     barras (el `core` y sus variantes, como la Fase 1 del viejo) y, si hay varias fichas, la eleccion del viejo por
-    su cotejo de nombre (`EleccionViejo.elegir`). Identidad: el ASIN encontrado por EAN solo sirve para ESTE escaneo;
-    no se escribe en ninguna ficha."""
+    su cotejo de nombre (`EleccionViejo.elegir`). Identidad: el ASIN elegido por nombre solo sirve para ESTE escaneo;
+    este programa no escribe en ninguna ficha.
+
+    🔑 (encargo P1, 19-oct-2026) Con `sondeo` (una lista), apunta en ella TODOS los candidatos que Keepa devolvio para
+       el codigo de barras de cada linea, no solo el elegido: es lo que la v2 clasifica para poner el ASIN en la ficha
+       (`asignar_asin_sondeo`, con sus guardas). Hasta hoy solo quedaba el elegido, y desde la base no se sabia si el
+       escaneo habia dudado. Si Keepa contesta y no casa ninguno, una fila CENTINELA (`asin_candidato` = None): «se
+       pregunto y no habia» es un dato. Si a Keepa no se le pudo preguntar (sin saldo, caido, codigo raro), NADA: eso
+       no es «no hay», es «no se sabe». Las lineas con el ASIN de su ficha no se preguntan por el codigo: tampoco."""
     out = {}
     for l in lineas:
         if l['asin']:
@@ -275,7 +314,7 @@ def resolver_asin(lineas, keepa, M, eleccion):
             out[l['linea']] = (None, None, 'código de barras con forma rara (%d cifras) y la ficha sin ASIN' % len(core))
             continue
         variantes = {M.norm(v) for v in M.variantes_ean(core)}
-        registros, motivo = [], None
+        registros, motivo, prods_casan = [], None, []
         for codigos in ([core], [v for v in M.variantes_ean(core) if v != core]):
             if not codigos:
                 continue
@@ -288,14 +327,44 @@ def resolver_asin(lineas, keepa, M, eleccion):
                 if p.get('asin') and eans & variantes and p['asin'] not in {r['asin'] for r in registros}:
                     f = nv.ficha_de_keepa(p)
                     registros.append({'asin': p['asin'], 'titulo': f['titulo'], 'rank90': f['rank_90d']})
+                    prods_casan.append(p)
             if registros:
                 break
         if not registros:
-            out[l['linea']] = (None, None, motivo or 'Keepa no encuentra el código de barras en Amazon España')
+            sin = 'Keepa no encuentra el código de barras en Amazon España'
+            out[l['linea']] = (None, None, motivo or sin)
+            if sondeo is not None and motivo is None:
+                sondeo.append({'ean_consultado': l['ean'], 'asin_candidato': None, 'posicion': None, 'titulo': None,
+                               'rank': None, 'rank_drops_30d': None, 'listado_desde': None,
+                               'crudo': {'centinela': True, 'motivo': sin, 'escaner': 'escaner2_factura'}})
             continue
         e = eleccion.elegir(l['nombre'], registros)
         out[l['linea']] = (e['asin'], 'keepa_ean', None)
+        if sondeo is not None:
+            sondeo.extend(_candidato_sondeo(l, p, i, p['asin'] == e['asin']) for i, p in enumerate(prods_casan))
     return out
+
+
+def _ean_norm(cod):
+    """Replica de `public.moloka_ean_norm`: solo cifras, sin ceros delante; vacio -> None."""
+    return ''.join(ch for ch in str(cod or '') if ch.isdigit()).lstrip('0') or None
+
+
+def filas_sondeo(ejecucion, candidatos, hoy):
+    """Las filas de `sondeo_keepa` de esta pasada: `lote` = la ejecucion (lo que la v2 le pasa a la asignacion),
+    `dominio` 'es' (se pregunta a Keepa ES), `fecha_sondeo` = hoy y `fichero` = la ejecucion, como el viejo.
+    🔴 La clave unica de la tabla es (lote, ean_norm, dominio, asin_candidato) NULLS NOT DISTINCT: dos lineas con el
+       mismo codigo de barras darian la misma fila y el INSERT entero fallaria. Se deja la primera y se CUENTA lo
+       descartado (devuelve (filas, descartadas)). `ean_norm` lo calcula Postgres; aqui solo se replica para no chocar."""
+    filas, vistos, dups = [], set(), 0
+    for c in candidatos:
+        k = (_ean_norm(c['ean_consultado']), c['asin_candidato'])
+        if k in vistos:
+            dups += 1
+            continue
+        vistos.add(k)
+        filas.append(dict(c, lote=ejecucion, dominio='es', fecha_sondeo=str(hoy), fichero=ejecucion))
+    return filas, dups
 
 
 def escanear(lineas, base, keepa, M, hoy, eleccion=None, productos=None):
@@ -309,7 +378,8 @@ def escanear(lineas, base, keepa, M, hoy, eleccion=None, productos=None):
     lineas = [l for l in lineas if l['linea'] not in chase]
     if eleccion is None:
         eleccion = e2.cargar_eleccion_viejo([l['nombre'] for l in lineas])
-    asin_de = resolver_asin(lineas, keepa, M, eleccion)
+    sondeo = []
+    asin_de = resolver_asin(lineas, keepa, M, eleccion, sondeo)
     asins = sorted({a for a, _o, _m in asin_de.values() if a})
     tarifas = base.tarifas(asins, hoy)
     app = datos_app(base.precios_dia(asins, hoy), tarifas, base.fotos_keepa(asins, hoy), hoy)
@@ -390,7 +460,9 @@ def escanear(lineas, base, keepa, M, hoy, eleccion=None, productos=None):
                'lineas_todo_app': sum(1 for l in lineas
                                       if all(f['fuente'] == 'app' for f in calc if f['linea'] == l['linea'])),
                'keepa_peticiones': getattr(keepa, 'peticiones', 0), 'keepa_tokens': getattr(keepa, 'tokens', 0),
-               'keepa_saldo': getattr(keepa, 'saldo', None)}
+               'keepa_saldo': getattr(keepa, 'saldo', None),
+               # (encargo P1) los candidatos de Keepa por codigo de barras, para `sondeo_keepa` (los escribe la nube).
+               'sondeo': sondeo}
     return filas, resumen
 
 
@@ -456,6 +528,12 @@ class Base:
         n = (self.sb.table(TABLA_PAIS).select('id', count='exact').eq('pasada_id', pasada_id).limit(1).execute().count)
         return n
 
+    def escribir_sondeo(self, ejecucion, filas):
+        """(encargo P1) Los candidatos de esta pasada en `sondeo_keepa`, y comprueba cuantos hay con ese `lote`."""
+        for i in range(0, len(filas), 500):
+            self.sb.table(TABLA_SONDEO).insert(filas[i:i + 500]).execute()
+        return (self.sb.table(TABLA_SONDEO).select('id', count='exact').eq('lote', ejecucion).limit(1).execute().count)
+
     def detalle_viejo(self, ejecucion):
         return nv._todas(self.sb, 'escaner_detalle',
                          'ejecucion,ean,producto_id,asin,pais,pa,precio_venta,fee_fba,ref_pct,margen,decision',
@@ -464,6 +542,7 @@ class Base:
 
 TABLA_PASADA = 'escaner2_factura_pasada'
 TABLA_PAIS = 'escaner2_factura_pais'
+TABLA_SONDEO = 'sondeo_keepa'
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

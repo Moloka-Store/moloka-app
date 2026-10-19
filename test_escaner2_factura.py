@@ -24,6 +24,11 @@ QUE PRUEBA:
   (L) 🔴 UN FALLO NO SE CUENTA EN EL LOG PUBLICO (devolución de Cowork, 16-oct-2026): escaner2_factura_nube.py, en su
       proceso, con una excepción cuyo texto lleva una fila con coste, ASIN y EAN: ni en el modo de verdad ni en la
       sombra sale ese texto por la salida; en el de verdad, el detalle llega a `motivo_fallo` (privado).
+  (M) (encargo P1, 19-oct-2026) LOS CANDIDATOS VAN A `sondeo_keepa`: todos los que casan con el código de barras, no solo
+      el elegido por nombre, con los campos que dejaba el viejo; centinela si Keepa contesta y no hay ninguno; nada si no
+      se le pudo preguntar, si la línea trae el ASIN de su ficha o si es chase; la clave única no choca con dos líneas
+      del mismo código; y en la nube el sondeo se escribe ANTES que las filas de la factura, y si no cuadra la pasada
+      es «fallida».
 """
 import io
 import os
@@ -46,11 +51,19 @@ def hijo(modo):
     import types
     actualizaciones = []
 
+    insertos = []   # (M) (tabla, n filas) en el orden en que se escriben
+
     class Q:
         def __init__(self, tabla):
-            self.tabla, self.upd = tabla, None
+            self.tabla, self.upd, self.cuenta, self.ins = tabla, None, False, False
+
+        def insert(self, filas):
+            insertos.append((self.tabla, len(filas)))
+            self.ins = True
+            return self
 
         def select(self, *a, **k):
+            self.cuenta = k.get('count') == 'exact'
             return self
 
         def eq(self, *a, **k):
@@ -75,6 +88,13 @@ def hijo(modo):
         def execute(self):
             if self.tabla == 'escaner_detalle':
                 raise Exception(SECRETO)
+            if self.ins:
+                return types.SimpleNamespace(data=[])
+            if self.cuenta:
+                n = sum(k for t, k in insertos if t == self.tabla)
+                if modo == 'sondeo_descuadra' and self.tabla == 'sondeo_keepa':
+                    n -= 1
+                return types.SimpleNamespace(data=[], count=n)
             if self.upd is not None:
                 actualizaciones.append(self.upd)
                 return types.SimpleNamespace(data=[{'id': 'P1'}])
@@ -93,7 +113,14 @@ def hijo(modo):
 
     def revienta(*a, **k):
         raise Exception(SECRETO)
-    _ef.escanear = revienta
+
+    def escanea_dos(lineas, base, keepa, M, hoy, **k):
+        # (M) dos candidatos del mismo código de barras y una fila de resultado.
+        cands = [{'ean_consultado': '8400000000017', 'asin_candidato': a, 'posicion': i, 'titulo': None, 'rank': None,
+                  'rank_drops_30d': None, 'listado_desde': None, 'crudo': {}} for i, a in enumerate(('B0X1', 'B0X2'))]
+        return [{'linea': 0, 'pais': 'ES'}], {'lineas': 1, 'paises_app': 0, 'paises_keepa': 1, 'paises_sin_dato': 0,
+                                              'sondeo': cands}
+    _ef.escanear = escanea_dos if modo.startswith('sondeo') else revienta
     _nv.Keepa.leer_saldo = lambda self: setattr(self, 'saldo', 1000) or 1000
     if modo == 'sombra':
         from cryptography.hazmat.primitives import serialization
@@ -110,6 +137,9 @@ def hijo(modo):
     def _informe():
         fallida = [u for u in actualizaciones if u.get('estado') == 'fallida']
         print('MOTIVO_PRIVADO=%d' % int(bool(fallida) and SECRETO in (fallida[0].get('motivo_fallo') or '')))
+        print('INSERTOS=%s' % ','.join('%s:%d' % x for x in insertos))
+        print('ESTADOS=%s' % ','.join(u['estado'] for u in actualizaciones if 'estado' in u))
+        print('SONDEO_EN_EL_MOTIVO=%d' % int(bool(fallida) and 'sondeo_keepa' in (fallida[0].get('motivo_fallo') or '')))
 
     import runpy
     runpy.run_path(os.path.join(AQUI, 'escaner2_factura_nube.py'), run_name='__main__')
@@ -463,6 +493,64 @@ for _modo in ('verdad', 'sombra'):
     eq('(L) %s: sí dice el TIPO de la excepción y dónde saltó' % _modo, 'Exception en ' in _r.stdout, True)
     if _modo == 'verdad':
         eq('(L) verdad: el detalle entero llega a motivo_fallo (privado)', 'MOTIVO_PRIVADO=1' in _r.stdout, True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+print('\n(M) los candidatos de Keepa van a sondeo_keepa (encargo P1)')
+cat_m = {(9, 'code', '8400000000017'): [
+    dict(producto_keepa('B0CCCCCCC1', eans=['8400000000017'], titulo='Funko Pop Hiccup Dragons', rank90=900, caidas=12),
+         listedSince=7000000),
+    producto_keepa('B0CCCCCCC2', eans=['8400000000017'], titulo='Casco de moto', rank90=100, caidas=-1),
+    producto_keepa('B0OTROEAN1', eans=['8499999999990'], titulo='No casa con el código')]}
+keepa, falso = keepa_de(cat_m)
+_f, res = ef.escanear([LINEA_C], BaseFalsa(productos=[PROD_C]), keepa, M, HOY)
+snd = res['sondeo']
+eq('(M) los DOS que casan con el código, no solo el elegido; el que no casa, fuera',
+   [(x['asin_candidato'], x['posicion'], x['crudo']['elegido_por_nombre']) for x in snd],
+   [('B0CCCCCCC1', 0, True), ('B0CCCCCCC2', 1, False)])
+# listedSince 7.000.000 min Keepa = (7.000.000 + 21.564.000) min Unix = 1.713.840.000 s = 23-abr-2024 02:40 UTC
+eq('(M) los campos del viejo: código preguntado, título, puesto (current[3]), caídas, fecha de alta',
+   [(x['ean_consultado'], x['titulo'], x['rank'], x['rank_drops_30d'], x['listado_desde']) for x in snd],
+   [('8400000000017', 'Funko Pop Hiccup Dragons', 5000, 12, '2024-04-23'),
+    ('8400000000017', 'Casco de moto', 5000, None, None)])
+eq('(M) el crudo lleva lo del viejo y dice quién lo escribió', sorted(snd[0]['crudo']),
+   sorted(['asin', 'title', 'r_act', 'r_90', 'ean_in', 'rank_drops_30d', 'listedSince', 'escaner', 'elegido_por_nombre']))
+eq('(M) 🔒 la ficha sigue sin ASIN', PROD_C['asin'], None)
+
+keepa, falso = keepa_de({})
+_f, res = ef.escanear([LINEA_C], BaseFalsa(productos=[PROD_C]), keepa, M, HOY)
+eq('(M) Keepa contesta y no hay ninguno → UNA fila centinela (asin vacío) con su motivo',
+   [(x['ean_consultado'], x['asin_candidato'], x['crudo'].get('centinela'), x['crudo'].get('motivo')) for x in res['sondeo']],
+   [('8400000000017', None, True, 'Keepa no encuentra el código de barras en Amazon España')])
+
+keepa, falso = keepa_de(cat_m, saldo=10)
+_f, res = ef.escanear([LINEA_C], BaseFalsa(productos=[PROD_C]), keepa, M, HOY)
+eq('(M) Keepa sin saldo → ni candidatos ni centinela: no preguntar no es «no hay»', res['sondeo'], [])
+
+keepa, falso = keepa_de({(9, 'asin', 'B0AAAAAAAA'): [producto_keepa('B0AAAAAAAA', bb=2000, fee=351)]})
+_f, res = ef.escanear([LINEA_A, dict(LINEA_C, producto_id='p-d', linea=1)],
+                      BaseFalsa(productos=[PROD_A, dict(PROD_C, id='p-d', es_chase=True)]), keepa, M, HOY)
+eq('(M) la línea con el ASIN de su ficha y la chase no dejan sondeo', res['sondeo'], [])
+
+keepa, falso = keepa_de(cat_m)
+_f, res = ef.escanear([LINEA_C, dict(LINEA_C, linea=1)], BaseFalsa(productos=[PROD_C]), keepa, M, HOY)
+filas_m, dups_m = ef.filas_sondeo('E-1', res['sondeo'], HOY)
+eq('(M) dos líneas del mismo código → la clave única no choca: 2 filas y 2 fuera, contadas',
+   (len(res['sondeo']), len(filas_m), dups_m), (4, 2, 2))
+eq('(M) lote = la ejecución, dominio es, fecha de hoy y fichero = la ejecución, como el viejo',
+   {(x['lote'], x['dominio'], x['fecha_sondeo'], x['fichero']) for x in filas_m}, {('E-1', 'es', HOY, 'E-1')})
+eq('(M) la clave se compara como moloka_ean_norm (sin ceros delante)',
+   ef.filas_sondeo('E', [dict(filas_m[0], ean_consultado='08400000000017'), filas_m[0]], HOY)[1], 1)
+
+for _modo, _insertos, _estados, _motivo in (('sondeo', 'sondeo_keepa:2,escaner2_factura_pais:1', 'en_marcha,terminada', '0'),
+                                             ('sondeo_descuadra', 'sondeo_keepa:2', 'en_marcha,fallida', '1')):
+    _r = subprocess.run([sys.executable, os.path.abspath(__file__), '--hijo', _modo], capture_output=True, text=True,
+                        encoding='utf-8', errors='replace', cwd=AQUI, env=dict(os.environ, PYTHONIOENCODING='utf-8'))
+    eq('(M) nube, %s: el sondeo se escribe ANTES que las filas de la factura' % _modo,
+       'INSERTOS=%s' % _insertos in _r.stdout, True)
+    eq('(M) nube, %s: la pasada acaba %s' % (_modo, _estados.split(',')[-1]), 'ESTADOS=%s' % _estados in _r.stdout, True)
+    eq('(M) nube, %s: el descuadre del sondeo va (o no) al motivo privado' % _modo,
+       'SONDEO_EN_EL_MOTIVO=%s' % _motivo in _r.stdout, True)
 
 print()
 if fallos:

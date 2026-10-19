@@ -9,8 +9,14 @@ facturas (app/(protegido)/entrada-facturas/escanear.ts). La v2 deja ANTES la pet
   python escaner2_factura_nube.py --ejecucion <ejecucion>
       1. lee la pasada (tiene que estar «pedida»: dos corridas no la toman a la vez) y la pone «en_marcha»;
       2. escanea (escaner2_factura.escanear: app de hoy o Keepa en el momento, la cuenta del viejo, NL/BE al 12 %);
-      3. escribe TODAS las filas de una vez en `escaner2_factura_pais` (la tabla que lee la factura) y comprueba
-         cuantas hay; 4. pone la pasada «terminada» con los tokens de Keepa. Si algo falla, «fallida» con su motivo.
+      3. (encargo P1, 19-oct-2026) escribe en `sondeo_keepa`, con `lote` = la ejecucion, TODOS los candidatos que
+         Keepa dio para el codigo de barras de cada linea sin ASIN (y un centinela si no dio ninguno), y comprueba
+         cuantos hay: la v2 los clasifica y pone el ASIN en la ficha cuando es claro (`asignar_asin_sondeo`);
+      4. escribe TODAS las filas de una vez en `escaner2_factura_pais` (la tabla que lee la factura) y comprueba
+         cuantas hay; 5. pone la pasada «terminada» con los tokens de Keepa. Si algo falla, «fallida» con su motivo.
+      🔑 El sondeo va ANTES que las filas de la factura: la v2 da el escaneo por listo en cuanto ve filas, y para
+         entonces los candidatos tienen que estar todos. Si el sondeo no se puede escribir, la pasada es «fallida»:
+         una factura escaneada sin candidatos es justo lo que dejo cuatro dias sin ASIN automatico (15-18 oct).
 
   python escaner2_factura_nube.py --sombra <ejecucion vieja> [<ejecucion vieja> …]
       🔴 NO ESCRIBE NADA. Repite con el programa nuevo las facturas que ya escaneo el viejo (sus lineas y su coste,
@@ -23,7 +29,8 @@ facturas (app/(protegido)/entrada-facturas/escanear.ts). La v2 deja ANTES la pet
 🔒 LA LLAVE DE SERVICIO, O NO SE CORRE: lee `productos` (el IVA de la ficha) y las tablas de Amazon desatendido
    (test_escaner_llave_servicio.py, lista PROGRAMAS). KEEPA_API_KEY solo llega a este paso.
 🔒 Ni escaner_detalle, ni escaner_resultados, ni el buzon `informes`, ni Excel en la biblioteca: el escaneo de una
-   factura deja SU tabla y nada mas.
+   factura deja SU tabla y los candidatos de Keepa en `sondeo_keepa` (la pelicula del EAN->ASIN), y nada mas. No
+   escribe ASIN en ninguna ficha: eso lo hace la v2, con sesion y con las guardas de la RPC.
 🔴 UN FALLO NO SE CUENTA EN EL LOG (devolucion de Cowork, 16-oct-2026): el log de Actions es PUBLICO, y el texto de una
    excepcion puede llevar una fila entera («Failing row contains (…)») con EAN, ASIN y coste. En el log va solo el TIPO
    de la excepcion y donde salto (`_fallo_en_log`); el detalle, solo en `escaner2_factura_pasada.motivo_fallo`, que es
@@ -96,7 +103,12 @@ def de_verdad(ejecucion):
         except nv.KeepaFalla as ex:
             keepa.caido = str(ex)
         antes = keepa.saldo
-        filas, resumen = ef.escanear(pasada['lineas'], base, keepa, e2.cargar_motor(), ef.hoy_madrid())
+        hoy = ef.hoy_madrid()
+        filas, resumen = ef.escanear(pasada['lineas'], base, keepa, e2.cargar_motor(), hoy)
+        sondeo, descartadas = ef.filas_sondeo(ejecucion, resumen['sondeo'], hoy)
+        n_snd = base.escribir_sondeo(ejecucion, sondeo)
+        if n_snd != len(sondeo):
+            raise RuntimeError('sondeo_keepa: hay %s filas con este lote y se esperaban %d' % (n_snd, len(sondeo)))
         n = base.escribir(pasada['id'], ejecucion, filas)
         if n != len(filas):
             raise RuntimeError('se escribieron %s filas y se esperaban %d' % (n, len(filas)))
@@ -106,9 +118,10 @@ def de_verdad(ejecucion):
             'n_paises_app': resumen['paises_app'], 'n_paises_keepa': resumen['paises_keepa'],
             'n_paises_sin_dato': resumen['paises_sin_dato'], 'motivo_fallo': keepa.caido})
         print('ESCANEO_FACTURA_HECHO: %d líneas · %d filas · países: %d de la app, %d de Keepa, %d sin dato · '
-              'Keepa: %d peticiones, %d tokens (saldo %s → %s)'
+              'Keepa: %d peticiones, %d tokens (saldo %s → %s) · sondeo: %d filas (%d candidatos, %d repetidas fuera)'
               % (resumen['lineas'], len(filas), resumen['paises_app'], resumen['paises_keepa'],
-                 resumen['paises_sin_dato'], keepa.peticiones, keepa.tokens, antes, keepa.saldo))
+                 resumen['paises_sin_dato'], keepa.peticiones, keepa.tokens, antes, keepa.saldo, len(sondeo),
+                 sum(1 for x in sondeo if x['asin_candidato']), descartadas))
     except Exception as ex:
         # 🔒 El detalle, a la base (privada); al log, solo el tipo y la línea.
         try:
