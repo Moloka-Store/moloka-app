@@ -612,6 +612,7 @@ jobs:
             test_escaner2_tcg_pro.py
             test_encadenar_keepa.py
             test_escaner2_factura.py
+            test_escaner2_base.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).
