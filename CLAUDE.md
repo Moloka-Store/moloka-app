@@ -23,16 +23,16 @@ las ves tú solo — no están aquí a propósito.
 
 ### 1.1 Identidad: dos ejes, no un maestro único
 - **EAN = el producto físico.** Universal, cero huecos. Lo escribe la **factura** (fuente dura).
-- **ASIN = la capa Amazon**, el mismo en los seis mercados. Lo pega Fernando a mano desde el Seller.
+- **ASIN = la capa Amazon**, mismo en los 6 mercados. A mano, del Seller (hasta el 19-oct-2026: ver identidad.md).
 - **SKU = un traductor de los informes del Seller. JAMÁS llave maestra.** Fue el error de la v1:
   cruzar por SKU dejó fuera al 41,7% del catálogo. El SKU **nace y muere**; un mismo ASIN puede
   tener dos vidas de SKU con stock en países distintos.
 - **La llave de la capa Amazon es el ASIN** (el país es una fila). Nunca el SKU.
-- **"ASIN→EAN es 1:1" es la regla DE MOLOKA, no un hecho de Amazon.** Keepa devuelve varios EAN
-  para algunos ASIN. Ir siempre ASIN→EAN, nunca EAN→ASIN (ambiguo con los packs).
+- **"ASIN→EAN es 1:1" es la regla DE MOLOKA, no un hecho de Amazon.** Keepa da varios EAN
+  a algunos ASIN. Siempre ASIN→EAN, nunca EAN→ASIN (hasta el 19-oct-2026).
 - **Ningún informe del Seller trae EAN.** El puente EAN↔ASIN es responsabilidad de Moloka.
 - **Fuentes duras escriben identidad; las blandas nunca.** Factura → EAN. All Listings → solo el SKU vacío.
-  **Keepa NO escribe identidad**, solo rellena huecos, y **NADA en fichas `es_chase=true`**.
+  **Keepa NO escribe identidad**, solo huecos (hasta el 19-oct-2026), y **NADA en `es_chase`**.
 
 ### 1.2 El país es una FILA, nunca un sufijo de columna
 Sin excepciones. Si una tabla necesita `stock_es`, `stock_it`, está mal diseñada.

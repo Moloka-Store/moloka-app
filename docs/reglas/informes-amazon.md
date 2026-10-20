@@ -15,9 +15,9 @@ Cada uno responde **una** pregunta y son universos distintos:
 | **INVENTARIO_FBA** | El informe de gestión de inventario FBA. Nació por **lo que viene DE CAMINO**, que es lo que nadie más contesta. Relevó a SALUD_FBA el 23-ago | ¿Cuánto hay en tránsito? |
 | **PANEU_APTOS** | La dimensión Pan-EU. Es película: cambia en horas | ¿Qué me deja Amazon? |
 | **LEDGER** | El EXTRACTO de UNIDADES. Libro append, no foto | ¿De dónde salió y a dónde fue? |
-| **TRANSACCIONES** | El EXTRACTO de EUROS. Uno por marketplace. El extracto cargado a mano (`transacciones_movimientos`) trae ES/IT/FR/DE y ninguna fila de NL/BE; las liquidaciones guardadas (`amz_liquidacion_linea`) cubren ES/IT/FR/DE/NL/BE (ES desde el 23-jun-2026, IT/FR/DE desde el 25-jun, NL desde el 20-ago, BE solo una, del 24-sep; medido el 6-oct-2026) | ¿Cuánto he cobrado y qué me han cobrado? |
+| **TRANSACCIONES** | El EXTRACTO de EUROS. Uno por marketplace. El extracto cargado a mano (`transacciones_movimientos`) trae ES/IT/FR/DE y ninguna fila de NL/BE; las liquidaciones guardadas (`amz_liquidacion_linea`) cubren ES/IT/FR/DE/NL/BE (ES desde el 23-jun-2026, IT/FR/DE desde el 25-jun, NL desde el 20-ago, BE solo una, del 24-sep; medido el 6-oct-2026) (el 20-oct-2026 hay 28 pedidos belgas con recargo liquidado; remedir con `select pais, count(*) from amz_liquidacion_linea where pais in ('NL','BE') group by 1`) | ¿Cuánto he cobrado y qué me han cobrado? |
 | **CUSTOM_ANALYTICS** | La DEMANDA por ASIN (visitas, sesiones, conversión). **Contador acumulado**: cada carga apila UNA LECTURA (**Película de lecturas**, §1.6) | ¿Cuánta gente lo mira? |
-| **ALL_LISTINGS** | Los anuncios (ASIN/SKU); a la ficha solo llega el SKU vacío | ¿Qué tengo listado? |
+| **ALL_LISTINGS** | Los anuncios (ASIN/SKU); a la ficha solo llega el SKU vacío (comprobado en el código el 20-oct-2026: `procesador_all_listings.py` sigue rellenando el SKU vacío de `productos`, sin pisar uno existente; lo de «Keepa NO escribe identidad» valía hasta el 19-oct-2026: ver identidad.md) | ¿Qué tengo listado? |
 | **KEEPA (CSV)** | Mercado, fotos, competencia | ¿Qué pasa fuera? |
 
 ⚰️ **SALUD_FBA estuvo aquí y se jubiló el 23-ago-2026** (`migraciones/2026-08-23_jubilar_salud_fba.sql`).

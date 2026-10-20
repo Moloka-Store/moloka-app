@@ -15,6 +15,6 @@ dos verdades y un descuadre garantizado.
 **Fase 0 (la capa de datos) va PRIMERO** y está a medias. ⚠️ Aquí ponía que *«de la app v2 en sí
 (repo, pantallas, Auth) no hay nada todavía»*: eso era cierto al arrancar el proyecto y **hoy no lo
 es**. La app existe en el repo `moloka-app-v2`, se despliega en Vercel, tiene Auth por
-`@supabase/ssr`, y su Inventario está en marcha — hasta el punto de que un workflow lo comprueba una vez al día
+`@supabase/ssr`, y su Inventario está en marcha (a 20-oct-2026 la v2 tiene además Pedidos, Entrada de facturas, Envíos y portada; el estado vigente, en Diseno del cerebro) — hasta el punto de que un workflow lo comprueba una vez al día
 en laborables (lo lanza con horas de retraso y sin hora fija (de 2 a 9 h tarde, medido el 15-oct-2026)). Lo que sigue siendo verdad es el orden: la capa de datos
 va primero.
