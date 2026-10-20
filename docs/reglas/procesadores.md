@@ -125,7 +125,7 @@
   objeto ya está en R2 con el mismo tamaño. Borrar a mano para "hacer sitio" sigue prohibido. Dejaron de
   ser fichero temporal el día que `keepa_escaparate_hist` dejó de guardar `crudo` (29-jul-2026):
   pasaron a ser **el archivo histórico permanente**. Ese `crudo` era copia byte a byte del CSV y se
-  sacó de la base porque estaba duplicado con 25× menos margen (BD 500 MB vs Storage 1 GB) (límites del plan Free, hasta el 23-sep-2026: hoy plan Pro, 8 GB de disco; base 768 MB y almacén 1.781 MB el 20-oct-2026; lo vigente en cerebro/ENTORNO.md, claves `supabase-plan` y `supabase-tamano`), pero las
+  sacó de la base porque estaba duplicado con 25× menos margen (BD 500 MB vs Storage 1 GB) (límites del plan Free; el plan es Pro desde septiembre de 2026 (a 23-sep ya lo era; la fecha exacta, en cerebro/ENTORNO.md supabase-plan): hoy plan Pro, 8 GB de disco; base 768 MB y almacén 1.781 MB el 20-oct-2026; lo vigente en cerebro/ENTORNO.md, claves `supabase-plan` y `supabase-tamano`), pero las
   512 claves que solo viven ahí siguen siendo munición del trackeador. **El rescate de cualquiera se
   hace por `keepa_escaparate_hist.fichero` → `informes/keepa_escaparate/<fichero>` (con `.gz` si ya fue comprimido).** Borrar esos CSV
   para "hacer sitio" es borrar el histórico sin vuelta atrás. Es la CONTRAPARTIDA del `DROP COLUMN
