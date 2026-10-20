@@ -65,13 +65,13 @@ if MODO == 'elegidas':
     if not ELEGIDAS:
         abortar('selección de marcas no válida: ni una marca')
 
-from supabase import create_client  # noqa: E402
+from escaner2_base import cliente  # noqa: E402
 
 BUCKET = 'escaner2'
 LOTE = 500
 RUN_ID = os.environ.get('GITHUB_RUN_ID')
 
-sb = create_client(os.environ['SUPABASE_URL'], _llave_svc)
+sb = cliente(os.environ['SUPABASE_URL'], _llave_svc)
 
 
 class Fallo(Exception):

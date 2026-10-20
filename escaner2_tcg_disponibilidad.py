@@ -479,8 +479,8 @@ def principal(argv, env=None, sb=None, sesion=None, dormir=None):
         abortar('FICHAS_MAX tiene que ser un número entero y LISTADO auto, si o no')
     run_id = env.get('GITHUB_RUN_ID') or ''
     if sb is None:
-        from supabase import create_client
-        sb = create_client(env['SUPABASE_URL'], env['SUPABASE_SERVICE_KEY'])
+        from escaner2_base import cliente
+        sb = cliente(env['SUPABASE_URL'], env['SUPABASE_SERVICE_KEY'])
     if rescate:
         try:
             rescatar(sb, run_id)

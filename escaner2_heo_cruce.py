@@ -56,7 +56,7 @@ PASADA = (os.environ.get('PASADA') or '').strip().lower()
 if not re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', PASADA):
     abortar(f'la pasada no es un id válido: {PASADA!r}')
 
-from supabase import create_client  # noqa: E402
+from escaner2_base import cliente  # noqa: E402
 
 import escaner2_motor as e2  # noqa: E402
 import en_mi_bd  # noqa: E402
@@ -69,7 +69,7 @@ BUCKET_VIEJO = 'informes'
 LOTE = 500
 RUN_ID = os.environ.get('GITHUB_RUN_ID')
 
-sb = create_client(os.environ['SUPABASE_URL'], _llave_svc)
+sb = cliente(os.environ['SUPABASE_URL'], _llave_svc)
 
 
 class Fallo(Exception):

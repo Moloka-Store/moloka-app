@@ -329,6 +329,19 @@ def _es_environ_idx(nodo, clave):
             and isinstance(nodo.slice, ast.Constant) and nodo.slice.value == clave)
 
 
+def _importa_cliente_del_escaner2(arbol):
+    """(Encargo D, 20-oct-2026) True si el fichero hace `from escaner2_base import cliente`: los 26 programas del
+    escaner 2 crean su cliente con `escaner2_base.cliente(url, llave)`, que es `create_client(url, llave)` con el
+    reintento de PostgREST, mismos dos argumentos. Solo con ESE import cuenta `cliente(...)` como constructor de
+    Supabase: un `cliente` cualquiera de otro fichero no se toma por uno."""
+    return any(isinstance(n, ast.ImportFrom) and n.module == 'escaner2_base' and any(a.name == 'cliente' for a in n.names)
+               for n in ast.walk(arbol))
+
+
+def _constructores_de_supabase(arbol):
+    return ('create_client', 'cliente') if _importa_cliente_del_escaner2(arbol) else ('create_client',)
+
+
 def llave_del_cliente(fuente, var='sb'):
     """Devuelve ('solo-servicio' | 'servicio-con-respaldo' | 'solo-anonima' |
     'no-encontrado').
@@ -348,6 +361,7 @@ def llave_del_cliente(fuente, var='sb'):
     arbol = ast.parse(fuente)
     nombres = {}
     llamada = None
+    supabase_ctor = _constructores_de_supabase(arbol)
     for nodo in ast.walk(arbol):
         if not (isinstance(nodo, ast.Assign) and len(nodo.targets) == 1
                 and isinstance(nodo.targets[0], ast.Name)):
@@ -355,7 +369,7 @@ def llave_del_cliente(fuente, var='sb'):
         nombres[nodo.targets[0].id] = nodo.value
         if (nodo.targets[0].id == var and isinstance(nodo.value, ast.Call)
                 and isinstance(nodo.value.func, ast.Name)
-                and nodo.value.func.id == 'create_client'):
+                and nodo.value.func.id in supabase_ctor):
             llamada = nodo.value
 
     if llamada is None or len(llamada.args) != 2:
@@ -433,6 +447,9 @@ def _sale(cuerpo):
 #    ninguno y (G) saldria verde sin haber mirado nada -- validar la nada siempre
 #    sale bien.
 CONSTRUCTORES_DE_RED = ('create_client', 'Keepa')
+# (Encargo D, 20-oct-2026) Y `cliente(...)` de escaner2_base (el create_client con reintento de los 26 programas del
+# escaner 2), solo en los ficheros que lo importan de ahi: ver `_importa_cliente_del_escaner2`.
+CLIENTE_DEL_ESCANER2 = 'cliente'
 
 
 def clientes_de_red(arbol):
@@ -442,13 +459,14 @@ def clientes_de_red(arbol):
     `keepa.Keepa(...)`, y no cuenta el nombre escrito dentro de un comentario.
     """
     salida = []
+    conocidos = CONSTRUCTORES_DE_RED + ((CLIENTE_DEL_ESCANER2,) if _importa_cliente_del_escaner2(arbol) else ())
     for nodo in ast.walk(arbol):
         if not isinstance(nodo, ast.Call):
             continue
         f = nodo.func
         nom = (f.id if isinstance(f, ast.Name)
                else f.attr if isinstance(f, ast.Attribute) else None)
-        if nom in CONSTRUCTORES_DE_RED:
+        if nom in conocidos:
             salida.append((nodo.lineno, nom))
     return sorted(salida)
 
@@ -512,8 +530,8 @@ for _script, _forma, _n in PROGRAMAS:
 # devolveria nada, (G) diria False y el arreglo pareceria no estar puesto -- pero
 # el dia que alguien la "arregle" al reves (aflojando (G) para que un fichero sin
 # cliente pase), esta cuenta es la que lo caza.
-eq('(D) …y los dos constructores de la lista aparecen de verdad en los ficheros',
-   sorted(_VISTOS), sorted(CONSTRUCTORES_DE_RED))
+eq('(D) …y los constructores de la lista (y el cliente del escaner 2) aparecen de verdad en los ficheros',
+   sorted(_VISTOS), sorted(CONSTRUCTORES_DE_RED + (CLIENTE_DEL_ESCANER2,)))
 
 # (C) las otras direcciones: los DOS codigos viejos, tal cual estaban.
 _ANTES = ("from supabase import create_client\n"

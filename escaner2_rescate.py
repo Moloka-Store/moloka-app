@@ -35,10 +35,10 @@ _run = os.environ.get('GITHUB_RUN_ID') or ''
 if not _run.isdigit():
     abortar('sin GITHUB_RUN_ID: no se sabe qué filas son de este run')
 
-from supabase import create_client  # noqa: E402
+from escaner2_base import cliente  # noqa: E402
 
 tabla, a_medias, campo_fin = QUE[sys.argv[1]]
-sb = create_client(os.environ['SUPABASE_URL'], _llave_svc)
+sb = cliente(os.environ['SUPABASE_URL'], _llave_svc)
 res = (sb.table(tabla).update({
     'estado': 'fallida', campo_fin: datetime.now(timezone.utc).isoformat(),
     'motivo_fallo': 'el run %s terminó sin cerrar esta fila (tope de tiempo, cancelación o caída); '

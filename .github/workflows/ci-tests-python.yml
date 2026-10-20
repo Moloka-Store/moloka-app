@@ -530,6 +530,13 @@ jobs:
       - name: 25 septendecies sexdecies) test_escaner2_factura.py
         run: python -u test_escaner2_factura.py
 
+      # (Encargo D, 20-oct-2026) El cliente de la base del escaner 2 (escaner2_base.py): el reintento ante un corte breve
+      # de PostgREST (503 PGRST002/PGRST001 siempre; fallo de red solo en lecturas; tope de 4 min por run), con un
+      # PostgREST de mentira en 127.0.0.1 y el supabase-py de verdad; con todo bien, las mismas peticiones al byte; los
+      # 26 programas compilan, importan y arrancan con el cliente con reintento; y el censo: nadie llama a create_client.
+      - name: 25 septendecies septendecies) test_escaner2_base.py
+        run: python -u test_escaner2_base.py
+
       - name: 25 duodevicies) test_encadenar_keepa.py
         run: python -u test_encadenar_keepa.py
 
@@ -605,6 +612,7 @@ jobs:
             test_escaner2_tcg_pro.py
             test_encadenar_keepa.py
             test_escaner2_factura.py
+            test_escaner2_base.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).

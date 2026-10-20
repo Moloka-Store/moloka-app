@@ -47,11 +47,11 @@ _llave_svc = os.environ.get('SUPABASE_SERVICE_KEY')
 if not _llave_svc:
     abortar('sin llave de servicio')
 
-from supabase import create_client  # noqa: E402
+from escaner2_base import cliente  # noqa: E402
 
 import escaner2_novedades as nv  # noqa: E402
 
-sb = create_client(os.environ['SUPABASE_URL'], _llave_svc)
+sb = cliente(os.environ['SUPABASE_URL'], _llave_svc)
 
 
 def main():
