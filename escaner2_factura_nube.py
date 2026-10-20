@@ -72,13 +72,13 @@ if _args[0] == '--sombra':
     if not _clave_publica or 'BEGIN PUBLIC KEY' not in _clave_publica:
         abortar('la sombra necesita SOMBRA_CLAVE_PUBLICA (PEM en base64): sin ella no saca nada')
 
-from supabase import create_client  # noqa: E402
+from escaner2_base import cliente  # noqa: E402
 
 import escaner2_factura as ef  # noqa: E402
 import escaner2_motor as e2  # noqa: E402
 import escaner2_novedades as nv  # noqa: E402
 
-sb = create_client(os.environ['SUPABASE_URL'], _llave_svc)
+sb = cliente(os.environ['SUPABASE_URL'], _llave_svc)
 
 
 def _ahora():

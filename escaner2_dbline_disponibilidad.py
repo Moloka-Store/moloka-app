@@ -302,8 +302,8 @@ def principal(argv):
     if not (os.environ.get('SUPABASE_URL') and os.environ.get('SUPABASE_SERVICE_KEY')):
         abortar('faltan SUPABASE_URL/SUPABASE_SERVICE_KEY; no se abre ninguna pasada')
     run_id = os.environ.get('GITHUB_RUN_ID') or ''
-    from supabase import create_client
-    sb = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_SERVICE_KEY'])
+    from escaner2_base import cliente
+    sb = cliente(os.environ['SUPABASE_URL'], os.environ['SUPABASE_SERVICE_KEY'])
     if rescate:
         try:
             rescatar(sb, run_id)
