@@ -1613,9 +1613,15 @@ def poner_columna_ficha_compartida(wb, foto, resultados):
 # (RS, 23-oct-2026) La columna «Amazon» de «Análisis», UNA columna nueva AL FINAL (como «Ficha compartida»): si Amazon
 # deja vender ESE ASIN a la cuenta de Moloka, de `amz_restriccion_venta`, que escribe el bloque de restricciones del
 # cartero de la v2 (getListingsRestrictions) para los COMPRAR/VALORAR del ultimo cruce de cada proveedor.
-#   · vacia            → Amazon deja vender en los seis mercados (consultado);
-#   · «no te deja vender en ES/IT» → alguna restriccion (hace falta permiso, no apto o el ASIN no existe ahi);
-#   · «sin consultar»  → no hay fila en ningun mercado; «… · sin consultar en NL/BE» si faltan solo algunos.
+#   · vacia            → Amazon deja vender en los seis mercados (consultados todos);
+#   · por partes, en este orden y separadas por « · » (devolucion de Cowork del 23-oct-2026: juntarlo todo bajo
+#     «no te deja» llenaba la columna de falsos «no»: muchos Funkos no tienen ficha en NL/BE):
+#       «pide permiso en ES/IT»  → algun APPROVAL_REQUIRED en el par (se puede pedir permiso);
+#       «no apto en FR»          → NOT_ELIGIBLE, un codigo desconocido o una restriccion sin codigo, sin APPROVAL_REQUIRED;
+#       «no existe en NL/BE»     → solo ASIN_NOT_FOUND (el ASIN no tiene ficha en ese mercado);
+#       «sin consultar en …»     → los mercados sin fila;
+#   · «sin consultar»  → no hay fila en ningun mercado.
+#   En la tabla `restringido` es true para las tres; lo que cambia es solo lo que se ensena.
 # 🔴 AUSENCIA DE DATO NO ES «DEJA»: sin fila se escribe «sin consultar», nunca vacio. Y si la tabla no se puede leer
 #    (migracion sin aplicar, red), toda la columna sale «sin consultar» y el cruce sigue, con su aviso.
 COLUMNA_AMAZON = 'Amazon'
@@ -1624,32 +1630,56 @@ PAISES_AMAZON = ('ES', 'IT', 'FR', 'DE', 'NL', 'BE')
 TANDA_ASIN_AMAZON = 100
 
 
+# Las clases de un par (asin, pais), de `clase_restriccion`.
+DEJA, PIDE_PERMISO, NO_APTO, NO_EXISTE = 'deja', 'pide_permiso', 'no_apto', 'no_existe'
+PARTES_AMAZON = ((PIDE_PERMISO, 'pide permiso en '), (NO_APTO, 'no apto en '), (NO_EXISTE, 'no existe en '))
+
+
+def clase_restriccion(restringido, motivo_codigo):
+    """La clase de UNA fila de amz_restriccion_venta. Puro. APPROVAL_REQUIRED manda sobre lo demas; solo ASIN_NOT_FOUND
+    es «no existe»; NOT_ELIGIBLE, un codigo desconocido o ninguno es «no apto» (un «no» que no se sabe salvar)."""
+    if not restringido:
+        return DEJA
+    codigos = {c.strip() for c in str(motivo_codigo or '').split(',') if c.strip()}
+    if 'APPROVAL_REQUIRED' in codigos:
+        return PIDE_PERMISO
+    if codigos == {'ASIN_NOT_FOUND'}:
+        return NO_EXISTE
+    return NO_APTO
+
+
 def texto_amazon(asin, por_par, paises=PAISES_AMAZON):
-    """El texto de la columna «Amazon» para un ASIN: `por_par` es {(asin, pais): restringido (bool)}. Puro."""
-    no_deja = [p for p in paises if por_par.get((asin, p)) is True]
+    """El texto de la columna «Amazon» para un ASIN: `por_par` es {(asin, pais): clase de `clase_restriccion`}. Puro."""
     sin = [p for p in paises if (asin, p) not in por_par]
     if len(sin) == len(paises):
         return 'sin consultar'
     partes = []
-    if no_deja:
-        partes.append('no te deja vender en ' + '/'.join(no_deja))
+    for clase, rotulo in PARTES_AMAZON:
+        de_esta = [p for p in paises if por_par.get((asin, p)) == clase]
+        if de_esta:
+            partes.append(rotulo + '/'.join(de_esta))
     if sin:
         partes.append('sin consultar en ' + '/'.join(sin))
     return ' · '.join(partes) or None
 
 
+def no_te_deja(texto):
+    """¿El texto dice que Amazon no deja vender en algun pais (pide permiso o no apto)? «No existe» no cuenta."""
+    return bool(texto) and ('pide permiso en ' in texto or 'no apto en ' in texto)
+
+
 def lector_restricciones(sb, avisos=None):
-    """Una funcion asins → {(asin, pais): restringido} que lee `amz_restriccion_venta` (condicion nueva) por tandas.
+    """Una funcion asins → {(asin, pais): clase} que lee `amz_restriccion_venta` (condicion nueva) por tandas.
     Si la lectura falla, devuelve {} (todo «sin consultar») y deja el porque en `avisos`: el Excel no se cae por esto."""
     def leer(asins):
         por_par = {}
         lista = sorted({a for a in asins if a})
         try:
             for i in range(0, len(lista), TANDA_ASIN_AMAZON):
-                filas = (sb.table('amz_restriccion_venta').select('asin,pais,restringido')
+                filas = (sb.table('amz_restriccion_venta').select('asin,pais,restringido,motivo_codigo')
                          .eq('condicion', 'new_new').in_('asin', lista[i:i + TANDA_ASIN_AMAZON]).execute().data) or []
                 for f in filas:
-                    por_par[(f['asin'], f['pais'])] = bool(f['restringido'])
+                    por_par[(f['asin'], f['pais'])] = clase_restriccion(f['restringido'], f.get('motivo_codigo'))
         except Exception as ex:
             if avisos is not None:
                 avisos.append(f'Columna «Amazon» sin datos (se escribe «sin consultar»): {type(ex).__name__}: {str(ex)[:160]}')
@@ -1660,7 +1690,8 @@ def lector_restricciones(sb, avisos=None):
 
 def poner_columna_amazon(wb, leer):
     """Anade «Amazon» detras de la ultima columna de «Análisis», fila a fila por ASIN, y alarga la tabla. `leer` es lo
-    que devuelve `lector_restricciones` (sin el, no se pone la columna). Devuelve cuantas filas dicen «no te deja»."""
+    que devuelve `lector_restricciones` (sin el, no se pone la columna). Devuelve cuantas filas dicen «pide permiso» o
+    «no apto» en algun pais (`no_te_deja`): las de solo «no existe» no cuentan."""
     if leer is None:
         return 0
     from openpyxl.styles import Font
@@ -1679,7 +1710,7 @@ def poner_columna_amazon(wb, leer):
         texto = texto_amazon(asin, por_par) if asin else 'sin consultar'
         if texto:
             ws.cell(row=fila, column=col, value=texto)
-            n += texto.startswith('no te deja')
+            n += no_te_deja(texto)
     for tabla in ws.tables.values():
         ini, fin = tabla.ref.split(':')
         fila_fin = re.sub(r'^[A-Z]+', '', fin)
