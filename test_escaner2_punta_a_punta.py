@@ -450,7 +450,8 @@ _lista = base64.b64decode(bd['storage']['escaner2']['heo/%s/eans.txt' % pasada])
 eq('2 · la lista para el Visualizador: un EAN por linea, en el bucket escaner2', (len(_lista), p['n_eans_lista'], p['n_tandas']),
    (5, 5, 1))
 eq('2 · ni una tabla nueva fuera de escaner2_', sorted(t for t in T if not t.startswith('escaner2_')),
-   sorted(TABLAS_VIEJO + ('disp_parametros', 'inventario_fba', 'amz_restriccion_venta')))   # (encargo E) la foto de FBA, sembrada y solo leida; (RS) las restricciones de venta, solo leidas
+   sorted(TABLAS_VIEJO + ('disp_parametros', 'inventario_fba', 'amz_restriccion_venta', 'mv_coste_preparacion',
+                          'parametro_coste')))   # (encargo E) la foto de FBA, sembrada y solo leida; (RS) las restricciones de venta, solo leidas; (RF4) la fuente del coste y el global, solo leidos (sin fuente en esta escena: v_fijo_preparacion_asin no se llega a leer)
 eq('2 · (30-sep) el log del cuadre previo dice SIEMPRE la diferencia y la tolerancia',
    'HEO declara 11 y se bajaron 11 · diferencia 0 (tolerancia 100)' in log, True)
 c = T['escaner2_cruce'][0]
@@ -503,7 +504,9 @@ HOJAS_E2 = ['Resumen', 'Comparación', 'Varias fichas', 'Puertas', 'Puertas prev
 eq('2 · 🔴 (B4) las seis hojas del viejo delante, en su orden, y las del escáner 2 detrás',
    _wb.sheetnames, HOJAS_VIEJO + HOJAS_E2)
 # (AA, 1-oct-2026) …y detrás de la última, «Ficha compartida» (la marca del reparto; vacía en esta escena).
-_COLS = e2.columnas_analisis(os.path.join(AQUI, e2.RUTA_MOTOR)) + [e2.COLUMNA_FICHA_COMPARTIDA, e2.COLUMNA_AMAZON]  # (RS) y «Amazon», la última
+# (RF4) «Origen almacén» va pegada a la última del viejo («Origen IVA»), antes de «Ficha compartida».
+_COLS = (e2.columnas_analisis(os.path.join(AQUI, e2.RUTA_MOTOR))
+         + [e2.COLUMNA_ORIGEN_ALMACEN, e2.COLUMNA_FICHA_COMPARTIDA, e2.COLUMNA_AMAZON])  # (RS) y «Amazon», la última
 _an = list(_wb['Análisis'].iter_rows(values_only=True))
 eq('2 · 🔴 (B4) «Análisis» lleva las cabeceras de COLS del viejo, en su orden, y (AA) «Ficha compartida» al final',
    list(_an[0]), list(_COLS))
@@ -534,6 +537,14 @@ eq('2 · (D) «Canal BB»: el CSV dice «yes» en «Caja de Compra: Es FBA» →
 #   con la funcion compartida de en_mi_bd.py; la ficha dice stock_fba 0, como Claptrap.
 eq('2 · (E) «En mi BD»: almacén de la ficha y FBA de la ÚLTIMA foto de inventario_fba, sumado por ASIN y con su fecha',
    _fil_es[_ia['En mi BD']], 'OK Alm:0 FBA:18 (foto %s)' % HOY_FOTO)
+# (RF4, 23-oct-2026) Esta escena NO tiene la fuente única del RF2 (el doble no tiene mv_coste_preparacion): el cruce sigue,
+#   cada fila guarda y pinta el respaldo del escáner (ni parametro_coste hay), y el aviso del cruce lo dice.
+eq('2 · (RF4) sin la fuente del coste: cada fila guardada lleva el respaldo (0,15) y el cruce lo avisa, sin pararse',
+   (sorted({r['almacen'] for r in T['escaner2_resultado_pais']}), 'Coste de preparación SIN la fuente única' in (c['aviso'] or ''),
+    c['estado']), ([0.15], True, 'lista'))
+eq('2 · (RF4) …y en «Análisis» cada fila lleva ese almacén, con «global» en «Origen almacén»',
+   sorted({(r[_ia['Almacén (€)']], r[_ia[e2.COLUMNA_ORIGEN_ALMACEN]]) for r in _an[1:]}), [(0.15, 'global')])
+eq('2 · (RF4) …y el log lo grita', '!!! COSTE_PREPARACION: Coste de preparación SIN la fuente única' in log2, True)
 _fil_fr = [r for r in _an[1:] if r[_ia['EAN']] == _ean(M, 1) and r[_ia['País']] == 'FR'][0]
 eq('2 · (B4) sin CSV de FR, su fila dice «Sin datos» y no inventa números',
    (_fil_fr[_ia['Decisión']], _fil_fr[_ia['Margen']], _fil_fr[_ia['Precio venta (€)']]), ('Sin datos', None, None))
@@ -566,7 +577,9 @@ import escaner2_huella_excel as HU  # noqa: E402
 # «Ventas» (escaner2_desvios.py): el resto de la huella —fórmulas por nombre de columna incluidas— sigue siendo la suya.
 _REF = HU.sin_columnas(json.load(open(os.path.join(AQUI, 'huella_excel_viejo_heo.json'), encoding='utf-8')),
                        DV.ANALISIS_QUITADAS, DV.ANALISIS_RENOMBRADAS)
-# (AA, 1-oct-2026) …y con «Ficha compartida» detrás de la última columna, dentro de la tabla T_Analisis.
+# (RF4, 23-oct-2026) …con «Origen almacén» detrás de la última del viejo; (AA, 1-oct-2026) y con «Ficha compartida»
+# detrás, dentro de la tabla T_Analisis.
+_REF = HU.con_columna_al_final(_REF, e2.COLUMNA_ORIGEN_ALMACEN, e2.ANCHO_ORIGEN_ALMACEN)
 _REF = HU.con_columna_al_final(_REF, e2.COLUMNA_FICHA_COMPARTIDA, e2.ANCHO_FICHA_COMPARTIDA)
 _REF = HU.con_columna_al_final(_REF, e2.COLUMNA_AMAZON, e2.ANCHO_AMAZON)  # (RS, 23-oct-2026)
 _h2 = HU.huella(base64.b64decode(bd['storage']['escaner2'][_xl[0]]))

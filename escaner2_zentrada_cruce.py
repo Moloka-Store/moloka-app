@@ -246,6 +246,10 @@ def cruzar(cruce, params, pasada):
         raise Fallo('productos devolvió 0 fichas activas: el IVA de la ficha no se puede leer')
     M.poner_catalogo_propio(activos)
     M.poner_foto_fba(en_mi_bd.leer_foto_fba(sb, imprimir=lambda linea: print(linea, flush=True)))
+    # (RF4, 23-oct-2026) El coste de preparación de cada ficha (fuente única del RF2), UNA lectura por pasada. Sin la
+    # fuente, el global y un aviso: el cruce no se para.
+    M.poner_coste_preparacion(e2.leer_coste_preparacion(sb, M.ALMACEN_GLOBAL_RESPALDO, avisos=avisos,
+                                                        imprimir=lambda linea: print(linea, flush=True)))
     fichas_nuestras = ez.fichas_nuestras_de(productos)
     por_asin_mapa = {p: ez.leer_csv_mapa(rutas_mapa[p], pro) for p in usados if p in rutas_mapa}
     caidas_val = {p: dict(caidas_por_pais.get(p) or {}, **(caidas_mapa.get(p) or {}))

@@ -227,6 +227,10 @@ def cruzar(cruce, params, pasada):
         raise Fallo('productos devolvió 0 filas con activo=true: el IVA de la ficha no se puede leer')
     M.poner_catalogo_propio(productos)
     M.poner_foto_fba(en_mi_bd.leer_foto_fba(sb, imprimir=lambda linea: print(linea, flush=True)))
+    # (RF4, 23-oct-2026) El coste de preparación de cada ficha (fuente única del RF2), UNA lectura por pasada. Sin la
+    # fuente, el global y un aviso: el cruce no se para.
+    M.poner_coste_preparacion(e2.leer_coste_preparacion(sb, M.ALMACEN_GLOBAL_RESPALDO, avisos=avisos,
+                                                        imprimir=lambda linea: print(linea, flush=True)))
 
     # ── 3 · Las puertas, con las reglas del PRO de HEO ─────────────────────────────────────────
     apartados = _todas('escaner2_apartado', 'ean_original,nombre,marca,precio_catalogo,motivo,detalle,producto_heo',
