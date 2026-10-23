@@ -1452,6 +1452,8 @@ def escribir_excel(foto, resultados, apartados, M, info):
     # (Mapa de OSMA, Fernando, 04-oct-2026) La ULTIMA hoja: lo nuestro que OSMA tiene agotado hoy, que no se esconda.
     hoja(HOJA_AGOTADOS, COLUMNAS_AGOTADOS, info.get('agotados') or [], {'A': 12, 'B': 50, 'C': 14, 'D': 50, 'G': 18})
     salida = io.BytesIO()
+    # (RS, 23-oct-2026) «Amazon», la ÚLTIMA columna de «Análisis» (detrás de las de cada proveedor: nadie se corre)
+    e2.poner_columna_amazon(wb, info.get('restricciones'))
     wb.save(salida)
     return salida.getvalue()
 

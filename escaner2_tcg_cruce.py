@@ -308,6 +308,7 @@ def cruzar(cruce, params, pasada):
         sello = _ahora().astimezone(ZoneInfo('Europe/Madrid')).strftime('%Y%m%d_%H%M')
         ruta = etc.ruta_excel(PASADA, cruce, sello)
         contenido = etc.escribir_excel(foto, resultados, apartados, M, {
+            'restricciones': e2.lector_restricciones(sb, avisos),  # (RS) la columna «Amazon»
             'pasada': PASADA, 'cruce': cruce, 'params': params, 'usados': usados, 'ficheros': ficheros,
             'n_entradas': n_entradas, 'n_bd': n_bd, 'cuadra': cuadra and not motivo_fallo, 'n_crudo': n_crudo,
             'previas': previas, 'modo': pasada.get('modo'), 'marcas': pasada.get('marcas'), 'eleccion': eleccion,

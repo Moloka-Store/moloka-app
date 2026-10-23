@@ -327,6 +327,90 @@ _cqe = e2.cuadre(['F%d' % n for n in range(1, 17)], [dict(_re[n], foto_id='F%d' 
 eq('(E) el cuadre sigue: las dos que no pasan (la de 5 caídas y la compartida de 6,67) son «pocas caídas»',
    (_cqe['cuadra'], _cqe['n_c_pocas']), (True, 2))
 
+# ═══════════════════════════════════════════════════════════════════════════════
+print('\n(F) (RS, 23-oct-2026) la columna «Amazon» al final de «Análisis»: si Amazon deja vender el ASIN')
+# Las restricciones de mentira, con la forma que lee `lector_restricciones` (amz_restriccion_venta: asin, pais, restringido).
+# Los ASIN que salen en «Análisis» (los de la puerta c no van a la hoja), en el orden de la hoja.
+_h0 = e2.excel_como_el_viejo(_foto, _res, [], M)['Análisis']
+_c0 = [c.value for c in _h0[1]].index('ASIN') + 1
+_asins = list(dict.fromkeys(_h0.cell(row=f, column=_c0).value for f in range(2, _h0.max_row + 1)))
+eq('(F) la hoja trae al menos cuatro ASIN con que probar', len(_asins) >= 4, True)
+_A_NO, _A_SI, _A_MEDIO = _asins[0], _asins[1], _asins[2]
+_FILAS_RS = ([{'asin': _A_NO, 'pais': p, 'restringido': p in ('ES', 'IT')} for p in e2.PAISES_AMAZON] +
+             [{'asin': _A_SI, 'pais': p, 'restringido': False} for p in e2.PAISES_AMAZON] +
+             [{'asin': _A_MEDIO, 'pais': p, 'restringido': False} for p in ('ES', 'IT', 'FR', 'DE')])
+
+
+class _SbFalso:
+    """El cliente de Supabase justo para `lector_restricciones`: table().select().eq().in_().execute().data."""
+    def __init__(self, filas, rompe=False):
+        self.filas, self.rompe, self.pedidas = filas, rompe, []
+
+    def table(self, nombre):
+        if self.rompe:
+            raise RuntimeError("Could not find the table 'public.amz_restriccion_venta'")
+        q = {'tabla': nombre}
+        sb = self
+
+        class _Q:
+            def select(self, cols): q['select'] = cols; return self
+            def eq(self, c, v): q[c] = v; return self
+            def in_(self, c, vs): q['asins'] = list(vs); return self
+            def execute(self):
+                sb.pedidas.append(dict(q))
+                return type('R', (), {'data': [f for f in sb.filas if f['asin'] in q['asins']]})()
+        return _Q()
+
+
+_sb = _SbFalso(_FILAS_RS)
+_avisos = []
+_wb = e2.excel_como_el_viejo(_foto, _res, [], M)
+_n_no = e2.poner_columna_amazon(_wb, e2.lector_restricciones(_sb, _avisos))
+_buf = io.BytesIO()
+_wb.save(_buf)
+_ws = load_workbook(io.BytesIO(_buf.getvalue()))['Análisis']
+_cab = [c.value for c in _ws[1]]
+eq('(F) «Amazon» es la ÚLTIMA columna, detrás de «Ficha compartida» (las del viejo no se mueven)',
+   _cab, e2.columnas_analisis() + ['Ficha compartida', 'Amazon'])
+eq('(F) la tabla T_Analisis la cubre', [(t.displayName, t.ref.split(':')[1][:2]) for t in _ws.tables.values()], [('T_Analisis', 'AC')])
+_i = {h: k for k, h in enumerate(_cab)}
+_am = {}
+for _r in _ws.iter_rows(min_row=2, values_only=True):
+    _am.setdefault(_r[_i['ASIN']], set()).add(_r[_i['Amazon']])
+eq('(F) restringido en ES e IT: «no te deja vender en ES/IT», en todas sus filas', _am[_A_NO], {'no te deja vender en ES/IT'})
+eq('(F) 🔴 permitido en los seis: la celda VACÍA', _am[_A_SI], {None})
+eq('(F) consultado solo en cuatro: lo que falta se dice', _am[_A_MEDIO], {'sin consultar en NL/BE'})
+eq('(F) 🔴 sin fila: «sin consultar», NUNCA vacío', all(_am[a] == {'sin consultar'} for a in _asins[3:]), True)
+eq('(F) devuelve cuántas filas dicen «no te deja»', _n_no, sum(1 for _r in _ws.iter_rows(min_row=2, values_only=True) if _r[_i['ASIN']] == _A_NO))
+eq('(F) una sola lectura de la tabla, de la condición nueva y solo con los ASIN de la hoja',
+   [(p['tabla'], p['select'], p['condicion'], sorted(p['asins'])) for p in _sb.pedidas],
+   [('amz_restriccion_venta', 'asin,pais,restringido', 'new_new', sorted(set(_asins)))])
+eq('(F) y sin aviso', _avisos, [])
+# 🔴 La tabla no se puede leer (migración sin aplicar): el Excel no se cae, todo «sin consultar» y el cruce lo avisa.
+_avisos = []
+_wb = e2.excel_como_el_viejo(_foto, _res, [], M)
+e2.poner_columna_amazon(_wb, e2.lector_restricciones(_SbFalso([], rompe=True), _avisos))
+_ws = _wb['Análisis']
+eq('(F) 🔴 sin la tabla: toda la columna «sin consultar», y el aviso con el porqué',
+   ({_ws.cell(row=f, column=len(_cab)).value for f in range(2, _ws.max_row + 1)}, len(_avisos), 'Columna «Amazon»' in _avisos[0]),
+   ({'sin consultar'}, 1, True))
+eq('(F) sin lector (bancos y Excel de novedades), no hay columna: el libro es el de antes',
+   (e2.poner_columna_amazon(e2.excel_como_el_viejo(_foto, _res, [], M), None),
+    [c.value for c in e2.excel_como_el_viejo(_foto, _res, [], M)['Análisis'][1]][-1]), (0, 'Ficha compartida'))
+eq('(F) el texto, puro', [e2.texto_amazon('X', {}), e2.texto_amazon('X', {('X', p): False for p in e2.PAISES_AMAZON}),
+                         e2.texto_amazon('X', {**{('X', p): False for p in e2.PAISES_AMAZON}, ('X', 'BE'): True}),
+                         e2.texto_amazon('X', {('X', 'ES'): True})],
+   ['sin consultar', None, 'no te deja vender en BE', 'no te deja vender en ES · sin consultar en IT/FR/DE/NL/BE'])
+# Por estructura: los siete cruces le pasan el lector a su Excel, y los siete Excel ponen la columna.
+for _f in ('escaner2_heo_cruce.py', 'escaner2_bems_cruce.py', 'escaner2_dbline_cruce.py', 'escaner2_ociostock_cruce.py',
+           'escaner2_osma_cruce.py', 'escaner2_tcg_cruce.py', 'escaner2_zentrada_cruce.py'):
+    _t = io.open(os.path.join(AQUI, _f), encoding='utf-8').read()
+    eq('(F) %s pasa el lector a su Excel' % _f, _t.count("'restricciones': e2.lector_restricciones(sb, avisos)"), 1)
+for _f in ('escaner2_heo_cruce.py', 'escaner2_bems_pro.py', 'escaner2_dbline_pro.py', 'escaner2_ociostock_pro.py',
+           'escaner2_osma.py', 'escaner2_tcg_pro.py', 'escaner2_zentrada.py'):
+    _t = io.open(os.path.join(AQUI, _f), encoding='utf-8').read()
+    eq('(F) %s pone la columna «Amazon»' % _f, _t.count("e2.poner_columna_amazon(wb, info.get('restricciones'))"), 1)
+
 shutil.rmtree(_tmp, ignore_errors=True)
 print()
 if fallos:

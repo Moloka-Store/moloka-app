@@ -102,6 +102,10 @@ class _Consulta:
         self.filtros.append((k, v))
         return self
 
+    def in_(self, k, vs):  # (RS) la columna «Amazon» lee amz_restriccion_venta por tandas de ASIN
+        self.filtros.append((k, frozenset(str(x) for x in vs)))
+        return self
+
     def order(self, col, desc=False):
         self.orden = (col, desc)
         return self
@@ -126,7 +130,7 @@ class _Consulta:
                     continue       # 200 y cero filas: lo que hace una politica que frena
                 filas.append(json.loads(json.dumps(f, default=str)))
             return _Resp(self.payload)
-        sel = [f for f in filas if all(str(f.get(k)) == str(v) for k, v in self.filtros)]
+        sel = [f for f in filas if all((str(f.get(k)) in v) if isinstance(v, frozenset) else str(f.get(k)) == str(v) for k, v in self.filtros)]
         if self.op == 'update':
             for f in sel:
                 f.update(json.loads(json.dumps(self.payload, default=str)))
@@ -446,7 +450,7 @@ _lista = base64.b64decode(bd['storage']['escaner2']['heo/%s/eans.txt' % pasada])
 eq('2 · la lista para el Visualizador: un EAN por linea, en el bucket escaner2', (len(_lista), p['n_eans_lista'], p['n_tandas']),
    (5, 5, 1))
 eq('2 · ni una tabla nueva fuera de escaner2_', sorted(t for t in T if not t.startswith('escaner2_')),
-   sorted(TABLAS_VIEJO + ('disp_parametros', 'inventario_fba')))   # (encargo E) la foto de FBA, sembrada y solo leida
+   sorted(TABLAS_VIEJO + ('disp_parametros', 'inventario_fba', 'amz_restriccion_venta')))   # (encargo E) la foto de FBA, sembrada y solo leida; (RS) las restricciones de venta, solo leidas
 eq('2 · (30-sep) el log del cuadre previo dice SIEMPRE la diferencia y la tolerancia',
    'HEO declara 11 y se bajaron 11 · diferencia 0 (tolerancia 100)' in log, True)
 c = T['escaner2_cruce'][0]
@@ -499,7 +503,7 @@ HOJAS_E2 = ['Resumen', 'Comparación', 'Varias fichas', 'Puertas', 'Puertas prev
 eq('2 · 🔴 (B4) las seis hojas del viejo delante, en su orden, y las del escáner 2 detrás',
    _wb.sheetnames, HOJAS_VIEJO + HOJAS_E2)
 # (AA, 1-oct-2026) …y detrás de la última, «Ficha compartida» (la marca del reparto; vacía en esta escena).
-_COLS = e2.columnas_analisis(os.path.join(AQUI, e2.RUTA_MOTOR)) + [e2.COLUMNA_FICHA_COMPARTIDA]
+_COLS = e2.columnas_analisis(os.path.join(AQUI, e2.RUTA_MOTOR)) + [e2.COLUMNA_FICHA_COMPARTIDA, e2.COLUMNA_AMAZON]  # (RS) y «Amazon», la última
 _an = list(_wb['Análisis'].iter_rows(values_only=True))
 eq('2 · 🔴 (B4) «Análisis» lleva las cabeceras de COLS del viejo, en su orden, y (AA) «Ficha compartida» al final',
    list(_an[0]), list(_COLS))
@@ -564,6 +568,7 @@ _REF = HU.sin_columnas(json.load(open(os.path.join(AQUI, 'huella_excel_viejo_heo
                        DV.ANALISIS_QUITADAS, DV.ANALISIS_RENOMBRADAS)
 # (AA, 1-oct-2026) …y con «Ficha compartida» detrás de la última columna, dentro de la tabla T_Analisis.
 _REF = HU.con_columna_al_final(_REF, e2.COLUMNA_FICHA_COMPARTIDA, e2.ANCHO_FICHA_COMPARTIDA)
+_REF = HU.con_columna_al_final(_REF, e2.COLUMNA_AMAZON, e2.ANCHO_AMAZON)  # (RS, 23-oct-2026)
 _h2 = HU.huella(base64.b64decode(bd['storage']['escaner2'][_xl[0]]))
 eq('2 · 🔴 (B4) el FORMATO de las seis hojas es el del Excel viejo de verdad (huella_excel_viejo_heo.json, con el desvío D)',
    HU.diferencias(_REF, _h2, solo_hojas=HOJAS_VIEJO, vacias=('Sin_rank',)), [])

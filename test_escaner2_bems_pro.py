@@ -79,6 +79,10 @@ class _Consulta:
         self.filtros.append((k, v))
         return self
 
+    def in_(self, k, vs):  # (RS) la columna «Amazon» lee amz_restriccion_venta por tandas de ASIN
+        self.filtros.append((k, frozenset(str(x) for x in vs)))
+        return self
+
     def order(self, col, desc=False):
         self.orden = (col, desc)
         return self
@@ -98,7 +102,7 @@ class _Consulta:
             for f in self.payload:
                 filas.append(json.loads(json.dumps(f, default=str)))
             return _Resp(self.payload)
-        sel = [f for f in filas if all(str(f.get(k)) == str(v) for k, v in self.filtros)]
+        sel = [f for f in filas if all((str(f.get(k)) in v) if isinstance(v, frozenset) else str(f.get(k)) == str(v) for k, v in self.filtros)]
         if self.op == 'update':
             for f in sel:
                 f.update(json.loads(json.dumps(self.payload, default=str)))
@@ -539,7 +543,7 @@ eq('B2 · las hojas del PRO de HEO, en su orden (sin «Chase_manual», que es de
     'Puertas', 'Puertas previas'])
 _cab = [c.value for c in _wb['Análisis'][1]]
 eq('🔴 B2 · «Análisis»: las del PRO de HEO (con «Ventas») y «Ficha compartida» al final, NADA MÁS',
-   (_cab, 'Ventas' in _cab), (e2.columnas_analisis() + [e2.COLUMNA_FICHA_COMPARTIDA], True))
+   (_cab, 'Ventas' in _cab), (e2.columnas_analisis() + [e2.COLUMNA_FICHA_COMPARTIDA, e2.COLUMNA_AMAZON], True))  # (RS) «Amazon», la última
 _ix = {n: _cab.index(n) for n in _cab}
 _an = list(_wb['Análisis'].iter_rows(min_row=2, values_only=True))
 _por = {}

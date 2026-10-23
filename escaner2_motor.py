@@ -1610,6 +1610,87 @@ def poner_columna_ficha_compartida(wb, foto, resultados):
     return n
 
 
+# (RS, 23-oct-2026) La columna «Amazon» de «Análisis», UNA columna nueva AL FINAL (como «Ficha compartida»): si Amazon
+# deja vender ESE ASIN a la cuenta de Moloka, de `amz_restriccion_venta`, que escribe el bloque de restricciones del
+# cartero de la v2 (getListingsRestrictions) para los COMPRAR/VALORAR del ultimo cruce de cada proveedor.
+#   · vacia            → Amazon deja vender en los seis mercados (consultado);
+#   · «no te deja vender en ES/IT» → alguna restriccion (hace falta permiso, no apto o el ASIN no existe ahi);
+#   · «sin consultar»  → no hay fila en ningun mercado; «… · sin consultar en NL/BE» si faltan solo algunos.
+# 🔴 AUSENCIA DE DATO NO ES «DEJA»: sin fila se escribe «sin consultar», nunca vacio. Y si la tabla no se puede leer
+#    (migracion sin aplicar, red), toda la columna sale «sin consultar» y el cruce sigue, con su aviso.
+COLUMNA_AMAZON = 'Amazon'
+ANCHO_AMAZON = 40
+PAISES_AMAZON = ('ES', 'IT', 'FR', 'DE', 'NL', 'BE')
+TANDA_ASIN_AMAZON = 100
+
+
+def texto_amazon(asin, por_par, paises=PAISES_AMAZON):
+    """El texto de la columna «Amazon» para un ASIN: `por_par` es {(asin, pais): restringido (bool)}. Puro."""
+    no_deja = [p for p in paises if por_par.get((asin, p)) is True]
+    sin = [p for p in paises if (asin, p) not in por_par]
+    if len(sin) == len(paises):
+        return 'sin consultar'
+    partes = []
+    if no_deja:
+        partes.append('no te deja vender en ' + '/'.join(no_deja))
+    if sin:
+        partes.append('sin consultar en ' + '/'.join(sin))
+    return ' · '.join(partes) or None
+
+
+def lector_restricciones(sb, avisos=None):
+    """Una funcion asins → {(asin, pais): restringido} que lee `amz_restriccion_venta` (condicion nueva) por tandas.
+    Si la lectura falla, devuelve {} (todo «sin consultar») y deja el porque en `avisos`: el Excel no se cae por esto."""
+    def leer(asins):
+        por_par = {}
+        lista = sorted({a for a in asins if a})
+        try:
+            for i in range(0, len(lista), TANDA_ASIN_AMAZON):
+                filas = (sb.table('amz_restriccion_venta').select('asin,pais,restringido')
+                         .eq('condicion', 'new_new').in_('asin', lista[i:i + TANDA_ASIN_AMAZON]).execute().data) or []
+                for f in filas:
+                    por_par[(f['asin'], f['pais'])] = bool(f['restringido'])
+        except Exception as ex:
+            if avisos is not None:
+                avisos.append(f'Columna «Amazon» sin datos (se escribe «sin consultar»): {type(ex).__name__}: {str(ex)[:160]}')
+            return {}
+        return por_par
+    return leer
+
+
+def poner_columna_amazon(wb, leer):
+    """Anade «Amazon» detras de la ultima columna de «Análisis», fila a fila por ASIN, y alarga la tabla. `leer` es lo
+    que devuelve `lector_restricciones` (sin el, no se pone la columna). Devuelve cuantas filas dicen «no te deja»."""
+    if leer is None:
+        return 0
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.table import TableColumn
+    ws = wb['Análisis']
+    cab = [c.value for c in ws[1]]
+    i_asin = cab.index('ASIN')
+    col = len(cab) + 1
+    ws.cell(row=1, column=col, value=COLUMNA_AMAZON).font = Font(bold=True)
+    ws.column_dimensions[get_column_letter(col)].width = ANCHO_AMAZON
+    asins = [str(ws.cell(row=f, column=i_asin + 1).value or '') for f in range(2, ws.max_row + 1)]
+    por_par = leer(asins)
+    n = 0
+    for fila, asin in enumerate(asins, start=2):
+        texto = texto_amazon(asin, por_par) if asin else 'sin consultar'
+        if texto:
+            ws.cell(row=fila, column=col, value=texto)
+            n += texto.startswith('no te deja')
+    for tabla in ws.tables.values():
+        ini, fin = tabla.ref.split(':')
+        fila_fin = re.sub(r'^[A-Z]+', '', fin)
+        tabla.ref = '%s:%s%s' % (ini, get_column_letter(col), fila_fin)
+        if tabla.tableColumns:
+            tabla.tableColumns.append(TableColumn(id=len(tabla.tableColumns) + 1, name=COLUMNA_AMAZON))
+        if tabla.autoFilter is not None:
+            tabla.autoFilter.ref = tabla.ref
+    return n
+
+
 def escribir_celda9(datos, M, ruta=RUTA_MOTOR, paises=None):
     """`excel_del_viejo` con estos datos (un dict con las llaves de DATOS_CELDA9), en el espacio de nombres
     del motor (sus constantes, `sup`, `pct_comision_celda`) y con `en_bd_txt` = `M.en_bd_txt` (encargo E: la

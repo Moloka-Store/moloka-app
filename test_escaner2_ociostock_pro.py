@@ -77,6 +77,10 @@ class _Consulta:
         self.filtros.append((k, v))
         return self
 
+    def in_(self, k, vs):  # (RS) la columna «Amazon» lee amz_restriccion_venta por tandas de ASIN
+        self.filtros.append((k, frozenset(str(x) for x in vs)))
+        return self
+
     def order(self, col, desc=False):
         self.orden = (col, desc)
         return self
@@ -96,7 +100,7 @@ class _Consulta:
             for f in self.payload:
                 filas.append(json.loads(json.dumps(f, default=str)))
             return _Resp(self.payload)
-        sel = [f for f in filas if all(str(f.get(k)) == str(v) for k, v in self.filtros)]
+        sel = [f for f in filas if all((str(f.get(k)) in v) if isinstance(v, frozenset) else str(f.get(k)) == str(v) for k, v in self.filtros)]
         if self.op == 'update':
             for f in sel:
                 f.update(json.loads(json.dumps(self.payload, default=str)))
@@ -508,7 +512,7 @@ eq('B2 · las hojas del PRO de HEO, en su orden (sin «Chase_manual», que es de
     'Puertas', 'Puertas previas'])
 _cab = [c.value for c in _wb['Análisis'][1]]
 eq('🔴 B2 · «Análisis»: las del PRO de HEO y, AL FINAL, «Ficha compartida», «Uds. escalón» y «Precio unidad»',
-   _cab, e2.columnas_analisis() + [e2.COLUMNA_FICHA_COMPARTIDA, 'Uds. escalón', 'Precio unidad'])
+   _cab, e2.columnas_analisis() + [e2.COLUMNA_FICHA_COMPARTIDA, 'Uds. escalón', 'Precio unidad', e2.COLUMNA_AMAZON])  # (RS) «Amazon», la última
 _ix = {n: _cab.index(n) for n in _cab}
 _an = list(_wb['Análisis'].iter_rows(min_row=2, values_only=True))
 _por = {}
@@ -525,8 +529,8 @@ eq('🔴 B2 · la caja: «caja de 6» en «Coherencia caja», PA 1,98, 6 uds de 
     for r in _por[E2 + ' C6']}, {('caja de 6', 1.98, 6, 2.5)})
 _tabla = list(_wb['Análisis'].tables.values())[0]
 eq('B2 · la tabla de «Análisis» cubre las dos columnas nuevas',
-   (_tabla.ref.split(':')[1].rstrip('0123456789'), [c.name for c in _tabla.tableColumns][-2:]),
-   (_wb['Análisis'].cell(row=1, column=len(_cab)).column_letter, ['Uds. escalón', 'Precio unidad']))
+   (_tabla.ref.split(':')[1].rstrip('0123456789'), [c.name for c in _tabla.tableColumns][-3:]),
+   (_wb['Análisis'].cell(row=1, column=len(_cab)).column_letter, ['Uds. escalón', 'Precio unidad', e2.COLUMNA_AMAZON]))
 _pu = list(_wb['Puertas'].iter_rows(values_only=True))
 _pcab = list(_pu[0])
 _pcaja = [r for r in _pu[1:] if r[0] == E2 + ' C6'][0]
