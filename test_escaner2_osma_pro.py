@@ -849,12 +849,13 @@ eq('B2 · las hojas del PRO de HEO, en su orden (sin «Chase_manual»: es de los
    _wb.sheetnames, HOJAS_VIEJO + HOJAS_E2)
 _cab = [c.value for c in _wb['Análisis'][1]]
 eq('B2 · «Análisis»: las columnas del PRO de HEO y, AL FINAL, «No habrá más» y (AM) «Precio OSMA sin porte (€)»',
-   _cab, e2.columnas_analisis() + [e2.COLUMNA_FICHA_COMPARTIDA, eo.COLUMNA_NO_HABRA_MAS, eo.COLUMNA_SIN_PORTE,
+   _cab, e2.columnas_analisis() + [e2.COLUMNA_ORIGEN_ALMACEN, e2.COLUMNA_FICHA_COMPARTIDA, eo.COLUMNA_NO_HABRA_MAS, eo.COLUMNA_SIN_PORTE,
                                    eo.COLUMNA_MAPA, e2.COLUMNA_AMAZON])  # (RS) «Amazon», la última
 import escaner2_desvios as DV  # noqa: E402
 import escaner2_huella_excel as HU  # noqa: E402
 _REF = HU.sin_columnas(json.load(open(os.path.join(AQUI, 'huella_excel_viejo_heo.json'), encoding='utf-8')),
                        DV.ANALISIS_QUITADAS, DV.ANALISIS_RENOMBRADAS)
+_REF = HU.con_columna_al_final(_REF, e2.COLUMNA_ORIGEN_ALMACEN, e2.ANCHO_ORIGEN_ALMACEN)  # (RF4, 23-oct-2026)
 _REF = HU.con_columna_al_final(_REF, e2.COLUMNA_FICHA_COMPARTIDA, e2.ANCHO_FICHA_COMPARTIDA)
 _REF = HU.con_columna_al_final(_REF, eo.COLUMNA_NO_HABRA_MAS, eo.ANCHO_NO_HABRA_MAS)
 _REF = HU.con_columna_al_final(_REF, eo.COLUMNA_SIN_PORTE, eo.ANCHO_SIN_PORTE)
@@ -863,10 +864,11 @@ _REF = HU.con_columna_al_final(_REF, e2.COLUMNA_AMAZON, e2.ANCHO_AMAZON)  # (RS,
 # (AM) Las dos únicas fórmulas nuevas de «Análisis», escritas a mano en R1C1 (la huella pone «k» en cada número): «PA (€)»
 # (la de una unidad y la de un pack) apunta a «Precio OSMA sin porte (€)» y a las celdas con nombre del Resumen, y
 # «Decisión» (la normal y la del posible pack) al «Margen» de su fila. Ninguna otra.
+# (RF4, 23-oct-2026) C[25] → C[26]: «Origen almacén» entra delante de «Precio OSMA sin porte (€)»; la casilla es la misma.
 _an_ref = next(h for h in _REF['hojas'] if h['hoja'] == 'Análisis')
 _an_ref['columnas']['PA (€)']['formula'] = [
-    '=ROUND(C[25]R[0]*(k+IF(N(PedidoPrevisto)>k,N(PorteEnvio)/PedidoPrevisto,k)),k)',
-    '=k*ROUND(C[25]R[0]/k*(k+IF(N(PedidoPrevisto)>k,N(PorteEnvio)/PedidoPrevisto,k)),k)']
+    '=ROUND(C[26]R[0]*(k+IF(N(PedidoPrevisto)>k,N(PorteEnvio)/PedidoPrevisto,k)),k)',
+    '=k*ROUND(C[26]R[0]/k*(k+IF(N(PedidoPrevisto)>k,N(PorteEnvio)/PedidoPrevisto,k)),k)']
 _an_ref['columnas']['Decisión']['formula'] = ['=IF(C[-1]R[0]*k>=k,"COMPRAR",IF(C[-1]R[0]*k>=k,"VALORAR","NO COMPRAR"))',
                                               '=IF(C[-1]R[0]*k>=k,"VALORAR","NO COMPRAR")']
 _REF['hojas'] = [h for h in _REF['hojas'] if h['hoja'] != 'Chase_manual']

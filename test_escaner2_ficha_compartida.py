@@ -245,9 +245,10 @@ _buf = io.BytesIO()
 e2.excel_como_el_viejo(_foto, _res, [], M).save(_buf)
 _ws = load_workbook(io.BytesIO(_buf.getvalue()))['Análisis']
 _cab = [c.value for c in _ws[1]]
-eq('(D) es la ÚLTIMA columna, detrás de las del viejo (que no se mueven)',
-   _cab, e2.columnas_analisis() + ['Ficha compartida'])
-eq('(D) la tabla T_Analisis la cubre', [(t.displayName, t.ref.split(':')[1][:2]) for t in _ws.tables.values()], [('T_Analisis', 'AB')])
+# (RF4, 23-oct-2026) Entre las del viejo y ella va «Origen almacén» (pegada a «Origen IVA»): la tabla, una letra más.
+eq('(D) es la ÚLTIMA columna, detrás de las del viejo (que no se mueven) y de «Origen almacén» (RF4)',
+   _cab, e2.columnas_analisis() + [e2.COLUMNA_ORIGEN_ALMACEN, 'Ficha compartida'])
+eq('(D) la tabla T_Analisis la cubre', [(t.displayName, t.ref.split(':')[1][:2]) for t in _ws.tables.values()], [('T_Analisis', 'AC')])
 _i = {h: k for k, h in enumerate(_cab)}
 _marcas = {(r[_i['EAN']], r[_i['País']]): r[_i['Ficha compartida']] for r in _ws.iter_rows(min_row=2, values_only=True)}
 eq('(D) la fila de ES del EAN compartido lleva la marca de ES',
@@ -379,8 +380,8 @@ _wb.save(_buf)
 _ws = load_workbook(io.BytesIO(_buf.getvalue()))['Análisis']
 _cab = [c.value for c in _ws[1]]
 eq('(F) «Amazon» es la ÚLTIMA columna, detrás de «Ficha compartida» (las del viejo no se mueven)',
-   _cab, e2.columnas_analisis() + ['Ficha compartida', 'Amazon'])
-eq('(F) la tabla T_Analisis la cubre', [(t.displayName, t.ref.split(':')[1][:2]) for t in _ws.tables.values()], [('T_Analisis', 'AC')])
+   _cab, e2.columnas_analisis() + [e2.COLUMNA_ORIGEN_ALMACEN, 'Ficha compartida', 'Amazon'])
+eq('(F) la tabla T_Analisis la cubre', [(t.displayName, t.ref.split(':')[1][:2]) for t in _ws.tables.values()], [('T_Analisis', 'AD')])
 _i = {h: k for k, h in enumerate(_cab)}
 _am = {}
 for _r in _ws.iter_rows(min_row=2, values_only=True):

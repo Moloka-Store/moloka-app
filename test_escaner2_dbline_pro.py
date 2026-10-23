@@ -412,7 +412,7 @@ def csv_real(pais, filas):
 ASIN1, ASIN2, ASIN3, ASIN4 = 'B0DBLN0001', 'B0DBLN0002', 'B0DBLN0003', 'B0DBLN0004'
 PRODUCTOS = [{'id': 1, 'ean': E1, 'asin': ASIN1, 'nombre': 'Figura de Moloka', 'activo': True, 'es_chase': False,
               'iva_pct': 0.21, 'stock_moloka': 3}]
-SEMBRADAS = ('productos', 'inventario_fba', 'disp_pasada', 'disp_estado', 'reglas_director')
+SEMBRADAS = ('productos', 'inventario_fba', 'disp_pasada', 'disp_estado', 'reglas_director', 'parametro_coste', 'mv_coste_preparacion', 'v_fijo_preparacion_asin')
 # En los programas, el «hoy» es el de verdad: la promo vigente acaba en 2099 y la caducada en 2020.
 FOTO_B = dict(fin_vigente='2099-12-31', fin_caducada='2020-01-01')
 
@@ -441,6 +441,12 @@ def estado_inicial(escena):
                             {'proveedor': 'OCIOSTOCK', 'activo': True, 'marcas': ['Otra']}],
         'productos': json.loads(json.dumps(PRODUCTOS)),
         'inventario_fba': [],
+        # (RF4, 23-oct-2026) La fuente única del coste, PRESENTE (como en producción desde el RF2) y sin eur_kg: la escena
+        # no tiene ASIN con coste ni estimación por peso, así que sus cuentas siguen con el global (0,15) y sin aviso.
+        # Los caminos (fuente, peso, global, sin fuente) se prueban en test_escaner2_coste.py.
+        'parametro_coste': [{'clave': 'coste_almacen_ud', 'valor': 0.15, 'desde': '2000-01-01', 'hasta': None}],
+        'mv_coste_preparacion': [{'producto_id': 'p0', 'eur_kg': None, 'refrescada_el': '2026-10-23T05:10:00Z'}],
+        'v_fijo_preparacion_asin': [],
     }, 'storage': {'escaner2': {}}}
 
 
@@ -538,7 +544,7 @@ eq('B2 · las hojas del PRO de HEO, en su orden (sin «Chase_manual», que es de
     'Puertas', 'Puertas previas'])
 _cab = [c.value for c in _wb['Análisis'][1]]
 eq('🔴 B2 · «Análisis»: las del PRO de HEO (con «Ventas») y «Ficha compartida» al final, NADA MÁS',
-   (_cab, 'Ventas' in _cab), (e2.columnas_analisis() + [e2.COLUMNA_FICHA_COMPARTIDA, e2.COLUMNA_AMAZON], True))  # (RS) «Amazon», la última
+   (_cab, 'Ventas' in _cab), (e2.columnas_analisis() + [e2.COLUMNA_ORIGEN_ALMACEN, e2.COLUMNA_FICHA_COMPARTIDA, e2.COLUMNA_AMAZON], True))  # (RS) «Amazon», la última
 _ix = {n: _cab.index(n) for n in _cab}
 _an = list(_wb['Análisis'].iter_rows(min_row=2, values_only=True))
 _por = {}
