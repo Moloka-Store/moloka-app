@@ -360,6 +360,7 @@ def cruzar(cruce, params, pasada):
         sello = _ahora().astimezone(_zona_madrid()).strftime('%Y%m%d_%H%M')
         ruta_excel = f'heo/{PASADA}/{cruce}/Escaner2_HEO_{sello}.xlsx'
         contenido = escribir_excel(foto, resultados, cmp_filas, {
+            'restricciones': e2.lector_restricciones(sb, avisos),  # (RS) la columna «Amazon»
             'pasada': PASADA, 'cruce': cruce, 'params': params, 'usados': usados, 'ficheros': ficheros,
             'n_entradas': n_entradas, 'n_bd': n_bd, 'cuadra': cuadra and not motivo_fallo,
             'n_crudo': n_crudo, 'previas': previas, 'modo': pasada.get('modo'), 'lista_viejo': lista_viejo,
@@ -580,6 +581,8 @@ def escribir_excel(foto, resultados, cmp_filas, info):
             else a['motivo']), a['detalle']] for a in info['apartados']],
          {'A': 18, 'B': 55, 'C': 16, 'E': 32, 'F': 80})
     salida = io.BytesIO()
+    # (RS, 23-oct-2026) «Amazon», la ÚLTIMA columna de «Análisis» (detrás de las de cada proveedor: nadie se corre)
+    e2.poner_columna_amazon(wb, info.get('restricciones'))
     wb.save(salida)
     return salida.getvalue()
 

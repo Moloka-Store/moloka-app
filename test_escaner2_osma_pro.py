@@ -91,6 +91,10 @@ class _Consulta:
         self.filtros.append((k, v))
         return self
 
+    def in_(self, k, vs):  # (RS) la columna «Amazon» lee amz_restriccion_venta por tandas de ASIN
+        self.filtros.append((k, frozenset(str(x) for x in vs)))
+        return self
+
     def order(self, col, desc=False):
         self.orden = (col, desc)
         return self
@@ -112,7 +116,7 @@ class _Consulta:
             for f in self.payload:
                 filas.append(json.loads(json.dumps(f, default=str)))
             return _Resp(self.payload)
-        sel = [f for f in filas if all(str(f.get(k)) == str(v) for k, v in self.filtros)]
+        sel = [f for f in filas if all((str(f.get(k)) in v) if isinstance(v, frozenset) else str(f.get(k)) == str(v) for k, v in self.filtros)]
         if self.op == 'update':
             for f in sel:
                 f.update(json.loads(json.dumps(self.payload, default=str)))
@@ -846,7 +850,7 @@ eq('B2 · las hojas del PRO de HEO, en su orden (sin «Chase_manual»: es de los
 _cab = [c.value for c in _wb['Análisis'][1]]
 eq('B2 · «Análisis»: las columnas del PRO de HEO y, AL FINAL, «No habrá más» y (AM) «Precio OSMA sin porte (€)»',
    _cab, e2.columnas_analisis() + [e2.COLUMNA_FICHA_COMPARTIDA, eo.COLUMNA_NO_HABRA_MAS, eo.COLUMNA_SIN_PORTE,
-                                   eo.COLUMNA_MAPA])
+                                   eo.COLUMNA_MAPA, e2.COLUMNA_AMAZON])  # (RS) «Amazon», la última
 import escaner2_desvios as DV  # noqa: E402
 import escaner2_huella_excel as HU  # noqa: E402
 _REF = HU.sin_columnas(json.load(open(os.path.join(AQUI, 'huella_excel_viejo_heo.json'), encoding='utf-8')),
@@ -855,6 +859,7 @@ _REF = HU.con_columna_al_final(_REF, e2.COLUMNA_FICHA_COMPARTIDA, e2.ANCHO_FICHA
 _REF = HU.con_columna_al_final(_REF, eo.COLUMNA_NO_HABRA_MAS, eo.ANCHO_NO_HABRA_MAS)
 _REF = HU.con_columna_al_final(_REF, eo.COLUMNA_SIN_PORTE, eo.ANCHO_SIN_PORTE)
 _REF = HU.con_columna_al_final(_REF, eo.COLUMNA_MAPA, eo.ANCHO_MAPA)
+_REF = HU.con_columna_al_final(_REF, e2.COLUMNA_AMAZON, e2.ANCHO_AMAZON)  # (RS, 23-oct-2026)
 # (AM) Las dos únicas fórmulas nuevas de «Análisis», escritas a mano en R1C1 (la huella pone «k» en cada número): «PA (€)»
 # (la de una unidad y la de un pack) apunta a «Precio OSMA sin porte (€)» y a las celdas con nombre del Resumen, y
 # «Decisión» (la normal y la del posible pack) al «Margen» de su fila. Ninguna otra.

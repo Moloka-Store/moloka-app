@@ -386,5 +386,7 @@ def escribir_excel(foto, resultados, apartados, M, info):
           for a in apartados],
          {'A': 18, 'B': 55, 'C': 16, 'E': 32, 'F': 80})
     salida = io.BytesIO()
+    # (RS, 23-oct-2026) «Amazon», la ÚLTIMA columna de «Análisis» (detrás de las de cada proveedor: nadie se corre)
+    e2.poner_columna_amazon(wb, info.get('restricciones'))
     wb.save(salida)
     return salida.getvalue()
