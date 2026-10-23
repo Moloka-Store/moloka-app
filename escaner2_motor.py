@@ -259,8 +259,11 @@ def cargar_motor(ruta=RUTA_MOTOR):
 #      excepcion vigente este mes delante y, si no, el valor de la fuente: lo MISMO que resta la lista, que hace
 #      COALESCE(su valor, global)); `eur_kg` de la fuente; y el global vigente de parametro_coste 'coste_almacen_ud';
 #   2. por ficha (`coste_almacen`): (a) el ASIN esta en la lista → ese valor, con su origen (excepcion, envios, peso);
-#      (b) no esta, pero el CSV trae el peso del paquete → eur_kg × peso / 1000, redondeado a 4 decimales como
-#      coste_peso del RF2 (peso = la mediana de los paises, a 1 decimal, como la mediana de amz_ficha del RF2);
+#      (a bis) no esta, pero es NUESTRO (un producto con ese ASIN, sin chase) → el global, como la lista de precios
+#      (coste_almacen_ud cae al global): decision de Cowork del 23-oct-2026 por la regla de Fernando, para que el
+#      escaner y el Trackeador digan lo mismo de cada producto nuestro;
+#      (b) no esta ni es nuestro, pero el CSV trae el peso del paquete → eur_kg × peso / 1000, redondeado a 4
+#      decimales como coste_peso del RF2 (peso = la mediana de los paises, a 1 decimal, como la de amz_ficha del RF2);
 #      (c) nada → el global vigente.
 #   🔴 Si la fuente no existe (RF2 sin aplicar) o no se puede leer, la pasada NO se para: todo sale con el global (y,
 #      si tampoco se lee, con ALMACEN_GLOBAL_RESPALDO), y el log y el aviso del Excel lo dicen.
@@ -289,7 +292,8 @@ def peso_de_fichas(recs):
 
 def coste_almacen(fuente, asin, peso_g, respaldo):
     """(valor, origen) del coste de preparacion de una ficha. Puro. `fuente` es lo de `leer_coste_preparacion` (None:
-    no se ha leido → el respaldo, «global»). Orden: (a) la lista por ASIN; (b) eur_kg × peso; (c) el global."""
+    no se ha leido → el respaldo, «global»). Orden: (a) la lista por ASIN; (a bis) un ASIN nuestro sin valor en la
+    lista → el global, como la lista de precios; (b) eur_kg × peso, solo fuera de nuestro catalogo; (c) el global."""
     if not fuente:
         return respaldo, 'global'
     global_ = fuente['global']
@@ -297,6 +301,8 @@ def coste_almacen(fuente, asin, peso_g, respaldo):
         return global_, 'global'
     if asin and asin in fuente['por_asin']:
         return fuente['por_asin'][asin]
+    if asin and asin in fuente.get('nuestros', ()):
+        return global_, 'global'
     if fuente.get('eur_kg') is not None and peso_g and peso_g > 0:
         g = _redondear(peso_g, 1)
         return float(_redondear(_redondear(fuente['eur_kg'], 4) * g / 1000, 4)), 'peso'
@@ -312,7 +318,9 @@ def _mes_madrid(hoy=None):
 
 def leer_coste_preparacion(sb, respaldo, hoy=None, avisos=None, imprimir=print):
     """LA lectura de la pasada (RF4). Devuelve {'estado': 'ok' | 'sin_fuente', 'por_asin': {asin: (valor, origen)},
-    'eur_kg', 'global', 'global_de' ('parametro_coste' | 'respaldo'), 'motivo', 'refrescada_el', 'n_origen'}.
+    'nuestros' (los ASIN de productos, sin chase), 'eur_kg', 'global', 'global_de' ('parametro_coste' | 'respaldo'),
+    'motivo', 'refrescada_el', 'n_origen'}. 🔴 Si `productos` no se puede leer (o da 0 filas), sin_fuente: sin saber
+    cuales son nuestros, el peso podria ponerle a un producto nuestro un coste distinto del de la lista.
     NUNCA LANZA: lo que no se pueda leer va a `avisos` (el Excel) y al log, y la pasada sigue.
     `hoy` (fecha, para el banco): el mes de la vigencia del global; por defecto, el de hoy en Madrid."""
     fuera = []
@@ -330,8 +338,8 @@ def leer_coste_preparacion(sb, respaldo, hoy=None, avisos=None, imprimir=print):
     except Exception as ex:
         fuera.append('el global de parametro_coste no se pudo leer (%s: %s): se usa el respaldo del escáner'
                      % (type(ex).__name__, str(ex)[:160]))
-    salida = {'estado': 'sin_fuente', 'por_asin': {}, 'eur_kg': None, 'global': global_, 'global_de': global_de,
-              'motivo': None, 'refrescada_el': None, 'n_origen': {}}
+    salida = {'estado': 'sin_fuente', 'por_asin': {}, 'nuestros': frozenset(), 'eur_kg': None, 'global': global_,
+              'global_de': global_de, 'motivo': None, 'refrescada_el': None, 'n_origen': {}}
     try:
         cab = (sb.table(FUENTE_COSTE).select('eur_kg,refrescada_el').limit(1).execute().data) or []
         if not cab:
@@ -346,10 +354,25 @@ def leer_coste_preparacion(sb, respaldo, hoy=None, avisos=None, imprimir=print):
             if len(trozo) < TANDA_COSTE:
                 break
             i += TANDA_COSTE
+        # (a bis) Los ASIN de NUESTRO catalogo (productos con ASIN, sin chase), por tandas: el que no tiene valor en la
+        # lista paga el global, como en la lista de precios, y no una estimacion por el peso de Keepa.
+        nuestros, i, n_productos = set(), 0, 0
+        while True:
+            trozo = (sb.table('productos').select('id,asin,es_chase').order('id')
+                     .range(i, i + TANDA_COSTE - 1).execute().data) or []
+            n_productos += len(trozo)
+            for f in trozo:
+                if (f.get('asin') or '').strip() and not f.get('es_chase'):
+                    nuestros.add(f['asin'].strip())
+            if len(trozo) < TANDA_COSTE:
+                break
+            i += TANDA_COSTE
+        if not n_productos:
+            raise ValueError('productos no devuelve ninguna fila: no se sabe qué ASIN son nuestros')
         raros = sorted({o for _v, o in por_asin.values() if o not in ORIGENES_COSTE})
         if raros:
             fuera.append('%s trae orígenes que el escáner no conoce: %s' % (VISTA_COSTE_ASIN, ', '.join(raros)))
-        salida.update(estado='ok', por_asin=por_asin, refrescada_el=cab[0].get('refrescada_el'),
+        salida.update(estado='ok', por_asin=por_asin, nuestros=frozenset(nuestros), refrescada_el=cab[0].get('refrescada_el'),
                       eur_kg=(None if cab[0].get('eur_kg') is None else float(cab[0]['eur_kg'])))
         for _v, o in por_asin.values():
             salida['n_origen'][o] = salida['n_origen'].get(o, 0) + 1
@@ -359,9 +382,11 @@ def leer_coste_preparacion(sb, respaldo, hoy=None, avisos=None, imprimir=print):
                      % (salida['motivo'], 'parametro_coste' if global_de == 'parametro_coste' else 'respaldo del escáner'))
     # 🔒 Solo recuentos: el registro de Actions de este repo es PUBLICO (ni el eur_kg ni el global ni un coste).
     if salida['estado'] == 'ok':
-        imprimir('COSTE_PREPARACION: fuente %s (refrescada %s) · %d ASIN (%s) · eur_kg %s · global de %s'
+        imprimir('COSTE_PREPARACION: fuente %s (refrescada %s) · %d ASIN (%s) · %d ASIN nuestros (%d sin valor: global)'
+                 ' · eur_kg %s · global de %s'
                  % (FUENTE_COSTE, salida['refrescada_el'], len(salida['por_asin']),
                     ', '.join('%s %d' % (o, n) for o, n in sorted(salida['n_origen'].items())),
+                    len(salida['nuestros']), len(salida['nuestros'] - set(salida['por_asin'])),
                     'sí' if salida['eur_kg'] is not None else 'NO (sin estimación por peso)', global_de))
     for a in fuera:
         imprimir('!!! COSTE_PREPARACION: ' + a)

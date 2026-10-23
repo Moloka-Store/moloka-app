@@ -88,7 +88,8 @@ class _Q:
 
 class SbFalso:
     def __init__(self, tablas, rotas=()):
-        self.tablas, self.rotas, self.lecturas = tablas, set(rotas), []
+        # El catalogo propio (PROD) va siempre, salvo que la escena traiga el suyo.
+        self.tablas, self.rotas, self.lecturas = dict({'productos': list(PROD)}, **tablas), set(rotas), []
 
     def table(self, nombre):
         return _Q(self, nombre)
@@ -103,6 +104,12 @@ PC = [{'clave': 'coste_almacen_ud', 'valor': 0.12, 'desde': '2026-01-01', 'hasta
       {'clave': 'coste_almacen_ud', 'valor': 0.15, 'desde': '2026-10-01', 'hasta': None},
       {'clave': 'otra_cosa', 'valor': 9.99, 'desde': '2026-01-01', 'hasta': None}]
 HOY = date(2026, 10, 23)
+# El catalogo propio, inventado: los tres de la lista; uno NUESTRO sin valor en la lista (ni envios ni peso de amz_ficha);
+# un chase con ASIN (no deberia pasar; no cuenta como nuestro) y dos sin ASIN.
+PROD = [{'id': 'p1', 'asin': 'B0RF4ENV01', 'es_chase': False}, {'id': 'p2', 'asin': 'B0RF4PES01', 'es_chase': False},
+        {'id': 'p3', 'asin': 'B0RF4EXC01', 'es_chase': False}, {'id': 'p4', 'asin': 'B0RF4NUES1', 'es_chase': None},
+        {'id': 'p5', 'asin': 'B0RF4CHAS1', 'es_chase': True}, {'id': 'p6', 'asin': None, 'es_chase': False},
+        {'id': 'p7', 'asin': '  ', 'es_chase': False}]
 
 
 def sb_entero(**kw):
@@ -126,8 +133,10 @@ eq('(A) fuente leída: estado ok, los tres ASIN con su valor y origen, eur_kg y 
 eq('(A) el global es el VIGENTE ese mes: en septiembre, el de entonces (0,12)', leer(sb_entero(), date(2026, 9, 15))[0]['global'], 0.12)
 _sb = sb_entero()
 leer(_sb)
-eq('(A) UNA lectura por pasada: el global, la fuente y la lista (una tanda), en este orden', _sb.lecturas,
-   ['parametro_coste', 'mv_coste_preparacion', 'v_fijo_preparacion_asin'])
+eq('(A) UNA lectura por pasada: el global, la fuente, la lista y el catálogo propio (una tanda cada una), en este orden',
+   _sb.lecturas, ['parametro_coste', 'mv_coste_preparacion', 'v_fijo_preparacion_asin', 'productos'])
+eq('(A) los ASIN NUESTROS: los de productos con ASIN, sin chase (ni el chase con ASIN ni los vacíos)', sorted(F['nuestros']),
+   ['B0RF4ENV01', 'B0RF4EXC01', 'B0RF4NUES1', 'B0RF4PES01'])
 _tanda = e2.TANDA_COSTE
 try:
     e2.TANDA_COSTE = 2
@@ -139,6 +148,8 @@ finally:
     e2.TANDA_COSTE = _tanda
 eq('(A) 🔴 la lista se lee ENTERA por tandas (5 filas en tandas de 2: tres lecturas de la vista, ninguna fila perdida)',
    (len(_f['por_asin']), _sb.lecturas.count('v_fijo_preparacion_asin')), (5, 3))
+eq('(A) 🔴 …y el catálogo propio también (7 filas en tandas de 2: cuatro lecturas, los cuatro nuestros)',
+   (len(_f['nuestros']), _sb.lecturas.count('productos')), (4, 4))
 _f, _a, _l = leer(SbFalso({'v_fijo_preparacion_asin': VFA + [{'asin': 'B0RF4RARO1', 'valor': 0.2, 'origen': 'inventado'}],
                            'mv_coste_preparacion': list(MV), 'parametro_coste': list(PC)}))
 eq('(A) un origen que el escáner no conoce se GRITA (aviso), no se traga', (_f['estado'], len(_a), 'inventado' in _a[0]),
@@ -156,6 +167,10 @@ eq('(B) (a) con excepción vigente → la excepción', e2.coste_almacen(F, 'B0RF
 eq('(B) 🔴 (a) manda sobre (b): en la fuente Y con peso en el CSV → el de la fuente', e2.coste_almacen(F, 'B0RF4ENV01', 500, 0.15),
    (0.96, 'envios'))
 # 0,7141 × 500 / 1000 = 0,35705 exacto: Postgres (la mitad hacia fuera) da 0,3571; el round de Python, 0,357.
+eq('(B) 🔴 (a bis) un ASIN NUESTRO sin valor en la lista y con peso en el CSV → el global, como la lista de precios',
+   e2.coste_almacen(F, 'B0RF4NUES1', 500, 0.15), (0.15, 'global'))
+eq('(B) (a bis) …el chase con ASIN no cuenta como nuestro: con peso, (b)', e2.coste_almacen(F, 'B0RF4CHAS1', 500, 0.15),
+   (0.3571, 'peso'))
 eq('(B) (b) fuera de la fuente, con peso → eur_kg × peso / 1000 a 4 decimales, como round(numeric) de Postgres',
    e2.coste_almacen(F, 'B0RF4NUEVO', 500, 0.15), (0.3571, 'peso'))
 eq('(B) (b) …y con decimales de gramo (redondeo del peso a 1 decimal, como la mediana del RF2)',
@@ -189,6 +204,14 @@ eq('(C) …y lo dice: un aviso para el Excel y una línea «!!!» en el log',
    (1, True, True, 1))
 _f, _a, _l = leer(sb_entero(rotas=('v_fijo_preparacion_asin',)))
 eq('(C) la lista ilegible (la fuente sí): tampoco se usa a medias → sin_fuente', (_f['estado'], _f['por_asin']), ('sin_fuente', {}))
+_f, _a, _l = leer(sb_entero(rotas=('productos',)))
+eq('(C) 🔴 el catálogo propio ilegible: sin saber cuáles son nuestros, nada a medias → sin_fuente, con aviso',
+   (_f['estado'], _f['por_asin'], len(_a), e2.coste_almacen(_f, 'B0RF4NUEVO', 500, 0.15)),
+   ('sin_fuente', {}, 1, (0.15, 'global')))
+_f, _a, _l = leer(SbFalso({'v_fijo_preparacion_asin': list(VFA), 'mv_coste_preparacion': list(MV), 'parametro_coste': list(PC),
+                           'productos': []}))
+eq('(C) …y con 0 filas (no se ha podido leer, no «no tenemos nada») → sin_fuente', (_f['estado'], 'productos' in _a[0]),
+   ('sin_fuente', True))
 _f, _a, _l = leer(SbFalso({'v_fijo_preparacion_asin': list(VFA), 'mv_coste_preparacion': [], 'parametro_coste': list(PC)}))
 eq('(C) la fuente vacía (0 filas: no se ha podido leer, no «nadie tiene coste») → sin_fuente', _f['estado'], 'sin_fuente')
 _f, _a, _l = leer(SbFalso({}, rotas=('mv_coste_preparacion', 'parametro_coste')))
@@ -233,6 +256,12 @@ eq('(D) la diferencia de beneficio es exactamente la del almacén (0,96 − 0,15
    round(_antes['beneficio'] - _ahora['beneficio'], 10), 0.81)
 eq('(D) fuera de la fuente, con 500 g: 0,3571 «peso», y sigue en COMPRAR', (_nuevo['almacen'], _nuevo['almacen_origen'],
                                                                            _nuevo['decision']), (0.3571, 'peso', 'COMPRAR'))
+M.poner_coste_preparacion(F)   # con la fuente puesta: sin ella el global sale por construcción
+_nues = e2.calcular_pais('ES', dict(REC, asin='B0RF4NUES1'), 7.5, CORE, M)
+M.poner_coste_preparacion(None)
+eq('(D) 🔴 un ASIN nuestro sin valor en la lista, con 500 g en el CSV: el global y la cuenta de antes (COMPRAR)',
+   (_nues['almacen'], _nues['almacen_origen'], _nues['decision'], _nues['beneficio']),
+   (0.15, 'global', 'COMPRAR', _antes['beneficio']))
 _sin = e2.calcular_pais('ES', dict(REC, fba=None), 7.5, CORE, M)
 eq('(D) sin tarifa: «Sin datos», pero el almacén y su origen se guardan igual', (_sin['decision'], _sin['almacen_origen']),
    ('Sin datos', 'global'))
@@ -331,6 +360,8 @@ eq('(G) el respaldo es el ALMACEN del viejo, con su nombre', (M.ALMACEN_GLOBAL_R
 print('\n(H) 🔒 el log es PUBLICO: ni el eur_kg, ni el global, ni un coste')
 _todo = ' '.join(LOG + leer(sb_entero(rotas=('mv_coste_preparacion',)))[2])
 eq('(H) el log de la lectura dice recuentos y orígenes', any('3 ASIN (envios 1, excepcion 1, peso 1)' in x for x in LOG), True)
+eq('(H) …y cuántos ASIN son nuestros y cuántos de ellos van al global', any('4 ASIN nuestros (1 sin valor: global)' in x for x in LOG),
+   True)
 eq('(H) 🔴 …y ninguna cifra de coste', [c for c in ('0.7141', '0,7141', '0.15', '0,15', '0.96', '0,96', '0.12') if c in _todo], [])
 
 print()
