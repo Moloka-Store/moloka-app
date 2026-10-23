@@ -367,6 +367,16 @@ def filas_sondeo(ejecucion, candidatos, hoy):
     return filas, dups
 
 
+def motor_con_coste(sb):
+    """(RF4, 23-oct-2026) El motor del escaner 2 con el coste de preparacion de la fuente unica del RF2 puesto (UNA
+    lectura). Sin la fuente, el global, y el log lo dice: el escaneo no se para. Las lineas de una factura no traen el
+    peso del paquete: o la fuente (por ASIN) o el global."""
+    M = e2.cargar_motor()
+    M.poner_coste_preparacion(e2.leer_coste_preparacion(sb, M.ALMACEN_GLOBAL_RESPALDO,
+                                                        imprimir=lambda linea: print(linea, flush=True)))
+    return M
+
+
 def escanear(lineas, base, keepa, M, hoy, eleccion=None, productos=None):
     """El escaneo de una factura → (filas, resumen). `base` da los datos de la app (lecturas) y el precio al margen
     (`precio_al_margen`); `keepa` es un `escaner2_novedades.Keepa` (o su doble). NO ESCRIBE NADA."""
@@ -428,6 +438,8 @@ def escanear(lineas, base, keepa, M, hoy, eleccion=None, productos=None):
                 if c is not None:
                     f.update(caidas_30d=c, caidas_fuente='keepa')
         es = por_pais['ES']
+        # (RF4) El precio al margen de los paises de precio fijo, con el coste de preparacion de ESTA ficha.
+        alm = M.coste_almacen(asin)[0]
         for pais in PAISES_PRECIO_FIJO:
             f = _fila_vacia(l, pais, asin, origen)
             filas.append(f)
@@ -442,13 +454,13 @@ def escanear(lineas, base, keepa, M, hoy, eleccion=None, productos=None):
             elif fee is None:
                 f['motivo'] = 'sin tarifa de %s ni de España' % pais
             else:
-                f.update(fee_fba=fee, tarifa_de=tarifa_de, iva=IVA_FIJO, ref_pct=COMISION_FIJA_PCT, almacen=M.ALMACEN,
+                f.update(fee_fba=fee, tarifa_de=tarifa_de, iva=IVA_FIJO, ref_pct=COMISION_FIJA_PCT, almacen=alm,
                          com_digitales=M.COM_DIGITALES,
                          fuente='app' if tarifa_de == pais or es['fuente'] == 'app' else 'keepa',
                          fuente_tarifa=('cartero' if tarifa_de == pais else es['fuente_tarifa']))
                 f['precio_objetivo'] = base.precio_al_margen(
                     asin=asin, dominio=(pais if tarifa_de == pais else 'ES').lower(), fee=fee, pvd=l['pa'], iva=IVA_FIJO,
-                    com_pct=COMISION_FIJA_PCT, k_com=M.COM_DIGITALES, k_fee=0.0, alm=M.ALMACEN, margen=MARGEN_OBJETIVO,
+                    com_pct=COMISION_FIJA_PCT, k_com=M.COM_DIGITALES, k_fee=0.0, alm=alm, margen=MARGEN_OBJETIVO,
                     redondeo=REDONDEO_PRECIO_FIJO)
                 if f['precio_objetivo'] is None:
                     f['motivo'] = 'la base no devuelve precio para ese margen'

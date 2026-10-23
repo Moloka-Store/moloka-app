@@ -537,6 +537,14 @@ jobs:
       - name: 25 septendecies septendecies) test_escaner2_base.py
         run: python -u test_escaner2_base.py
 
+      # (Encargo RF4, 23-oct-2026) El coste de preparacion de cada ficha en el escaner 2 (escaner2_motor.coste_almacen), de
+      # la fuente unica del RF2 en vez de ALMACEN = 0,15: la lectura de la pasada (por tandas, el global VIGENTE ese mes),
+      # los tres caminos en su orden (fuente → eur_kg × peso a 4 decimales con el redondeo de Postgres → global), la fuente
+      # ausente (sigue con el global y avisa, nunca lanza), el COMPRAR/VALORAR que cambia SOLO por el almacen, el Excel
+      # («Almacén (€)» y «Origen almacén»), el peso del CSV, que nadie use M.ALMACEN (y muerde) y el log sin cifras de coste.
+      - name: 25 septendecies duodevicies) test_escaner2_coste.py
+        run: python -u test_escaner2_coste.py
+
       - name: 25 duodevicies) test_encadenar_keepa.py
         run: python -u test_encadenar_keepa.py
 
@@ -613,6 +621,7 @@ jobs:
             test_encadenar_keepa.py
             test_escaner2_factura.py
             test_escaner2_base.py
+            test_escaner2_coste.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).

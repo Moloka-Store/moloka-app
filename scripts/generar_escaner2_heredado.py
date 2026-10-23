@@ -205,6 +205,8 @@ escribir('escaner2_heredado_pro.py',
          '🔴 NO SE TOCA A MANO: si el Pro cambia, test_escaner2_heredado.py lo avisa y decide Fernando.\n'
          '🔑 Salvo el desvio DELIBERADO de escaner2_desvios.py (encargo D, 28-sep-2026): «yes» en «Caja de Compra:\n'
          '   Es FBA» cuenta como FBA. Lo aplica el generador al copiar; `leer_csv_visualizador` lo dice encima.\n'
+         '🔑 Y el del encargo RF4 (23-oct-2026): `CSV_COLS` y el registro leen tambien «Paquete: Peso (g)» como `peso`\n'
+         '   (el coste de preparacion por peso de escaner2_motor.coste_almacen). Cada linea desviada lo dice al lado.\n'
          % (COMMIT[:7], sha_pro[:10]),
          piezas, cabecera_codigo='\nimport csv  # ← moloka_escaner_pro.py, línea 9 (`import pandas as pd, csv`): solo `csv`\n')
 

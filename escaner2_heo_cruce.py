@@ -262,6 +262,10 @@ def cruzar(cruce, params, pasada):
     # (encargo E, 30-sep-2026) «En mi BD»: el FBA de la ultima foto de inventario_fba (en_mi_bd.py), no el
     # `productos.stock_fba` congelado. No tumba el cruce: sin foto, o vieja, la columna y el log lo dicen.
     M.poner_foto_fba(en_mi_bd.leer_foto_fba(sb, imprimir=lambda linea: print(linea, flush=True)))
+    # (RF4, 23-oct-2026) El coste de preparación de cada ficha (fuente única del RF2), UNA lectura por pasada. Sin la
+    # fuente, el global y un aviso: el cruce no se para.
+    M.poner_coste_preparacion(e2.leer_coste_preparacion(sb, M.ALMACEN_GLOBAL_RESPALDO, avisos=avisos,
+                                                        imprimir=lambda linea: print(linea, flush=True)))
 
     # ── 3 · Las puertas ───────────────────────────────────────────────────────────────
     # (B5) Con dos o mas fichas, la regla del viejo (su cotejo de titulo) elige una entre las de ES.

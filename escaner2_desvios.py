@@ -36,6 +36,12 @@ Y UNO MAS (encargo CJ4, decision de Fernando del 11-oct-2026):
      HEO, al centimo; vacio si no hay). Las cajas con chase que la descarga desvia llevan tambien su `precio_tachado`
      (el viejo no les calcula oferta; escaner2_motor._fila_de_chase la saca de ahi). Nada lee el descuento de
      cliente: no se guarda. El director viejo (descargar_heo.py) no cambia.
+Y UNO MAS (encargo RF4, decision de Fernando del 23-oct-2026: «tiene que ser consistente, que en todos los sitios
+donde se vea la rentabilidad de un producto se calcule con su coste correcto»):
+  4. El lector del CSV del Visualizador (`CSV_COLS` y `leer_csv_visualizador`) lee tambien «Paquete: Peso (g)» como
+     `peso` (gramos, con el mismo `_num_csv`; un CSV sin esa columna da None). Lo usa escaner2_motor.coste_almacen:
+     una ficha que no vendemos (sin coste en la fuente unica del RF2) paga eur_kg × su peso, como coste_peso del RF2.
+     Ninguna otra llave del registro cambia.
 """
 
 # Heredado → {pieza: [(antes, despues), …]}. Los textos van con la sangria del VIEJO (en el heredado, la
@@ -60,9 +66,16 @@ DESVIOS = {
         ],
     },
     'escaner2_heredado_pro.py': {
+        # (4) RF4: el peso del paquete, para el coste de preparación de las fichas que no vendemos.
+        'CSV_COLS': [
+            ("    'nvar':'Recuento de variaciones',\n",
+             "    'nvar':'Recuento de variaciones', 'peso':'Paquete: Peso (g)',  # 🔑 DESVÍO RF4: el peso del paquete\n"),
+        ],
         'leer_csv_visualizador': [
             ("                 es_fba=(es_fba in ('true','verdadero','sí','si','1')),\n",
              "                 es_fba=(es_fba in ('true','verdadero','sí','si','1','yes')),  # 🔑 DESVÍO D: Keepa escribe «yes»/«no»\n"),
+            ("                 nvar=_num_csv(col(row,'nvar')),\n",
+             "                 nvar=_num_csv(col(row,'nvar')), peso=_num_csv(col(row,'peso')),  # 🔑 DESVÍO RF4: gramos; sin columna, None\n"),
         ],
     },
     'escaner2_heredado_descarga.py': {

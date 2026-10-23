@@ -619,7 +619,7 @@ HOJAS_E2 = ['Resumen', 'Comparación', 'Varias fichas', 'Puertas', 'Puertas prev
 eq('B2 · las hojas del PRO, en su orden, y la ÚLTIMA la de nuestros agotados', _wb.sheetnames, HOJAS_VIEJO + HOJAS_E2)
 _cab = [c.value for c in _wb['Análisis'][1]]
 eq('B2 · «Análisis»: las columnas del PRO y, AL FINAL, «Ficha compartida», «Ficha del mapa» y las nueve de la compra',
-   _cab, e2.columnas_analisis() + [e2.COLUMNA_FICHA_COMPARTIDA, ez.COLUMNA_MAPA] + ez.COLUMNAS_COMPRA + [e2.COLUMNA_AMAZON])  # (RS) «Amazon», la última
+   _cab, e2.columnas_analisis() + [e2.COLUMNA_ORIGEN_ALMACEN, e2.COLUMNA_FICHA_COMPARTIDA, ez.COLUMNA_MAPA] + ez.COLUMNAS_COMPRA + [e2.COLUMNA_AMAZON])  # (RS) «Amazon», la última
 _filas = list(_wb['Análisis'].iter_rows(min_row=2, values_only=True))
 _ix = {n: _cab.index(n) for n in _cab}
 _por = {(r[_ix['EAN']], r[_ix['ASIN']]): r for r in _filas}

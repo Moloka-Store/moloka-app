@@ -75,7 +75,6 @@ if _args[0] == '--sombra':
 from escaner2_base import cliente  # noqa: E402
 
 import escaner2_factura as ef  # noqa: E402
-import escaner2_motor as e2  # noqa: E402
 import escaner2_novedades as nv  # noqa: E402
 
 sb = cliente(os.environ['SUPABASE_URL'], _llave_svc)
@@ -104,7 +103,7 @@ def de_verdad(ejecucion):
             keepa.caido = str(ex)
         antes = keepa.saldo
         hoy = ef.hoy_madrid()
-        filas, resumen = ef.escanear(pasada['lineas'], base, keepa, e2.cargar_motor(), hoy)
+        filas, resumen = ef.escanear(pasada['lineas'], base, keepa, ef.motor_con_coste(sb), hoy)
         sondeo, descartadas = ef.filas_sondeo(ejecucion, resumen['sondeo'], hoy)
         n_snd = base.escribir_sondeo(ejecucion, sondeo)
         if n_snd != len(sondeo):
@@ -139,7 +138,7 @@ def sombra(ejecuciones):
     base = ef.Base(sb)
     grabadora = ef.Grabadora()
     keepa = nv.Keepa(os.environ.get('KEEPA_API_KEY'), http=grabadora)
-    M = e2.cargar_motor()
+    M = ef.motor_con_coste(sb)
     hoy = ef.hoy_madrid()
     keepa.leer_saldo()
     print('SOMBRA: hoy %s · saldo de Keepa al empezar %s' % (hoy, keepa.saldo))

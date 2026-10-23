@@ -10,12 +10,14 @@ SI se importa (`import escaner2_heredado_pro as pro`), como antes el Escaner Pro
 🔴 NO SE TOCA A MANO: si el Pro cambia, test_escaner2_heredado.py lo avisa y decide Fernando.
 🔑 Salvo el desvio DELIBERADO de escaner2_desvios.py (encargo D, 28-sep-2026): «yes» en «Caja de Compra:
    Es FBA» cuenta como FBA. Lo aplica el generador al copiar; `leer_csv_visualizador` lo dice encima.
+🔑 Y el del encargo RF4 (23-oct-2026): `CSV_COLS` y el registro leen tambien «Paquete: Peso (g)» como `peso`
+   (el coste de preparacion por peso de escaner2_motor.coste_almacen). Cada linea desviada lo dice al lado.
 """
 
 import csv  # ← moloka_escaner_pro.py, línea 9 (`import pandas as pd, csv`): solo `csv`
 
 
-# ── ORIGEN: moloka_escaner_pro.py, líneas 64-75 · commit 2f9c06a · blob e60c13f819 · md5 dfbebdc4ae3a052e7eb4a2bd28aca6a8 ──
+# ── ORIGEN: moloka_escaner_pro.py, líneas 64-75 · commit 2f9c06a · blob e60c13f819 · md5 3067bf4d60ce8750fbdb553e8f397eba ──
 # ===== Columnas del CSV del Visualizador (por NOMBRE: robusto a reordenacion) =====
 CSV_COLS = {
     'ean':'Códigos de producto: EAN', 'asin':'ASIN',
@@ -25,7 +27,7 @@ CSV_COLS = {
     'nof':'Recuento ofertas nuevas: Actual',
     'vendidos':'Tendencias de ventas mensuales: Ventas mensuales (Último conocido)',
     'vendidos2':'Tendencias de ventas mensuales: Comprados el mes pasado',
-    'nvar':'Recuento de variaciones',
+    'nvar':'Recuento de variaciones', 'peso':'Paquete: Peso (g)',  # 🔑 DESVÍO RF4: el peso del paquete
     'titulo':'Título',   # la de la FICHA, no la del ASIN padre (ver el porque en leer_csv_visualizador)
 }
 
@@ -42,7 +44,7 @@ def _num_csv(x):
     except Exception: return None
 
 
-# ── ORIGEN: moloka_escaner_pro.py, líneas 312-353 · commit 2f9c06a · blob e60c13f819 · md5 ca638050a07eabd5e3cd52e237e58911 ──
+# ── ORIGEN: moloka_escaner_pro.py, líneas 312-353 · commit 2f9c06a · blob e60c13f819 · md5 ba257aa860b26bd3c8786e8b587f361d ──
 # ── DESVÍO DELIBERADO del viejo (encargo D, Fernando 28-sep-2026): ver escaner2_desvios.py
 # ===== Lectura del CSV del Visualizador (indexado por CADA EAN; celdas multi-EAN) =====
 def leer_csv_visualizador(rutas):
@@ -80,7 +82,7 @@ def leer_csv_visualizador(rutas):
                  fba=_num_csv(col(row,'fba')), compct=_num_csv(col(row,'compct')),
                  nof=_num_csv(col(row,'nof')),
                  vendidos=(_num_csv(col(row,'vendidos')) or _num_csv(col(row,'vendidos2'))),
-                 nvar=_num_csv(col(row,'nvar')),
+                 nvar=_num_csv(col(row,'nvar')), peso=_num_csv(col(row,'peso')),  # 🔑 DESVÍO RF4: gramos; sin columna, None
                  titulo=((row[idx[_tit]].strip() if (_tit and idx[_tit]<len(row)) else '')))
         for e in col(row,'ean').split(','):
             e=norm(e)

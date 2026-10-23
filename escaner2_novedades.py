@@ -629,6 +629,12 @@ def cuentas(sb, M, params, imprimir=print, valoradas=None, keepa=None, reserva=2
     for f in filas:
         por_nov.setdefault(f['novedad_id'], []).append(f)
     hechas, fallos, avisos = 0, 0, []
+    # (RF4, 23-oct-2026) El coste de preparación de cada ficha (fuente única del RF2), UNA lectura por pasada. Las
+    # novedades no traen el peso del paquete: o la fuente o el global. 🔑 Sin la fuente se dice en el LOG (y en el
+    # Excel cada fila dice «global» en «Origen almacén»), no en `avisos`: aquí un aviso pone el run en rojo, y el
+    # encargo dice que la pasada sigue.
+    M.poner_coste_preparacion(e2.leer_coste_preparacion(sb, M.ALMACEN_GLOBAL_RESPALDO,
+                                                        imprimir=lambda linea: imprimir(linea, flush=True)))
     for n in listas:
         try:
             suyas = por_nov.get(n['id']) or []

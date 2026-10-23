@@ -228,12 +228,171 @@ class Motor:
         ES de la ficha (o el general, asumido); IT, FR y DE, el general del pais."""
         return {'ES': self.iva_es_de(core), 'IT': self.IVA_IT, 'FR': self.IVA_FR, 'DE': self.IVA_DE}
 
+    def poner_coste_preparacion(self, fuente):
+        """(RF4, 23-oct-2026) La lectura de la pasada de `leer_coste_preparacion`. Sin ponerla, todo sale con
+        ALMACEN_GLOBAL_RESPALDO y origen «global» (lo que pasaba siempre hasta el RF4)."""
+        self._ns['COSTE_PREPARACION'] = fuente
+
+    def coste_almacen(self, asin, peso_g=None):
+        """(RF4) (valor, origen) del coste de preparacion de UNA ficha: `coste_almacen` con la lectura puesta."""
+        return coste_almacen(self._ns.get('COSTE_PREPARACION'), asin, peso_g, self._ns['ALMACEN_GLOBAL_RESPALDO'])
+
 
 def cargar_motor(ruta=RUTA_MOTOR):
     # (encargo E) `en_mi_bd` y `FOTO_FBA` van en el espacio de nombres igual que `sup`: son lo que el `en_bd_txt`
     # del viejo (moloka_escaner_nube.py) lee como globales, y asi el banco puede ejecutar el suyo con este motor.
-    return Motor(sacar_piezas(ruta, DEFS_MOTOR, NOMBRES_MOTOR,
-                              base={'re': re, 'sup': {}, 'en_mi_bd': en_mi_bd, 'FOTO_FBA': None}))
+    ns = sacar_piezas(ruta, DEFS_MOTOR, NOMBRES_MOTOR,
+                      base={'re': re, 'sup': {}, 'en_mi_bd': en_mi_bd, 'FOTO_FBA': None})
+    # 🔑 (RF4) El ALMACEN del viejo (0,15) ya no entra en ninguna cuenta del escaner 2: es el ULTIMO recurso, cuando no
+    #    se puede leer ni el global vigente de parametro_coste. Con su nombre, para que nadie lo use por descuido.
+    ns['ALMACEN_GLOBAL_RESPALDO'] = ns['ALMACEN']
+    return Motor(ns)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 1 bis · (RF4, 23-oct-2026) EL COSTE DE PREPARACION DE CADA FICHA, DE LA FUENTE UNICA DEL RF2
+# ═══════════════════════════════════════════════════════════════════════════════
+# Fernando, 23-oct-2026: «tiene que ser consistente, que en todos los sitios donde se vea la rentabilidad de un
+# producto se calcule con su coste correcto». Hasta el RF4 el escaner restaba ALMACEN = 0,15 a todo; la lista de
+# precios y la rentabilidad de la v2 restan, desde el RF2, el coste de `mv_coste_preparacion`. Ahora el escaner tambien:
+#   1. al arrancar cada pasada, UNA lectura (`leer_coste_preparacion`): por ASIN, `v_fijo_preparacion_asin` (la
+#      excepcion vigente este mes delante y, si no, el valor de la fuente: lo MISMO que resta la lista, que hace
+#      COALESCE(su valor, global)); `eur_kg` de la fuente; y el global vigente de parametro_coste 'coste_almacen_ud';
+#   2. por ficha (`coste_almacen`): (a) el ASIN esta en la lista → ese valor, con su origen (excepcion, envios, peso);
+#      (a bis) no esta, pero es NUESTRO (un producto con ese ASIN, sin chase) → el global, como la lista de precios
+#      (coste_almacen_ud cae al global): decision de Cowork del 23-oct-2026 por la regla de Fernando, para que el
+#      escaner y el Trackeador digan lo mismo de cada producto nuestro;
+#      (b) no esta ni es nuestro, pero el CSV trae el peso del paquete → eur_kg × peso / 1000, redondeado a 4
+#      decimales como coste_peso del RF2 (peso = la mediana de los paises, a 1 decimal, como la de amz_ficha del RF2);
+#      (c) nada → el global vigente.
+#   🔴 Si la fuente no existe (RF2 sin aplicar) o no se puede leer, la pasada NO se para: todo sale con el global (y,
+#      si tampoco se lee, con ALMACEN_GLOBAL_RESPALDO), y el log y el aviso del Excel lo dicen.
+#   🔒 calc_rentabilidad y decision_de NO cambian: solo el numero que entra en `almacen`.
+FUENTE_COSTE = 'mv_coste_preparacion'
+VISTA_COSTE_ASIN = 'v_fijo_preparacion_asin'
+CLAVE_COSTE_GLOBAL = 'coste_almacen_ud'
+TANDA_COSTE = 1000
+ORIGENES_COSTE = ('excepcion', 'envios', 'peso', 'global')
+TEXTO_ORIGEN_COSTE = {'excepcion': 'excepción', 'envios': 'envíos', 'peso': 'peso', 'global': 'global'}
+
+
+def _redondear(x, decimales):
+    """Como `round(numeric, n)` de Postgres (la mitad, hacia fuera), no como el `round` de Python (al par)."""
+    from decimal import Decimal, ROUND_HALF_UP
+    return Decimal(str(x)).quantize(Decimal(1).scaleb(-decimales), rounding=ROUND_HALF_UP)
+
+
+def peso_de_fichas(recs):
+    """El peso del paquete (g) de una ficha a partir de sus filas del CSV de cada pais: la MEDIANA de los pesos > 0
+    (percentile_cont(0.5), como el RF2 con amz_ficha), redondeada a 1 decimal. None si ninguna trae peso."""
+    import statistics
+    pesos = [float(r['peso']) for r in recs if isinstance(r.get('peso'), (int, float)) and r['peso'] > 0]
+    return float(_redondear(statistics.median(pesos), 1)) if pesos else None
+
+
+def coste_almacen(fuente, asin, peso_g, respaldo):
+    """(valor, origen) del coste de preparacion de una ficha. Puro. `fuente` es lo de `leer_coste_preparacion` (None:
+    no se ha leido → el respaldo, «global»). Orden: (a) la lista por ASIN; (a bis) un ASIN nuestro sin valor en la
+    lista → el global, como la lista de precios; (b) eur_kg × peso, solo fuera de nuestro catalogo; (c) el global."""
+    if not fuente:
+        return respaldo, 'global'
+    global_ = fuente['global']
+    if fuente['estado'] != 'ok':
+        return global_, 'global'
+    if asin and asin in fuente['por_asin']:
+        return fuente['por_asin'][asin]
+    if asin and asin in fuente.get('nuestros', ()):
+        return global_, 'global'
+    if fuente.get('eur_kg') is not None and peso_g and peso_g > 0:
+        g = _redondear(peso_g, 1)
+        return float(_redondear(_redondear(fuente['eur_kg'], 4) * g / 1000, 4)), 'peso'
+    return global_, 'global'
+
+
+def _mes_madrid(hoy=None):
+    if hoy is None:
+        from zoneinfo import ZoneInfo
+        hoy = datetime.now(ZoneInfo('Europe/Madrid')).date()
+    return hoy.replace(day=1).isoformat()
+
+
+def leer_coste_preparacion(sb, respaldo, hoy=None, avisos=None, imprimir=print):
+    """LA lectura de la pasada (RF4). Devuelve {'estado': 'ok' | 'sin_fuente', 'por_asin': {asin: (valor, origen)},
+    'nuestros' (los ASIN de productos, sin chase), 'eur_kg', 'global', 'global_de' ('parametro_coste' | 'respaldo'),
+    'motivo', 'refrescada_el', 'n_origen'}. 🔴 Si `productos` no se puede leer (o da 0 filas), sin_fuente: sin saber
+    cuales son nuestros, el peso podria ponerle a un producto nuestro un coste distinto del de la lista.
+    NUNCA LANZA: lo que no se pueda leer va a `avisos` (el Excel) y al log, y la pasada sigue.
+    `hoy` (fecha, para el banco): el mes de la vigencia del global; por defecto, el de hoy en Madrid."""
+    fuera = []
+    mes = _mes_madrid(hoy)
+    global_, global_de = respaldo, 'respaldo'
+    try:
+        filas = (sb.table('parametro_coste').select('valor,desde,hasta').eq('clave', CLAVE_COSTE_GLOBAL)
+                 .execute().data) or []
+        vig = sorted((f for f in filas if f.get('valor') is not None and str(f['desde'])[:10] <= mes
+                      and (f.get('hasta') is None or mes < str(f['hasta'])[:10])),
+                     key=lambda f: str(f['desde']), reverse=True)
+        if not vig:
+            raise ValueError("parametro_coste no tiene '%s' vigente en %s" % (CLAVE_COSTE_GLOBAL, mes))
+        global_, global_de = float(vig[0]['valor']), 'parametro_coste'
+    except Exception as ex:
+        fuera.append('el global de parametro_coste no se pudo leer (%s: %s): se usa el respaldo del escáner'
+                     % (type(ex).__name__, str(ex)[:160]))
+    salida = {'estado': 'sin_fuente', 'por_asin': {}, 'nuestros': frozenset(), 'eur_kg': None, 'global': global_,
+              'global_de': global_de, 'motivo': None, 'refrescada_el': None, 'n_origen': {}}
+    try:
+        cab = (sb.table(FUENTE_COSTE).select('eur_kg,refrescada_el').limit(1).execute().data) or []
+        if not cab:
+            raise ValueError('%s no devuelve ninguna fila' % FUENTE_COSTE)
+        por_asin, i = {}, 0
+        while True:
+            trozo = (sb.table(VISTA_COSTE_ASIN).select('asin,valor,origen').order('asin')
+                     .range(i, i + TANDA_COSTE - 1).execute().data) or []
+            for f in trozo:
+                if f.get('asin') and f.get('valor') is not None:
+                    por_asin[f['asin']] = (float(f['valor']), f.get('origen') or 'envios')
+            if len(trozo) < TANDA_COSTE:
+                break
+            i += TANDA_COSTE
+        # (a bis) Los ASIN de NUESTRO catalogo (productos con ASIN, sin chase), por tandas: el que no tiene valor en la
+        # lista paga el global, como en la lista de precios, y no una estimacion por el peso de Keepa.
+        nuestros, i, n_productos = set(), 0, 0
+        while True:
+            trozo = (sb.table('productos').select('id,asin,es_chase').order('id')
+                     .range(i, i + TANDA_COSTE - 1).execute().data) or []
+            n_productos += len(trozo)
+            for f in trozo:
+                if (f.get('asin') or '').strip() and not f.get('es_chase'):
+                    nuestros.add(f['asin'].strip())
+            if len(trozo) < TANDA_COSTE:
+                break
+            i += TANDA_COSTE
+        if not n_productos:
+            raise ValueError('productos no devuelve ninguna fila: no se sabe qué ASIN son nuestros')
+        raros = sorted({o for _v, o in por_asin.values() if o not in ORIGENES_COSTE})
+        if raros:
+            fuera.append('%s trae orígenes que el escáner no conoce: %s' % (VISTA_COSTE_ASIN, ', '.join(raros)))
+        salida.update(estado='ok', por_asin=por_asin, nuestros=frozenset(nuestros), refrescada_el=cab[0].get('refrescada_el'),
+                      eur_kg=(None if cab[0].get('eur_kg') is None else float(cab[0]['eur_kg'])))
+        for _v, o in por_asin.values():
+            salida['n_origen'][o] = salida['n_origen'].get(o, 0) + 1
+    except Exception as ex:
+        salida['motivo'] = '%s: %s' % (type(ex).__name__, str(ex)[:200])
+        fuera.append('Coste de preparación SIN la fuente única (%s): todas las filas con el global (%s)'
+                     % (salida['motivo'], 'parametro_coste' if global_de == 'parametro_coste' else 'respaldo del escáner'))
+    # 🔒 Solo recuentos: el registro de Actions de este repo es PUBLICO (ni el eur_kg ni el global ni un coste).
+    if salida['estado'] == 'ok':
+        imprimir('COSTE_PREPARACION: fuente %s (refrescada %s) · %d ASIN (%s) · %d ASIN nuestros (%d sin valor: global)'
+                 ' · eur_kg %s · global de %s'
+                 % (FUENTE_COSTE, salida['refrescada_el'], len(salida['por_asin']),
+                    ', '.join('%s %d' % (o, n) for o, n in sorted(salida['n_origen'].items())),
+                    len(salida['nuestros']), len(salida['nuestros'] - set(salida['por_asin'])),
+                    'sí' if salida['eur_kg'] is not None else 'NO (sin estimación por peso)', global_de))
+    for a in fuera:
+        imprimir('!!! COSTE_PREPARACION: ' + a)
+        if avisos is not None:
+            avisos.append(a)
+    return salida
 
 
 def cargar_filtro_director(regla, ruta=RUTA_DIRECTOR_HEO):
@@ -982,22 +1141,25 @@ def precio_de_venta(rec):
     return None, 'sin precio'
 
 
-def calcular_pais(pais, rec, pa, core, M):
+def calcular_pais(pais, rec, pa, core, M, peso_g=None):
     """La rentabilidad de UNA ficha en UN pais, con `calc_rentabilidad` del viejo y el recargo
     ISD de ese pais (lo que hace hoy la Celda 8). Misma condicion para calcular: precio, PA,
-    comision y tarifa FBA; si falta una, 'Sin datos' y ni un numero inventado."""
+    comision y tarifa FBA; si falta una, 'Sin datos' y ni un numero inventado.
+    (RF4) El almacen es el coste de preparacion de ESTA ficha (`M.coste_almacen`), con su origen en
+    `almacen_origen`; `peso_g`: el peso del paquete de la ficha (la mediana de sus paises); sin el, el de `rec`."""
     precio, canal = precio_de_venta(rec)
     iva = M.iva_por_pais(core)[pais]
     isd = M.ISD_PAIS[pais]
+    almacen, almacen_origen = M.coste_almacen(rec.get('asin'), rec.get('peso') if peso_g is None else peso_g)
     out = {'pais': pais, 'asin': rec.get('asin'), 'titulo': rec.get('titulo') or '',
            'rank': rec.get('rank'), 'rank_90d': rec.get('rank90'),
            'precio_venta': precio, 'canal': canal, 'ref_pct': rec.get('compct'),
            'fee_fba': rec.get('fba'), 'iva': iva, 'iva_origen': M.origen_iva_fila(pais, iva, core),
-           'almacen': M.ALMACEN, 'com_digitales': M.COM_DIGITALES,
+           'almacen': almacen, 'almacen_origen': almacen_origen, 'com_digitales': M.COM_DIGITALES,
            'isd_pct': isd['pct'], 'isd_incluye_fba': bool(isd['incluye_fba']), 'pa': pa}
     if precio and pa and rec.get('compct') is not None and rec.get('fba') is not None:
         r = M.calc_rentabilidad(precio, pa, rec['compct'], rec['fba'], iva,
-                                almacen=M.ALMACEN, com_digitales=M.COM_DIGITALES, isd=isd)
+                                almacen=almacen, com_digitales=M.COM_DIGITALES, isd=isd)
         out.update(com_amazon=r['com_amazon'], beneficio=r['beneficio'], roi=r['roi'],
                    margen=r['margen'], decision=M.decision_de(r['margen']))
     else:
@@ -1085,6 +1247,8 @@ def _decidir_con_asin(fila_foto, cands_por_pais, caidas_por_pais, params, M, asi
     filtro = list(params['paises_filtro'])
     # Los que se calculan, en el orden de los parametros; solo los que traen CSV.
     paises = [p for p in params['paises_calculo'] if p in cands_por_pais]
+    # (RF4) El peso del paquete de la ficha: la mediana de lo que traen sus CSV (todos los paises subidos).
+    peso = peso_de_fichas([r for p in cands_por_pais for r in cands_por_pais[p] if r.get('asin') == asin])
     calculos, caidas, ventas, reparto = {}, {}, {}, {}
     for p in paises:
         rec = next((r for r in cands_por_pais.get(p, []) if r.get('asin') == asin), None)
@@ -1098,7 +1262,7 @@ def _decidir_con_asin(fila_foto, cands_por_pais, caidas_por_pais, params, M, asi
                 ventas[p] = caidas[p] / info['divisor']
             reparto[p] = dict(info, ventas_ficha=caidas[p], por_figura=ventas[p])
         if rec is not None:
-            calculos[p] = calcular_pais(p, rec, fila_foto['precio_unidad'], fila_foto['ean_core'], M)
+            calculos[p] = calcular_pais(p, rec, fila_foto['precio_unidad'], fila_foto['ean_core'], M, peso)
             calculos[p]['caidas_30d'] = caidas[p]
             # 🔑 La marca «no vende aquí»: se decide AQUI y se guarda; la pantalla no la recalcula.
             calculos[p]['vende_aqui'] = pasa_corte(ventas[p], umbral)
@@ -1508,6 +1672,9 @@ def datos_como_el_viejo(foto, resultados, apartados, M, eleccion=None):
             # «Coincide» y «Cotejo» los saca el viejo con Keepa; el cruce no: vacios (None), no inventados.
             'coincide': None, 'coherencia_caja': f.get('aviso_caja'), 'url': '', 'volumen': None,
             '_paises_calc': {p: _pais_viejo(c) for p, c in calc.items()},
+            # (RF4) El coste de preparacion de la ficha (el mismo en todos sus paises: es por ASIN), con su origen.
+            '_almacen': next(((calc[p]['almacen'], calc[p].get('almacen_origen') or 'global') for p in M.PAISES
+                              if p in calc and calc[p].get('almacen') is not None), None),
             '_margen_es': (calc.get('ES') or {}).get('margen')})
     registros.sort(key=lambda x: x['_margen_es'] if x['_margen_es'] is not None else -10 ** 9, reverse=True)
 
@@ -1734,7 +1901,55 @@ def escribir_celda9(datos, M, ruta=RUTA_MOTOR, paises=None):
         base['PAISES'] = tuple(paises)
     ns = sacar_piezas(ruta, ('pct_comision_celda', 'excel_del_viejo'), (), base=base)
     with redirect_stdout(io.StringIO()):     # sus `print` de la hoja no ensucian el log del cruce
-        return ns['excel_del_viejo'](**{k: datos[k] for k in DATOS_CELDA9})
+        wb = ns['excel_del_viejo'](**{k: datos[k] for k in DATOS_CELDA9})
+    # (RF4) Los registros del cruce (`datos_como_el_viejo`) traen su coste de preparacion; los del viejo, no.
+    if any('_almacen' in x for x in datos['registros']):
+        poner_almacen_por_fila(wb, datos['registros'])
+    return wb
+
+
+# (RF4, 23-oct-2026) EL COSTE DE PREPARACION DE CADA FILA EN «Análisis». La Celda 9 del viejo escribe ALMACEN (0,15) en
+# «Almacén (€)» y su formula del beneficio resta ESA casilla; no se toca la Celda 9: sobre el libro que devuelve se pone
+# en esa casilla el coste de la ficha (el mismo que ha entrado en su cuenta y en lo guardado), y una columna
+# «Origen almacén» detras de la ultima del viejo («Origen IVA»), con «envíos», «peso», «excepción» o «global».
+COLUMNA_ORIGEN_ALMACEN = 'Origen almacén'
+ANCHO_ORIGEN_ALMACEN = 14
+
+
+def poner_almacen_por_fila(wb, registros):
+    """«Almacén (€)» y «Origen almacén» de «Análisis», fila a fila por ASIN, con el `_almacen` de cada registro; la
+    tabla se alarga. Una fila cuyo ASIN no trae `_almacen` se queda como la escribio el viejo y SIN origen (vacia: no
+    se sabe). Devuelve {origen: filas}."""
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.table import TableColumn
+    ws = wb['Análisis']
+    cab = [c.value for c in ws[1]]
+    i_asin, i_alm = cab.index('ASIN'), cab.index('Almacén (€)')
+    col = len(cab) + 1
+    ws.cell(row=1, column=col, value=COLUMNA_ORIGEN_ALMACEN).font = Font(bold=True)
+    ws.column_dimensions[get_column_letter(col)].width = ANCHO_ORIGEN_ALMACEN
+    por_asin = {}
+    for x in registros:
+        if x.get('_almacen') and x.get('asin'):
+            por_asin.setdefault(str(x['asin']), x['_almacen'])
+    cuenta = {}
+    for fila in range(2, ws.max_row + 1):
+        par = por_asin.get(str(ws.cell(row=fila, column=i_asin + 1).value))
+        if not par:
+            continue
+        ws.cell(row=fila, column=i_alm + 1).value = par[0]
+        ws.cell(row=fila, column=col, value=TEXTO_ORIGEN_COSTE.get(par[1], par[1]))
+        cuenta[par[1]] = cuenta.get(par[1], 0) + 1
+    for tabla in ws.tables.values():
+        ini, fin = tabla.ref.split(':')
+        fila_fin = re.sub(r'^[A-Z]+', '', fin)
+        tabla.ref = '%s:%s%s' % (ini, get_column_letter(col), fila_fin)
+        if tabla.tableColumns:
+            tabla.tableColumns.append(TableColumn(id=len(tabla.tableColumns) + 1, name=COLUMNA_ORIGEN_ALMACEN))
+        if tabla.autoFilter is not None:
+            tabla.autoFilter.ref = tabla.ref
+    return cuenta
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
