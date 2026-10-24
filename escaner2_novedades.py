@@ -104,6 +104,7 @@ from datetime import datetime, timedelta, timezone
 
 import en_mi_bd
 import escaner2_motor as e2
+import escaner2_tambien as etl
 
 # El proveedor por defecto (el de siempre). Cada funcion que lo usa lo recibe como `proveedor=` (encargo OC4).
 PROVEEDOR = 'HEO'
@@ -1022,6 +1023,14 @@ def excel_de_novedades(sb, valoradas, origen, pasada, run_id=None, ahora=_ahora,
         escalon = escalon_de(sb, [v['nov']['id'] for v in valoradas]) if PROVEEDORES[proveedor]['escalon'] else None
         fin = fin_oferta_de(sb, [v['nov']['id'] for v in valoradas]) if _de(proveedor, 'fin_oferta', False) else None
         hoja_novedades(wb, valoradas, avalancha, escalon, fin)
+        # (TL, 24-oct-2026) «También lo tiene» al final de «Análisis»: qué otros proveedores lo tienen hoy y a qué
+        # precio. Si no se puede leer, la columna va «sin consultar» y el Excel sale igual; al registro (público),
+        # solo que pasó, sin el texto del error.
+        avisos_tl = []
+        e2.poner_columna_tambien(wb, etl.lector_tambien(sb, proveedor, comprar[0]['M'], avisos_tl))
+        if avisos_tl:
+            imprimir('    AVISO: la columna «%s» va «%s»: no se pudo leer' % (e2.COLUMNA_TAMBIEN,
+                     e2.TEXTO_SIN_CONSULTAR_TAMBIEN), flush=True)
         buf = io.BytesIO()
         wb.save(buf)
         ruta = ruta_del_excel(ahora(), proveedor)

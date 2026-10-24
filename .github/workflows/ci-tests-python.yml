@@ -545,6 +545,14 @@ jobs:
       - name: 25 septendecies duodevicies) test_escaner2_coste.py
         run: python -u test_escaner2_coste.py
 
+      # (Encargo TL, 24-oct-2026) La columna «También lo tiene» de «Análisis» (escaner2_tambien.py y
+      # escaner2_motor.poner_columna_tambien): los otros proveedores que tienen el EAN hoy, del mas barato al mas caro, con
+      # el precio de SU escaneo (su construir_foto: el tramo de TCG, el precio_pa de OcioStock, el porte de OSMA, la promo
+      # vigente de DBLine, la caja de HEO entre sus unidades, Zentrada de su ultimo escaneo); el propio fuera; chase suelto,
+      # preventa y foto de mas de 30 dias fuera; la lectura caida → «sin consultar» sin romper el Excel; solo lee.
+      - name: 25 septendecies undevicies) test_escaner2_tambien.py
+        run: python -u test_escaner2_tambien.py
+
       - name: 25 duodevicies) test_encadenar_keepa.py
         run: python -u test_encadenar_keepa.py
 
@@ -622,6 +630,7 @@ jobs:
             test_escaner2_factura.py
             test_escaner2_base.py
             test_escaner2_coste.py
+            test_escaner2_tambien.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).

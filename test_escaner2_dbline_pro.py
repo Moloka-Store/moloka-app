@@ -544,7 +544,7 @@ eq('B2 · las hojas del PRO de HEO, en su orden (sin «Chase_manual», que es de
     'Puertas', 'Puertas previas'])
 _cab = [c.value for c in _wb['Análisis'][1]]
 eq('🔴 B2 · «Análisis»: las del PRO de HEO (con «Ventas») y «Ficha compartida» al final, NADA MÁS',
-   (_cab, 'Ventas' in _cab), (e2.columnas_analisis() + [e2.COLUMNA_ORIGEN_ALMACEN, e2.COLUMNA_FICHA_COMPARTIDA, e2.COLUMNA_AMAZON], True))  # (RS) «Amazon», la última
+   (_cab, 'Ventas' in _cab), (e2.columnas_analisis() + [e2.COLUMNA_ORIGEN_ALMACEN, e2.COLUMNA_FICHA_COMPARTIDA, e2.COLUMNA_AMAZON, e2.COLUMNA_TAMBIEN], True))  # (RS) «Amazon»; (TL) «También lo tiene», la última
 _ix = {n: _cab.index(n) for n in _cab}
 _an = list(_wb['Análisis'].iter_rows(min_row=2, values_only=True))
 _por = {}
