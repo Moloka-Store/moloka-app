@@ -451,7 +451,7 @@ eq('2 · la lista para el Visualizador: un EAN por linea, en el bucket escaner2'
    (5, 5, 1))
 eq('2 · ni una tabla nueva fuera de escaner2_', sorted(t for t in T if not t.startswith('escaner2_')),
    sorted(TABLAS_VIEJO + ('disp_parametros', 'inventario_fba', 'amz_restriccion_venta', 'mv_coste_preparacion',
-                          'parametro_coste')))   # (encargo E) la foto de FBA, sembrada y solo leida; (RS) las restricciones de venta, solo leidas; (RF4) la fuente del coste y el global, solo leidos (sin fuente en esta escena: v_fijo_preparacion_asin no se llega a leer)
+                          'parametro_coste', 'disp_estado')))   # (encargo E) la foto de FBA, sembrada y solo leida; (RS) las restricciones de venta, solo leidas; (RF4) la fuente del coste y el global, solo leidos (sin fuente en esta escena: v_fijo_preparacion_asin no se llega a leer); (TL) la foto de los otros proveedores, solo leida («También lo tiene»)
 eq('2 · (30-sep) el log del cuadre previo dice SIEMPRE la diferencia y la tolerancia',
    'HEO declara 11 y se bajaron 11 · diferencia 0 (tolerancia 100)' in log, True)
 c = T['escaner2_cruce'][0]
@@ -506,7 +506,7 @@ eq('2 · 🔴 (B4) las seis hojas del viejo delante, en su orden, y las del esc�
 # (AA, 1-oct-2026) …y detrás de la última, «Ficha compartida» (la marca del reparto; vacía en esta escena).
 # (RF4) «Origen almacén» va pegada a la última del viejo («Origen IVA»), antes de «Ficha compartida».
 _COLS = (e2.columnas_analisis(os.path.join(AQUI, e2.RUTA_MOTOR))
-         + [e2.COLUMNA_ORIGEN_ALMACEN, e2.COLUMNA_FICHA_COMPARTIDA, e2.COLUMNA_AMAZON])  # (RS) y «Amazon», la última
+         + [e2.COLUMNA_ORIGEN_ALMACEN, e2.COLUMNA_FICHA_COMPARTIDA, e2.COLUMNA_AMAZON, e2.COLUMNA_TAMBIEN])  # (RS) «Amazon»; (TL) y «También lo tiene», la última
 _an = list(_wb['Análisis'].iter_rows(values_only=True))
 eq('2 · 🔴 (B4) «Análisis» lleva las cabeceras de COLS del viejo, en su orden, y (AA) «Ficha compartida» al final',
    list(_an[0]), list(_COLS))
@@ -582,6 +582,7 @@ _REF = HU.sin_columnas(json.load(open(os.path.join(AQUI, 'huella_excel_viejo_heo
 _REF = HU.con_columna_al_final(_REF, e2.COLUMNA_ORIGEN_ALMACEN, e2.ANCHO_ORIGEN_ALMACEN)
 _REF = HU.con_columna_al_final(_REF, e2.COLUMNA_FICHA_COMPARTIDA, e2.ANCHO_FICHA_COMPARTIDA)
 _REF = HU.con_columna_al_final(_REF, e2.COLUMNA_AMAZON, e2.ANCHO_AMAZON)  # (RS, 23-oct-2026)
+_REF = HU.con_columna_al_final(_REF, e2.COLUMNA_TAMBIEN, e2.ANCHO_TAMBIEN)  # (TL, 24-oct-2026)
 _h2 = HU.huella(base64.b64decode(bd['storage']['escaner2'][_xl[0]]))
 eq('2 · 🔴 (B4) el FORMATO de las seis hojas es el del Excel viejo de verdad (huella_excel_viejo_heo.json, con el desvío D)',
    HU.diferencias(_REF, _h2, solo_hojas=HOJAS_VIEJO, vacias=('Sin_rank',)), [])

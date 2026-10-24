@@ -59,6 +59,7 @@ if not re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 from escaner2_base import cliente  # noqa: E402
 
 import escaner2_motor as e2  # noqa: E402
+import escaner2_tambien as etl  # noqa: E402
 import en_mi_bd  # noqa: E402
 # (B7) El lector del CSV del Visualizador del Escaner Pro, copiado literalmente (ya no se importa el Pro).
 import escaner2_heredado_pro as pro  # noqa: E402
@@ -365,6 +366,7 @@ def cruzar(cruce, params, pasada):
         ruta_excel = f'heo/{PASADA}/{cruce}/Escaner2_HEO_{sello}.xlsx'
         contenido = escribir_excel(foto, resultados, cmp_filas, {
             'restricciones': e2.lector_restricciones(sb, avisos),  # (RS) la columna «Amazon»
+            'tambien': etl.lector_tambien(sb, e2.PROVEEDOR, M, avisos),  # (TL) la columna «También lo tiene»
             'pasada': PASADA, 'cruce': cruce, 'params': params, 'usados': usados, 'ficheros': ficheros,
             'n_entradas': n_entradas, 'n_bd': n_bd, 'cuadra': cuadra and not motivo_fallo,
             'n_crudo': n_crudo, 'previas': previas, 'modo': pasada.get('modo'), 'lista_viejo': lista_viejo,
@@ -587,6 +589,8 @@ def escribir_excel(foto, resultados, cmp_filas, info):
     salida = io.BytesIO()
     # (RS, 23-oct-2026) «Amazon», la ÚLTIMA columna de «Análisis» (detrás de las de cada proveedor: nadie se corre)
     e2.poner_columna_amazon(wb, info.get('restricciones'))
+    # (TL, 24-oct-2026) «También lo tiene», detrás de «Amazon»: qué otros proveedores lo tienen hoy y a qué precio
+    e2.poner_columna_tambien(wb, info.get('tambien'))
     wb.save(salida)
     return salida.getvalue()
 

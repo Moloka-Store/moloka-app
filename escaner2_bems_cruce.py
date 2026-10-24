@@ -50,6 +50,7 @@ if not re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 from escaner2_base import cliente  # noqa: E402
 
 import escaner2_motor as e2  # noqa: E402
+import escaner2_tambien as etl  # noqa: E402
 import escaner2_bems_pro as ebe  # noqa: E402
 import en_mi_bd  # noqa: E402
 import escaner2_heredado_pro as pro  # noqa: E402
@@ -314,6 +315,7 @@ def cruzar(cruce, params, pasada):
         ruta = ebe.ruta_excel(PASADA, cruce, sello)
         contenido = ebe.escribir_excel(foto, resultados, apartados, M, {
             'restricciones': e2.lector_restricciones(sb, avisos),  # (RS) la columna «Amazon»
+            'tambien': etl.lector_tambien(sb, ebe.PROVEEDOR, M, avisos),  # (TL) la columna «También lo tiene»
             'pasada': PASADA, 'cruce': cruce, 'params': params, 'usados': usados, 'ficheros': ficheros,
             'n_entradas': n_entradas, 'n_bd': n_bd, 'cuadra': cuadra and not motivo_fallo, 'n_crudo': n_crudo,
             'previas': previas, 'modo': pasada.get('modo'), 'marcas': pasada.get('marcas'), 'eleccion': eleccion,

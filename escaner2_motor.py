@@ -1889,6 +1889,52 @@ def poner_columna_amazon(wb, leer):
     return n
 
 
+# (TL, 24-oct-2026) La columna «También lo tiene» de «Análisis», UNA columna nueva AL FINAL (detras de «Amazon»): que
+# OTROS proveedores tienen ese EAN disponible hoy y a que precio de compra por unidad, del mas barato al mas caro
+# (Fernando: «me sale un funko rentable en dbline pero resulta que esta semana estaba en oferta en TCG… me voy a TCG y
+# lo compro directamente»). SOLO INFORMA: no toca la rentabilidad, la «Decisión» ni el orden de las filas.
+#   · vacia            → ningun otro proveedor lo tiene (aqui vacio SI significa «nadie»);
+#   · «sin consultar»  → la lectura fallo: TODA la columna, y el cruce sigue con su aviso (como «Amazon»).
+# Lo que se lee y el texto viven en escaner2_tambien.py (importa los modulos de cada proveedor: aqui no se puede).
+COLUMNA_TAMBIEN = 'También lo tiene'
+ANCHO_TAMBIEN = 60
+TEXTO_SIN_CONSULTAR_TAMBIEN = 'sin consultar'
+
+
+def poner_columna_tambien(wb, leer):
+    """Anade «También lo tiene» detras de la ultima columna de «Análisis», fila a fila por EAN, y alarga la tabla.
+    `leer` es lo que devuelve `escaner2_tambien.lector_tambien` (sin el, no se pone la columna): de los EAN de la hoja
+    tal cual, {EAN: texto} o None si la lectura fallo. Devuelve cuantas filas llevan algo escrito."""
+    if leer is None:
+        return 0
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.table import TableColumn
+    ws = wb['Análisis']
+    cab = [c.value for c in ws[1]]
+    i_ean = cab.index('EAN')
+    col = len(cab) + 1
+    ws.cell(row=1, column=col, value=COLUMNA_TAMBIEN).font = Font(bold=True)
+    ws.column_dimensions[get_column_letter(col)].width = ANCHO_TAMBIEN
+    eans = [str(ws.cell(row=f, column=i_ean + 1).value or '').strip() for f in range(2, ws.max_row + 1)]
+    por_ean = leer(eans)
+    n = 0
+    for fila, ean in enumerate(eans, start=2):
+        texto = TEXTO_SIN_CONSULTAR_TAMBIEN if por_ean is None else por_ean.get(ean)
+        if texto:
+            ws.cell(row=fila, column=col, value=texto)
+            n += 1
+    for tabla in ws.tables.values():
+        ini, fin = tabla.ref.split(':')
+        fila_fin = re.sub(r'^[A-Z]+', '', fin)
+        tabla.ref = '%s:%s%s' % (ini, get_column_letter(col), fila_fin)
+        if tabla.tableColumns:
+            tabla.tableColumns.append(TableColumn(id=len(tabla.tableColumns) + 1, name=COLUMNA_TAMBIEN))
+        if tabla.autoFilter is not None:
+            tabla.autoFilter.ref = tabla.ref
+    return n
+
+
 def escribir_celda9(datos, M, ruta=RUTA_MOTOR, paises=None):
     """`excel_del_viejo` con estos datos (un dict con las llaves de DATOS_CELDA9), en el espacio de nombres
     del motor (sus constantes, `sup`, `pct_comision_celda`) y con `en_bd_txt` = `M.en_bd_txt` (encargo E: la

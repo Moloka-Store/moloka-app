@@ -1198,6 +1198,8 @@ def escribir_excel(foto, resultados, apartados, M, info):
     salida = io.BytesIO()
     # (RS, 23-oct-2026) «Amazon», la ÚLTIMA columna de «Análisis» (detrás de las de cada proveedor: nadie se corre)
     e2.poner_columna_amazon(wb, info.get('restricciones'))
+    # (TL, 24-oct-2026) «También lo tiene», detrás de «Amazon»: qué otros proveedores lo tienen hoy y a qué precio
+    e2.poner_columna_tambien(wb, info.get('tambien'))
     wb.save(salida)
     return salida.getvalue()
 
