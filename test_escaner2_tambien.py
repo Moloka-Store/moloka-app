@@ -224,8 +224,9 @@ eq('(A) 🔴 el ejemplo, literal: el propio (DBLine, 5,00) no sale; del más bar
 print('\n(B) el precio es el de su escaneo')
 eq('(B) TCG con el tramo más barato (6,95, no el suelto 7,50) y OcioStock con precio_pa (7,20, no 8,00)',
    ('TCG 6,95' in T[ean(1)], 'OcioStock 7,20' in T[ean(1)], '7,50' in T[ean(1)], '8,00' in T[ean(1)]), (True, True, False, False))
-eq('(B) 🔴 la caja de HEO, entre sus unidades (30 ÷ 6 = 5,00); la «5 + 1» de OcioStock, por figura; el chase suelto '
-   '(HEO 1,00 y OcioStock 1,49) y la preventa de TCG (2,00), fuera', T[ean(2)], 'HEO 5,00 € · OcioStock 5,94 €')
+eq('(B) 🔴 la caja de HEO, entre sus unidades (30 ÷ 6 = 5,00); la «5 + 1» de OcioStock, por figura; las dos con '
+   '« caja de 6» (Cowork, 24-oct); el chase suelto (HEO 1,00 y OcioStock 1,49) y la preventa de TCG (2,00), fuera',
+   T[ean(2)], 'HEO 5,00 € caja de 6 · OcioStock 5,94 € caja de 6')
 eq('(B) OSMA con su porte (10,00 × 1,05 = 10,50, la última factura con porte) y «oferta» (SALE); el propio DBLine no',
    T[ean(5)], 'OSMA 10,50 € oferta')
 eq('(B) Zentrada: la foto del último escaneo con cruce «lista» (la del 11-oct), con su fecha', T[ean(6)], 'Zentrada 3,99 € (11-oct)')
@@ -290,6 +291,13 @@ O = lambda p, x, of=False, dia=HOY: {'proveedor': p, 'precio': x, 'oferta': of, 
 eq('(G) orden por precio y, a igual precio, por nombre; dos decimales con coma y redondeo comercial',
    etl.texto_tambien([O('TCG', 7.0), O('BEMS', 7.0), O('HEO', 6.945, True, date(2026, 1, 3))], HOY),
    'HEO 6,95 € oferta (3-ene) · BEMS 7,00 € · TCG 7,00 €')
+eq('(G) 🔴 la caja: « caja de N» detrás del precio y antes de «oferta»; suelta (o caja de 1, o sin unidades), sin nada',
+   etl.texto_tambien([dict(O('HEO', 4.52, True), caja=6), dict(O('BEMS', 6.48), caja=None)], HOY),
+   'HEO 4,52 € caja de 6 oferta · BEMS 6,48 €')
+eq('(G) qué es caja: es_caja con uds_caja > 1',
+   [etl.uds_de_caja(x) for x in ({'es_caja': True, 'uds_caja': 6}, {'es_caja': True, 'uds_caja': 1},
+                                 {'es_caja': True, 'uds_caja': None}, {'es_caja': False, 'uds_caja': 6}, {})],
+   [6, None, None, None, None])
 eq('(G) nadie: None', (etl.texto_tambien([], HOY), etl.texto_tambien(None, HOY)), (None, None))
 eq('(G) la regla de los 30 días: el día UTC contra hoy de Madrid',
    [etl.caducada('2026-09-24T23:30:00+00:00', HOY), etl.caducada('2026-09-23T23:30:00+00:00', HOY), etl.caducada(None, HOY)],

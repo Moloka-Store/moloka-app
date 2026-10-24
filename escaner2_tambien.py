@@ -13,6 +13,9 @@ pues como se que es rentable a precio mas caro me voy a tcg y lo compro directam
 LA CELDA: «TCG 6,95 € oferta · OcioStock 7,20 € · BEMS 7,40 € (10-oct)». Cada otro proveedor (NUNCA el del propio
 Excel), una vez, con su precio mas barato del EAN; «oferta» si lo esta en ese proveedor; la fecha de su foto solo si
 no es de hoy (Madrid). Nadie mas → vacia. La lectura falla → toda la columna «sin consultar», y el aviso al cruce.
+🔑 (Cowork, 24-oct-2026) SI ESE PRECIO ES DE UNA CAJA (es_caja con uds_caja > 1, en cualquier proveedor), « caja de N»
+   detras del precio: «HEO 4,52 € caja de 6 · BEMS 6,48 €». El precio sigue siendo por unidad (comparable con la suelta
+   del mismo EAN), pero solo se consigue comprando la caja entera, y eso se tiene que ver sin abrir la web.
 
 🔑 EL PRECIO ES EL DEL ESCANEO DE ESE PROVEEDOR, NO UNO NUEVO: las filas de su foto de disponibilidad (`disp_estado`,
    vistas en su ultima pasada, en catalogo y disponibles) pasan por SU `construir_foto`, la misma que usa su barrido,
@@ -112,7 +115,7 @@ def foto_heo(filas):
             continue
         foto.append({'producto_heo': str(f.get('producto_prov') or ''), 'ean_core': str(f.get('ean_core') or '').strip(),
                      'precio_unidad': None if f.get('precio_unidad') is None else float(f['precio_unidad']),
-                     'es_caja': bool(f.get('es_caja')), 'es_chase': bool(f.get('es_chase')),
+                     'es_caja': bool(f.get('es_caja')), 'uds_caja': f.get('uds_caja'), 'es_chase': bool(f.get('es_chase')),
                      'en_oferta': bool(f.get('en_oferta')), 'preorder': False})
     return foto
 
@@ -137,9 +140,19 @@ def foto_de(proveedor, filas, M, hoy, osma=None):
     raise ValueError('proveedor sin foto: %r' % (proveedor,))
 
 
+def uds_de_caja(f):
+    """Las unidades de la caja de una fila de foto (es_caja con uds_caja > 1), o None si va suelta."""
+    try:
+        n = int(f.get('uds_caja') or 0)
+    except (TypeError, ValueError):
+        return None
+    return n if f.get('es_caja') and n > 1 else None
+
+
 def ofertas_de(proveedor, filas, M, hoy, osma=None):
     """{ean_norm: oferta} de un proveedor: la de menor precio por unidad de su foto, sin preventas, sin chase suelto y
-    sin foto de mas de 30 dias. Oferta = {proveedor, precio, oferta, dia}; `dia`, el de Madrid de su `visto_en`."""
+    sin foto de mas de 30 dias. Oferta = {proveedor, precio, oferta, dia, caja}; `dia`, el de Madrid de su `visto_en`;
+    `caja`, las unidades si ese precio es de una caja (`uds_de_caja`)."""
     filas = [f for f in filas or [] if f.get('disponible') and not f.get('preorder')]
     visto = {str(f.get('producto_prov') or ''): f.get('visto_en') for f in filas}
     mejor = {}
@@ -152,7 +165,7 @@ def ofertas_de(proveedor, filas, M, hoy, osma=None):
             continue
         k = M.norm(str(f.get('ean_core') or '').strip())
         o = {'proveedor': proveedor, 'precio': float(precio), 'oferta': bool(f.get('en_oferta')),
-             'dia': dia_madrid(cuando)}
+             'dia': dia_madrid(cuando), 'caja': uds_de_caja(f)}
         if k and (k not in mejor or o['precio'] < mejor[k]['precio']):
             mejor[k] = o
     return mejor
@@ -170,7 +183,7 @@ def ofertas_zentrada(fotos, creada_en, M, hoy):
             continue
         k = M.norm(str(f.get('ean_core') or '').strip())
         o = {'proveedor': 'ZENTRADA', 'precio': precio, 'oferta': bool(f.get('en_oferta')),
-             'dia': dia_madrid(creada_en)}
+             'dia': dia_madrid(creada_en), 'caja': uds_de_caja(f)}
         if k and (k not in mejor or precio < mejor[k]['precio']):
             mejor[k] = o
     return mejor
@@ -190,10 +203,12 @@ def dia_texto(d):
 
 def texto_tambien(ofertas, hoy):
     """La celda para un EAN: `ofertas`, una por proveedor. Del mas barato al mas caro (a igual precio, por nombre),
-    separadas por « · ». None si no hay ninguna. Puro."""
+    separadas por « · », cada una «Nombre precio[ caja de N][ oferta][ (dia)]». None si no hay ninguna. Puro."""
     partes = []
     for o in sorted(ofertas or [], key=lambda o: (o['precio'], NOMBRE.get(o['proveedor'], o['proveedor']))):
         t = '%s %s' % (NOMBRE.get(o['proveedor'], o['proveedor']), precio_texto(o['precio']))
+        if o.get('caja'):
+            t += ' caja de %d' % o['caja']
         if o.get('oferta'):
             t += ' oferta'
         if o.get('dia') is not None and o['dia'] != hoy:
@@ -258,8 +273,8 @@ def leer_zentrada(sb, eans):
     fotos = []
     for i in range(0, len(eans), TANDA_EAN):
         tanda = eans[i:i + TANDA_EAN]
-        fotos += _paginas(lambda: sb.table('escaner2_foto').select('ean_core,ean_norm,precio_unidad,es_chase,preorder,'
-                                                                   'en_oferta').eq('pasada_id', ult['id'])
+        fotos += _paginas(lambda: sb.table('escaner2_foto').select('ean_core,ean_norm,precio_unidad,es_caja,uds_caja,'
+                                                                   'es_chase,preorder,en_oferta').eq('pasada_id', ult['id'])
                           .in_('ean_norm', tanda).order('id'))
     return fotos, ult['creada_en']
 
