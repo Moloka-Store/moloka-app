@@ -72,13 +72,17 @@ QUE HACE, EN ORDEN:
      escaner nuevo de HEO (escaner2_motor.excel_como_el_viejo, con la columna «Ventas») y detras una hoja
      «Novedades» con el origen de cada uno de sus 4 paises (Amazon · de Keepa (Amazon fallo) · pendiente: cambia de
      escalon · no esta en Amazon <pais> · nadie lo vende ahora en <pais>). Al bucket escaner2 (heo/novedades/<dia>/)
-     y a nov_excel, que es lo que lee la biblioteca de escaneos de la v2. Sin COMPRAR, no se deja nada. Con mas de
-     AVALANCHA novedades en la pasada, la hoja «Novedades» se abre la primera con «Avalancha: N cambios — lanza un
-     Escaneo PRO» arriba.
+     y a nov_excel, que es lo que lee la biblioteca de escaneos de la v2. Sin COMPRAR, no se deja nada.
   3 bis. EL TELEGRAM (añadido 3), como el escaner viejo: con Excel, «🟢 Novedades HEO Funko: N para COMPRAR» y una
-     linea por COMPRAR (tope 20); con avalancha, aunque no haya COMPRAR; y en 🔴, diciendolo, si algun pais quedo
-     pendiente o Keepa no llego a todo. Sin TELEGRAM_TOKEN/TELEGRAM_CHAT_ID en el paso, no se envia; si Telegram
-     falla, la corrida sigue.
+     linea por COMPRAR (tope 20); y en 🔴, diciendolo, si algun pais quedo pendiente o Keepa no llego a todo. Sin
+     TELEGRAM_TOKEN/TELEGRAM_CHAT_ID en el paso, no se envia; si Telegram falla, la corrida sigue.
+  🔴 LA AVALANCHA (encargo NV, 26-oct-2026; Fernando: «Si son menos de 100 los hace el cartero. Si son mas de 100 el
+     cartero no hace nada, me avisa por telegran que hay avalancha y hago yo un escaner pro»). Por proveedor y pasada, con
+     la cuenta de `novedades_a_valorar` (las novedades menos las subidas): hasta AVALANCHA (100), todo como arriba (y el
+     cartero se lleva toda su cola en la corrida siguiente); con MAS, NO SE VALORA NINGUNA: ni los pasos 1 y 2 (ni Keepa,
+     ni la cuenta), ni Excel. Las «pendiente» de esa pasada se cierran como «caducada» con el motivo «avalancha: …»
+     (`cerrar_por_avalancha`: ninguna corrida las vuelve a coger) y solo sale el Telegram de siempre: «⚠️ Avalancha: N
+     cambios en <proveedor> — lanza un Escaneo PRO». El registro lo dice: «<PROVEEDOR> · avalancha: N, no se valora».
   4. EL CIERRE: nov_cerrar_valoracion con el flujo del paso (lo cuadra la base) y los tokens gastados.
 
 LAS CUENTAS SUELTAS (encargo V): `solo_cuentas` hace el paso 1 (con el respaldo de Keepa de los paises en que Amazon
@@ -144,6 +148,7 @@ LOTE_IN = 100
 # de nov_excel (lib/escaner2/build.ts: esRutaDelBucket exige «heo/»).
 BUCKET_EXCEL = 'escaner2'
 # Mas de estas novedades en una pasada es una AVALANCHA (Fernando: «si hay mas de 100 cambios aviso para hacerlo Pro»).
+# (Encargo NV, 26-oct-2026) Y entonces no se valora ninguna: solo el Telegram (ver `valorar_pasada`).
 AVALANCHA = 100
 # Identidad 10: el escalon de la tarifa FBA en los cuatro paises. 20,00 € exactos pagan la alta.
 ESCALON_EUR = 20.0
@@ -702,22 +707,36 @@ def valorar_pasada(sb, pasada, keepa_llave=None, http=None, dormir=time.sleep, a
         if par.get('valorar') is not True:
             # 🔴 APAGADO: ni Keepa, ni cuentas. Solo se cierra (la base cuenta y cuadra la foto de las novedades).
             datos = {'estado': 'apagada'}
+        elif avalancha:
+            # 🔴 (Encargo NV, 26-oct-2026; Fernando: «Si son mas de 100 el cartero no hace nada, me avisa por telegran que
+            #    hay avalancha y hago yo un escaner pro») NO SE VALORA NINGUNA: ni Keepa (ni lo guardado ni peticiones
+            #    nuevas), ni la cola de Amazon, ni Excel. Las novedades de ESTA pasada se cierran como avalancha
+            #    (`cerrar_por_avalancha`) y solo sale el Telegram de siempre. Lo de las pasadas de antes sigue su camino.
+            imprimir('>>> %s · avalancha: %d, no se valora (%d cambios en %s %s, más de %d) — lanza un Escaneo PRO.'
+                     % (proveedor, avalancha, avalancha, nombre, marcas_de(proveedor), AVALANCHA), flush=True)
+            _resumen_del_run('⚠️ **Avalancha: %d cambios en %s %s — no se valora ninguna: lanza un Escaneo PRO**'
+                             % (avalancha, nombre, marcas_de(proveedor)), env)
+            datos = dict(_FLUJO_SIN_VALORAR, estado='hecha', keepa_reserva=int(par['keepa_reserva']))
+            try:
+                cerradas = cerrar_por_avalancha(sb, pasada, avalancha, ahora, proveedor)
+                datos['motivo'] = ('avalancha: %d cambios en la pasada, más de %d; %d novedad(es) cerradas sin valorar '
+                                   '(Escaneo PRO a mano)' % (avalancha, AVALANCHA, cerradas))
+                imprimir('>>> %s · avalancha: %d novedad(es) de la pasada cerradas sin valorar (ni Keepa, ni Amazon, ni Excel).'
+                         % (proveedor, cerradas), flush=True)
+            except Exception as ex:
+                # Sin cerrar, la pasada siguiente las cogería de la cola: ROJO, para que se mire.
+                avisos.append('las novedades de la avalancha no se pudieron cerrar: %s: %s' % (type(ex).__name__, str(ex)[:300]))
+            aviso_telegram([], avalancha, [], imprimir, env, post, proveedor)
         else:
             valoradas, incompletos = [], []
-            if avalancha:
-                imprimir('>>> AVALANCHA: %d cambios en %s %s (más de %d) — lanza un Escaneo PRO. El automático sigue con '
-                         'las que quepan por prioridad sin cruzar la reserva de Keepa.'
-                         % (avalancha, nombre, marcas_de(proveedor), AVALANCHA), flush=True)
-                _resumen_del_run('⚠️ **Avalancha: %d cambios en %s %s — lanza un Escaneo PRO**'
-                                 % (avalancha, nombre, marcas_de(proveedor)), env)
             _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, imprimir, valoradas, incompletos,
                      proveedor)
             # 🔑 (encargo V) EL EXCEL, con lo valorado en esta pasada, si hay un COMPRAR. Un fallo aqui es un aviso (rojo
             #    al final), no tumba la valoracion.
-            aviso = excel_de_novedades(sb, valoradas, 'pasada', pasada, run_id, ahora, imprimir, avalancha, proveedor)
+            aviso = excel_de_novedades(sb, valoradas, 'pasada', pasada, run_id, ahora, imprimir, None, proveedor)
             if aviso:
                 avisos.append(aviso)
-            aviso_telegram(valoradas, avalancha, incompletos, imprimir, env, post, proveedor)
+            aviso_telegram(valoradas, None, incompletos, imprimir, env, post, proveedor)
     except Exception as ex:
         datos = {'estado': 'fallida'}
         avisos.append('la valoración no terminó: %s: %s' % (type(ex).__name__, str(ex)[:500]))
@@ -738,6 +757,33 @@ def valorar_pasada(sb, pasada, keepa_llave=None, http=None, dormir=time.sleep, a
         imprimir('    AVISO: %s' % a, flush=True)
     ok = (res or {}).get('estado') == datos['estado'] and datos['estado'] in ('hecha', 'apagada') and not avisos
     return ok, res
+
+
+# (Encargo NV) El flujo de una pasada con avalancha: nada pasa por Keepa ni por la cuenta (la base cuadra con todo a 0).
+_FLUJO_SIN_VALORAR = {k: 0 for k in ('v_en_cola', 'v_keepa', 'v_keepa_cache', 'v_escaneo_pro', 'v_espera_saldo', 'v_espera_fallo',
+                                     'v_no_se_vende', 'v_sin_historial', 'v_varias_fichas', 'v_a_amazon', 'v_listas', 'v_cuentas',
+                                     'v_cuenta_fallo', 'keepa_peticiones', 'keepa_tokens', 'keepa_con_tarifa', 'keepa_fichas')}
+_FLUJO_SIN_VALORAR['keepa_reserva_cruzada'] = False
+
+# (Encargo NV) Como empieza el motivo de una novedad cerrada por avalancha: es lo que la distingue de las demás «caducada».
+MOTIVO_AVALANCHA = 'avalancha'
+
+
+def cerrar_por_avalancha(sb, pasada, avalancha, ahora=_ahora, proveedor=PROVEEDOR):
+    """(Encargo NV, 26-oct-2026) Cierra SIN VALORAR las novedades de una pasada con avalancha: las «pendiente» de ESA pasada
+    y ese proveedor pasan a «caducada» con el motivo «avalancha: …». Devuelve cuántas.
+    🔑 SIN TOCAR LA BASE: «caducada» ya existe (nov_novedad_estado_check) y exige su motivo (nov_novedad_estado_dice_por_que);
+       ninguna corrida la recoge: la cola de Keepa (nov_cola) es de «pendiente» y «espera_keepa», el cartero lee
+       «espera_amazon» (nov_espera_amazon), la cuenta lee «lista», y la seleccion solo caduca lo que sigue en vuelo. La
+       llave del escaner (service_role) puede actualizar nov_novedad (ACL arw, sin disparadores; medido el 26-oct-2026).
+    🔒 Solo ESA pasada y SOLO «pendiente»: lo de otras pasadas, y lo que ya nacio caducado, no se toca."""
+    motivo = ('%s: %d cambios en la pasada %s de %s (más de %d) — no se valora: Escaneo PRO a mano'
+              % (MOTIVO_AVALANCHA, avalancha, pasada, PROVEEDORES[proveedor]['nombre'], AVALANCHA))
+    filas = (sb.table('nov_novedad')
+               .update({'estado': 'caducada', 'estado_en': ahora().isoformat(), 'motivo_estado': motivo})
+               .eq('pasada_id', pasada).eq('proveedor', proveedor).eq('estado', 'pendiente')
+               .execute().data) or []
+    return len(filas)
 
 
 def _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, imprimir, valoradas=None, incompletos=None,

@@ -26,7 +26,8 @@ QUE PRUEBA:
   (I) LA CUENTA de una novedad «lista», al centimo, con la formula del Escaneo PRO (numeros escritos a mano).
   (J) LA CUENTA COINCIDE CON LA DEL ESCANEO PRO: filas fabricadas (siempre) y, si NOV_CASOS_REALES apunta a un JSON
       con filas REALES de escaner2_resultado_pais (el CI de la v2, que es privado, lo hace), al menos 5 al centimo.
-  (K) EL MODULO, POR ESTRUCTURA: que tablas lee, que escribe (solo inserta en nov_keepa y nov_excel) y a que funciones
+  (K) EL MODULO, POR ESTRUCTURA: que tablas lee, que escribe (inserta en nov_keepa y nov_excel; y, encargo NV, el cierre
+      de una avalancha en nov_novedad) y a que funciones
       llama; y ni escaner_resultados ni el buzon `informes`.
   (X) EL EXCEL (encargo V): con un COMPRAR entre lo valorado en la ejecucion, el Excel del escaner nuevo (las hojas del
       viejo + «Novedades», con el origen de cada pais) al bucket escaner2 y su fila en nov_excel; sin COMPRAR, nada; si
@@ -37,7 +38,10 @@ QUE PRUEBA:
       y precio de venta del mismo lado, o «pendiente: cambia de escalon»; sin precio base, cruce.
   (T) EL TELEGRAM (añadido 3), con el formato del viejo: con COMPRAR, sin COMPRAR (no se manda), avalancha, incompleto;
       sin claves no manda y no falla; si Telegram falla, la corrida sigue; la llave no sale.
-  (A) LA AVALANCHA: mas de 100 novedades en la pasada → el Excel se abre con el aviso arriba, y el Telegram lo dice.
+  (A) LA AVALANCHA (encargo NV, 26-oct-2026): con 100 se valoran todas (Keepa y a la cola de Amazon); con 101, NINGUNA: ni
+      Keepa (ni el saldo), ni la cuenta, ni Excel; solo el Telegram de avalancha. Las «pendiente» de ESA pasada se cierran
+      como «caducada» con el motivo «avalancha: …», no vuelven a la cola en la pasada siguiente, y lo de otras pasadas no se
+      toca. Dos proveedores a la vez: uno con 101 y otro con 30, el segundo se valora entero.
   (O) (encargo OC4) OCIOSTOCK por el mismo camino, con `proveedor=`: Keepa solo para SU cola (nov_keepa con su proveedor),
       sus parametros y su foto; su Excel en ociostock/novedades/ con «Uds. escalón» y «Precio unidad» al final (HEO,
       sin ellas); su Telegram «Novedades OcioStock Funko»; la seleccion + valoracion de una pasada
@@ -143,6 +147,14 @@ class _Q:
         if self.accion == 'upsert':
             self.base.tablas.setdefault(self.tabla, []).append(dict(self.fila, _opciones=self.opciones))
             return types.SimpleNamespace(data=[self.fila])
+        if self.accion == 'update':
+            # (Encargo NV) Como PostgREST: cambia las filas que pasan los filtros y las devuelve.
+            if self.tabla in self.base.fallan:
+                raise RuntimeError('la base de mentira falla al actualizar %s' % self.tabla)
+            cambiadas = [r for r in self.base.leer(self.tabla) if all(f(r) for f in self.filtros)]
+            for r in cambiadas:
+                r.update(self.fila)
+            return types.SimpleNamespace(data=[dict(r) for r in cambiadas])
         filas = [r for r in self.base.leer(self.tabla) if all(f(r) for f in self.filtros)]
         if self.orden:
             c, desc = self.orden
@@ -818,25 +830,75 @@ eq('(T) 🔒 si Telegram falla: la corrida sigue, lo dice, y la llave no sale',
                        imprimir=lambda *a, **k: salida_tg.append(a[0])), 'no se envió' in salida_tg[-1], 'TOKEN-SECRETO' in salida_tg[-1]),
    (False, True, False))
 
-# ── (A) LA AVALANCHA ─────────────────────────────────────────────────────────────────────
+# ── (A) LA AVALANCHA (encargo NV, 26-oct-2026) ───────────────────────────────────────────
+# Fernando: «Si son menos de 100 los hace el cartero. Si son mas de 100 el cartero no hace nada, me avisa por telegran que hay
+# avalancha y hago yo un escaner pro».
+def de_la_pasada(n, pasada='PASADA-1'):
+    return dict(n, pasada_id=pasada)
+
+
 TELEGRAM.clear()
-b = Base(novedades=[novedad(9, estado='lista')], valoraciones=VALS_COMPRA)
-ok, res, txt = correr(b, KeepaFalso(), novedades_pasada=150, env={'TELEGRAM_TOKEN': 'T', 'TELEGRAM_CHAT_ID': '42'})
-wb = load_workbook(_io.BytesIO(b.subidos[0][2]))
-eq('(A) más de 100 novedades: el Excel se abre en «Novedades» con el aviso arriba, y el run y el Telegram lo dicen',
-   (wb.active.title, wb['Novedades']['A1'].value, 'AVALANCHA: 150 cambios' in txt,
-    '⚠️ <b>Avalancha</b>: 150 cambios en HEO Funko — lanza un Escaneo PRO' in TELEGRAM[0][1]['text']),
-   ('Novedades', 'Avalancha: 150 cambios — lanza un Escaneo PRO', True, True))
-b = Base(novedades=[novedad(9, estado='lista')], valoraciones=VALS_COMPRA)
-ok, res, txt = correr(b, KeepaFalso(), novedades_pasada=100)
-eq('(A) con 100 justas no es avalancha', (load_workbook(_io.BytesIO(b.subidos[0][2])).active.title, 'AVALANCHA' in txt), ('Análisis', False))
-eq('(A) 🔑 (2.ª auditoría) la avalancha cuenta lo que entra a valorar: novedades − subidas fuera (130 − 30 = 100 no; 131 − 30 = 101 sí)',
+_pend = [de_la_pasada(novedad(i)) for i in (1, 2, 3)]
+_otra = de_la_pasada(novedad(4), 'PASADA-0')
+_nacida = de_la_pasada(dict(novedad(5), estado='caducada', motivo_estado='rehecha a mano'))
+b = Base(novedades=[novedad(9, estado='lista'), _otra, _nacida] + _pend, valoraciones=VALS_COMPRA)
+k = KeepaFalso(productos=PRODS)
+ok, res, txt = correr(b, k, novedades_pasada=150, env={'TELEGRAM_TOKEN': 'T', 'TELEGRAM_CHAT_ID': '42'})
+_est = {n['id']: n['estado'] for n in b.tablas['nov_novedad']}
+eq('(A1) 🔴 101 o más (150): NI Keepa (ni el saldo), ni la cuenta, ni Keepa guardado, ni Excel en la biblioteca',
+   (k.llamadas, b.llamadas('nov_guardar_keepa'), b.llamadas('nov_guardar_cuenta'), b.subidos, b.tablas.get('nov_excel', [])),
+   ([], [], [], [], []))
+eq('(A1) …SOLO el Telegram, con el texto de hoy',
+   [x[1]['text'] for x in TELEGRAM], ['⚠️ <b>Avalancha</b>: 150 cambios en HEO Funko — lanza un Escaneo PRO'])
+eq('(A1) …las «pendiente» de ESTA pasada, «caducada» con el motivo de la avalancha; la de otra pasada, la que ya nació '
+   'caducada y la «lista» de antes, sin tocar',
+   (_est, sorted({n['motivo_estado'].split(' (')[0] for n in b.tablas['nov_novedad'] if n['id'] in ('nov-1', 'nov-2', 'nov-3')}),
+    next(n['motivo_estado'] for n in b.tablas['nov_novedad'] if n['id'] == 'nov-5')),
+   ({'nov-9': 'lista', 'nov-4': 'pendiente', 'nov-5': 'caducada', 'nov-1': 'caducada', 'nov-2': 'caducada', 'nov-3': 'caducada'},
+    ['avalancha: 150 cambios en la pasada PASADA-1 de HEO'], 'rehecha a mano'))
+eq('(A1) …y el motivo dice que no se valora y por qué (Escaneo PRO a mano)', b.tablas['nov_novedad'][-1]['motivo_estado'],
+   'avalancha: 150 cambios en la pasada PASADA-1 de HEO (más de 100) — no se valora: Escaneo PRO a mano')
+eq('(A1) …el cierre: «hecha», con el flujo a cero que cuadra la base, el motivo y verde; el registro dice «HEO · avalancha: '
+   '150, no se valora» y cuántas se cierran',
+   (cierre(b)['estado'], cuadra(cierre(b)), cierre(b)['v_en_cola'], cierre(b)['keepa_peticiones'], cierre(b)['motivo'], ok,
+    '>>> HEO · avalancha: 150, no se valora' in txt, '>>> HEO · avalancha: 3 novedad(es) de la pasada cerradas sin valorar' in txt),
+   ('hecha', True, 0, 0, 'avalancha: 150 cambios en la pasada, más de 100; 3 novedad(es) cerradas sin valorar (Escaneo PRO a mano)',
+    True, True, True))
+# La pasada siguiente (sin avalancha): lo cerrado no vuelve a la cola; solo la de la otra pasada.
+TELEGRAM.clear()
+k2 = KeepaFalso(productos=PRODS)
+ok2, _res2, _txt2 = correr(b, k2, novedades_pasada=0)
+eq('(A2) la pasada siguiente: lo de la avalancha NO vuelve (ni Keepa ni la cola); solo la «pendiente» de la otra pasada',
+   (sorted({c for _d, c in k2.de_producto()}), [x['p_novedad'] for x in b.llamadas('nov_guardar_keepa')],
+    {n['id']: n['estado'] for n in b.tablas['nov_novedad'] if n['id'] in ('nov-1', 'nov-2', 'nov-3')}),
+   (['889698100002'], ['nov-4'], {'nov-1': 'caducada', 'nov-2': 'caducada', 'nov-3': 'caducada'}))
+eq('(A2) 🔑 la selección de la base no las vuelve a sacar: nov_seleccionar_pasada solo mira los cambios de la pasada nueva '
+   '(disp_cambio) o, con precio_pa, la memoria que reescribe cada selección; y solo caduca lo que sigue en vuelo '
+   '(medido en la definición de producción el 26-oct-2026). Aquí: la cola de mentira, como la vista, sin «caducada»',
+   [n['id'] for n in b.leer('nov_cola')], [])
+b = Base(novedades=[novedad(9, estado='lista'), _otra] + _pend, valoraciones=VALS_COMPRA, fallan=('nov_novedad',))
+ok, res, txt = correr(b, KeepaFalso(productos=PRODS), novedades_pasada=150)
+eq('(A3) 🔴 si no se pueden cerrar: ROJO, con el motivo, y tampoco se valora nada (ni Keepa ni Excel)',
+   (ok, 'no se pudieron cerrar' in cierre(b)['motivo'], b.llamadas('nov_guardar_keepa'), b.subidos), (False, True, [], []))
+# 100 justas: se valoran TODAS en la pasada (Keepa) y van a la cola de Amazon de esa misma hora.
+TELEGRAM.clear()
+_cien = [de_la_pasada(novedad(i)) for i in range(1, 101)]
+b = Base(novedades=_cien)
+k = KeepaFalso(productos=PRODS, saldo=5000)
+ok, res, txt = correr(b, k, novedades_pasada=100, env={'TELEGRAM_TOKEN': 'T', 'TELEGRAM_CHAT_ID': '42'})
+eq('(A4) con 100 justas no es avalancha: las 100 pasan por Keepa y van TODAS a esperar Amazon (la cola del cartero), sin Telegram',
+   (len(b.llamadas('nov_guardar_keepa')), sorted({n['estado'] for n in b.tablas['nov_novedad']}), cierre(b)['v_a_amazon'],
+    cuadra(cierre(b)), ok, '· avalancha:' in txt, TELEGRAM),
+   (100, ['espera_amazon'], 100, True, True, False, []))
+eq('(A5) 🔑 (2.ª auditoría) la avalancha cuenta lo que entra a valorar: novedades − subidas fuera (130 − 30 = 100 no; 131 − 30 = 101 sí)',
    [nv.novedades_a_valorar({'novedades': 130, 'subidas_fuera': 30}), nv.novedades_a_valorar({'novedades': 131, 'subidas_fuera': 30}),
     nv.novedades_a_valorar({'novedades': 7}), nv.novedades_a_valorar(None)],
    [100, 101, 7, 0])
-b = Base(novedades=[novedad(9, estado='lista')], valoraciones=VALS_COMPRA)
-ok, res, txt = correr(b, KeepaFalso(), novedades_pasada=nv.novedades_a_valorar({'novedades': 131, 'subidas_fuera': 30}))
-eq('(A) …y con 101 tras restar las subidas, avalancha', 'AVALANCHA: 101 cambios' in txt, True)
+b = Base(novedades=list(_pend))
+ok, res, txt = correr(b, KeepaFalso(productos=PRODS), novedades_pasada=nv.novedades_a_valorar({'novedades': 131, 'subidas_fuera': 30}))
+eq('(A5) …y con 101 tras restar las subidas, avalancha: no se valora ninguna',
+   ('HEO · avalancha: 101, no se valora' in txt, b.llamadas('nov_guardar_keepa'), sorted({n['estado'] for n in b.tablas['nov_novedad']})),
+   (True, [], ['caducada']))
 
 # ── (D) SIN DUPLICADOS (2.ª auditoría): la que vuelve a la cuenta por un país «repedir» ─────────
 TELEGRAM.clear()
@@ -888,9 +950,20 @@ eq('(K) lee lo suyo: parámetros, la cola, las novedades y sus filas, la caché,
    sorted(tablas | leidas), sorted({'nov_parametros', 'escaner2_parametros', 'nov_keepa', 'escaner2_cruce', 'nov_cola', 'nov_novedad',
                                     'productos', 'disp_estado', 'nov_valoracion', 'escaner2_foto', 'escaner2_resultado_ean',
                                     'escaner2_resultado_pais', 'nov_excel', 'nov_pasada'}))
-eq('(K) 🔒 y solo ESCRIBE insertando en nov_keepa (la película de Keepa) y en nov_excel (el Excel, encargo V); y (encargo OC4) el '
-   'apunte de una selección que falla en nov_pasada, como la foto de HEO (upsert que no pisa): ni update, ni delete',
-   escrituras, {('nov_keepa', 'insert'), ('nov_excel', 'insert'), ('nov_pasada', 'upsert')})
+eq('(K) 🔒 y solo ESCRIBE insertando en nov_keepa (la película de Keepa) y en nov_excel (el Excel, encargo V); (encargo OC4) el '
+   'apunte de una selección que falla en nov_pasada, como la foto de HEO (upsert que no pisa); y (encargo NV) el cierre de una '
+   'avalancha en nov_novedad (update): ni delete',
+   escrituras, {('nov_keepa', 'insert'), ('nov_excel', 'insert'), ('nov_pasada', 'upsert'), ('nov_novedad', 'update')})
+_updates = [n for n in ast.walk(arbol) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == 'update'
+            and isinstance(n.func.value, ast.Call) and getattr(n.func.value.func, 'attr', None) == 'table']
+_fn_update = [f.name for f in ast.walk(arbol) if isinstance(f, ast.FunctionDef) and any(u in ast.walk(f) for u in _updates)]
+eq('(K) 🔒 (encargo NV) ese update es UNO, vive en cerrar_por_avalancha, pone «caducada» y va filtrado por pasada, proveedor y '
+   '«pendiente»',
+   (len(_updates), _fn_update, [sorted(k.value for k in u.args[0].keys) for u in _updates],
+    sorted(c.args[0].value for c in ast.walk(next(f for f in ast.walk(arbol) if isinstance(f, ast.FunctionDef)
+                                                 and f.name == 'cerrar_por_avalancha'))
+           if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute) and c.func.attr == 'eq')),
+   (1, ['cerrar_por_avalancha'], [['estado', 'estado_en', 'motivo_estado']], ['estado', 'pasada_id', 'proveedor']))
 _upserts = [n for n in ast.walk(arbol) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == 'upsert']
 eq('(K) 🔒 …y ese upsert NO pisa lo que hubiera (ignore_duplicates=True, por pasada_id)',
    [sorted((k.arg, k.value.value) for k in u.keywords if isinstance(k.value, ast.Constant)) for u in _upserts],
@@ -1288,6 +1361,41 @@ eq('(TC6) entero: a mano, la selección de esa pasada (en minúsculas) y verde; 
    (cod_tc1, b_tc1.llamadas('nov_seleccionar_pasada'), cod_tc2, b_tc2.rpcs, 'APAGADO' in out_tc2, cod_tc3, b_tc3.rpcs,
     b_tc3.ops, 'NOVEDADES_CUENTAS_NO_EJECUTADAS' in out_tc3),
    (0, [{'p_pasada': '0ac40000-0000-0000-0000-000000000001'}], 0, [], True, 1, [], [], True))
+
+# ── (A6) (encargo NV) DOS PROVEEDORES A LA VEZ: TCG con 101 (avalancha) y HEO con 30 (se valora entero) ────────────
+TELEGRAM.clear()
+_heo30 = [de_la_pasada(novedad(i), 'PASADA-HEO') for i in range(1, 31)]
+_tc101 = [dict(de_la_pasada(novedad(200 + i), 'PASADA-TC'), id='tc-%d' % i, producto_prov='TC%05d' % i) for i in range(1, 102)]
+b = con_tcg(Base(novedades=_heo30), _tc101)
+k = KeepaFalso(productos=PRODS, saldo=5000)
+_log_tc, _log_heo = [], []
+ok_tc, _r = nv.valorar_pasada(b, 'PASADA-TC', keepa_llave=LLAVE, http=k, dormir=lambda s: None, ahora=lambda: AHORA,
+                              imprimir=lambda *a, **kw: _log_tc.append(' '.join(map(str, a))), run_id='36700000061',
+                              novedades_pasada=101, env={'TELEGRAM_TOKEN': 'T', 'TELEGRAM_CHAT_ID': '42'}, post=post_falso,
+                              proveedor='TCG')
+ok_heo, _r = nv.valorar_pasada(b, 'PASADA-HEO', keepa_llave=LLAVE, http=k, dormir=lambda s: None, ahora=lambda: AHORA,
+                               imprimir=lambda *a, **kw: _log_heo.append(' '.join(map(str, a))), run_id='36700000062',
+                               novedades_pasada=30, env={'TELEGRAM_TOKEN': 'T', 'TELEGRAM_CHAT_ID': '42'}, post=post_falso)
+_por_prov = {}
+for n in b.tablas['nov_novedad']:
+    _por_prov.setdefault((n['proveedor'], n['estado']), 0)
+    _por_prov[(n['proveedor'], n['estado'])] += 1
+eq('(A6) 🔑 la avalancha de TCG (101) no frena a HEO (30): las 101 de TCG cerradas sin una petición a Keepa, y las 30 de HEO '
+   'valoradas enteras (todas a esperar Amazon); un solo Telegram, el de TCG; los dos en verde',
+   (_por_prov, sorted({x['p_novedad'][:3] for x in b.llamadas('nov_guardar_keepa')}), len(b.llamadas('nov_guardar_keepa')),
+    [x[1]['text'] for x in TELEGRAM], ok_tc, ok_heo, '>>> TCG · avalancha: 101, no se valora' in '\n'.join(_log_tc)),
+   ({('HEO', 'espera_amazon'): 30, ('TCG', 'caducada'): 101}, ['nov'], 30,
+    ['⚠️ <b>Avalancha</b>: 101 cambios en TCG Funko — lanza un Escaneo PRO'], True, True, True))
+def _discreto_de(linea):
+    _b = _io.StringIO()
+    with _ctx.redirect_stdout(_b):
+        nv.imprimir_discreto(linea, flush=True)
+    return _b.getvalue().splitlines()
+
+
+eq('(A6) …y el registro discreto (el de las fotos de OcioStock, DBLine y TCG) deja ver la línea de la avalancha',
+   _discreto_de('>>> TCG · avalancha: 101, no se valora (101 cambios en TCG Funko, más de 100) — lanza un Escaneo PRO.'),
+   ['>>> TCG · avalancha: 101, no se valora (101 cambios en TCG Funko, más de 100) — lanza un Escaneo PRO.'])
 
 print()
 if fallos:
