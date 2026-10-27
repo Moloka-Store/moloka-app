@@ -849,8 +849,8 @@ eq('B2 · las hojas del PRO de HEO, en su orden (sin «Chase_manual»: es de los
    _wb.sheetnames, HOJAS_VIEJO + HOJAS_E2)
 _cab = [c.value for c in _wb['Análisis'][1]]
 eq('B2 · «Análisis»: las columnas del PRO de HEO y, AL FINAL, «No habrá más» y (AM) «Precio OSMA sin porte (€)»',
-   _cab, e2.columnas_analisis() + [e2.COLUMNA_ORIGEN_ALMACEN, e2.COLUMNA_FICHA_COMPARTIDA, eo.COLUMNA_NO_HABRA_MAS, eo.COLUMNA_SIN_PORTE,
-                                   eo.COLUMNA_MAPA, e2.COLUMNA_AMAZON, e2.COLUMNA_TAMBIEN])  # (RS) «Amazon»; (TL) «También lo tiene», la última
+   _cab, e2.orden_columnas_ex(e2.columnas_analisis() + [e2.COLUMNA_ORIGEN_ALMACEN, e2.COLUMNA_FICHA_COMPARTIDA, eo.COLUMNA_NO_HABRA_MAS, eo.COLUMNA_SIN_PORTE,
+                                   eo.COLUMNA_MAPA, e2.COLUMNA_AMAZON, e2.COLUMNA_TAMBIEN], 'FBA (sin foto)'))  # (RS) «Amazon»; (TL) «También lo tiene»; (EX) detrás de «Decisión», sin foto de FBA sembrada
 import escaner2_desvios as DV  # noqa: E402
 import escaner2_huella_excel as HU  # noqa: E402
 _REF = HU.sin_columnas(json.load(open(os.path.join(AQUI, 'huella_excel_viejo_heo.json'), encoding='utf-8')),
@@ -873,6 +873,10 @@ _an_ref['columnas']['PA (€)']['formula'] = [
 _an_ref['columnas']['Decisión']['formula'] = ['=IF(C[-1]R[0]*k>=k,"COMPRAR",IF(C[-1]R[0]*k>=k,"VALORAR","NO COMPRAR"))',
                                               '=IF(C[-1]R[0]*k>=k,"VALORAR","NO COMPRAR")']
 _REF['hojas'] = [h for h in _REF['hojas'] if h['hoja'] != 'Chase_manual']
+# (EX, 27-oct-2026) El paso final: fuera «En mi BD» y «Almacén», «FBA (…)» y «También lo tiene» detrás de «Decisión». Las
+# dos fórmulas vivas de arriba (escritas sobre la hoja de antes) las vuelve a apuntar a su MISMA columna por nombre.
+_REF = HU.con_paso_ex(_REF, 'FBA (sin foto)')
+_an_ref = next(h for h in _REF['hojas'] if h['hoja'] == 'Análisis')
 _huella = HU.huella(_bytes)
 eq('B2 · 🔴 el FORMATO de las hojas del viejo es el del Excel viejo de verdad (con «Ventas», «Ficha compartida», «No habrá '
    'más», «Precio OSMA sin porte (€)» y las dos fórmulas vivas)',

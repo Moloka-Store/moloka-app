@@ -961,6 +961,21 @@ def foto_para_excel(foto, resultados):
     return salida
 
 
+def precio_propio_excel(foto, resultados, mapa):
+    """(EX, 27-oct-2026) {(EAN, ASIN) de cada fila de «Análisis»: el precio de Zentrada por UNIDAD}, la base con que
+    «También lo tiene» compara (las negritas de `escaner2_motor.poner_almacen_fba_tambien`): el `precio_unidad` de la
+    foto aunque la fila sea un pack (su «PA (€)» es el del pack), y el de un codigo en las fichas de «Fichas»."""
+    por_foto = {r['foto_id']: r for r in resultados}
+    salida = {}
+    for f in foto:
+        if f.get('precio_unidad') is not None:
+            salida[(str(f['ean_original']), str((por_foto.get(f['id']) or {}).get('asin') or ''))] = float(f['precio_unidad'])
+    for r in mapa or []:
+        if r['puerta'] in e2.PUERTAS_ANALISIS and r.get('precio_catalogo') is not None:
+            salida[(str(r['ean_original']), str(r['asin_mapa'] or ''))] = float(r['precio_catalogo'])
+    return salida
+
+
 def filas_mapa_excel(mapa):
     """Las fichas de «Fichas» que se venden (puertas d, e y f), como filas de la foto y resultados para las hojas del
     viejo → (foto, resultados). Cada una con su id propio ('mapa:<ean>:<asin>') y el coste ya calculado."""
@@ -1200,6 +1215,8 @@ def escribir_excel(foto, resultados, apartados, M, info):
     e2.poner_columna_amazon(wb, info.get('restricciones'))
     # (TL, 24-oct-2026) «También lo tiene», detrás de «Amazon»: qué otros proveedores lo tienen hoy y a qué precio
     e2.poner_columna_tambien(wb, info.get('tambien'))
+    # (EX, 27-oct-2026) EL PASO FINAL: «Almacén», «FBA» y «También lo tiene» detrás de «Decisión» (fuera «En mi BD»)
+    e2.poner_almacen_fba_tambien(wb, M, precio_propio=precio_propio_excel(foto, resultados, mapa))
     wb.save(salida)
     return salida.getvalue()
 

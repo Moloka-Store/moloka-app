@@ -1157,6 +1157,14 @@ def foto_para_excel(foto, resultados, enlaces):
     return salida
 
 
+def precio_propio_excel(foto_excel):
+    """(EX, 27-oct-2026) {(EAN, ASIN) de cada fila de «Análisis»: el precio de OSMA por UNIDAD y SIN porte}, la base con
+    que «También lo tiene» compara (las negritas de `escaner2_motor.poner_almacen_fba_tambien`): `precio_catalogo` (en
+    un pack, el de una unidad; en una ficha del mapa, el del codigo), no el «PA (€)», que lleva el porte."""
+    return {(str(f['ean_original']), str(f.get('asin') or '')): float(f['precio_catalogo'])
+            for f in foto_excel if f.get('precio_catalogo') is not None}
+
+
 def paises_de_la_hoja(params, M):
     """(AM) Los paises que pinta «Análisis»: con UN solo pais calculado (OSMA, solo ES), ese; con mas, los cuatro del
     viejo, como HEO (las filas de un pais sin CSV salen «Sin datos»)."""
@@ -1456,6 +1464,8 @@ def escribir_excel(foto, resultados, apartados, M, info):
     e2.poner_columna_amazon(wb, info.get('restricciones'))
     # (TL, 24-oct-2026) «También lo tiene», detrás de «Amazon»: qué otros proveedores lo tienen hoy y a qué precio
     e2.poner_columna_tambien(wb, info.get('tambien'))
+    # (EX, 27-oct-2026) EL PASO FINAL: «Almacén», «FBA» y «También lo tiene» detrás de «Decisión» (fuera «En mi BD»)
+    e2.poner_almacen_fba_tambien(wb, M, precio_propio=precio_propio_excel(foto_excel))
     wb.save(salida)
     return salida.getvalue()
 
