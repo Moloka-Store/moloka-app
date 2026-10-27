@@ -574,7 +574,7 @@ eq('B2 · las hojas del PRO de HEO, en su orden (sin «Chase_manual», que es de
     'Puertas', 'Puertas previas'])
 _cab = [c.value for c in _wb['Análisis'][1]]
 eq('🔴 B2 · «Análisis»: las del PRO de HEO (con «Ventas») y, AL FINAL, «Ficha compartida» y las tres de TCG',
-   _cab, e2.columnas_analisis() + [e2.COLUMNA_ORIGEN_ALMACEN, e2.COLUMNA_FICHA_COMPARTIDA, 'Uds. escalón', 'Precio unidad', 'Aviso del tramo', e2.COLUMNA_AMAZON, e2.COLUMNA_TAMBIEN])  # (RS) «Amazon»; (TL) «También lo tiene», la última
+   _cab, e2.orden_columnas_ex(e2.columnas_analisis() + [e2.COLUMNA_ORIGEN_ALMACEN, e2.COLUMNA_FICHA_COMPARTIDA, 'Uds. escalón', 'Precio unidad', 'Aviso del tramo', e2.COLUMNA_AMAZON, e2.COLUMNA_TAMBIEN], 'FBA (sin foto)'))  # (RS) «Amazon»; (TL) «También lo tiene»  # (EX) «Almacén», «FBA» y «También lo tiene» detrás de «Decisión»; sin foto de FBA sembrada
 eq('B2 · «Ventas» en lugar de los dos rank', ('Ventas' in _cab, any('rank' in str(c).lower() for c in _cab)), (True, False))
 _ix = {n: _cab.index(n) for n in _cab}
 _an = list(_wb['Análisis'].iter_rows(min_row=2, values_only=True))
@@ -599,7 +599,7 @@ eq('🔴 B2 · la caja: «caja de 6» en «Coherencia caja», PA 2,00, 6 figuras
 _tabla = list(_wb['Análisis'].tables.values())[0]
 eq('B2 · la tabla de «Análisis» cubre las tres columnas nuevas',
    (_tabla.ref.split(':')[1].rstrip('0123456789'), [c.name for c in _tabla.tableColumns][-5:]),
-   (_wb['Análisis'].cell(row=1, column=len(_cab)).column_letter, ['Uds. escalón', 'Precio unidad', 'Aviso del tramo', e2.COLUMNA_AMAZON, e2.COLUMNA_TAMBIEN]))
+   (_wb['Análisis'].cell(row=1, column=len(_cab)).column_letter, [e2.COLUMNA_FICHA_COMPARTIDA, 'Uds. escalón', 'Precio unidad', 'Aviso del tramo', e2.COLUMNA_AMAZON]))  # (EX) «También lo tiene», detrás de «Decisión»
 _pu = list(_wb['Puertas'].iter_rows(values_only=True))
 _pcab = list(_pu[0])
 _pcaja = [r for r in _pu[1:] if r[0] == E2 + 'C'][0]

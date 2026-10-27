@@ -505,8 +505,12 @@ eq('2 · 🔴 (B4) las seis hojas del viejo delante, en su orden, y las del esc�
    _wb.sheetnames, HOJAS_VIEJO + HOJAS_E2)
 # (AA, 1-oct-2026) …y detrás de la última, «Ficha compartida» (la marca del reparto; vacía en esta escena).
 # (RF4) «Origen almacén» va pegada a la última del viejo («Origen IVA»), antes de «Ficha compartida».
-_COLS = (e2.columnas_analisis(os.path.join(AQUI, e2.RUTA_MOTOR))
-         + [e2.COLUMNA_ORIGEN_ALMACEN, e2.COLUMNA_FICHA_COMPARTIDA, e2.COLUMNA_AMAZON, e2.COLUMNA_TAMBIEN])  # (RS) «Amazon»; (TL) y «También lo tiene», la última
+# (EX, 27-oct-2026) Y el paso final: fuera «En mi BD»; detrás de «Decisión», «Almacén», «FBA (foto de hoy)» y «También lo
+# tiene» (la foto de inventario_fba de la escena es de hoy).
+_FBA = 'FBA (foto %s)' % en_mi_bd.dia_mes(en_mi_bd.hoy_madrid())
+_COLS = e2.orden_columnas_ex(e2.columnas_analisis(os.path.join(AQUI, e2.RUTA_MOTOR))
+                             + [e2.COLUMNA_ORIGEN_ALMACEN, e2.COLUMNA_FICHA_COMPARTIDA, e2.COLUMNA_AMAZON, e2.COLUMNA_TAMBIEN],
+                             _FBA)  # (RS) «Amazon»; (TL) y «También lo tiene»
 _an = list(_wb['Análisis'].iter_rows(values_only=True))
 eq('2 · 🔴 (B4) «Análisis» lleva las cabeceras de COLS del viejo, en su orden, y (AA) «Ficha compartida» al final',
    list(_an[0]), list(_COLS))
@@ -535,8 +539,10 @@ eq('2 · (D) «Canal BB»: el CSV dice «yes» en «Caja de Compra: Es FBA» →
 # (encargo E, 30-sep-2026) CAMBIADO A PROPOSITO: hasta hoy decia 'OK Alm:0 FBA:3', el `productos.stock_fba` de la
 #   ficha, que esta congelado. Ahora el FBA es la foto de inventario_fba sumada por ASIN (10 + 6 + 2 = 18) con su fecha,
 #   con la funcion compartida de en_mi_bd.py; la ficha dice stock_fba 0, como Claptrap.
-eq('2 · (E) «En mi BD»: almacén de la ficha y FBA de la ÚLTIMA foto de inventario_fba, sumado por ASIN y con su fecha',
-   _fil_es[_ia['En mi BD']], 'OK Alm:0 FBA:18 (foto %s)' % HOY_FOTO)
+# (EX, 27-oct-2026) CAMBIADO A PROPOSITO: «En mi BD» decía «OK Alm:0 FBA:18 (foto <hoy>)»; ahora lo mismo va en dos
+#   columnas de número, y la fecha de la foto, una vez, en la cabecera.
+eq('2 · (E)(EX) «Almacén» de la ficha y «FBA» de la ÚLTIMA foto de inventario_fba, sumado por ASIN; la fecha, en la cabecera',
+   (_fil_es[_ia['Almacén']], _fil_es[_ia[_FBA]], 'En mi BD' in _ia), (0, 18, False))
 # (RF4, 23-oct-2026) Esta escena NO tiene la fuente única del RF2 (el doble no tiene mv_coste_preparacion): el cruce sigue,
 #   cada fila guarda y pinta el respaldo del escáner (ni parametro_coste hay), y el aviso del cruce lo dice.
 eq('2 · (RF4) sin la fuente del coste: cada fila guardada lleva el respaldo (0,15) y el cruce lo avisa, sin pararse',
@@ -583,6 +589,7 @@ _REF = HU.con_columna_al_final(_REF, e2.COLUMNA_ORIGEN_ALMACEN, e2.ANCHO_ORIGEN_
 _REF = HU.con_columna_al_final(_REF, e2.COLUMNA_FICHA_COMPARTIDA, e2.ANCHO_FICHA_COMPARTIDA)
 _REF = HU.con_columna_al_final(_REF, e2.COLUMNA_AMAZON, e2.ANCHO_AMAZON)  # (RS, 23-oct-2026)
 _REF = HU.con_columna_al_final(_REF, e2.COLUMNA_TAMBIEN, e2.ANCHO_TAMBIEN)  # (TL, 24-oct-2026)
+_REF = HU.con_paso_ex(_REF, _FBA)  # (EX, 27-oct-2026) el paso final, con las fórmulas y reglas en su columna nueva
 _h2 = HU.huella(base64.b64decode(bd['storage']['escaner2'][_xl[0]]))
 eq('2 · 🔴 (B4) el FORMATO de las seis hojas es el del Excel viejo de verdad (huella_excel_viejo_heo.json, con el desvío D)',
    HU.diferencias(_REF, _h2, solo_hojas=HOJAS_VIEJO, vacias=('Sin_rank',)), [])

@@ -9,6 +9,8 @@ pues como se que es rentable a precio mas caro me voy a tcg y lo compro directam
 
 🔒 SOLO INFORMA Y SOLO LEE: no recalcula la rentabilidad, no cambia la «Decisión» ni ninguna otra columna, no reordena
    filas, y no escribe en ninguna tabla. La hoja la toca `escaner2_motor.poner_columna_tambien`.
+🔑 (EX, 27-oct-2026) Ya no se queda la ultima: el paso final de cada Excel (`escaner2_motor.poner_almacen_fba_tambien`)
+   la pone detras de «Decisión», con «Almacén» y «FBA», y en NEGRITA cada proveedor mas barato que el de la fila.
 
 LA CELDA: «TCG 6,95 € oferta · OcioStock 7,20 € · BEMS 7,40 € (10-oct)». Cada otro proveedor (NUNCA el del propio
 Excel), una vez, con su precio mas barato del EAN; «oferta» si lo esta en ese proveedor; la fecha de su foto solo si

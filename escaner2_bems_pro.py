@@ -351,5 +351,7 @@ def escribir_excel(foto, resultados, apartados, M, info):
     e2.poner_columna_amazon(wb, info.get('restricciones'))
     # (TL, 24-oct-2026) «También lo tiene», detrás de «Amazon»: qué otros proveedores lo tienen hoy y a qué precio
     e2.poner_columna_tambien(wb, info.get('tambien'))
+    # (EX, 27-oct-2026) EL PASO FINAL: «Almacén», «FBA» y «También lo tiene» detrás de «Decisión» (fuera «En mi BD»)
+    e2.poner_almacen_fba_tambien(wb, M)
     wb.save(salida)
     return salida.getvalue()

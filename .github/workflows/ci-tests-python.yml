@@ -553,6 +553,14 @@ jobs:
       - name: 25 septendecies undevicies) test_escaner2_tambien.py
         run: python -u test_escaner2_tambien.py
 
+      # (Encargo EX, 27-oct-2026) «Almacén» y «FBA» en números y «También lo tiene» detrás de «Decisión» en los Excel del
+      # escaner 2 (en_mi_bd.numeros_en_mi_bd y escaner2_motor.poner_almacen_fba_tambien): 17 + 3 en camino → 20; foto
+      # vieja, sin foto, ASIN fuera, chase y sin stock_moloka → vacío, nunca 0; A–Q intactas celda a celda; las fórmulas,
+      # el formato condicional, la tabla y los nombres en su columna nueva; la negrita solo en el proveedor más barato; y
+      # los ocho Excel lo llaman justo antes de guardar (el escáner viejo y los heredados, no).
+      - name: 25 septendecies vicies) test_escaner2_almacen_fba.py
+        run: python -u test_escaner2_almacen_fba.py
+
       - name: 25 duodevicies) test_encadenar_keepa.py
         run: python -u test_encadenar_keepa.py
 
@@ -631,6 +639,7 @@ jobs:
             test_escaner2_base.py
             test_escaner2_coste.py
             test_escaner2_tambien.py
+            test_escaner2_almacen_fba.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).

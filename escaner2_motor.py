@@ -1935,6 +1935,327 @@ def poner_columna_tambien(wb, leer):
     return n
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# 6 ter · (EX, 27-oct-2026) «Almacén», «FBA» y «También lo tiene», DETRAS DE «Decisión»
+# ═══════════════════════════════════════════════════════════════════════════════
+# Fernando, 27-oct-2026: «Esta primera parte perfecta, no cambies nada» (de «Nombre» a «Decisión», A–Q); «Solo poner
+# lo que hay en almacén y lo que hay en FBA», lo de camino «Sumado a FBA», y «También lo tiene» al lado, en negrita el
+# proveedor que lo tiene mas barato. «No quiero cambiar nada de las funciones del escaner»: ni cuentas, ni decision,
+# ni filtros, ni hojas. Por eso es UN PASO FINAL COMUN sobre el libro terminado, justo antes de guardarlo (todos los
+# Excel del escaner 2 lo llaman tras `poner_columna_tambien`); la Celda 9 heredada sigue escribiendo «En mi BD» como
+# siempre, y aqui:
+#   1. «En mi BD» se quita; detras de «Decisión» van «Almacén», «FBA (foto 26-oct)» y «También lo tiene» (movida
+#      desde el final); detras, TODAS las demas columnas en su orden de antes;
+#   2. Almacén = `productos.stock_moloka` de la ficha y FBA = available + fc_transfer + inbound de la ultima foto,
+#      sumado por ASIN (`en_mi_bd.numeros_en_mi_bd`), de la MISMA ficha que la Celda 9 usaba para «En mi BD»
+#      (`M._sup(core)`, con el `core` de cada registro: en OSMA y Zentrada, el EAN de NUESTRA ficha enlazada);
+#   3. en «También lo tiene», en NEGRITA (texto enriquecido, solo ese tramo) cada proveedor con el precio por debajo
+#      del precio de compra por unidad de ESTE proveedor en esa fila, comparados los dos a centimos (lo que se ve).
+# 🔴 Mover columnas en openpyxl NO reescribe referencias: aqui se reescriben, por estructura (el tokenizador de
+#    formulas de openpyxl), las formulas de TODAS las hojas que apuntan a «Análisis», el formato condicional, la
+#    tabla T_Analisis, la validacion de datos, el filtro, los anchos y los nombres definidos. Una formula o una regla
+#    que apuntase a «En mi BD» no se adivina: ColumnaBorrada.
+COLUMNA_EN_MI_BD = 'En mi BD'
+COLUMNA_DECISION = 'Decisión'
+COLUMNA_ALMACEN = 'Almacén'
+ANCHO_ALMACEN = 10
+ANCHO_FBA = 24
+FORMATO_UNIDADES = '0'
+ATRIBUTO_FILAS_EX = '_escaner2_filas_ex'
+SEPARADOR_TAMBIEN = ' · '
+# El precio de cada tramo de «También lo tiene», tal como lo escribe escaner2_tambien.texto_tambien
+# («Nombre 6,95 €[ caja de N][ oferta][ (dia)]»): el primer importe con dos decimales y « €» detras del nombre.
+_RE_PRECIO_TAMBIEN = re.compile(r'^\S.*? (\d+),(\d{2}) €(?: |$)')
+
+
+class ColumnaBorrada(ValueError):
+    """Una formula, una regla o un rango del libro apunta a una columna que el paso final quita («En mi BD»)."""
+
+
+def filas_de_registros(registros):
+    """{(EAN, ASIN) tal como van en «Análisis»: {'core', 'pa'}} de los registros de la Celda 9. Si dos registros con la
+    misma llave traen otra ficha (otro `core`), la llave vale None: esas filas se quedan sin Almacén ni FBA."""
+    salida = {}
+    for x in registros or []:
+        k = (str(x.get('ean') if x.get('ean') is not None else ''), str(x.get('asin') or ''))
+        v = {'core': x.get('core'), 'pa': x.get('_pa_efectivo')}
+        if k in salida and (salida[k] is None or salida[k]['core'] != v['core']):
+            salida[k] = None
+        else:
+            salida.setdefault(k, v)
+    return salida
+
+
+def precio_de_parte_tambien(parte):
+    """El precio (Decimal) de un tramo de «También lo tiene», o None si no lo lleva."""
+    from decimal import Decimal
+    m = _RE_PRECIO_TAMBIEN.match(parte or '')
+    return Decimal('%s.%s' % (m.group(1), m.group(2))) if m else None
+
+
+def _centimos(x):
+    from decimal import Decimal, ROUND_HALF_UP
+    return Decimal(str(x)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
+def tambien_en_negrita(texto, precio_propio):
+    """El texto de «También lo tiene» con en negrita los tramos de precio MENOR que `precio_propio` (a centimos).
+    Devuelve el mismo texto (str) si no hay ninguno, o un CellRichText con los tramos en negrita."""
+    if not isinstance(texto, str) or not texto or not isinstance(precio_propio, (int, float)) or precio_propio <= 0:
+        return texto
+    from openpyxl.cell.rich_text import CellRichText, TextBlock
+    from openpyxl.cell.text import InlineFont
+    tope = _centimos(precio_propio)
+    partes = texto.split(SEPARADOR_TAMBIEN)
+    negrita = [(precio_de_parte_tambien(p) is not None and precio_de_parte_tambien(p) < tope) for p in partes]
+    if not any(negrita):
+        return texto
+    trozos = []
+    for i, (p, b) in enumerate(zip(partes, negrita)):
+        sep = SEPARADOR_TAMBIEN if i else ''
+        if b:
+            if sep:
+                trozos.append(sep)
+            trozos.append(TextBlock(InlineFont(rFont='Calibri', sz=11, family=2, b=True), p))
+        else:
+            trozos.append(sep + p)
+    # Los trozos sin negrita seguidos se juntan (un solo tramo de texto, como el de hoy).
+    juntos = []
+    for t in trozos:
+        if isinstance(t, str) and juntos and isinstance(juntos[-1], str):
+            juntos[-1] += t
+        else:
+            juntos.append(t)
+    return CellRichText(*juntos)
+
+
+def _nombre_hoja_formula(nombre):
+    return nombre[1:-1].replace("''", "'") if nombre.startswith("'") else nombre
+
+
+_RE_REF_CELDAS = re.compile(r'^(\$?)([A-Z]{1,3})(\$?)(\d*)$')
+
+
+def _traducir_ref(ref, col_nueva):
+    """'H2', '$Q:$Q', 'A2:AB9' → la misma referencia con las columnas en su sitio nuevo; None si no es de celdas
+    (un nombre definido, una referencia de tabla…). Un rango sigue siendo un rango SEGUIDO."""
+    from openpyxl.utils import column_index_from_string, get_column_letter
+    trozos = ref.split(':')
+    if len(trozos) > 2:
+        return None
+    ms = [_RE_REF_CELDAS.match(t) for t in trozos]
+    if not all(ms):
+        return None
+    if len(trozos) == 1 and not ms[0].group(4):
+        return None      # 'IVA' a secas es un nombre, no una columna
+    cols = [column_index_from_string(m.group(2)) for m in ms]
+    nuevas = [col_nueva(c) for c in cols]
+    if len(cols) == 2:
+        nuevas = list(_rango_nuevo(cols[0], cols[1], col_nueva))
+    return ':'.join('%s%s%s%s' % (m.group(1), get_column_letter(n), m.group(3), m.group(4)) for m, n in zip(ms, nuevas))
+
+
+def _rango_nuevo(c1, c2, col_nueva):
+    """(primera, ultima) columnas nuevas de un rango seguido de columnas viejas: el rango sigue seguido y abarca todo lo
+    que ahora cae entre sus extremos (las columnas que entran en medio, como las tres de detras de «Decisión»)."""
+    nuevas = [col_nueva(c, borrada=None) for c in range(min(c1, c2), max(c1, c2) + 1)]
+    nuevas = [n for n in nuevas if n is not None]
+    if not nuevas:
+        raise ColumnaBorrada('el rango de columnas %d:%d solo abarca columnas que se quitan' % (c1, c2))
+    return min(nuevas), max(nuevas)
+
+
+def _traducir_formula(formula, en_analisis, hoja, col_nueva):
+    """La formula con cada referencia a la hoja `hoja` vuelta a apuntar a su columna nueva. `en_analisis`: la formula
+    vive en esa hoja (sus referencias sin hoja son suyas)."""
+    from openpyxl.formula.tokenizer import Tokenizer, Token
+    if not isinstance(formula, str) or not formula.startswith('='):
+        return formula
+    tok = Tokenizer(formula)
+    cambio = False
+    for t in tok.items:
+        if t.type != Token.OPERAND or t.subtype != Token.RANGE:
+            continue
+        valor = t.value
+        if '!' in valor:
+            prefijo, ref = valor.rsplit('!', 1)
+            if _nombre_hoja_formula(prefijo) != hoja:
+                continue
+            prefijo += '!'
+        elif en_analisis:
+            prefijo, ref = '', valor
+        else:
+            continue
+        nueva = _traducir_ref(ref, col_nueva)
+        if nueva is not None and nueva != ref:
+            t.value = prefijo + nueva
+            cambio = True
+    return '=' + ''.join(t.value for t in tok.items) if cambio else formula
+
+
+def _traducir_sqref(sqref, col_nueva):
+    """Un MultiCellRange («A2:AB9 Q2:Q9») con cada rango en sus columnas nuevas (seguido, como `_rango_nuevo`)."""
+    from openpyxl.utils import get_column_letter
+    salida = []
+    for r in sqref.ranges:
+        c1, c2 = _rango_nuevo(r.min_col, r.max_col, col_nueva)
+        salida.append('%s%d:%s%d' % (get_column_letter(c1), r.min_row, get_column_letter(c2), r.max_row))
+    return ' '.join(salida)
+
+
+def reordenar_columnas(wb, hoja, orden):
+    """Pone las columnas de la hoja `hoja` en el `orden` dado: una lista con, para cada columna nueva (1, 2, …), la
+    columna vieja que va ahi o None (columna nueva, vacia). Las viejas que no estan en `orden` se QUITAN. Mueve las
+    celdas (valor, estilo, enlace) y reescribe lo que apunta a ellas en todo el libro. Puro sobre el libro."""
+    import copy as _copy
+    from openpyxl.formatting.formatting import ConditionalFormattingList
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.table import TableColumn
+    ws = wb[hoja]
+    n_viejas = ws.max_column
+    cab_vieja = {c: ws.cell(row=1, column=c).value for c in range(1, n_viejas + 1)}
+    destino = {v: i for i, v in enumerate(orden, 1) if v is not None}
+    if len(destino) != len([v for v in orden if v is not None]):
+        raise ValueError('una columna vieja aparece dos veces en el orden')
+
+    def col_nueva(c, borrada='lanza'):
+        if c > n_viejas:      # mas alla de la ultima columna: corre lo mismo que la ultima
+            return len(orden) + (c - n_viejas)
+        if c not in destino:
+            if borrada == 'lanza':
+                raise ColumnaBorrada('algo apunta a la columna %s de «%s» (%s), que se quita'
+                                     % (get_column_letter(c), hoja, cab_vieja.get(c)))
+            return borrada
+        return destino[c]
+
+    if ws.merged_cells.ranges:
+        raise ValueError('«%s» tiene celdas combinadas: no se reordena a ciegas' % hoja)
+    # 1 · Las celdas: fuera las de las columnas que se quitan; las demas, a su columna nueva.
+    celdas = {}
+    for (r, c), celda in list(ws._cells.items()):
+        del ws._cells[(r, c)]
+        if c in destino or c > n_viejas:
+            celdas[(r, col_nueva(c))] = celda
+    for (r, c), celda in celdas.items():
+        celda.column = c
+        ws._cells[(r, c)] = celda
+        if celda.hyperlink is not None:
+            celda.hyperlink.ref = celda.coordinate
+    # 2 · Los anchos.
+    dims = {}
+    for letra, d in list(ws.column_dimensions.items()):
+        from openpyxl.utils import column_index_from_string
+        c = column_index_from_string(letra)
+        del ws.column_dimensions[letra]
+        n = col_nueva(c, borrada=None)
+        if n is not None:
+            d = _copy.copy(d)
+            d.index = get_column_letter(n)
+            d.min = d.max = n
+            dims[d.index] = d
+    for letra, d in dims.items():
+        ws.column_dimensions[letra] = d
+    # 3 · Las formulas de TODO el libro que apuntan a esta hoja.
+    for w in wb.worksheets:
+        for fila in w.iter_rows():
+            for celda in fila:
+                if celda.data_type == 'f':
+                    celda.value = _traducir_formula(celda.value, w is ws, hoja, col_nueva)
+    # 4 · El formato condicional (rangos y formulas) y la validacion de datos.
+    viejo = ws.conditional_formatting
+    nuevo = ConditionalFormattingList()
+    for cf, reglas in viejo._cf_rules.items():
+        rango = _traducir_sqref(cf.sqref, col_nueva)
+        for regla in reglas:
+            regla.formula = [_traducir_formula('=' + f, True, hoja, col_nueva)[1:] for f in (regla.formula or [])]
+            nuevo.add(rango, regla)
+    nuevo.max_priority = viejo.max_priority
+    ws.conditional_formatting = nuevo
+    for dv in ws.data_validations.dataValidation:
+        from openpyxl.worksheet.cell_range import MultiCellRange
+        dv.sqref = MultiCellRange(_traducir_sqref(dv.sqref, col_nueva))
+    if ws.auto_filter.ref:
+        ws.auto_filter.ref = _traducir_ref(ws.auto_filter.ref, col_nueva)
+    # 5 · Las tablas: su rango y sus columnas, con los nombres de la cabecera nueva.
+    for tabla in ws.tables.values():
+        tabla.ref = _traducir_ref(tabla.ref, col_nueva)
+        from openpyxl.worksheet.cell_range import CellRange
+        cr = CellRange(tabla.ref)
+        if tabla.tableColumns:
+            tabla.tableColumns = [TableColumn(id=i, name=str(ws.cell(row=cr.min_row, column=c).value))
+                                  for i, c in enumerate(range(cr.min_col, cr.max_col + 1), 1)]
+        if tabla.autoFilter is not None:
+            tabla.autoFilter.ref = tabla.ref
+    # 6 · Los nombres definidos (del libro y de cada hoja) que apuntan a esta hoja.
+    for dn in list(wb.defined_names.values()) + [d for w in wb.worksheets for d in w.defined_names.values()]:
+        if dn.attr_text:
+            dn.attr_text = _traducir_formula('=' + dn.attr_text, False, hoja, col_nueva)[1:]
+    return ws
+
+
+def orden_columnas_ex(cabecera, titulo_fba):
+    """La cabecera de «Análisis» tras el paso final, a partir de la de antes: de la primera a «Decisión» igual,
+    «Almacén», `titulo_fba` y «También lo tiene» (si estaba), y las demas en su orden, sin «En mi BD». Pura."""
+    cab = list(cabecera)
+    i = cab.index(COLUMNA_DECISION) + 1
+    tl = [COLUMNA_TAMBIEN] if COLUMNA_TAMBIEN in cab else []
+    return cab[:i] + [COLUMNA_ALMACEN, titulo_fba] + tl + [c for c in cab[i:] if c not in (COLUMNA_EN_MI_BD,
+                                                                                            COLUMNA_TAMBIEN)]
+
+
+def poner_almacen_fba_tambien(wb, M, precio_propio=None):
+    """EL PASO FINAL de todos los Excel del escaner 2 (ver arriba), sobre el libro terminado y antes de guardarlo.
+    `precio_propio`: {(EAN, ASIN): precio de compra por unidad de ESTE proveedor} en la base de «También lo tiene» (OSMA,
+    sin porte; Zentrada, el de una unidad aunque la fila sea un pack); si no se da, el «PA (€)» de cada registro.
+    Devuelve {'almacen': filas con numero, 'fba': filas con numero, 'negrita': filas con algun tramo en negrita}."""
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+    ws = wb['Análisis']
+    filas = getattr(wb, ATRIBUTO_FILAS_EX, None)
+    if filas is None:
+        raise ValueError('el libro no sale de escribir_celda9: no se sabe de que ficha es cada fila')
+    cab = [c.value for c in ws[1]]
+    i_ean, i_asin, i_dec, i_bd = (cab.index(n) + 1 for n in ('EAN', 'ASIN', COLUMNA_DECISION, COLUMNA_EN_MI_BD))
+    i_tl = cab.index(COLUMNA_TAMBIEN) + 1 if COLUMNA_TAMBIEN in cab else None
+    foto = M._ns.get('FOTO_FBA')
+    # Lo de cada fila, ANTES de mover nada (por sus columnas de ahora).
+    valores = {}
+    cuenta = {'almacen': 0, 'fba': 0, 'negrita': 0}
+    for fila in range(2, ws.max_row + 1):
+        k = (str(ws.cell(row=fila, column=i_ean).value if ws.cell(row=fila, column=i_ean).value is not None else ''),
+             str(ws.cell(row=fila, column=i_asin).value or ''))
+        reg = filas.get(k)
+        nums = en_mi_bd.numeros_en_mi_bd(M._sup(reg['core']) if reg and reg.get('core') else None, foto)
+        propio = (precio_propio or {}).get(k) if precio_propio is not None else (reg or {}).get('pa')
+        tl = ws.cell(row=fila, column=i_tl).value if i_tl else None
+        tl_nuevo = tambien_en_negrita(tl, propio)
+        valores[fila] = (nums['almacen'], nums['fba'], tl_nuevo)
+        cuenta['almacen'] += nums['almacen'] is not None
+        cuenta['fba'] += nums['fba'] is not None
+        cuenta['negrita'] += tl_nuevo is not tl
+    orden = [cab.index(n) + 1 if n in cab else None
+             for n in orden_columnas_ex(cab, en_mi_bd.cabecera_fba(foto))]
+    reordenar_columnas(wb, 'Análisis', orden)
+    c_alm, c_fba = i_dec + 1, i_dec + 2
+    for col, titulo, ancho in ((c_alm, COLUMNA_ALMACEN, ANCHO_ALMACEN), (c_fba, en_mi_bd.cabecera_fba(foto), ANCHO_FBA)):
+        ws.cell(row=1, column=col, value=titulo).font = Font(bold=True)
+        ws.column_dimensions[get_column_letter(col)].width = ancho
+    for fila, (alm, fba, tl) in valores.items():
+        for col, v in ((c_alm, alm), (c_fba, fba)):
+            if v is not None:
+                ws.cell(row=fila, column=col, value=v).number_format = FORMATO_UNIDADES
+        if i_tl and tl is not None:
+            ws.cell(row=fila, column=i_dec + 3).value = tl
+    # La tabla, con los nombres de las dos columnas nuevas (reordenar_columnas los leyo de la cabecera aun vacia).
+    from openpyxl.worksheet.cell_range import CellRange
+    from openpyxl.worksheet.table import TableColumn
+    for tabla in ws.tables.values():
+        cr = CellRange(tabla.ref)
+        tabla.tableColumns = [TableColumn(id=i, name=str(ws.cell(row=cr.min_row, column=c).value))
+                              for i, c in enumerate(range(cr.min_col, cr.max_col + 1), 1)]
+    return cuenta
+
+
 def escribir_celda9(datos, M, ruta=RUTA_MOTOR, paises=None):
     """`excel_del_viejo` con estos datos (un dict con las llaves de DATOS_CELDA9), en el espacio de nombres
     del motor (sus constantes, `sup`, `pct_comision_celda`) y con `en_bd_txt` = `M.en_bd_txt` (encargo E: la
@@ -1948,6 +2269,8 @@ def escribir_celda9(datos, M, ruta=RUTA_MOTOR, paises=None):
     ns = sacar_piezas(ruta, ('pct_comision_celda', 'excel_del_viejo'), (), base=base)
     with redirect_stdout(io.StringIO()):     # sus `print` de la hoja no ensucian el log del cruce
         wb = ns['excel_del_viejo'](**{k: datos[k] for k in DATOS_CELDA9})
+    # (EX, 27-oct-2026) De que ficha es cada fila: lo que necesita el paso final (`poner_almacen_fba_tambien`).
+    setattr(wb, ATRIBUTO_FILAS_EX, filas_de_registros(datos['registros']))
     # (RF4) Los registros del cruce (`datos_como_el_viejo`) traen su coste de preparacion; los del viejo, no.
     if any('_almacen' in x for x in datos['registros']):
         poner_almacen_por_fila(wb, datos['registros'])

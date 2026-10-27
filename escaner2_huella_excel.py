@@ -236,6 +236,49 @@ def con_columna_al_final(ref, nombre, ancho, hoja='Análisis'):
     return salida
 
 
+def con_paso_ex(ref, titulo_fba, anchos=(10, 24), formato='0', hoja='Análisis'):
+    """(EX, 27-oct-2026) Una COPIA de la huella `ref` como la deja el paso final del escaner 2
+    (`escaner2_motor.poner_almacen_fba_tambien`): sin «En mi BD» (`sin_columnas`), y detras de «Decisión» «Almacén» y
+    `titulo_fba` (numeros, con `formato` y sus `anchos`) y «También lo tiene» si la habia; las demas en su orden. Cada
+    formula (R1C1 relativo), cada regla de formato condicional (por letra) y cada tabla, vueltas a apuntar a la MISMA
+    columna por nombre en su sitio nuevo; un rango de columnas que abarcaba el sitio de las nuevas, las abarca."""
+    import copy
+    salida = sin_columnas(ref, ['En mi BD'], hoja=hoja)
+    h = next(x for x in salida['hojas'] if x['hoja'] == hoja)
+    viejo = list(h['cabecera'])
+    i = viejo.index('Decisión') + 1
+    tl = ['También lo tiene'] if 'También lo tiene' in viejo else []
+    nueva = viejo[:i] + ['Almacén', titulo_fba] + tl + [c for c in viejo[i:] if c not in tl]
+    pos_v = {c: k for k, c in enumerate(viejo, 1)}
+    pos_n = {c: k for k, c in enumerate(nueva, 1)}
+
+    def formula_r1c1(f, c):
+        return re.sub(r'C\[(-?\d+)\]', lambda m: 'C[%d]' % (pos_n[viejo[pos_v[c] + int(m.group(1)) - 1]] - pos_n[c]), f)
+
+    def formula_letras(f):
+        return re.sub(r'(?<![A-Za-z])([A-Z]{1,3})n(?![A-Za-z])',
+                      lambda m: _letra(pos_n[viejo[_col(m.group(1)) - 1]]) + 'n', f)
+
+    def par_nuevo(par):
+        dentro = [pos_n[c] for c in viejo[pos_v[par[0]] - 1:pos_v[par[1]]]]
+        return [nueva[min(dentro) - 1], nueva[max(dentro) - 1]]
+
+    h['cabecera'] = nueva
+    h['anchos'] = dict(h['anchos'], **{'Almacén': round(float(anchos[0]), 2), titulo_fba: round(float(anchos[1]), 2)})
+    columnas = {c: dict(p, formula=sorted(formula_r1c1(f, c) for f in p['formula'])) for c, p in h['columnas'].items()}
+    for c in ('Almacén', titulo_fba):
+        columnas[c] = {'formato': [formato], 'enlace': False, 'color_letra': [], 'formula': []}
+    h['columnas'] = columnas
+    for r in h['formato_condicional']:
+        r['columnas'] = [par_nuevo(p) for p in r['columnas']]
+        r['formula'] = [formula_letras(f) for f in r['formula']]
+    h['formato_condicional'] = sorted(h['formato_condicional'], key=lambda x: (str(x['columnas']), str(x['formula']),
+                                                                             str(x['operador'])))
+    for t in h['tablas']:
+        t['columnas'] = [par_nuevo(p) for p in copy.deepcopy(t['columnas'])]
+    return salida
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # (B7, 25-sep-2026) CELDA A CELDA: dos libros IDENTICOS, no solo con la misma huella
 # ═══════════════════════════════════════════════════════════════════════════════

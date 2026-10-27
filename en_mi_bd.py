@@ -142,3 +142,49 @@ def texto_en_mi_bd(ficha, foto):
     alm = ficha.get('stock_moloka')
     alm_txt = 'Alm:%d' % int(alm) if alm not in (None, '') else 'Alm: ' + RAYA
     return 'OK %s %s' % (alm_txt, texto_fba(ficha, foto))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# (EX, 27-oct-2026) LOS MISMOS DATOS, EN NUMEROS: las columnas «Almacén» y «FBA» de los Excel del escaner 2
+# ═══════════════════════════════════════════════════════════════════════════════
+# Fernando, 27-oct-2026: «Solo poner lo que hay en almacén y lo que hay en FBA»; lo de camino, «Sumado a FBA». Las
+# dos fuentes son las de `texto_en_mi_bd` (que NO cambia: la usan el escaner viejo y el Pro); aqui salen en numero y
+# la fecha de la foto va UNA vez, en la cabecera de la columna (`cabecera_fba`).
+# 🔒 AUSENCIA DE DATO NO ES CERO, igual que arriba: sin ficha, almacen nulo, sin ASIN, chase, ASIN fuera de la foto,
+#    foto vieja o sin foto → None (celda vacia). Nunca un 0 que no se ha medido.
+MESES = ('ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic')
+
+
+def dia_mes(d):
+    """date(2026, 10, 26) → «26-oct»."""
+    return '%d-%s' % (d.day, MESES[d.month - 1])
+
+
+def cabecera_fba(foto):
+    """La cabecera de la columna «FBA»: «FBA (foto 26-oct)», «FBA (foto vieja del 23-oct)» o «FBA (sin foto)»."""
+    if not foto or foto.get('fecha') is None:
+        return 'FBA (sin foto)'
+    if foto['vieja']:
+        return 'FBA (foto vieja del %s)' % dia_mes(foto['fecha'])
+    return 'FBA (foto %s)' % dia_mes(foto['fecha'])
+
+
+def unidades_fba(ficha, foto):
+    """available + fc_transfer + inbound_shipped + inbound_receiving de la foto, sumado por el ASIN de la ficha; None
+    si no hay dato (sin ASIN, chase, foto vieja o sin foto, ASIN que no esta en la foto)."""
+    asin = (ficha.get('asin') or '').strip()
+    if not asin or ficha.get('es_chase'):
+        return None
+    if not foto or foto.get('fecha') is None or foto['vieja']:
+        return None
+    a = foto['por_asin'].get(asin)
+    return None if a is None else a['disponible'] + a['en_camino']
+
+
+def numeros_en_mi_bd(ficha, foto):
+    """{'almacen', 'fba'} de una ficha propia, en numero (None = no hay dato): `productos.stock_moloka` y
+    `unidades_fba`. Sin ficha, los dos None."""
+    if not ficha:
+        return {'almacen': None, 'fba': None}
+    alm = ficha.get('stock_moloka')
+    return {'almacen': int(alm) if alm not in (None, '') else None, 'fba': unidades_fba(ficha, foto)}
