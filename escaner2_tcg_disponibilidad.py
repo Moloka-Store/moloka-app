@@ -57,7 +57,9 @@ QUE HACE, EN ORDEN:
   🆕 (Encargo DI, 2-nov-2026) UNA FICHA CON UN NUMERO IMPOSIBLE en su tabla de tramos (escaner2_tcg_tramos.
      FichaDatoImposible: la forma es la medida, pero un descuento del 100 % o mas, un precio base 0, 0 uds) NO para: se
      apunta 'no_entendida' (ningun cociente nuevo; se reintenta a las HORAS_REINTENTO, como hoy), se cuenta («dato imposible N»
-     en el registro, solo el numero) y se sigue. MAS de DATO_IMPOSIBLE_MAX en la misma corrida: para, como arriba.
+     en el registro, solo el numero, con las leidas) y se sigue. (Encargo DT, 2-nov-2026) Para, como arriba, solo si en la
+     misma corrida pasan A LA VEZ de DATO_IMPOSIBLE_MIN y de DATO_IMPOSIBLE_PROPORCION de las fichas leidas hasta ese momento
+     (leidas: las que han devuelto tabla, buena o con dato imposible; no cuentan «sin ficha» ni «otro_ean»).
 
 🔴 REPO PUBLICO: SOLO estados y recuentos al registro. NUNCA la respuesta de la web, una URL, el usuario, la clave,
    precios, nombres, EAN ni el texto de un error (al registro, su tipo; el detalle, limpio, a `disp_pasada.motivo`). Lo
@@ -94,9 +96,13 @@ CATEGORIA_FUNKO = 'distribucion-merchandising'
 FICHAS_FUNKO_MAX = 300
 WEB_MINIMO = 0.5
 SIN_FICHA_SEGUIDAS = 5  # tantas fichas seguidas sin producto (404 o a otra pagina) ya no son casualidad: se para
-# (Encargo DI, 2-nov-2026) Una ficha con un numero imposible en su tabla de tramos (una errata de TCG) se apunta y se sigue;
-# MAS de tantas en la misma corrida (las de Funko antes de la foto y las del lector, juntas) ya no son erratas sueltas: se para.
-DATO_IMPOSIBLE_MAX = 5
+# (Encargo DI, 2-nov-2026) Una ficha con un numero imposible en su tabla de tramos (una errata de TCG) se apunta y se sigue.
+# (Encargo DT, 2-nov-2026: Fernando, «veo excesivo perder todo un escaneo por esto») Se para solo si en la misma corrida (las
+# de Funko antes de la foto y las del lector, juntas) pasan A LA VEZ de DATO_IMPOSIBLE_MIN fichas y de DATO_IMPOSIBLE_PROPORCION
+# de las leidas hasta ese momento: una errata de TCG en unas cuantas familias no para; un cambio que estropea los numeros de
+# todo el catalogo, si.
+DATO_IMPOSIBLE_MIN = 20
+DATO_IMPOSIBLE_PROPORCION = 0.20
 HORA_LISTADO = 9  # Madrid, de lunes a viernes: la pasada de las 09:00
 _RE_HEX = re.compile(r'[0-9a-fA-F]{24,}')
 _RE_URL = re.compile(r'https?://\S+')
@@ -190,8 +196,9 @@ def _minimos(c, minimo, min_disp):
 
 
 def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX):
-    """La pasada de la foto. Devuelve (codigo, estado, catalogo, guardados, pid, imposibles): `estado` 'aplicada',
-    'al_dia' u otro; `imposibles`, las fichas de Funko con dato imposible (encargo DI: cuentan para el tope del lector);
+    """La pasada de la foto. Devuelve (codigo, estado, catalogo, guardados, pid, previos): `estado` 'aplicada',
+    'al_dia' u otro; `previos`, (fichas de Funko con dato imposible, fichas de Funko leidas) (encargos DI y DT: cuentan
+    para el tope del lector);
     `catalogo` y `guardados` para el lector de tramos (None si la pasada no ha llegado a entender el Excel)."""
     import escaner2_tcg as tcg
     import escaner2_tcg_tramos as tr
@@ -202,7 +209,7 @@ def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX
     print(f">>> Pasada de disponibilidad de TCG {pid} abierta (leyendo).", flush=True)
     rec = None
     catalogo = guardados = None
-    imposibles = 0
+    previos = (0, 0)
     try:
         par = (sb.table('disp_parametros').select('crudo_minimo, disponibles_minimo').eq('proveedor', PROVEEDOR)
                  .execute().data or [{}])
@@ -239,8 +246,8 @@ def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX
               f"{rf['total_web']}{', entero' if vista['completo'] else ', A MEDIAS: no se quita nada'}), {rf['desajustes']} ya "
               f"no cuadran · fichas antes de la foto: pendientes {rf['pendientes']}, pedidas {rf['pedidas']} (máximo "
               f"{fichas_funko}), leídas bien {rf['ok']}, sin ficha {rf['sin_ficha']}, de otro EAN {rf['otro_ean']}, sin precio "
-              f"en el Excel {rf['sin_precio_excel']}, dato imposible {rf['dato_imposible']}", flush=True)
-        imposibles = rf['dato_imposible']
+              f"en el Excel {rf['sin_precio_excel']}, dato imposible {rf['dato_imposible']} de {rf['leidas']} leídas", flush=True)
+        previos = (rf['dato_imposible'], rf['leidas'])
         guardados = leer_tramos(sb)
         try:
             lectura, c, catalogo_leido = tcg.convertir(contenido, cocientes(guardados), ahora, web=vista)
@@ -278,12 +285,12 @@ def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX
         _cerrar(sb, pid, ex.estado, ex.motivo, rec)
         if isinstance(ex, AlDia):
             print(f"TCG_AL_DIA: el contenido es el de la pasada aplicada {ex.pasada_aplicada}; nada nuevo.", flush=True)
-            return 0, 'al_dia', catalogo, guardados, pid, imposibles
+            return 0, 'al_dia', catalogo, guardados, pid, previos
         print(f"TCG_NO_APLICADA: pasada {pid} {ex.estado}: {ex.motivo}", flush=True)
         if ex.bloqueo:
             avisar(f'⚠️ Escáner 2 · TCG: la pasada de la foto se ha parado porque la web de TCG no deja ({ex.motivo}). '
                    f'Nada inventado; el escáner viejo sigue como siempre.')
-        return 1, ex.estado, None, None, pid, imposibles
+        return 1, ex.estado, None, None, pid, previos
     except Exception as ex:
         # 🔴 REPO PÚBLICO: el texto de un error puede llevar una URL, la respuesta de la web o una fila de la base.
         motivo_log = f'error inesperado ({type(ex).__name__}); el detalle queda en disp_pasada.motivo'
@@ -292,7 +299,7 @@ def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX
         except Exception as ex2:
             motivo_log += f'; tampoco se ha podido cerrar la pasada ({type(ex2).__name__})'
         print(f"TCG_NO_APLICADA: pasada {pid} fallida: {motivo_log}", flush=True)
-        return 1, 'fallida', None, None, pid, imposibles
+        return 1, 'fallida', None, None, pid, previos
 
     fila = sb.table('disp_pasada').select('*').eq('id', pid).execute().data[0]
     print(">>> EN LA BASE: " + ' · '.join(f'{k} {fila.get(k)}' for k in (
@@ -301,7 +308,7 @@ def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX
         'n_ausentes', 'n_en_catalogo', 'n_disponibles_estado')), flush=True)
     if fila.get('estado') != 'aplicada':
         print(f"TCG_NO_APLICADA: pasada {pid} {fila.get('estado')}: {fila.get('motivo')}", flush=True)
-        return 1, fila.get('estado'), None, None, pid, imposibles
+        return 1, fila.get('estado'), None, None, pid, previos
     print(f">>> PASADA APLICADA: {fila.get('n_en_catalogo')} productos de TCG en el catálogo, "
           f"{fila.get('n_disponibles_estado')} disponibles.", flush=True)
     codigo = 0
@@ -309,7 +316,7 @@ def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX
         print(f"CAIDA_ACEPTADA: la pasada {pid} se ha aplicado como NUEVA REFERENCIA tras varios rechazos estables por "
               f"el freno del 90 %: hay que mirar si TCG ha caído de verdad.", flush=True)
         codigo = 1
-    return codigo, 'aplicada', catalogo, guardados, pid, imposibles
+    return codigo, 'aplicada', catalogo, guardados, pid, previos
 
 
 def novedades(sb, pid, run_id):
@@ -362,8 +369,10 @@ def _leer_fichas(sb, web, cola, run, r, reloj):
     LANZA al primer bloqueo (Bloqueo, tambien con SIN_FICHA_SEGUIDAS sin producto) o ficha que no se entienda
     (FichaNoEntendida): lo leido ya esta guardado. NUNCA deja un cociente que no salga de una ficha leida entera.
     (Encargo DI) Una ficha con un numero imposible (FichaDatoImposible) se apunta 'no_entendida', SIN cociente nuevo, cuenta en
-    r['dato_imposible'] y se sigue; si con las de antes en la corrida (r['dato_imposible_previos']) pasan de
-    DATO_IMPOSIBLE_MAX, LANZA FichaNoEntendida: se para como con una forma que no se entiende."""
+    r['dato_imposible'] y se sigue. (Encargo DT) r['leidas'] cuenta las que han devuelto tabla (ok, sin precio en el Excel o
+    dato imposible; no «sin ficha» ni «otro_ean»); si con las de antes en la corrida (r['dato_imposible_previos'],
+    r['leidas_previas']) las de dato imposible pasan A LA VEZ de DATO_IMPOSIBLE_MIN y de DATO_IMPOSIBLE_PROPORCION de las
+    leidas, LANZA FichaNoEntendida: se para como con una forma que no se entiende."""
     import escaner2_tcg_tramos as tr
     from escaner2_tcg_web import Bloqueo
 
@@ -381,10 +390,14 @@ def _leer_fichas(sb, web, cola, run, r, reloj):
         except tr.FichaDatoImposible:
             _guardar(sb, dict(base, intento_resultado='no_entendida'))
             r['dato_imposible'] += 1
+            r['leidas'] += 1
             seguidas = 0  # es la ficha de un producto: corta la racha de «sin ficha»
-            if r['dato_imposible'] + r.get('dato_imposible_previos', 0) > DATO_IMPOSIBLE_MAX:
-                raise tr.FichaNoEntendida(f'más de {DATO_IMPOSIBLE_MAX} fichas con un número imposible en su tabla de '
-                                          f'tramos en esta corrida: ya no es una errata suelta') from None
+            malas = r['dato_imposible'] + r.get('dato_imposible_previos', 0)
+            leidas = r['leidas'] + r.get('leidas_previas', 0)
+            if malas > DATO_IMPOSIBLE_MIN and malas > DATO_IMPOSIBLE_PROPORCION * leidas:
+                raise tr.FichaNoEntendida(f'{malas} fichas con un número imposible en su tabla de tramos de {leidas} leídas '
+                                          f'en esta corrida, más de {DATO_IMPOSIBLE_MIN} y más del '
+                                          f'{round(DATO_IMPOSIBLE_PROPORCION * 100)} %: ya no es una errata suelta') from None
             continue
         except tr.FichaNoEsProducto:
             ficha = None
@@ -401,6 +414,7 @@ def _leer_fichas(sb, web, cola, run, r, reloj):
             r['otro_ean'] += 1
             continue
         t = tr.tramo_de_ficha(ficha, e['precio_excel'])
+        r['leidas'] += 1
         if t['cociente'] is None:
             _guardar(sb, dict(base, intento_resultado='sin_precio_excel'))
             r['sin_precio_excel'] += 1
@@ -424,7 +438,7 @@ def funko_antes_de_la_foto(sb, web, catalogo, guardados, run_id, fichas_max, rel
     import escaner2_tcg_tramos as tr
 
     r = {'paginas': 0, 'tarjetas': 0, 'total_web': None, 'desajustes': 0, 'pendientes': 0, 'pedidas': 0, 'ok': 0,
-         'con_tramo': 0, 'sin_ficha': 0, 'otro_ean': 0, 'sin_precio_excel': 0, 'dato_imposible': 0}
+         'con_tramo': 0, 'sin_ficha': 0, 'otro_ean': 0, 'sin_precio_excel': 0, 'dato_imposible': 0, 'leidas': 0}
     run = int(run_id) if run_id.isdigit() else None
     trozos, r['paginas'] = web.listado(CATEGORIA_FUNKO, marca=MARCA_NOVEDADES)
     cards, vistas = [], set()
@@ -454,16 +468,17 @@ def funko_antes_de_la_foto(sb, web, catalogo, guardados, run_id, fichas_max, rel
 
 
 def leer_tramos_web(sb, web, catalogo, guardados, run_id, fichas_max, hacer_listado, reloj=_ahora,
-                    imposibles_previos=0):
+                    imposibles_previos=0, leidas_previas=0):
     """El lector (paso 6). Devuelve un dict de recuentos con 'parada' (None si no ha parado). NUNCA deja un cociente
-    que no salga de una ficha leida entera. `imposibles_previos`: las fichas con dato imposible de la web de Funko de
-    esta misma corrida (cuentan para el tope DATO_IMPOSIBLE_MAX, no para el recuento de este paso)."""
+    que no salga de una ficha leida entera. `imposibles_previos` y `leidas_previas`: las fichas con dato imposible y las
+    leidas de la web de Funko de esta misma corrida (cuentan para el tope, DATO_IMPOSIBLE_MIN y DATO_IMPOSIBLE_PROPORCION,
+    no para los recuentos de este paso)."""
     import escaner2_tcg_tramos as tr
     from escaner2_tcg_web import CATEGORIAS, Bloqueo
 
     r = {'listado_paginas': 0, 'tarjetas': 0, 'desajustes': 0, 'pendientes': 0, 'pedidas': 0, 'ok': 0,
-         'con_tramo': 0, 'sin_ficha': 0, 'otro_ean': 0, 'sin_precio_excel': 0, 'dato_imposible': 0,
-         'dato_imposible_previos': imposibles_previos, 'parada': None, 'segundos': 0}
+         'con_tramo': 0, 'sin_ficha': 0, 'otro_ean': 0, 'sin_precio_excel': 0, 'dato_imposible': 0, 'leidas': 0,
+         'dato_imposible_previos': imposibles_previos, 'leidas_previas': leidas_previas, 'parada': None, 'segundos': 0}
     t0 = time.monotonic()
     run = int(run_id) if run_id.isdigit() else None
     try:
@@ -515,7 +530,7 @@ def principal(argv, env=None, sb=None, sesion=None, dormir=None):
     from escaner2_tcg_web import Web, sesion_de_verdad
     web = Web(sesion if sesion is not None else sesion_de_verdad(), **({'dormir': dormir} if dormir else {}))
     ahora = _ahora()
-    codigo, estado, catalogo, guardados, pid, imposibles = pasada(sb, web, run_id, env['TCG_USER'], env['TCG_PASS'], ahora)
+    codigo, estado, catalogo, guardados, pid, previos = pasada(sb, web, run_id, env['TCG_USER'], env['TCG_PASS'], ahora)
     if estado not in ('aplicada', 'al_dia') or catalogo is None:
         print(">>> TRAMOS: no se leen (la pasada no ha entendido el Excel o la web no deja).", flush=True)
         return codigo or 1
@@ -526,7 +541,7 @@ def principal(argv, env=None, sb=None, sesion=None, dormir=None):
     hacer_listado = toca_listado(listado, ahora.astimezone(ZoneInfo('Europe/Madrid')))
     try:
         r = leer_tramos_web(sb, web, catalogo, guardados, run_id, int(fichas_txt), hacer_listado,
-                            imposibles_previos=imposibles)
+                            imposibles_previos=previos[0], leidas_previas=previos[1])
     except Exception as ex:  # noqa: BLE001 — 🔴 solo el tipo: el texto puede llevar una URL o una fila
         print(f"TCG_TRAMOS_NO_HECHOS: la foto sigue como ha quedado; el lector ha fallado ({type(ex).__name__}).",
               flush=True)
@@ -536,7 +551,7 @@ def principal(argv, env=None, sb=None, sesion=None, dormir=None):
           f"(máximo {fichas_txt}) · leídas bien {r['ok']} (con tramo de más de 1 ud {r['con_tramo']}) · sin ficha "
           f"{r['sin_ficha']} · de otro EAN {r['otro_ean']} · sin precio en el Excel {r['sin_precio_excel']} · "
           f"{r['segundos']} s · peticiones a la web en la corrida {web.peticiones} · dato imposible "
-          f"{r['dato_imposible']}", flush=True)
+          f"{r['dato_imposible']} de {r['leidas']} leídas", flush=True)
     if r['parada']:
         print(f"TCG_TRAMOS_PARADO: {r['parada']}. Lo leído queda guardado; ningún cociente inventado.", flush=True)
         avisar(f"⚠️ Escáner 2 · TCG: el lector de tramos se ha parado ({r['parada']}). Fichas leídas bien en esta "
