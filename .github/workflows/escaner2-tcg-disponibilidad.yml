@@ -1,5 +1,5 @@
 # ============================================================
-# Moloka - Escaner 2 · DISPONIBILIDAD DE TCG, EN SOMBRA, Y SU LECTOR DE TRAMOS (encargo T2, 13-oct-2026)
+# Moloka - Escaner 2 · DISPONIBILIDAD DE TCG Y SU LECTOR DE TRAMOS (encargo T2, 13-oct-2026)
 #
 # Entra en la web de TCG con TCG_USER/TCG_PASS, baja el Excel del catalogo (lo mismo que el director viejo), lo lee con
 # las reglas de escaner2_tcg.py y deja en la base lo que tiene TCG ahora (disp_estado) y lo que ha cambiado
@@ -18,9 +18,10 @@
 #    llegan despues del cartero de la v2, en escaner2-tcg-novedades-cuentas.yml.
 #    🔴 NECESITA 20261014150000_nov_novedades_tcg.sql DE LA V2 aplicada ANTES de fusionar: sin ella, rojo al final.
 #
-# 🔑 EN SOMBRA: TCG no tiene fila en disp_fuente. Reponer, el Trackeador y la lista de precios siguen con la memoria del
-#    escaner viejo (director-tcg.yml, sin tocar). El interruptor es otro encargo, con Fernando delante. Sin Keepa y sin
-#    sondeo_keepa (Fernando, 13-oct).
+# 🔑 YA NO VA EN SOMBRA (encargo T5, 14-oct-2026, con Fernando delante): TCG tiene fila en disp_fuente (fuente 'disp',
+#    desde el 14-oct) y Reponer, el Trackeador y la lista de precios leen TCG de la foto que deja este workflow; el
+#    director viejo de TCG, apagado (reglas_director.activo = false). Una pasada que no se aplica deja la foto anterior.
+#    Sin sondeo_keepa (Fernando, 13-oct).
 #
 # 🔴 NECESITA LA MIGRACION 20261013190000_disp_tcg_en_sombra.sql DE LA V2 (la fila TCG de disp_parametros y la tabla
 #    disp_tramo), que se aplica con Fernando delante ANTES de lanzar esto. Sin ella, rojo y la pasada 'fallida'.
