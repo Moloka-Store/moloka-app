@@ -8,8 +8,8 @@ las ves tú solo — no están aquí a propósito.
 
 ## 0. QUIÉN USA ESTO
 
-**Elena usa esta app a diario para operar un almacén real.** Moloka Store S.L.U. hoy solo vende Amazon
-(FBA Pan-EU en seis mercados: ES/IT/FR/DE/NL/BE); lo demás está pendiente de hacer u optimizar (Fernando, 9-oct-2026). Si rompes la app, se para el almacén.
+**Esta app (v1) está congelada y ya no la abre nadie (Fernando, 20-sep-2026).** Moloka Store S.L.U. vende casi todo por Amazon
+(FBA Pan-EU en seis mercados: ES/IT/FR/DE/NL/BE); Miravia vende poco (su stock lo escribe el cartero desde el 27-oct-2026).
 
 - **`index.html` (v1) está CONGELADO.** Solo bugs críticos. Es un monolito y no se refactoriza.
   Si tu cambio lo toca, párate y pregunta.
