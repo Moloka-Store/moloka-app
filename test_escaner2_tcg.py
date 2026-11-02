@@ -251,6 +251,28 @@ lanza('C17b la URL lleva a una categoría (el producto ya no está ahí): sin fi
       ficha(tabla=TABLA).replace('id="product"', 'id="category"'))
 lanza('C17c una categoría sin sesión: para (la sesión se mira antes)', tr.FichaNoEntendida, tr.leer_ficha,
       ficha(tabla=TABLA, sesion=False).replace('id="product"', 'id="category"'))
+# (Encargo DI, 2-nov-2026) Un número con forma de número pero imposible NO es una forma que no se entiende: otra excepción,
+# que no es FichaNoEntendida (no para la pasada). Lo que no tiene forma de número sigue parando.
+TABLA_DI = [(2, '10.000000', '0.010000'), (6, '10.000000', '1.230000'), (12, '10.000000', '0.020000')]
+lanza('C17d (DI) un tramo con dis="1.230000" (más del 100 %): FichaDatoImposible', tr.FichaDatoImposible, tr.leer_ficha,
+      ficha(tabla=TABLA_DI))
+eq('C17e (DI) …y FichaDatoImposible NO es FichaNoEntendida (ninguna captura de hoy la toma por parada)',
+   issubclass(tr.FichaDatoImposible, tr.FichaNoEntendida), False)
+lanza('C17f (DI) dis="abc": FichaNoEntendida (sigue parando)', tr.FichaNoEntendida, tr.leer_ficha,
+      ficha(tabla=[(2, '10.000000', '0.010000'), (6, '10.000000', 'abc')]))
+lanza('C17g (DI) un dis de 1 justo: imposible', tr.FichaDatoImposible, tr.leer_ficha, ficha(tabla=[(6, '10.000000', '1')]))
+lanza('C17h (DI) un rel de 0: imposible', tr.FichaDatoImposible, tr.leer_ficha, ficha(tabla=[(6, '0.000000', '0.010000')]))
+lanza('C17i (DI) «A partir de 0 uds.»: imposible', tr.FichaDatoImposible, tr.leer_ficha, ficha(tabla=[(0, '10.000000', '0.010000')]))
+lanza('C17j (DI) un dis negativo no tiene forma de número (decimal() no lo lee): sigue parando', tr.FichaNoEntendida,
+      tr.leer_ficha, ficha(tabla=[(6, '10.000000', '-0.010000')]))
+_txt = lanza('C17k (DI) el texto lo escribe el módulo, sin valores de la página', tr.FichaDatoImposible, tr.leer_ficha,
+             ficha(tabla=TABLA_DI))
+eq('C17l (DI) …ni el dis, ni el rel, ni las uds', [x for x in ('1.23', '10.0', '6') if x in (_txt or '')], [])
+lanza('C17m (DI) la forma manda: un dato imposible con otro tipo de descuento sigue parando', tr.FichaNoEntendida,
+      tr.leer_ficha, ficha(tabla=TABLA_DI, tipo='amount'))
+lanza('C17n (DI) …también si la forma rota viene después: un dato imposible y dos precios base distintos sigue parando',
+      tr.FichaNoEntendida, tr.leer_ficha, ficha(tabla=[(2, '10.000000', '1.230000'), (6, '10.000000', '0.010000'),
+                                                       (12, '11.000000', '0.020000')]))
 eq('C18 el EAN de la ficha casa sin ceros delante', tr.ean_casa(['008000000000017'], '8000000000017', '8000000000017', False), True)
 eq('C19 el de otro producto, no', tr.ean_casa(['8000000000024'], '8000000000017', '8000000000017', False), False)
 eq('C20 caja: el GS1 largo de la web casa con la C del Excel (GTIN-14 sin indicador ni control)',

@@ -25,6 +25,11 @@ sobre el precio de antes de la oferta). En cada pasada de la foto, precio de com
    de descuento, columnas que no casan, un numero que no lo es) → FichaNoEntendida, y el programa PARA de leer la web
    (encargo T2: «Al primer bloqueo, captcha, 403/429 o HTML que no se entienda: para»). Un EAN de la ficha que no es
    el del Excel no es HTML roto: ese producto se apunta 'otro_ean' y no se le pone cociente.
+🆕 (Encargo DI, 2-nov-2026) UN NUMERO IMPOSIBLE NO ES UNA FORMA QUE NO SE ENTIENDE: si la tabla tiene la forma medida y
+   rel y dis tienen forma de numero, pero uno es imposible (rel <= 0, dis < 0, dis >= 1, «A partir de 0 uds.») →
+   FichaDatoImposible, que NO es FichaNoEntendida: es una errata de TCG en esa ficha (el 2-nov, un tramo con un
+   descuento de mas del 100 %), y el que lee la apunta y sigue con la siguiente (Fernando: «veo excesivo perder todo un
+   escaneo por esto»).
 
 EL LISTADO FILTRADO (parte T1, 2a y 2d: 16 paginas de 111 tarjetas, el filtro de estado de la propia web): por
 tarjeta, la URL de su ficha, el «desde X» (solo si tiene tramo: el mas barato, REDONDEADO) y el suelto. Sirve para
@@ -57,6 +62,12 @@ VACIOS = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'm
 
 class FichaNoEntendida(ValueError):
     """La ficha no tiene la forma medida: se para de leer. El texto lo escribe este modulo (sin valores de la pagina)."""
+
+
+class FichaDatoImposible(ValueError):
+    """(Encargo DI) La tabla de tramos tiene la forma medida, pero un numero es imposible (rel <= 0, dis fuera de [0, 1),
+    menos de 1 ud). NO hereda de FichaNoEntendida: no para la pasada; el que lee la apunta 'no_entendida' y sigue. El
+    texto lo escribe este modulo (sin valores de la pagina)."""
 
 
 class FichaNoEsProducto(ValueError):
@@ -181,7 +192,8 @@ def norm_ean(texto):
 # ── La ficha ──────────────────────────────────────────────────────────────────────────────
 def leer_ficha(html):
     """{'precio_actual', 'eans', 'tramos': [(uds, rel, dis)]} de una ficha. FichaNoEntendida si falta la sesion o el
-    precio actual, o si la tabla de tramos no tiene la forma medida."""
+    precio actual, o si la tabla de tramos no tiene la forma medida; FichaDatoImposible si la tiene pero un numero de
+    una celda es imposible."""
     raiz = arbol(html)
     cuerpo = raiz.primero('body')
     if cuerpo is None or 'usuariologeado' not in cuerpo.clases():
@@ -206,6 +218,7 @@ def leer_ficha(html):
                 eans.append(sp.texto().strip())
 
     tramos = []
+    imposible = False  # (encargo DI) se dice al final: si la tabla tampoco tiene la forma medida, manda la forma
     tabla = raiz.primero('table', clase='table-product-discounts')
     if tabla is not None:
         filas = [n for n in tabla.buscar('tr')]
@@ -228,11 +241,17 @@ def leer_ficha(html):
                 raise FichaNoEntendida('tabla de tramos: las celdas no casan con las columnas')
             for uds, td in zip(cabecera, celdas):
                 rel, dis = decimal(td.attrs.get('rel')), decimal(td.attrs.get('dis'))
-                if rel is None or dis is None or rel <= 0 or not (0 <= dis < 1) or uds < 1:
+                if rel is None or dis is None:
                     raise FichaNoEntendida('tabla de tramos: una celda sin rel/dis que se entiendan')
+                if rel <= 0 or not (0 <= dis < 1) or uds < 1:
+                    imposible = True
+                    continue
                 tramos.append((uds, rel, dis))
         if len({r for _u, r, _d in tramos}) > 1:
             raise FichaNoEntendida('tabla de tramos con dos precios base distintos')
+        if imposible:
+            raise FichaDatoImposible('tabla de tramos: una celda con un número imposible (precio base, descuento o '
+                                     'unidades)')
     return {'precio_actual': precio, 'eans': eans, 'tramos': tramos}
 
 
