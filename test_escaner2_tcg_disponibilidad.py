@@ -29,8 +29,11 @@ QUE PRUEBA:
       y ROJO; un listado con menos de la mitad de lo que da el Excel no se cree; unas novedades que fallan: ROJO con la
       pasada aplicada; y el registro, limpio.
   (K) 🆕 (encargo DI, 2-nov-2026) UNA FICHA CON UN NÚMERO IMPOSIBLE (un descuento de más del 100 %) NO PARA: se guarda
-      'no_entendida' sin cociente, se cuenta («dato imposible N», solo el número) y se sigue; más de 5 en la misma corrida
-      (las de Funko antes de la foto y las del lector, juntas) para como hoy: ROJO, Telegram; y el registro, limpio.
+      'no_entendida' sin cociente, se cuenta («dato imposible N de M leídas», solo números) y se sigue. (Encargo DT,
+      2-nov-2026) Para como hoy (ROJO, Telegram) solo si en la misma corrida (las de Funko antes de la foto y las del lector,
+      juntas) pasan A LA VEZ de 20 y del 20 % de las leídas hasta ese momento (leídas: las que han devuelto tabla; no «sin
+      ficha» ni «otro_ean»): 6 de 100 no para, 19 de 20 no, 25 de 100 sí, 21 de 200 no; la forma rota sigue parando a la
+      primera; y el registro, limpio.
 """
 import contextlib
 import io
@@ -652,7 +655,8 @@ eq('J19 🔴 el vigía de la marca (algo que se parece a Funko y no lo es): ROJO
 
 # ── (K) (Encargo DI, 2-nov-2026) Una ficha con un número imposible no para la pasada ────────────
 #    Una errata de TCG en una ficha (un descuento de más del 100 % en un tramo) se apunta 'no_entendida', sin cociente
-#    nuevo, se cuenta («dato imposible N», solo el número) y se sigue; más de DATO_IMPOSIBLE_MAX en la corrida: para.
+#    nuevo, se cuenta («dato imposible N de M leídas», solo números) y se sigue; (encargo DT) para solo si en la corrida
+#    pasan a la vez de DATO_IMPOSIBLE_MIN y de DATO_IMPOSIBLE_PROPORCION de las leídas hasta ese momento.
 TABLA_MAL = [(2, '10.000000', '0.010000'), (6, '10.000000', '1.230000'), (12, '10.000000', '0.020000')]
 
 
@@ -678,7 +682,7 @@ def cola_k(claves, malas):
 
 def r_k(**k):
     return dict({'pedidas': 0, 'ok': 0, 'con_tramo': 0, 'sin_ficha': 0, 'otro_ean': 0, 'sin_precio_excel': 0,
-                 'dato_imposible': 0}, **k)
+                 'dato_imposible': 0, 'leidas': 0}, **k)
 
 
 _reloj = lambda: datetime.now(timezone.utc)  # noqa: E731
@@ -697,33 +701,80 @@ eq('K2 (iii) …la del medio, guardada «no_entendida» y sin cociente; las otra
    [(base.tramo(k)['intento_resultado'], base.tramo(k).get('cociente')) for k in KK],
    [('ok', '0.976600000000'), ('no_entendida', None), ('ok', '0.976600000000')])
 
-KS = ['80000000030%d7' % i for i in range(6)]
-base = Base()
-cola, htmls = cola_k(KS + ['8000000003997'], set(KS))
-wk, rk = WebFichas(htmls), r_k()
-try:
-    prog._leer_fichas(base, wk, cola, 777, rk, _reloj)
-    lanzo = None
-except Exception as ex:  # noqa: BLE001
-    lanzo = type(ex).__name__
-eq('K3 (iv) 6 fichas con dato imposible: a la sexta LANZA FichaNoEntendida (para como hoy); ni una ficha más',
-   (lanzo, len(wk.pedidas), rk['dato_imposible'], prog.DATO_IMPOSIBLE_MAX), ('FichaNoEntendida', 6, 6, 5))
-eq('K4 (iv) …y las seis quedan guardadas «no_entendida», sin cociente',
-   [(base.tramo(k)['intento_resultado'], base.tramo(k).get('cociente')) for k in KS], [('no_entendida', None)] * 6)
-base = Base()
-cola, htmls = cola_k(KS[:5], set(KS))
-wk, rk = WebFichas(htmls), r_k()
-prog._leer_fichas(base, wk, cola, 777, rk, _reloj)
-eq('K5 cinco (el tope justo) no paran', (len(wk.pedidas), rk['dato_imposible']), (5, 5))
-base = Base()
-cola, htmls = cola_k(KS[:3], set(KS))
-wk, rk = WebFichas(htmls), r_k(dato_imposible_previos=3)
-try:
-    prog._leer_fichas(base, wk, cola, 777, rk, _reloj)
-    lanzo = None
-except Exception as ex:  # noqa: BLE001
-    lanzo = type(ex).__name__
-eq('K6 el tope es de la corrida: 3 de antes (Funko) + 3 ahora = 6: para', (lanzo, len(wk.pedidas)), ('FichaNoEntendida', 3))
+eq('K1b (DT) …y las 3 cuentan como leídas (las tres han devuelto tabla)', rk['leidas'], 3)
+
+
+# (Encargo DT, 2-nov-2026) El tope pasa de 5 fijo a proporcional: para solo si las de dato imposible de la corrida pasan A LA
+# VEZ de DATO_IMPOSIBLE_MIN (20) y de DATO_IMPOSIBLE_PROPORCION (20 %) de las leídas hasta ese momento, tras cada una.
+def corrida_k(orden, previos=(0, 0)):
+    """_leer_fichas sobre una cola con una letra por ficha, en su orden: b buena, m dato imposible, r forma rota, n sin ficha
+    (404), o de otro EAN, s sin precio en el Excel. Devuelve (lanza, pedidas, r, base, claves, texto de lo que lanza)."""
+    claves = ['800000006%04d' % i for i in range(len(orden))]
+    cola, htmls = [], {}
+    for k, x in zip(claves, orden):
+        url = URL_FICHA % k
+        cola.append({'producto_prov': k, 'url': url, 'ean_core': k, 'es_caja': False,
+                     'precio_excel': None if x == 's' else Decimal('10')})
+        htmls[url] = None if x == 'n' else ficha_html(tabla=TABLA_MAL if x == 'm' else TABLA,
+                                                      tipo='amount' if x == 'r' else 'percentage',
+                                                      eans=('8000000069997',) if x == 'o' else (k,))
+    base, wk = Base(), WebFichas(htmls)
+    rk = r_k(dato_imposible_previos=previos[0], leidas_previas=previos[1])
+    try:
+        prog._leer_fichas(base, wk, cola, 777, rk, _reloj)
+        lanza, texto = None, ''
+    except Exception as ex:  # noqa: BLE001
+        lanza, texto = type(ex).__name__, str(ex)
+    return lanza, len(wk.pedidas), rk, base, claves, texto
+
+
+eq('K3 (DT) las dos constantes con nombre, y el tope fijo ya no está',
+   (prog.DATO_IMPOSIBLE_MIN, prog.DATO_IMPOSIBLE_PROPORCION, hasattr(prog, 'DATO_IMPOSIBLE_MAX')), (20, 0.20, False))
+lanza, ped, rk, base, claves, _t = corrida_k('m' * 6 + 'b' * 94)
+eq('K4 (a) 🔑 el caso real de hoy: 6 con dato imposible entre 100 leídas (las 6, las primeras) NO para; se leen las 100',
+   (lanza, ped, rk['dato_imposible'], rk['leidas'], rk['ok']), (None, 100, 6, 100, 94))
+eq('K4b (a) …y las seis quedan guardadas «no_entendida», sin cociente',
+   [(base.tramo(k)['intento_resultado'], base.tramo(k).get('cociente')) for k in claves[:6]], [('no_entendida', None)] * 6)
+lanza, ped, rk, *_r = corrida_k('m' * 19 + 'b')
+eq('K5 (b) 19 de 20 leídas NO para (no pasa del mínimo de 20, aunque sea el 95 %)', (lanza, ped, rk['dato_imposible']),
+   (None, 20, 19))
+lanza, ped, rk, *_r = corrida_k('m' * 20)
+eq('K5b (b) …20 de 20, el mínimo justo, tampoco («pasar de 20» es más de 20)', (lanza, ped), (None, 20))
+lanza, ped, rk, *_r = corrida_k('m' * 21 + 'b')
+eq('K5c (b) …21 de 21: para a la 21.ª, ni una ficha más', (lanza, ped, rk['dato_imposible']), ('FichaNoEntendida', 21, 21))
+lanza, ped, rk, base, claves, texto = corrida_k('b' * 75 + 'm' * 25)
+eq('K6 (c) 🔑 25 de 100 (las malas, al final): para a la 21.ª (21 de 96 leídas: más de 20 y más del 20 %); ni una más',
+   (lanza, ped, rk['dato_imposible'], rk['leidas']), ('FichaNoEntendida', 96, 21, 96))
+eq('K6b (c) …el motivo lo dice con los números, sin un EAN', ('21 fichas con un número imposible en su tabla de tramos de 96 '
+                                                              'leídas en esta corrida, más de 20 y más del 20 %' in texto,
+                                                              '800000006' in texto), (True, False))
+eq('K6c (c) …y la que para también queda guardada «no_entendida», sin cociente',
+   (base.tramo(claves[95])['intento_resultado'], base.tramo(claves[95]).get('cociente'), base.tramo(claves[96])),
+   ('no_entendida', None, None))
+eq('K6d (c) 25 de 100 para en cualquier orden: al principio (a la 21.ª) o salteadas (una de cada cuatro: a las 84 leídas)',
+   [corrida_k(o)[:2] for o in ('m' * 25 + 'b' * 75, 'bbbm' * 25)], [('FichaNoEntendida', 21), ('FichaNoEntendida', 84)])
+lanza, ped, rk, *_r = corrida_k('b' * 179 + 'm' * 21)
+eq('K7 (d) 🔑 21 de 200 (las malas, al final) NO para: pasa de 20 pero no del 20 % (sería 40)',
+   (lanza, ped, rk['dato_imposible'], rk['leidas']), (None, 200, 21, 200))
+eq('K7b (d) …el orden cuenta, como pide el encargo («de las leídas hasta ese momento»): las mismas 21 al PRINCIPIO de la '
+   'cola paran a la 21.ª (21 de 21)', corrida_k('m' * 21 + 'b' * 179)[:2], ('FichaNoEntendida', 21))
+eq('K7c frontera del 20 %: 21 de 105 (el 20 % justo) no para; 21 de 104, sí',
+   [corrida_k('b' * 84 + 'm' * 21)[:2], corrida_k('b' * 83 + 'm' * 21)[:2]], [(None, 105), ('FichaNoEntendida', 104)])
+lanza, ped, rk, *_r = corrida_k('b' * 60 + 'mno' * 21)
+eq('K7d «sin ficha» y «otro_ean» NO cuentan como leídas: 60 buenas + 21 × (dato imposible, 404, otro EAN) para a la 21.ª '
+   'con 81 leídas (contándolas serían 121 y no pararía)',
+   (lanza, ped, rk['leidas'], rk['sin_ficha'], rk['otro_ean']), ('FichaNoEntendida', 121, 81, 20, 20))
+lanza, ped, rk, *_r = corrida_k('s' * 84 + 'm' * 21)
+eq('K7e «sin precio en el Excel» SÍ cuenta (ha devuelto tabla, y buena): 84 + 21 = 105 leídas, el 20 % justo, no para',
+   (lanza, ped, rk['leidas'], rk['sin_precio_excel']), (None, 105, 105, 84))
+eq('K8 (e) 🔴 la forma rota sigue parando a la primera: sola, tras 3 de dato imposible, o con 19 de 30 de antes en la corrida',
+   [corrida_k(o, p)[:2] for o, p in (('rbbbb', (0, 0)), ('mmmrbb', (0, 0)), ('rbb', (19, 30)))],
+   [('FichaNoEntendida', 1), ('FichaNoEntendida', 4), ('FichaNoEntendida', 1)])
+lanza, ped, rk, base, claves, _t = corrida_k('mmmr')
+eq('K8b (e) …y la rota, guardada «no_entendida», sin cociente', (base.tramo(claves[3])['intento_resultado'],
+                                                                 base.tramo(claves[3]).get('cociente')), ('no_entendida', None))
+eq('K9 el tope es de la corrida: 20 de 50 de antes (Funko) + 1 ahora = 21 de 51: para; 20 de 200 + 1 = 21 de 201: no',
+   [corrida_k('mb', (20, 50))[:2], corrida_k('mb', (20, 200))[:2]], [('FichaNoEntendida', 1), (None, 2)])
 
 # El programa entero: A ok, B con dato imposible, C de su EAN (cola de 3 con FICHAS_MAX=3).
 telegramas.clear()
@@ -733,39 +784,78 @@ fk[EANS['B'].lower()] = ficha_html(tabla=TABLA_MAL, eans=(EANS['B'],))
 fk[EANS['C'].lower()] = ficha_html(tabla=TABLA, eans=(EANS['C'],))
 web = Web(catalogo(), fk)
 codigo, reg = correr(base, web, env={'FICHAS_MAX': '3'})
-eq('K7 (iii) entero: VERDE, sin parada ni Telegram, las 3 pedidas; B «no_entendida» sin cociente; C ok',
+eq('K20 (iii) entero: VERDE, sin parada ni Telegram, las 3 pedidas; B «no_entendida» sin cociente; C ok',
    (codigo, 'TCG_TRAMOS_PARADO' in reg, len(telegramas), len(web.fichas_pedidas()), base.tramo(EANS['B'])['intento_resultado'],
     base.tramo(EANS['B']).get('cociente'), base.tramo(EANS['C'])['intento_resultado']),
    (0, False, 0, 3, 'no_entendida', None, 'ok'))
-eq('K8 (iii) el registro lo cuenta, solo el número, en la línea de TRAMOS (y en la de Funko, 0)',
-   ('· dato imposible 1' in reg, ', dato imposible 0' in reg), (True, True))
-limpio('K9', reg)
+eq('K21 (iii) el registro lo cuenta, solo números, con las leídas: en la línea de TRAMOS 1 de 3 (y en la de Funko, 0 de 0)',
+   ('· dato imposible 1 de 3 leídas' in reg, ', dato imposible 0 de 0 leídas' in reg), (True, True))
+limpio('K22', reg)
 web = Web(catalogo(), fk)
 codigo, reg = correr(base, web)
-eq('K10 la de dato imposible no se reintenta antes de 24 h (como hoy una «no_entendida»)', EANS['B'].lower() in ' '.join(web.fichas_pedidas()), False)
+eq('K23 la de dato imposible no se reintenta antes de 24 h (como hoy una «no_entendida»)', EANS['B'].lower() in ' '.join(web.fichas_pedidas()), False)
 
-# El programa entero, el tope entre las dos lecturas de la corrida: 3 de Funko antes de la foto + 3 del lector = 6.
-KF = {'F%d' % i: '8000000004%03d7' % i for i in range(3)}
-KO = {'O%d' % i: '8000000005%03d7' % i for i in range(3)}
-UK = {k: URL_FICHA % v.lower() for k, v in dict(KF, **KO).items()}
-cat_k = excel([fila(v, marca='Funko' if k.startswith('F') else 'Marca X',
-                    imagen='https://tcgfactory.com/%d-large_default/%s.jpg' % (60 + i, SLUG % v.lower()))
-               for i, (k, v) in enumerate(dict(KF, **KO).items())])
-fk = {v.lower(): ficha_html(tabla=TABLA_MAL, eans=(v,)) for v in dict(KF, **KO).values()}
-telegramas.clear()
-base = Base()
-web = Web(cat_k, fk, funko=''.join(tarjeta(UK[k], '9,90') for k in KF))
-codigo, reg = correr(base, web)
-eq('K11 (iv) entero: 3 de Funko (la foto se aplica) + 3 del lector = 6 en la corrida: para, ROJO y Telegram',
+
+def corrida_entera(funko_buenas, funko_malas, otras_malas=0):
+    """principal() con `funko_buenas` + `funko_malas` fichas de Funko (antes de la foto) y `otras_malas` de otra marca (el
+    lector), todas nuevas. Devuelve (base, web, codigo, registro)."""
+    funko = ['800000007%04d' % i for i in range(funko_buenas + funko_malas)]
+    otras = ['800000008%04d' % i for i in range(otras_malas)]
+    malas = set(funko[funko_buenas:]) | set(otras)
+    cat = excel([fila(v, marca='Funko' if v in funko else 'Marca X',
+                      imagen='https://tcgfactory.com/%d-large_default/%s.jpg' % (100 + i, SLUG % v))
+                 for i, v in enumerate(funko + otras)])
+    fk = {v: ficha_html(tabla=TABLA_MAL if v in malas else TABLA, eans=(v,)) for v in funko + otras}
+    telegramas.clear()
+    base = Base()
+    web = Web(cat, fk, funko=''.join(tarjeta(URL_FICHA % v, '9,90') for v in funko))
+    codigo, reg = correr(base, web)
+    return base, web, codigo, reg
+
+
+PROHIBIDO += ['80000000020', '800000006', '800000007', '800000008', '1.23', '9,90']
+# (a) entero, el caso real de hoy: 6 Funko con dato imposible entre 100 leídas antes de la foto.
+base, web, codigo, reg = corrida_entera(94, 6)
+eq('K24 (a) 🔑 entero, el caso de hoy: 6 de 100 Funko con dato imposible antes de la foto: la foto se APLICA, VERDE, sin '
+   'Telegram, las 100 pedidas',
+   (base.pasadas()[0]['estado'], codigo, len(telegramas), len(web.fichas_pedidas()), 'TCG_NO_APLICADA' in reg),
+   ('aplicada', 0, 0, 100, False))
+eq('K25 (a) …WEB FUNKO lo cuenta, «dato imposible 6 de 100 leídas»; y las 6, «no_entendida» sin cociente',
+   (', dato imposible 6 de 100 leídas' in reg,
+    sorted((t['intento_resultado'], t.get('cociente')) for t in base.t['disp_tramo'] if t['intento_resultado'] != 'ok')),
+   (True, [('no_entendida', None)] * 6))
+limpio('K26 (f)', reg)
+# (c) entero: 25 de 100 Funko con dato imposible antes de la foto, como la corrida de hoy pero con el tope nuevo.
+base, web, codigo, reg = corrida_entera(75, 25)
+eq('K27 (c) 🔑 entero: 25 de 100 Funko con dato imposible antes de la foto: para como hoy (pasada «fallida», la foto como '
+   'estaba, ni lector ni novedades), Telegram y ROJO',
+   (base.pasadas()[0]['estado'], codigo, ('disp_lectura', 'insert') in base.llamadas, 'TRAMOS: no se leen' in reg,
+    [n for n, _p in base.rpcs], len(telegramas)),
+   ('fallida', 1, False, True, [], 1))
+eq('K28 (c) …el registro dice por qué, con los números: 21 de las leídas hasta ese momento, más de 20 y más del 20 %',
+   ('TCG_NO_APLICADA' in reg, 'fichas con un número imposible en su tabla de tramos de' in reg,
+    'más de 20 y más del 20 %: ya no es una errata suelta' in reg, reg.count('21 fichas con un número imposible')),
+   (True, True, True, 1))
+eq('K29 (c) …las de dato imposible leídas, «no_entendida» sin cociente: 21 (la que para también)',
+   sorted((t['intento_resultado'], t.get('cociente')) for t in base.t['disp_tramo'] if t['intento_resultado'] != 'ok'),
+   [('no_entendida', None)] * 21)
+limpio('K30 (f)', reg)
+eq('K31 (f) el Telegram de la parada, sin URLs ni EAN', (len(telegramas), any(p in ''.join(telegramas) for p in PROHIBIDO)),
+   (1, False))
+codigo, reg = correr(base, None, argv=['--rescate'])
+eq('K32 (c) …y el rescate, como hoy: 0 pasadas a «fallida» (la pasada ya se cerró sola)',
+   ('0 pasada(s) de TCG de este run' in reg, [p['estado'] for p in base.pasadas()]), (True, ['fallida']))
+# El tope es de la corrida: 15 de Funko antes de la foto (no paran solas) + 6 del lector = 21 de 21 leídas.
+base, web, codigo, reg = corrida_entera(0, 15, 6)
+eq('K33 entero: 15 de Funko (la foto se aplica) + 6 del lector = 21 de 21 en la corrida: para en el lector, ROJO y Telegram',
    (base.pasadas()[0]['estado'], codigo, 'TCG_TRAMOS_PARADO' in reg, len(web.fichas_pedidas()), len(telegramas)),
-   ('aplicada', 1, True, 6, 1))
-eq('K12 (iv) …WEB FUNKO cuenta sus 3 y TRAMOS las suyas (3, la que para también)',
-   (', dato imposible 3' in reg, '· dato imposible 3' in reg), (True, True))
-eq('K13 (iv) …las seis, «no_entendida» y sin cociente',
-   sorted((t['intento_resultado'], t.get('cociente')) for t in base.t['disp_tramo']), [('no_entendida', None)] * 6)
-PROHIBIDO += ['80000000020', '80000000030', '80000000040', '80000000050', '1.23', '9,90']
-limpio('K14', reg)
-eq('K15 el Telegram de la parada, sin URLs ni EAN', any(p in ''.join(telegramas) for p in PROHIBIDO), False)
+   ('aplicada', 1, True, 21, 1))
+eq('K34 …WEB FUNKO cuenta sus 15 de 15 y TRAMOS las suyas (6 de 6, la que para también)',
+   (', dato imposible 15 de 15 leídas' in reg, '· dato imposible 6 de 6 leídas' in reg), (True, True))
+eq('K35 …las 21, «no_entendida» y sin cociente',
+   sorted((t['intento_resultado'], t.get('cociente')) for t in base.t['disp_tramo']), [('no_entendida', None)] * 21)
+limpio('K36 (f)', reg)
+eq('K37 (f) el Telegram de la parada, sin URLs ni EAN', any(p in ''.join(telegramas) for p in PROHIBIDO), False)
 
 # ── (H) El workflow ──────────────────────────────────────────────────────────────────────
 wf = yaml.safe_load(open(WORKFLOW, encoding='utf-8'))
