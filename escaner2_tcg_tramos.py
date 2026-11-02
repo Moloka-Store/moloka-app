@@ -218,6 +218,7 @@ def leer_ficha(html):
                 eans.append(sp.texto().strip())
 
     tramos = []
+    imposible = False  # (encargo DI) se dice al final: si la tabla tampoco tiene la forma medida, manda la forma
     tabla = raiz.primero('table', clase='table-product-discounts')
     if tabla is not None:
         filas = [n for n in tabla.buscar('tr')]
@@ -243,11 +244,14 @@ def leer_ficha(html):
                 if rel is None or dis is None:
                     raise FichaNoEntendida('tabla de tramos: una celda sin rel/dis que se entiendan')
                 if rel <= 0 or not (0 <= dis < 1) or uds < 1:
-                    raise FichaDatoImposible('tabla de tramos: una celda con un número imposible (precio base, '
-                                             'descuento o unidades)')
+                    imposible = True
+                    continue
                 tramos.append((uds, rel, dis))
         if len({r for _u, r, _d in tramos}) > 1:
             raise FichaNoEntendida('tabla de tramos con dos precios base distintos')
+        if imposible:
+            raise FichaDatoImposible('tabla de tramos: una celda con un número imposible (precio base, descuento o '
+                                     'unidades)')
     return {'precio_actual': precio, 'eans': eans, 'tramos': tramos}
 
 
