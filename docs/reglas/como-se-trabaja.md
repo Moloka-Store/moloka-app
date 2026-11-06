@@ -14,3 +14,13 @@
   Si no lo has verificado ahora mismo, dilo.
 - **Antes de decir "no se puede":** eso es una hipótesis. Agota la búsqueda (documentación oficial,
   la propia herramienta, la web). *"No conozco una manera"* ≠ *"no existe una manera"*.
+
+## Casos reales de «esto no me cuadra» (movido literal desde `CLAUDE.md`, 6-nov-2026, por el candado de tamaño)
+
+- **Cuando Fernando dice "esto no me cuadra", PARA y baja al dato.** Acierta ~95% de las veces.
+  Casos reales: un bug oficial de la API de Amazon (FBA_CORE), un envío perdido de 24 uds, un ASIN
+  borrado con 12 uds dentro. En los cuatro, la explicación cómoda era la equivocada.
+
+## El estado vive en el repo, no en las notas (movido literal desde `CLAUDE.md`, 6-nov-2026, por el candado de tamaño)
+
+- Antes de afirmar el estado de cualquier pieza: **míralo**. Las notas de ayer mienten hoy.

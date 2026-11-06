@@ -18,3 +18,8 @@ es**. La app existe en el repo `moloka-app-v2`, se despliega en Vercel, tiene Au
 `@supabase/ssr`, y su Inventario está en marcha (a 20-oct-2026 la v2 tiene además Pedidos, Entrada de facturas, Envíos y portada; el estado vigente, en Diseno del cerebro) — hasta el punto de que un workflow lo comprueba una vez al día
 en laborables (lo lanza con horas de retraso y sin hora fija (de 2 a 9 h tarde, medido el 15-oct-2026)). Lo que sigue siendo verdad es el orden: la capa de datos
 va primero.
+
+## Orden de mudanza (movido literal desde `CLAUDE.md`, 6-nov-2026, por el candado de tamaño)
+
+Orden de mudanza acordado: Inventario → Inicio → Alertas → Movimientos → Rotación+Rentabilidad →
+*(frontera lectura/escritura)* → Entrada → Facturas → Envío FBA → Motores.

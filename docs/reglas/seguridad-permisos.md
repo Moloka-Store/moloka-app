@@ -41,3 +41,9 @@
   `SECURITY INVOKER`; `SECURITY DEFINER` solo como puerta de escritura, lectura estrecha de una tabla
   cerrada o función de una política, con `search_path = ''`, EXECUTE solo a quien la llama, nunca a
   `anon`, y —si escribe— excluyendo al warmer y fallando cerrado. Detalle: `CLAUDE.md` de `moloka-app-v2`.
+
+## Escritura anónima de la v1 (movido literal desde `CLAUDE.md`, 6-nov-2026, por el candado de tamaño)
+
+- **La v1 tiene escritura anónima abierta** (deuda estructural). **No se toca a mitad de vuelo**:
+  se cierra en la v2 con Auth + RPC. El problema no es la llave `publishable` (es pública por
+  diseño): son las políticas.
