@@ -15,7 +15,7 @@ las ves tú solo — no están aquí a propósito.
   Si tu cambio lo toca, párate y pregunta.
 - **Se fusiona a cualquier hora**; el parte dice si puede perderse un envío a medias (`escalera-de-migraciones.md`).
 - **Fernando no es programador.** Es economista y contable. Explícaselo aterrizado, en lenguaje llano, con analogías
-  contables si ayudan. Él decide qué encargo se lanza; el PR lo audita Cowork y lo fusiona Code.
+  contables si ayudan. Él decide qué encargo se lanza; el PR lo audita Cowork y lo fusiona Code en una sesión NUEVA, con el recuadro autosuficiente de Cowork (PR, rama, SHA probado, diff vacío contra él, mensaje de fusión); después de fusionar no se repiten las pruebas.
 
 ---
 
@@ -31,7 +31,7 @@ las ves tú solo — no están aquí a propósito.
 - **"ASIN→EAN es 1:1" es la regla DE MOLOKA, no un hecho de Amazon.** Keepa da varios EAN
   a algunos ASIN. Siempre ASIN→EAN, nunca EAN→ASIN (hasta el 19-oct-2026).
 - **Ningún informe del Seller trae EAN.** El puente EAN↔ASIN es responsabilidad de Moloka.
-- **Fuentes duras escriben identidad; las blandas nunca.** Factura → EAN. All Listings → solo el SKU vacío.
+- **Fuentes duras escriben identidad; las blandas nunca.** Factura → EAN. All Listings → solo el SKU vacío, y nunca igual al ASIN ni al EAN de la ficha (3-nov-2026, PR #864 de la v2): la base lo rechaza y el cargador de anuncios lo manda a «conflictos».
   **Keepa NO escribe identidad**, solo huecos (hasta el 19-oct-2026), y **NADA en `es_chase`**.
 
 ### 1.2 El país es una FILA, nunca un sufijo de columna
@@ -66,9 +66,6 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
 - **Greps parciales no son lectura.** Si te preguntan "¿seguro que el código hace X?", lee el
   fichero entero.
 
-### El estado vive en el repo, no en las notas
-- Antes de afirmar el estado de cualquier pieza: **míralo**. Las notas de ayer mienten hoy.
-
 ---
 
 ## SEGURIDAD
@@ -81,8 +78,7 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
 - **Todo lo NUEVO nace CERRADO**; `SECURITY DEFINER` solo por uno de tres motivos y con candados:
   ver `docs/reglas/seguridad-permisos.md`.
 - **La v1 tiene escritura anónima abierta** (deuda estructural). **No se toca a mitad de vuelo**:
-  se cierra en la v2 con Auth + RPC. El problema no es la llave `publishable` (es pública por
-  diseño): son las políticas.
+  se cierra en la v2 con Auth + RPC (la llave `publishable` no es el problema: ver `seguridad-permisos.md`).
 - **Confirmar una factura SIEMPRE inyecta stock.** Nunca subir facturas antiguas retroactivamente.
 
 ---
@@ -90,26 +86,19 @@ fichero o consulta lo contestaría. No inventes explicaciones plausibles.
 ## CÓMO SE TRABAJA AQUÍ
 
 - **UN PR, UNA COSA.** Sin excepciones.
-- 🔴 **AL TERMINAR UN TRABAJO, EL PARTE SE DEJA EN LA BANDEJA.** Además del PR, se escribe
-  una copia del informe en `~/Mi unidad/Moloka/bandeja/` (nunca con letra de unidad) con el nombre
-  **`AAAA-MM-DD-HHMM-tema.md`** (hora española). **Primera línea del parte, una sola:** para quién es y
-  cuándo / modelo y esfuerzo leídos de la ficha de tu sesión (o «esfuerzo: no lo sé»). Sin esa
-  copia, Fernando hace de correveidile entre Code y los chats: **no depende de que el encargo lo pida**.
+- 🔴 **EL PARTE SE DEJA EN LA BANDEJA, EN DOS TIEMPOS** (además del PR; `~/Mi unidad/Moloka/bandeja/`,
+  sin letra de unidad; hora española). **PROVISIONAL** al empujar: `AAAA-MM-DD-HHMM-PARTE-PROVISIONAL-<tema>.md`,
+  con la versión exacta y «pruebas en marcha». **DEFINITIVO** `AAAA-MM-DD-HHMM-tema.md`: pruebas en verde sobre
+  la versión final y, uno por uno, lo añadido después. **Primera línea, una sola:** para quién es y cuándo /
+  modelo y esfuerzo leídos de la ficha de tu sesión (o «esfuerzo: no lo sé»). Sin esa copia, Fernando hace
+  de correveidile: **no depende de que el encargo lo pida**.
 - **Una regla nueva no se escribe aquí ni en `docs/reglas/`: va al parte, y entra por el consolidador con su encargo.**
 - **Antes de picar: lee cómo se hizo lo anterior.** Hay procesadores en producción que funcionan;
   el siguiente se les tiene que parecer. Si algo se aparta del patrón, dilo y explica por qué.
 - **Las dudas de diseño no se resuelven en caliente.** Se anotan en una línea y se deciden en frío.
-- **Cuando Fernando dice "esto no me cuadra", PARA y baja al dato.** Acierta ~95% de las veces.
-  Casos reales: un bug oficial de la API de Amazon (FBA_CORE), un envío perdido de 24 uds, un ASIN
-  borrado con 12 uds dentro. En los cuatro, la explicación cómoda era la equivocada.
+- **Cuando Fernando dice "esto no me cuadra", PARA y baja al dato.** Acierta ~95% de las veces
+  (casos reales: `docs/reglas/como-se-trabaja.md`).
 - **Darle la razón sin medir es fallarle.** Si tienes el dato y contradice lo que dice, enséñaselo.
-
----
-
-## DÓNDE ESTÁ EL PROYECTO
-
-Orden de mudanza acordado: Inventario → Inicio → Alertas → Movimientos → Rotación+Rentabilidad →
-*(frontera lectura/escritura)* → Entrada → Facturas → Envío FBA → Motores.
 
 ---
 
