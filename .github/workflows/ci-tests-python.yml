@@ -564,6 +564,11 @@ jobs:
       - name: 25 duodevicies) test_encadenar_keepa.py
         run: python -u test_encadenar_keepa.py
 
+      # La tabla unica de nombres de columna del CSV de Keepa (9-nov-2026): cabecera vieja y nueva dan la misma
+      # fila tipada y el mismo crudo, y el escaner lee igual las dos. Sin red, sin secretos y sin datos de producto.
+      - name: 25 undevicies) test_keepa_cabeceras.py
+        run: python -u test_keepa_cabeceras.py
+
       - name: 26) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
@@ -635,6 +640,7 @@ jobs:
             test_escaner2_tcg_disponibilidad.py
             test_escaner2_tcg_pro.py
             test_encadenar_keepa.py
+            test_keepa_cabeceras.py
             test_escaner2_factura.py
             test_escaner2_base.py
             test_escaner2_coste.py

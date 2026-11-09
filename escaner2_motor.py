@@ -41,6 +41,7 @@ import re
 from datetime import datetime, timezone
 
 import en_mi_bd
+from keepa_cabeceras import CabeceraAmbigua, nombre_para_aviso, normalizar_export
 
 # 🔑 (B7, 25-sep-2026) LAS PIEZAS SALEN DE LOS FICHEROS HEREDADOS DEL ESCANER 2, NO DEL VIEJO.
 #    escaner2_heredado_*.py llevan el texto EXACTO de cada pieza del viejo (copiado por script del commit
@@ -930,7 +931,11 @@ def _leer_crudo(ruta):
         filas = [r for r in csv.reader(fh) if any((c or '').strip() for c in r)]
     if not filas:
         raise CsvIlegible('el fichero está vacío')
-    return [_limpio(h) for h in filas[0]], filas[1:]
+    # 🔑 (9-nov-2026) Los nombres y formatos de siempre, antes de mirar ninguna columna: keepa_cabeceras.py.
+    try:
+        return normalizar_export([_limpio(h) for h in filas[0]], filas[1:])
+    except CabeceraAmbigua as ex:
+        raise CsvIlegible(str(ex))
 
 
 def columnas_requeridas(pro, col_caidas):
@@ -957,7 +962,7 @@ def examinar_csv(ruta, pro, col_pais, col_caidas, cols_ficha=None):
         idx.setdefault(h, i)
     faltan = [h for h in columnas_requeridas(pro, col_caidas) if h not in idx]
     if faltan:
-        raise CsvIlegible('le faltan columnas del Visualizador: ' + ', '.join(repr(h) for h in faltan))
+        raise CsvIlegible('le faltan columnas del Visualizador: ' + ', '.join(nombre_para_aviso(h) for h in faltan))
 
     def celda(fila, h):
         i = idx.get(h)

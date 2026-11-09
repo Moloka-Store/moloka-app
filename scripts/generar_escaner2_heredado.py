@@ -207,6 +207,7 @@ escribir('escaner2_heredado_pro.py',
          '   Es FBA» cuenta como FBA. Lo aplica el generador al copiar; `leer_csv_visualizador` lo dice encima.\n'
          '🔑 Y el del encargo RF4 (23-oct-2026): `CSV_COLS` y el registro leen tambien «Paquete: Peso (g)» como `peso`\n'
          '   (el coste de preparacion por peso de escaner2_motor.coste_almacen). Cada linea desviada lo dice al lado.\n'
+         '🔑 Y el del encargo keepa-nombres-columnas (9-nov-2026): el lector pasa el CSV por keepa_cabeceras.normalizar_export.\n'
          % (COMMIT[:7], sha_pro[:10]),
          piezas, cabecera_codigo='\nimport csv  # ← moloka_escaner_pro.py, línea 9 (`import pandas as pd, csv`): solo `csv`\n')
 

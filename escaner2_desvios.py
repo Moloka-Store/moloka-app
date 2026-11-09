@@ -42,6 +42,10 @@ donde se vea la rentabilidad de un producto se calcule con su coste correcto»):
      `peso` (gramos, con el mismo `_num_csv`; un CSV sin esa columna da None). Lo usa escaner2_motor.coste_almacen:
      una ficha que no vendemos (sin coste en la fuente unica del RF2) paga eur_kg × su peso, como coste_peso del RF2.
      Ninguna otra llave del registro cambia.
+Y UNO MAS (encargo keepa-nombres-columnas, Fernando, 9-nov-2026):
+  5. El lector del CSV del Visualizador (`leer_csv_visualizador`) pasa la cabecera y las filas por
+     keepa_cabeceras.normalizar_export al leerlas: desde el 9-nov-2026 Keepa llama «Buy Box» a lo que era «Caja de
+     Compra», y sin esto `buybox` y `es_fba` saldrian vacios en silencio. Con un CSV de los de antes no cambia nada.
 """
 
 # Heredado → {pieza: [(antes, despues), …]}. Los textos van con la sangria del VIEJO (en el heredado, la
@@ -72,6 +76,9 @@ DESVIOS = {
              "    'nvar':'Recuento de variaciones', 'peso':'Paquete: Peso (g)',  # 🔑 DESVÍO RF4: el peso del paquete\n"),
         ],
         'leer_csv_visualizador': [
+            # (5) keepa-nombres-columnas: los nombres y formatos de siempre, antes de mirar ninguna columna.
+            ("        rr=csv.reader(f); H=next(rr); rows=list(rr)\n",
+             "        from keepa_cabeceras import normalizar_export; rr=csv.reader(f); H,rows=normalizar_export(next(rr),list(rr))  # 🔑 DESVÍO keepa-nombres-columnas\n"),
             ("                 es_fba=(es_fba in ('true','verdadero','sí','si','1')),\n",
              "                 es_fba=(es_fba in ('true','verdadero','sí','si','1','yes')),  # 🔑 DESVÍO D: Keepa escribe «yes»/«no»\n"),
             ("                 nvar=_num_csv(col(row,'nvar')),\n",

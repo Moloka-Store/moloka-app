@@ -57,6 +57,8 @@ from supabase import create_client
 # El patrón de carga de FOTO, común a las cuatro cañerías de la Fase 0.
 from foto_comun import (Aborta, conectar_bd, listar_buzon, descargar_buzon, guarda_anti_encogimiento, guarda_no_retroceder, claves_previas,
                         barrer_sobrantes, resumen_foto, archivar_foto, refrescar_vistas)
+# La tabla única de nombres de columna del CSV de Keepa (9-nov-2026): ver la cabecera de ese fichero.
+from keepa_cabeceras import CabeceraAmbigua, nombre_para_aviso, normalizar_export
 
 # ---------------------------------------------------------------------------
 # 0) Configuración (secrets de GitHub; jamás credenciales en el código)
@@ -697,6 +699,12 @@ def analizar(texto, fichero, meta):
         raise Aborta("[Guarda 9] 0 filas de datos (fichero vacío o no es CSV). Abortando.")
 
     cabecera = [_clean(c) for c in filas[0]]
+    # 🔑 (9-nov-2026) AQUÍ, ANTES DE MIRAR NINGUNA COLUMNA, el fichero vuelve a los nombres y formatos de siempre:
+    #    de esto sale tanto la fila tipada como `crudo`, así que lo guardado conserva sus claves y las vistas no cambian.
+    try:
+        cabecera, filas_datos = normalizar_export(cabecera, filas[1:])
+    except CabeceraAmbigua as e:
+        raise Aborta(f"[Guarda 1 bis] {e}")
     idx = {}
     for i, h in enumerate(cabecera):
         idx.setdefault(h, i)   # primera aparición
@@ -710,7 +718,7 @@ def analizar(texto, fichero, meta):
         raise Aborta(
             "[Guarda 1] Encabezados tipados que NO aparecen EXACTOS en el CSV "
             "(regla que mató al PR #26: se ABORTA, no se aproxima):\n   · "
-            + "\n   · ".join(repr(h) for h in faltan)
+            + "\n   · ".join(nombre_para_aviso(h) for h in faltan)
             + f"\n   Cabecera real ({len(cabecera)} cols), primeras 20: {cabecera[:20]}")
 
     def celda(fila, h):
@@ -723,7 +731,6 @@ def analizar(texto, fichero, meta):
         """int o None (leniente); se usa en las guardas de cuadre."""
         return ent(celda(fila, h))
 
-    filas_datos = filas[1:]
     claves_vistas = {}
     duplicadas = []
     salida = []
