@@ -12,6 +12,7 @@ SI se importa (`import escaner2_heredado_pro as pro`), como antes el Escaner Pro
    Es FBA» cuenta como FBA. Lo aplica el generador al copiar; `leer_csv_visualizador` lo dice encima.
 🔑 Y el del encargo RF4 (23-oct-2026): `CSV_COLS` y el registro leen tambien «Paquete: Peso (g)» como `peso`
    (el coste de preparacion por peso de escaner2_motor.coste_almacen). Cada linea desviada lo dice al lado.
+🔑 Y el del encargo keepa-nombres-columnas (9-nov-2026): el lector pasa el CSV por keepa_cabeceras.normalizar_export.
 """
 
 import csv  # ← moloka_escaner_pro.py, línea 9 (`import pandas as pd, csv`): solo `csv`
@@ -44,7 +45,7 @@ def _num_csv(x):
     except Exception: return None
 
 
-# ── ORIGEN: moloka_escaner_pro.py, líneas 312-353 · commit 2f9c06a · blob e60c13f819 · md5 ba257aa860b26bd3c8786e8b587f361d ──
+# ── ORIGEN: moloka_escaner_pro.py, líneas 312-353 · commit 2f9c06a · blob e60c13f819 · md5 99f3729ee3a271657a495ae788b341cb ──
 # ── DESVÍO DELIBERADO del viejo (encargo D, Fernando 28-sep-2026): ver escaner2_desvios.py
 # ===== Lectura del CSV del Visualizador (indexado por CADA EAN; celdas multi-EAN) =====
 def leer_csv_visualizador(rutas):
@@ -55,7 +56,7 @@ def leer_csv_visualizador(rutas):
     data={}
     for ruta in rutas:
       with open(ruta, encoding='utf-8-sig', newline='') as f:
-        rr=csv.reader(f); H=next(rr); rows=list(rr)
+        from keepa_cabeceras import normalizar_export; rr=csv.reader(f); H,rows=normalizar_export(next(rr),list(rr))  # 🔑 DESVÍO keepa-nombres-columnas
       idx={c:i for i,c in enumerate(H)}
       # Columna del titulo de Amazon (robusto al nombre exacto del export de Keepa).
       # 🔒 EL ORDEN IMPORTA, y no es por el idioma: en el export del Visualizador las dos
