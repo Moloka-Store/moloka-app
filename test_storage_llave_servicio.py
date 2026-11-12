@@ -65,7 +65,9 @@ LO QUE SALE «SIN CLASIFICAR» (rojo, nunca «no toca»), y no mas que esto:
     SUPABASE…KEY; un `shell:` que no sea bash o sh; un `.sh` o un `.py`
     lanzado que no este en el repo; y la cadena `storage/v1`.
     `echo`, `printf`, `declare`/`export` y los comentarios no lanzan nada,
-    aunque nombren un guion;
+    aunque nombren un guion, SALVO con sustitucion de ordenes: una palabra con
+    `$(...)` o comillas invertidas que nombre Python o un .py sale SIN
+    CLASIFICAR, este en la orden que este;
   - en el guion: lo que el resolvedor SIGUE y no puede cerrar (un almacen, un
     cliente o una llave sin resolver).
   Si un dia hace falta una excepcion, va en EXCEPCIONES con su motivo; y una
@@ -875,9 +877,18 @@ def lanzamientos(proyecto, texto, prof=0):
             p.pop(0)
             while p and (re.match(r'^[A-Za-z_]\w*=', p[0]) or p[0].startswith('-')):
                 p.pop(0)
+        orden = ' '.join(palabras)
+        # 🔴 Lo que va entre comillas es UNA palabra para el troceado, y una orden
+        #    de `_NO_LANZAN` se descarta entera: `echo "$(python -u X.py)"`,
+        #    `export S="$(python X.py)"` o printf con comillas invertidas lanzaban
+        #    X.py sin que el banco lo viera (revision del #390, segunda vuelta).
+        #    Sin trocear mas: toda palabra con sustitucion de ordenes que nombre
+        #    Python o un .py sale SIN CLASIFICAR, se descarte la orden o no.
+        if any(('$(' in x or '`' in x) and _NOMBRA_PYTHON.search(x) for x in palabras):
+            raros.append('lanza Python por sustitucion de ordenes (`$(...)` o comillas invertidas) dentro de '
+                         'una palabra: «%s»' % orden[:80])
         if not p or p[0] in _NO_LANZAN:
             continue
-        orden = ' '.join(palabras)
         if p[0] in _PYTHON:
             k = 1
             while k < len(p) and _FLAGS_SIN_ARGUMENTO.match(p[k]):
@@ -1138,6 +1149,12 @@ def casos_de_ensayo():
         ('`python3.11`', 'SIN CLASIFICAR', 0, wf('python3.11 -u zz_ensayo_a.py', como_key), F),
         ('`python -X utf8`', 'SIN CLASIFICAR', 0, wf('python -X utf8 zz_ensayo_a.py', como_key), F),
         ('`python -m`', 'SIN CLASIFICAR', 0, wf('python -m zz_ensayo_a', como_key), F),
+        ('`echo "$(python ...)"`', 'SIN CLASIFICAR', 0, wf('echo "$(python -u zz_ensayo_a.py)"', publica), F),
+        ('`export S="$(python ...)"`', 'SIN CLASIFICAR', 0,
+         wf('export SALIDA="$(python -u zz_ensayo_a.py)"', publica), F),
+        ('`S="$(python ...)"` sin export', 'SIN CLASIFICAR', 0, wf('S="$(python -u zz_ensayo_a.py)"', publica), F),
+        ('printf con comillas invertidas', 'SIN CLASIFICAR', 0,
+         wf("printf '%s' \"`python -u zz_ensayo_a.py`\"", publica), F),
         ('un .sh que no esta en el repo', 'SIN CLASIFICAR', 0, wf('bash scripts/no_existe.sh', como_key), F),
         ('`shell: python`', 'SIN CLASIFICAR', 0, wf('print(1)', como_key, shell='python'), F),
         ('Python en linea que nombra el Storage', 'SIN CLASIFICAR', 0,
