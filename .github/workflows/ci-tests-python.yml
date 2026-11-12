@@ -569,6 +569,14 @@ jobs:
       - name: 25 undevicies) test_keepa_cabeceras.py
         run: python -u test_keepa_cabeceras.py
 
+      # Ningun workflow entra en `informes`, `facturas-pdfs` o `fotos-fabrica` con la llave publicable
+      # (12-nov-2026, tras el #389 y el cierre de esos almacenes a anon). Con la publicable, listar devuelve
+      # `[]`: un procesador leeria el buzon vacio y saldria en verde sin procesar. Por estructura: que guion
+      # lanza cada paso, si llega a esos almacenes (directo, por constante o por una funcion auxiliar) y con
+      # que llave entra su cliente. Sin red, sin secretos: lee ficheros del repo.
+      - name: 25 vicies) test_storage_llave_servicio.py
+        run: python -u test_storage_llave_servicio.py
+
       - name: 26) Censo - ningun test se queda sin correr
         # 🔴 EL FALSO VERDE PEOR DE TODOS: un test que se escribe, se commitea y
         #    NO SE REGISTRA. No falla -- es que no existe, y el verde de los
@@ -646,6 +654,7 @@ jobs:
             test_escaner2_coste.py
             test_escaner2_tambien.py
             test_escaner2_almacen_fba.py
+            test_storage_llave_servicio.py
           )
           # Los que existen en el repo, segun git (no segun un `ls`, que ve
           # tambien lo que no esta versionado).
