@@ -23,5 +23,5 @@ jobs:
       - name: Procesar el informe de resultados de Miravia
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python moloka_miravia_resultado.py

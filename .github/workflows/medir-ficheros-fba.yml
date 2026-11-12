@@ -54,6 +54,6 @@ jobs:
       - name: Medir el buzon
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           SOLO_DIA: ${{ inputs.solo_dia }}
         run: python -u medir_ficheros_fba.py

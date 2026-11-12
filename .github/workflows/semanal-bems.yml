@@ -55,7 +55,7 @@ jobs:
       - name: Ejecutar repaso semanal
         env:
           SUPABASE_URL:    ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY:    ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_KEY:    ${{ secrets.SUPABASE_SERVICE_KEY }}
           DISPARO_SECRET:  ${{ secrets.DISPARO_SECRET }}
         run: |
           set -o pipefail

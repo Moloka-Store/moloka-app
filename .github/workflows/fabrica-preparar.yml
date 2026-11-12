@@ -24,7 +24,7 @@ jobs:
         env:
           KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY:         ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_KEY:         ${{ secrets.SUPABASE_SERVICE_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
         run: python -u robot_preparar.py
