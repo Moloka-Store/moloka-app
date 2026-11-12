@@ -88,7 +88,7 @@ jobs:
       - name: Ejecutar procesador
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           ENTORNO: ${{ inputs.entorno }}
           MODO: ${{ inputs.modo }}
           FICHERO: ${{ inputs.fichero }}
@@ -189,7 +189,7 @@ jobs:
       - name: Buscar el siguiente fichero del buzón y lanzarlo
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           GH_TOKEN: ${{ github.token }}
           PROPIO_FICHERO: ${{ inputs.fichero }}

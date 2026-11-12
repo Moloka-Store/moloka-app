@@ -202,7 +202,7 @@ jobs:
         id: guarda
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           DB_URL:       ${{ secrets.SUPABASE_DB_URL }}
           MODO: guarda
         run: python -u comprimir_keepa_antiguos.py
@@ -211,7 +211,7 @@ jobs:
         id: pasada
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           DB_URL:       ${{ secrets.SUPABASE_DB_URL }}
           GUARDA_VERDE: ${{ steps.guarda.outputs.guarda_verde }}
           R2_LISTADO:   ${{ env.R2_LISTADO }}
@@ -277,7 +277,7 @@ jobs:
         if: always()
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           DB_URL:       ${{ secrets.SUPABASE_DB_URL }}
           MODO: guarda
         run: python -u comprimir_keepa_antiguos.py
