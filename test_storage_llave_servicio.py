@@ -18,8 +18,10 @@ es ese test.
 
 QUE MIRA, Y POR ESTRUCTURA (no con una lista a mano que se quede vieja):
   1. Cada paso de cada workflow de `.github/workflows/`: que guion lanza su
-     `run:` (`python [-u] X.py`), con el env que le llega (workflow + job +
-     paso, ganando el mas cercano, como en Actions).
+     `run:`, con el env que le llega (workflow + job + paso, ganando el mas
+     cercano, como en Actions). El `run:` se trocea en ordenes como lo haria
+     el shell; un lanzamiento es `python|python3 [-u -B -O -I -s -S -E] X.py`,
+     tambien dentro de un `.sh` del repo que el paso lance.
   2. Cada guion, con `ast` sobre el fichero real (nunca importandolo: estos
      guiones se conectan al importarse): toda llamada `<cliente>.storage.from_(
      <almacen>)`, siguiendo:
@@ -46,27 +48,46 @@ QUE MIRA, Y POR ESTRUCTURA (no con una lista a mano que se quede vieja):
      Cualquier otra cosa es ROJO: la publicable, ninguna llave, o una
      expresion que no se sabe leer.
 
-LOS TRES DEL `or` (moloka_actualizar_tcg, moloka_tracker_snapshot_nube,
-moloka_tracker_cerebro) NO estan en ninguna lista: pasan por lo que hacen. Su
-cliente lee primero `SUPABASE_SERVICE_KEY`, el paso se la pasa, y por eso entra
-con la de servicio. Si el paso dejara de pasarla, el `or` caeria a la
-publicable y este banco se pondria rojo; si alguien invirtiera el `or`, tambien.
-Las dos cosas se comprueban abajo, en (C).
+LOS DEL `or`. Tres guiones eligen `SUPABASE_SERVICE_KEY or SUPABASE_KEY`, y DOS
+tocan el Storage: moloka_actualizar_tcg y moloka_tracker_snapshot_nube (el
+tercero, moloka_tracker_cerebro, no llega a ningun almacen y aqui ni aparece).
+No estan en ninguna lista: pasan por lo que hacen. Su cliente lee primero
+`SUPABASE_SERVICE_KEY`, el paso se la pasa, y por eso entra con la de servicio.
+Si el paso dejara de pasarla, el `or` caeria a la publicable y este banco se
+pondria rojo; si alguien invirtiera el `or`, tambien. Las dos cosas se
+comprueban abajo, en (C), sobre guiones de mentira con la misma forma.
 
-🔴 LO QUE NO SE SABE CLASIFICAR SALE ROJO, NUNCA «NO TOCA». Un almacen que no se
-puede resolver, un cliente cuyo origen no se ve, una llave que no se sabe de
-donde sale, un `run:` con Python en linea que nombra el Storage, o un paso que
-lanza un guion que no esta en el repo: todo eso es «sin clasificar» y para el
-banco. Si un dia hace falta una excepcion, se anade aqui a proposito, con su
-motivo; mientras no la haya, lo nuevo no pasa en silencio.
+LO QUE SALE «SIN CLASIFICAR» (rojo, nunca «no toca»), y no mas que esto:
+  - en el workflow: toda orden que nombre `python` o un `.py` y no sea un
+    lanzamiento reconocido (`python3.11`, `python -X utf8`, `python -m`, ...);
+    Python en linea (`-c` o por la entrada) que nombre el Storage, un almacen o
+    una llave de Supabase; un `run:` que asigne o exporte una variable
+    SUPABASE…KEY; un `shell:` que no sea bash o sh; un `.sh` o un `.py`
+    lanzado que no este en el repo; y la cadena `storage/v1`.
+    `echo`, `printf`, `declare`/`export` y los comentarios no lanzan nada,
+    aunque nombren un guion;
+  - en el guion: lo que el resolvedor SIGUE y no puede cerrar (un almacen, un
+    cliente o una llave sin resolver).
+  Si un dia hace falta una excepcion, va en EXCEPCIONES con su motivo; y una
+  que deja de tapar algo tambien pone el banco rojo.
   Lo que SI se ignora, y por que: un cliente construido con una CLASE del
   propio repo (los dobles de los bancos) no es un cliente de Supabase, y un
   almacen resuelto que no es uno de los tres (escaner2, amz-crudos) no es
   asunto de este banco.
 
-QUE NO MIRA: `index.html` (la v1 congelada, con la publicable escrita en la
-pagina; fuera a proposito, ver el parte del #389) ni lo que un workflow haga
-con `curl` sin Python (hoy ninguno toca `storage/v1`; si aparece, sale rojo).
+LO QUE NO MIRA (no lo ve, ni rojo ni verde; dicho para que nadie lo de por
+cubierto):
+  - `index.html` (la v1 congelada, con la publicable escrita en la pagina;
+    fuera a proposito, ver el parte del #389);
+  - dentro de un guion: un cliente que llega por `functools.partial`, por una
+    clase que lo envuelve o por `from x import *`; un alias de `.storage`
+    (`st = sb.storage`); `requests` contra `/storage/v1`; y lo que un guion
+    lance a su vez con `subprocess` o `runpy`;
+  - la URL PUBLICA de `fotos-fabrica`: `robot_generar.py`, `robot_preparar.py`
+    y `robot_rehacer.py` la leen con `requests`, sin llave;
+  - una lista `BUCKETS` distinta del valor por defecto que pasara el workflow
+    a `backup_storage.py`, y un paso con `working-directory:`;
+  - un `-c` que importe un guion que toca el Storage al importarse.
 
 LAS SECCIONES:
   (A) El censo de hoy, impreso: cada paso vigilado, su guion, sus almacenes,
@@ -76,16 +97,18 @@ LAS SECCIONES:
       `procesar-keepa-escaparate`, un paso que llegue a `facturas-pdfs` y otro
       a `fotos-fabrica`, el detector esta ciego y eso es un fallo. Cero
       incumplidores de cero pasos mirados es como miente esta clase de test.
-  (C) Las dos direcciones, en memoria en cada pasada: el mismo detector,
-      contra copias rotas a proposito, tiene que salir rojo y nombrar el
-      workflow y el paso. Asi el CI demuestra en cada PR que el banco muerde.
+      Es la UNICA parte que nombra ficheros reales, a proposito.
+  (C) Las dos direcciones, en cada pasada, sobre un workflow y unos guiones de
+      MENTIRA en memoria (ningun fichero del repo): con todo en orden tiene
+      que estar callado y ver el paso; roto a proposito, tiene que salir rojo
+      nombrando el workflow y el paso. Asi el CI demuestra en cada PR que el
+      banco muerde, y limpiar mañana un fichero real no lo pone rojo.
 
 Sin red, sin secretos y sin tocar la base: lee ficheros del repo. La raiz se
 puede cambiar con la variable MOLOKA_RAIZ (los ensayos sobre copias de disco
 corren ESTE MISMO fichero contra otra carpeta).
 """
 import ast
-import copy
 import os
 import re
 import sys
@@ -286,6 +309,19 @@ class Proyecto:
                     break
         self._mods[nombre] = m
         return m
+
+    def leer(self, rel):
+        """El texto de un fichero del repo (o de `fuentes_extra`), o None."""
+        rel = rel.replace('\\', '/')
+        if rel.startswith('./'):
+            rel = rel[2:]
+        if rel in self.extra:
+            return self.extra[rel]
+        ruta = os.path.join(self.raiz, rel)
+        if not os.path.isfile(ruta):
+            return None
+        with open(ruta, encoding='utf-8') as fh:
+            return fh.read()
 
     def modulo_por_ruta(self, rel):
         rel = rel.replace('\\', '/')
@@ -661,17 +697,143 @@ def efectos_del_guion(mod):
 # ===========================================================================
 # LOS WORKFLOWS: que lanza cada paso y con que env
 # ===========================================================================
-_LANZA = re.compile(r'(?:^|[\s;&|(])python3?(?:\s+-[A-Za-z]+)*\s+([\w./-]+\.py)\b')
-_EN_LINEA = re.compile(r'(?:^|[\s;&|(])python3?(?:\s+-[A-Za-z]+)*\s+(?:-c\b|-\s)')
+# 🔴 LO CARO A PROPOSITO, Y SIN HACER CRECER EL RESOLVEDOR (revision del #390,
+#    12-nov-2026). Hasta esa revision un regex buscaba `python [-u] X.py` en el
+#    `run:` y lo que no casaba se tomaba por «no lanza nada»: con
+#    `python3.11 -u X.py`, `python -X utf8 X.py`, `SUPABASE_KEY=... python X.py`
+#    o `bash scripts/lanzar.sh` el banco daba VERDE sin mirar el paso. Ahora el
+#    `run:` se trocea en ordenes (como lo haria el shell: comillas, `;`, `&&`,
+#    `|`, `$(...)`, heredocs y comentarios) y:
+#      - `python|python3 [-u -B -O -I -s -S -E] X.py ...` es un lanzamiento, y se
+#        mira el guion;
+#      - `python -c CODIGO` o `python - <<EOF` es Python en linea: si nombra el
+#        Storage, un almacen o una llave de Supabase, SIN CLASIFICAR;
+#      - `bash|sh X.sh`, `./X.sh` o `source X.sh` de un fichero DEL REPO se lee y
+#        se trocea igual, con el mismo env;
+#      - `echo`, `printf` y los comentarios NO lanzan nada aunque nombren un
+#        guion (contar «para relanzar: python X.py» como lanzarlo es otro rojo
+#        falso);
+#      - cualquier otra orden que nombre `python` o un `.py`, SIN CLASIFICAR. Y
+#        tambien todo `run:` que asigne o exporte una variable SUPABASE…KEY, y
+#        todo paso cuyo `shell:` no sea bash o sh.
+#    Medido en main ese dia: los 311 `run:` de los 76 workflows lanzan Python
+#    solo como `python [-u] X.py`, mas dos en linea que no tocan el Storage.
 _SECRETO = re.compile(r'^\$\{\{\s*secrets\.(\w+)\s*\}\}$')
+_EXPRESION_GH = re.compile(r'\$\{\{.*?\}\}', re.S)
+_ASIGNA_LLAVE = re.compile(r'\bSUPABASE\w*KEY\s*=')
+_PYTHON = ('python', 'python3')
+_FLAGS_SIN_ARGUMENTO = re.compile(r'^-[uBOISsE]+$')
+_RUTA_PY = re.compile(r'^[\w./-]+\.py$')
+_RUTA_SH = re.compile(r'^[\w./-]+\.sh$')
+_NOMBRA_PYTHON = re.compile(r'python|\.py\b', re.I)
+# Ordenes que no ejecutan lo que nombran: escriben texto, o solo declaran variables
+# (`declare -a CUBIERTOS=( test_x.py ... )`). Una `$(python X.py)` dentro de un
+# `export` sigue viendose: el troceado la saca como orden aparte.
+_NO_LANZAN = ('echo', 'printf', ':', 'true', 'false', 'declare', 'local', 'readonly', 'typeset', 'export')
+_PREFIJOS = ('sudo', 'time', 'nohup', 'env', 'exec', 'command')
 
 
-def _sin_comentarios_shell(texto):
-    lineas = []
-    for l in texto.splitlines():
-        m = re.search(r'(^|\s)#', l)
-        lineas.append(l[:m.start()] if m else l)
-    return '\n'.join(lineas)
+def _ordenes(texto):
+    """Trocea un script de shell en ordenes: [(palabras, cuerpo_heredoc|None)].
+
+    No es un shell completo: lo justo para saber QUE se ejecuta. Las expresiones
+    `${{ ... }}` de Actions se cambian antes por EXPR (Actions las sustituye antes
+    de que el shell vea el texto)."""
+    s = _EXPRESION_GH.sub('EXPR', texto)
+    ordenes, palabras, cur = [], [], None
+    heredocs = []                         # (delimitador, indice de la orden)
+    i, n = 0, len(s)
+
+    def fin_palabra():
+        nonlocal cur
+        if cur is not None:
+            palabras.append(cur)
+            cur = None
+
+    def fin_orden():
+        nonlocal palabras
+        fin_palabra()
+        if palabras:
+            ordenes.append([palabras, None])
+        palabras = []
+
+    while i < n:
+        c = s[i]
+        if c in "'\"":
+            q = c
+            cur = cur or ''
+            i += 1
+            while i < n and s[i] != q:
+                if q == '"' and s[i] == '\\' and i + 1 < n:
+                    i += 1
+                cur += s[i]
+                i += 1
+            i += 1
+            continue
+        if c == '\\' and i + 1 < n:
+            if s[i + 1] != '\n':
+                cur = (cur or '') + s[i + 1]
+            i += 2
+            continue
+        if c == '#' and cur is None:
+            while i < n and s[i] != '\n':
+                i += 1
+            continue
+        if c in ' \t\r':
+            fin_palabra()
+            i += 1
+            continue
+        if c == '<' and s.startswith('<<', i) and not s.startswith('<<<', i):
+            fin_palabra()
+            i += 2
+            if i < n and s[i] == '-':
+                i += 1
+            while i < n and s[i] in ' \t':
+                i += 1
+            d = ''
+            while i < n and s[i] not in ' \t\r\n;&|<>()':
+                if s[i] not in "'\"":
+                    d += s[i]
+                i += 1
+            heredocs.append((d, len(ordenes)))
+            continue
+        if c in '<>':
+            fin_palabra()
+            i += 1
+            if i < n and s[i] in '&>':
+                i += 1
+            continue
+        if c == '(' and cur is not None and cur.endswith('='):
+            # `LISTA=( a b c )`: un array de bash es DATO, no ordenes (el censo de
+            # este mismo CI nombra los 67 tests asi).
+            prof_par, i = 1, i + 1
+            while i < n and prof_par:
+                prof_par += {'(': 1, ')': -1}.get(s[i], 0)
+                cur += s[i]
+                i += 1
+            continue
+        if c == '\n' or c in ';|&()`':
+            fin_orden()
+            i += 1
+            if c == '\n' and heredocs:
+                for d, idx in heredocs:
+                    cuerpo = []
+                    while i < n:
+                        j = s.find('\n', i)
+                        j = n if j < 0 else j
+                        linea = s[i:j]
+                        i = j + 1
+                        if linea.strip() == d:
+                            break
+                        cuerpo.append(linea)
+                    if idx < len(ordenes):
+                        ordenes[idx][1] = '\n'.join(cuerpo)
+                heredocs = []
+            continue
+        cur = (cur or '') + c
+        i += 1
+    fin_orden()
+    return [(p, cu) for p, cu in ordenes]
 
 
 def _env(*capas):
@@ -680,6 +842,86 @@ def _env(*capas):
         if isinstance(c, dict):
             out.update({str(k): v for k, v in c.items()})
     return out
+
+
+def _shell_raro(*valores):
+    for v in valores:
+        if v is not None and not re.match(r'^(bash|sh)\b', str(v).strip()):
+            return str(v)
+    return None
+
+
+def _python_en_linea_toca(codigo):
+    return codigo is not None and ('storage' in codigo or 'SUPABASE' in codigo
+                                  or any(a in codigo for a in ALMACENES_CERRADOS))
+
+
+def lanzamientos(proyecto, texto, prof=0):
+    """Lo que ejecuta un `run:` (o un .sh del repo): ([guiones .py], [motivos sin clasificar])."""
+    guiones, raros = [], []
+    if prof > 4:
+        return guiones, ['demasiados .sh anidados']
+    if _ASIGNA_LLAVE.search(_EXPRESION_GH.sub('EXPR', texto).replace('EXPR', '')) or \
+            _ASIGNA_LLAVE.search(texto):
+        raros.append('asigna o exporta una variable SUPABASE…KEY dentro del `run:`; la llave tiene que llegar '
+                     'por el `env:` del paso para que este banco la vea')
+    if 'storage/v1' in texto:
+        raros.append('llama a la API del Storage (`storage/v1`) sin guion')
+    for palabras, cuerpo in _ordenes(texto):
+        p = list(palabras)
+        while p and re.match(r'^[A-Za-z_]\w*=', p[0]):
+            p.pop(0)
+        while p and p[0] in _PREFIJOS:
+            p.pop(0)
+            while p and (re.match(r'^[A-Za-z_]\w*=', p[0]) or p[0].startswith('-')):
+                p.pop(0)
+        if not p or p[0] in _NO_LANZAN:
+            continue
+        orden = ' '.join(palabras)
+        if p[0] in _PYTHON:
+            k = 1
+            while k < len(p) and _FLAGS_SIN_ARGUMENTO.match(p[k]):
+                k += 1
+            if k < len(p) and p[k] == '-c':
+                if k + 1 >= len(p) or _python_en_linea_toca(p[k + 1]):
+                    raros.append('Python en linea (`-c`) que nombra el Storage o una llave: «%s»' % orden[:80])
+                continue
+            if k >= len(p) or p[k] == '-':
+                if cuerpo is None or _python_en_linea_toca(cuerpo):
+                    raros.append('Python en linea (por la entrada) que nombra el Storage o una llave, o sin '
+                                 'cuerpo que leer: «%s»' % orden[:80])
+                continue
+            if _RUTA_PY.match(p[k]):
+                guiones.append(p[k])
+                continue
+            raros.append('lanza Python de una forma que este banco no reconoce: «%s»' % orden[:80])
+            continue
+        sh = None
+        if p[0] in ('bash', 'sh', 'source', '.'):
+            resto = [x for x in p[1:] if not x.startswith('-')]
+            if resto and _RUTA_SH.match(resto[0]):
+                sh = resto[0]
+            elif not resto and cuerpo is not None:
+                g, r = lanzamientos(proyecto, cuerpo, prof + 1)
+                guiones += g
+                raros += r
+                continue
+        elif _RUTA_SH.match(p[0]):
+            sh = p[0]
+        if sh is not None:
+            if sh.startswith('/'):
+                continue                      # un .sh del sistema (el de apt de PostgreSQL), no del repo
+            texto_sh = proyecto.leer(sh)
+            if texto_sh is None:
+                raros.append('lanza %s, que no esta en el repo' % sh)
+                continue
+            g, r = lanzamientos(proyecto, texto_sh, prof + 1)
+            guiones += g
+            raros += ['%s (dentro de %s)' % (x, sh) for x in r]
+            continue
+        if any(_NOMBRA_PYTHON.search(x) for x in palabras):
+            raros.append('nombra Python o un .py y no es un lanzamiento reconocido: «%s»' % orden[:80])
+    return guiones, raros
 
 
 # ---------------------------------------------------------------------------
@@ -709,14 +951,17 @@ def revisar(proyecto, workflows, usadas=None):
     filas, fallos = [], []
     usadas = set() if usadas is None else usadas
 
+    def apuntar(msg):
+        if msg not in fallos:
+            fallos.append(msg)
+
     def sin_clasificar(etiqueta, guion, motivo):
         clave = (guion, _motivo(motivo))
         if clave in EXCEPCIONES:
             usadas.add(clave)
             return
-        msg = 'SIN CLASIFICAR: %s -> %s: %s' % (etiqueta, guion, motivo)
-        if msg not in fallos:
-            fallos.append(msg)
+        apuntar('SIN CLASIFICAR: %s -> %s: %s' % (etiqueta, guion, motivo))
+
     for wf_nombre in sorted(workflows):
         wf = workflows[wf_nombre]
         if not isinstance(wf, dict):
@@ -728,16 +973,19 @@ def revisar(proyecto, workflows, usadas=None):
                 if not isinstance(paso, dict) or not isinstance(paso.get('run'), str):
                     continue
                 etiqueta = '%s · job %s · paso «%s»' % (wf_nombre, job_id, paso.get('name') or paso.get('id') or '#%d' % i)
-                run = _sin_comentarios_shell(paso['run'])
-                if _EN_LINEA.search(run) and ('storage' in run or any(a in run for a in ALMACENES_CERRADOS)):
-                    fallos.append('SIN CLASIFICAR: %s lleva Python en linea que nombra el Storage' % etiqueta)
-                if 'storage/v1' in run:
-                    fallos.append('SIN CLASIFICAR: %s llama a la API del Storage sin guion' % etiqueta)
+                raro = _shell_raro(paso.get('shell'), ((job.get('defaults') or {}).get('run') or {}).get('shell'),
+                                   ((wf.get('defaults') or {}).get('run') or {}).get('shell'))
+                if raro is not None:
+                    apuntar('SIN CLASIFICAR: %s corre con `shell: %s`; este banco solo lee bash' % (etiqueta, raro))
+                    continue
+                guiones, raros = lanzamientos(proyecto, paso['run'])
+                for r in raros:
+                    apuntar('SIN CLASIFICAR: %s %s' % (etiqueta, r))
                 env = _env(wf.get('env'), job.get('env'), paso.get('env'))
-                for guion in _LANZA.findall(run):
+                for guion in guiones:
                     mod = proyecto.modulo_por_ruta(guion)
                     if mod is None:
-                        fallos.append('SIN CLASIFICAR: %s lanza %s, que no esta en el repo' % (etiqueta, guion))
+                        apuntar('SIN CLASIFICAR: %s lanza %s, que no esta en el repo' % (etiqueta, guion))
                         continue
                     vistos = {}
                     for cli, alm, sitio in efectos_del_guion(mod):
@@ -764,13 +1012,12 @@ def revisar(proyecto, workflows, usadas=None):
                                 'var': var, 'secreto': secreto}
                         filas.append(fila)
                         if var is None:
-                            fallos.append('ROJO: %s -> %s entra en %s con un cliente que lee %s, y el paso no le '
-                                          'pasa ninguna' % (etiqueta, guion, '/'.join(fila['almacenes']),
-                                                            ' o '.join(prefs)))
+                            apuntar('ROJO: %s -> %s entra en %s con un cliente que lee %s, y el paso no le '
+                                    'pasa ninguna' % (etiqueta, guion, '/'.join(fila['almacenes']), ' o '.join(prefs)))
                         elif secreto != SECRETO_SERVICIO:
-                            fallos.append('ROJO: %s -> %s entra en %s con %s = %s (cliente de %s); tiene que ser '
-                                          '${{ secrets.%s }}' % (etiqueta, guion, '/'.join(fila['almacenes']), var,
-                                                                  valor, ctor, SECRETO_SERVICIO))
+                            apuntar('ROJO: %s -> %s entra en %s con %s = %s (cliente de %s); tiene que ser '
+                                    '${{ secrets.%s }}' % (etiqueta, guion, '/'.join(fila['almacenes']), var,
+                                                            valor, ctor, SECRETO_SERVICIO))
     return filas, fallos
 
 
@@ -794,6 +1041,109 @@ def ok(nombre, cond, detalle=''):
     print(('  OK  ' if cond else '  FALLA  ') + nombre + ('' if cond or not detalle else '\n        ' + detalle))
     if not cond:
         FALLOS.append(nombre)
+
+
+# ===========================================================================
+# LOS CASOS DE MENTIRA de (C): un workflow y unos guiones inventados
+# ===========================================================================
+_PUB = '${{ secrets.SUPABASE_KEY }}'
+_SVC = '${{ secrets.SUPABASE_SERVICE_KEY }}'
+_URL = {'SUPABASE_URL': '${{ secrets.SUPABASE_URL }}'}
+
+_FUENTES = {
+    # Una ayuda que recibe cliente y almacen por parametro, como listar_buzon.
+    'zz_ensayo_ayuda.py': (
+        "def listar(sb, almacen, carpeta):\n"
+        "    return sb.storage.from_(almacen).list(carpeta)\n"),
+    # Como los procesadores: constante en tupla, llave por variable, ayuda importada dentro de main().
+    'zz_ensayo_a.py': (
+        "import os\n"
+        "ALMACEN, CARPETA = 'informes', 'buzon'\n"
+        "LLAVE = os.environ.get('SUPABASE_KEY', '')\n"
+        "def main():\n"
+        "    from supabase import create_client\n"
+        "    from zz_ensayo_ayuda import listar\n"
+        "    sb = create_client(os.environ['SUPABASE_URL'], LLAVE)\n"
+        "    listar(sb, ALMACEN, CARPETA)\n"
+        "if __name__ == '__main__':\n"
+        "    main()\n"),
+    # Como los dos del `or` que tocan el Storage.
+    'zz_ensayo_or.py': (
+        "import os\n"
+        "from supabase import create_client\n"
+        "sb = create_client(os.environ['SUPABASE_URL'],\n"
+        "                   os.environ.get('SUPABASE_SERVICE_KEY') or os.environ['SUPABASE_KEY'])\n"
+        "sb.storage.from_('facturas-pdfs').list('x')\n"),
+    'zz_ensayo_or_al_reves.py': (
+        "import os\n"
+        "from supabase import create_client\n"
+        "sb = create_client(os.environ['SUPABASE_URL'],\n"
+        "                   os.environ.get('SUPABASE_KEY') or os.environ['SUPABASE_SERVICE_KEY'])\n"
+        "sb.storage.from_('facturas-pdfs').list('x')\n"),
+    # Como robot_rehacer: la publicable solo para tablas, la de servicio para el Storage.
+    'zz_ensayo_dos.py': (
+        "import os\n"
+        "from supabase import create_client\n"
+        "sb = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])\n"
+        "admin = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_SERVICE_KEY'])\n"
+        "def subir(admin, ruta):\n"
+        "    admin.storage.from_('fotos-fabrica').upload(ruta, b'')\n"
+        "sb.table('fichas').select('*').execute()\n"
+        "subir(admin, 'a.jpg')\n"),
+    'zz_ensayo_opaco.py': (
+        "import os, supabase\n"
+        "def dame():\n"
+        "    return supabase.create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_SERVICE_KEY'])\n"
+        "dame().storage.from_(os.environ['ALMACEN']).list('x')\n"),
+    'scripts/zz_ensayo_lanzar.sh': "#!/bin/bash\nset -e\npython -u zz_ensayo_a.py\n",
+}
+
+
+def casos_de_ensayo():
+    """(caso, 'callado'|'ROJO'|'SIN CLASIFICAR', filas esperadas si callado, workflow, fuentes)."""
+    def wf(run, env=None, **extra_paso):
+        paso = {'name': 'paso de ensayo', 'run': run}
+        if env is not None:
+            paso['env'] = dict(_URL, **env)
+        paso.update(extra_paso)
+        return {'jobs': {'j': {'steps': [paso]}}}
+
+    como_key = {'SUPABASE_KEY': _SVC}
+    publica = {'SUPABASE_KEY': _PUB}
+    ambas = {'SUPABASE_KEY': _PUB, 'SUPABASE_SERVICE_KEY': _SVC}
+    F = _FUENTES
+    return [
+        # --- la direccion que se olvida: con todo en orden, CALLADO (y viendo el paso) ---
+        ('servicio por SUPABASE_KEY, via una ayuda', 'callado', 1, wf('python -u zz_ensayo_a.py', como_key), F),
+        ('`or` con las dos llaves en el paso', 'callado', 1, wf('python -u zz_ensayo_or.py', ambas), F),
+        ('publicable solo para tablas, servicio para el Storage', 'callado', 1,
+         wf('python -u zz_ensayo_dos.py', ambas), F),
+        ('un `echo` y un comentario que nombran el guion no lo lanzan', 'callado', 0,
+         wf('echo "Para relanzar a mano: python -u zz_ensayo_a.py"\n# python -u zz_ensayo_a.py\n'), F),
+        ('un .sh del repo que lanza el guion, con la de servicio', 'callado', 1,
+         wf('bash scripts/zz_ensayo_lanzar.sh', como_key), F),
+        # --- la llave mal ---
+        ('la publicable, via una ayuda', 'ROJO', 0, wf('python -u zz_ensayo_a.py', publica), F),
+        ('ninguna llave en el paso', 'ROJO', 0, wf('python -u zz_ensayo_a.py', {}), F),
+        ('un `or` sin la de servicio cae a la publicable', 'ROJO', 0, wf('python -u zz_ensayo_or.py', publica), F),
+        ('el `or` al reves (prefiere la publicable)', 'ROJO', 0,
+         wf('python -u zz_ensayo_or_al_reves.py', ambas), F),
+        ('el cliente del Storage sin su llave de servicio', 'ROJO', 0, wf('python -u zz_ensayo_dos.py', publica), F),
+        ('el guion entre comillas con la publicable', 'ROJO', 0, wf('python -u "zz_ensayo_a.py"', publica), F),
+        ('un .sh del repo que lanza el guion con la publicable', 'ROJO', 0,
+         wf('bash scripts/zz_ensayo_lanzar.sh', publica), F),
+        # --- lo que no se sabe leer ---
+        ('la llave asignada en el propio `run:`', 'SIN CLASIFICAR', 0,
+         wf('SUPABASE_KEY="%s" python -u zz_ensayo_a.py' % _PUB, como_key), F),
+        ('`python3.11`', 'SIN CLASIFICAR', 0, wf('python3.11 -u zz_ensayo_a.py', como_key), F),
+        ('`python -X utf8`', 'SIN CLASIFICAR', 0, wf('python -X utf8 zz_ensayo_a.py', como_key), F),
+        ('`python -m`', 'SIN CLASIFICAR', 0, wf('python -m zz_ensayo_a', como_key), F),
+        ('un .sh que no esta en el repo', 'SIN CLASIFICAR', 0, wf('bash scripts/no_existe.sh', como_key), F),
+        ('`shell: python`', 'SIN CLASIFICAR', 0, wf('print(1)', como_key, shell='python'), F),
+        ('Python en linea que nombra el Storage', 'SIN CLASIFICAR', 0,
+         wf('python -c "import x; x.sb.storage.from_(\'informes\')"', como_key), F),
+        ('un almacen que no se sabe resolver', 'SIN CLASIFICAR', 0, wf('python zz_ensayo_opaco.py', como_key), F),
+    ]
 
 
 def main():
@@ -826,79 +1176,38 @@ def main():
     ok('(A) toda excepcion sigue tapando algo (una que sobra se quita)', not sobran, 'sobran: %r' % sobran)
 
     # ── (B) Contra el verde vacio ──────────────────────────────────────────
+    # Es lo UNICO que nombra ficheros reales, y a proposito: si el barrido deja
+    # de ver la carga diaria de Keepa, o ningun paso que llegue a uno de los
+    # tres almacenes, el detector se ha quedado ciego. Si se renombra el
+    # workflow o el guion de Keepa, este es el sitio que hay que poner al dia.
     keepa = [f for f in filas if f['wf'] == 'procesar-keepa-escaparate.yml']
     ok('(B) ve los DOS pasos de procesar-keepa-escaparate (procesador y encadenar)',
        {f['guion'] for f in keepa} >= {'procesador_keepa_escaparate.py', 'encadenar_keepa_escaparate.py'},
-       'visto: %r' % sorted({f['guion'] for f in keepa}))
+       'visto: %r. Si se ha renombrado el workflow o sus guiones, cambia aqui el nombre; si no, el '
+       'barrido ha dejado de ver la carga de Keepa y eso es lo que hay que arreglar.'
+       % sorted({f['guion'] for f in keepa}))
     for alm in sorted(ALMACENES_CERRADOS):
-        ok('(B) ve al menos un paso que llega a `%s`' % alm, any(alm in f['almacenes'] for f in filas))
+        ok('(B) ve al menos un paso que llega a `%s`' % alm, any(alm in f['almacenes'] for f in filas),
+           'ningun paso llega a `%s`: o ya nadie lo usa (y sobra en ALMACENES_CERRADOS) o el detector no lo ve'
+           % alm)
 
-    # ── (C) Las dos direcciones, en memoria ────────────────────────────────
-    def rojo(nombre, wfs_mod, extra=None, debe_nombrar=()):
-        _, fs = revisar(Proyecto(RAIZ, extra, base=proyecto), wfs_mod)
-        nombra = [x for x in fs if all(t in x for t in debe_nombrar)]
-        ok(nombre, bool(nombra), 'fallos vistos: %r' % fs)
-        if nombra:
-            print('        -> ' + nombra[0])
+    # ── (C) Las dos direcciones, sobre casos de mentira ────────────────────
+    # 🔴 Ni un nombre del repo (revision del #390): con copias rotas de
+    #    keepa o de tracker-app, limpiar mañana esos ficheros reales ponia el
+    #    banco rojo sin haber nada mal. Aqui los workflows y los guiones son
+    #    inventados, y viven solo en memoria.
+    for caso, esperado, filas_esperadas, wf, extra in casos_de_ensayo():
+        fs_filas, fs = revisar(Proyecto(RAIZ, extra, base=proyecto), {'zz-ensayo.yml': wf})
+        paso = wf['jobs']['j']['steps'][0]['name']
+        if esperado == 'callado':
+            ok('(C) %s -> callado' % caso, not fs and len(fs_filas) == filas_esperadas,
+               'fallos: %r | filas: %d, esperadas %d' % (fs, len(fs_filas), filas_esperadas))
+        else:
+            nombra = [x for x in fs if x.startswith(esperado) and 'zz-ensayo.yml' in x and paso in x]
+            ok('(C) %s -> %s' % (caso, esperado), bool(nombra), 'fallos vistos: %r' % fs)
+            if nombra:
+                print('        -> ' + nombra[0])
 
-    def paso_que_lanza(wfdict, guion):
-        for job in wfdict['jobs'].values():
-            for p in job.get('steps') or []:
-                if isinstance(p, dict) and guion in str(p.get('run', '')):
-                    return p
-        raise AssertionError('no hay paso que lance ' + guion)
-
-    k = 'procesar-keepa-escaparate.yml'
-    w = copy.deepcopy(workflows)
-    p = paso_que_lanza(w[k], 'procesador_keepa_escaparate.py')
-    p['env']['SUPABASE_KEY'] = '${{ secrets.SUPABASE_KEY }}'
-    rojo('(C1) keepa con la publicable -> ROJO, nombrando workflow y paso', w,
-         debe_nombrar=('ROJO', k, p.get('name', ''), 'secrets.SUPABASE_KEY'))
-
-    w = copy.deepcopy(workflows)
-    del paso_que_lanza(w[k], 'encadenar_keepa_escaparate.py')['env']['SUPABASE_KEY']
-    rojo('(C2) keepa (encadenar) sin ninguna llave -> ROJO', w, debe_nombrar=('ROJO', k, 'ninguna'))
-
-    t = 'tracker-app.yml'
-    w = copy.deepcopy(workflows)
-    p = paso_que_lanza(w[t], 'moloka_tracker_snapshot_nube.py')
-    p['env'].pop('SUPABASE_SERVICE_KEY', None)
-    rojo('(C3) un `or` sin la de servicio en el paso cae a la publicable -> ROJO', w,
-         debe_nombrar=('ROJO', t, 'secrets.SUPABASE_KEY'))
-
-    g = 'moloka_actualizar_tcg.py'
-    with open(os.path.join(RAIZ, g), encoding='utf-8') as fh:
-        fuente = fh.read()
-    invertida = fuente.replace("os.environ.get('SUPABASE_SERVICE_KEY') or os.environ['SUPABASE_KEY']",
-                               "os.environ.get('SUPABASE_KEY') or os.environ['SUPABASE_SERVICE_KEY']")
-    ok('(C4) [preparacion] el `or` de %s existe tal cual para invertirlo' % g, invertida != fuente)
-    rojo('(C4) el mismo `or` al reves (prefiere la publicable) -> ROJO', workflows, extra={g: invertida},
-         debe_nombrar=('ROJO', 'actualizar-tcg.yml', 'secrets.SUPABASE_KEY'))
-
-    nuevo_guion = (
-        "import os\n"
-        "from supabase import create_client\n"
-        "from foto_comun import listar_buzon\n"
-        "ALMACEN = 'informes'\n"
-        "def main():\n"
-        "    sb = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])\n"
-        "    print(listar_buzon(sb, ALMACEN, 'nuevo'))\n"
-        "main()\n")
-    w = copy.deepcopy(workflows)
-    w['ensayo-nuevo.yml'] = {'jobs': {'j': {'steps': [{'name': 'lee el buzon', 'run': 'python -u ensayo_nuevo.py',
-                                                         'env': {'SUPABASE_KEY': '${{ secrets.SUPABASE_KEY }}'}}]}}}
-    rojo('(C5) un workflow nuevo que lee `informes` por listar_buzon con la publicable -> ROJO', w,
-         extra={'ensayo_nuevo.py': nuevo_guion}, debe_nombrar=('ROJO', 'ensayo-nuevo.yml', 'lee el buzon'))
-
-    w = copy.deepcopy(workflows)
-    w['ensayo-opaco.yml'] = {'jobs': {'j': {'steps': [{'name': 'opaco', 'run': 'python ensayo_opaco.py'}]}}}
-    opaco = ("import os, supabase\n"
-             "def dame(): return supabase.create_client(os.environ['U'], llave_de_algun_sitio())\n"
-             "dame().storage.from_(os.environ['ALMACEN']).list('x')\n")
-    rojo('(C6) un almacen que no se sabe resolver -> SIN CLASIFICAR (rojo, no «no toca»)', w,
-         extra={'ensayo_opaco.py': opaco}, debe_nombrar=('SIN CLASIFICAR', 'ensayo-opaco.yml'))
-
-    # Y la otra direccion de (C): con todo en orden, callado. Es (A) en verde.
     print()
     if FALLOS:
         print('FALLAN %d:' % len(FALLOS))
