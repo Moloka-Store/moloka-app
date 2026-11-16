@@ -450,6 +450,39 @@ eq('C8 la web no deja entrar: fallida, ROJO, ni Excel ni fichas, Telegram',
 eq('C9 el motivo lo dice', '403' in base.pasadas()[0]['motivo'], True)
 limpio('C10', reg)
 
+# (16-nov-2026) Un error de la web en las dos paginas de login (no es un bloqueo: _pedir no para): el motivo dice
+# que contesto cada una, en vez de solo «no aparece el formulario».
+telegramas.clear()
+base = Base()
+web = Web(catalogo(), FICHAS, login=500)
+codigo, reg = correr(base, web)
+eq('C11 un 500 en el login: fallida, ROJO, ni Excel ni fichas, Telegram',
+   (codigo, base.pasadas()[0]['estado'], tw.EXCEL_URL in [u for m, u in web.pedidas], web.fichas_pedidas(), len(telegramas)),
+   (1, 'fallida', False, [], 1))
+eq('C12 el motivo dice el código de cada página de login',
+   base.pasadas()[0]['motivo'].endswith('(iniciar-sesion: HTTP 500; mi-cuenta: HTTP 500)'), True)
+limpio('C13', reg)
+
+
+class WebOtraPagina(Web):
+    """El login contesta 200 con una pagina sin formulario."""
+
+    def get(self, url, **k):
+        if url in tw.LOGIN_URLS:
+            self.pedidas.append(('GET', url))
+            return _Resp(200, '<html><body><p>Otra cosa</p></body></html>')
+        return super().get(url, **k)
+
+
+telegramas.clear()
+base = Base()
+web = WebOtraPagina(catalogo(), FICHAS)
+codigo, reg = correr(base, web)
+eq('C14 un 200 sin formulario: fallida y el motivo lo dice con su tamaño',
+   (codigo, base.pasadas()[0]['estado'], 'iniciar-sesion: HTTP 200 sin casilla de contraseña (42 caracteres)'
+    in base.pasadas()[0]['motivo']), (1, 'fallida', True))
+limpio('C15', reg)
+
 # ── (D) El listado ───────────────────────────────────────────────────────────────────────
 base = Base()
 Web_ = Web(catalogo(), FICHAS)
