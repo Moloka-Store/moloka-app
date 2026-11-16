@@ -79,9 +79,14 @@ class Web:
         """Login de PrestaShop por formulario (como director_tcg_prep.py). Bloqueo si no entra."""
         from escaner2_tcg_tramos import arbol
         form, accion = None, None
+        # (16-nov-2026) Lo que contesto cada pagina de login, para el motivo si no sale el formulario: solo el codigo
+        # y el tamano, nunca el texto (repo publico). Hasta hoy el aviso no distinguia un error de la web de otra pagina.
+        vistos = []
         for url in LOGIN_URLS:
             r = self._pedir('login (página)', 'GET', url, timeout=ESPERA_S)
+            nombre = url.rsplit('/', 1)[-1]
             if r.status_code != 200:
+                vistos.append(f'{nombre}: HTTP {r.status_code}')
                 continue
             if _con_sesion(r.text) and not any(i.attrs.get('type') == 'password' for i in arbol(r.text).buscar('input')):
                 return  # ya dentro (la misma sesion entra dos veces: la sonda T2 lo midio)
@@ -91,8 +96,10 @@ class Web:
                     break
             if form is not None:
                 break
+            texto = r.text if isinstance(r.text, str) else ''
+            vistos.append(f'{nombre}: HTTP 200 sin casilla de contraseña ({len(texto)} caracteres)')
         if form is None:
-            raise Bloqueo('login: no aparece el formulario de entrada')
+            raise Bloqueo(f'login: no aparece el formulario de entrada ({"; ".join(vistos)})')
         if accion.startswith('/'):
             accion = BASE + accion
         datos = {i.attrs['name']: i.attrs.get('value', '') for i in form.buscar('input') if i.attrs.get('name')}
