@@ -170,6 +170,20 @@ jobs:
         #    semanal desde la v2) y la vieja de la v1 (`storage/...`,
         #    congelada desde hoy pero con meses de volcados detras). Que un
         #    fichero este en CUALQUIERA de los dos basta.
+        #
+        # 🔴 UNA CARPETA VACIA NO ES LO MISMO QUE UN LISTADO QUE FALLA (17-nov-2026).
+        #    `aws s3 ls` sale con 1 y sin decir nada cuando no hay ningun objeto
+        #    bajo el prefijo; con `pipefail` eso tumbaba el paso entero. Paso el
+        #    17-nov (run 44093016147): la carpeta vieja de la v1 ya no tenia nada
+        #    y la pasada no llego ni a empezar. Ahora:
+        #      · salida 1 SIN NADA escrito = carpeta vacia: cuenta 0 y se dice.
+        #      · cualquier otra salida distinta de 0 (credenciales, red...) = ROJO.
+        #      · la copia VIEJA (v1) vacia: aviso, y se sigue con la viva. Sus
+        #        ficheros no se pierden: la guarda por fichero solo deja comprimir
+        #        lo que esta en R2, y la viva tiene lo de todas las semanas.
+        #      · la copia VIVA (v2) vacia: ROJO. Eso es un problema de la copia
+        #        de seguridad y no se tapa.
+        #    El recuento sale por carpeta, para que el log diga cual es cual.
         env:
           AWS_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -177,20 +191,41 @@ jobs:
         run: |
           set -euo pipefail
           EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          : > /tmp/r2_informes_keepa.tsv
+          TSV="${R2_TSV:-/tmp/r2_informes_keepa.tsv}"
+          : > "$TSV"
+          CRUDO="$(mktemp)"
+          V1="storage/informes/keepa_escaparate/"
+          V2="v2/storage/informes/keepa_escaparate/"
           # 🔒 EL NOMBRE VA AL FINAL, SIN TOCAR POR COLUMNAS (los export de
           #    Keepa pueden llevar espacios y parentesis): se recorta la fecha
           #    y la hora por delante con `sub`, nunca reconstruyendo con OFS.
           #    Mismo patron que copia-r2.yml (v2), medido alli con nombres con
           #    espacios antes de confiar en el.
-          for PREFIJO in "storage/informes/keepa_escaparate/" "v2/storage/informes/keepa_escaparate/"; do
+          for PREFIJO in "$V1" "$V2"; do
+            RC=0
             aws s3 ls "s3://moloka-backups/${PREFIJO}" --recursive \
-                --endpoint-url "$EP" --region auto \
-              | awk '{ tam=$3; sub(/^[^ ]+ +[^ ]+ +[^ ]+ +/, ""); print $0 "\t" tam }' \
-              | sed "s|^${PREFIJO}||" >> /tmp/r2_informes_keepa.tsv
+                --endpoint-url "$EP" --region auto > "$CRUDO" || RC=$?
+            if [ "$RC" -eq 1 ] && [ ! -s "$CRUDO" ]; then
+              : # carpeta vacia: 0 objetos, se decide abajo
+            elif [ "$RC" -ne 0 ]; then
+              echo "::error::No se ha podido listar R2 bajo ${PREFIJO} (aws salio con ${RC}). No se toca nada."
+              exit 1
+            fi
+            N=$(wc -l < "$CRUDO" | tr -d ' ')
+            awk '{ tam=$3; sub(/^[^ ]+ +[^ ]+ +[^ ]+ +/, ""); print $0 "\t" tam }' "$CRUDO" \
+              | sed "s|^${PREFIJO}||" >> "$TSV"
+            echo "  ${PREFIJO}: ${N} objeto(s)"
+            if [ "$N" -eq 0 ] && [ "$PREFIJO" = "$V2" ]; then
+              echo "::error::La copia VIVA de R2 (${V2}) esta vacia: es un problema de la copia de seguridad (copia-r2.yml de la v2). No se toca nada."
+              exit 1
+            fi
+            if [ "$N" -eq 0 ]; then
+              echo "::warning::La copia VIEJA de la v1 en R2 (${V1}) esta vacia. Se sigue con la copia viva."
+            fi
           done
-          echo "R2_LISTADO=/tmp/r2_informes_keepa.tsv" >> "$GITHUB_ENV"
-          echo "Objetos vistos en R2 bajo informes/keepa_escaparate/ (v1+v2): $(wc -l < /tmp/r2_informes_keepa.tsv)"
+          rm -f "$CRUDO"
+          echo "R2_LISTADO=${TSV}" >> "$GITHUB_ENV"
+          echo "Objetos vistos en R2 bajo informes/keepa_escaparate/ (v1+v2): $(wc -l < "$TSV" | tr -d ' ')"
 
       - name: 5) La guarda ANTES (si ya venimos rotos, no se toca nada)
         # 🔒 Lleva `id` porque el paso 6 decide con lo que esta guarda MIDE: el
