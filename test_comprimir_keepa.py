@@ -694,6 +694,102 @@ eq('(O) 🔴 el que NO tiene copia en R2 se GRITA con su motivo',
 eq('(O) … y el que SI tiene copia NO sale marcado como sin copia',
    '· con_copia.csv  (' not in _txt, True)
 
+
+# --- (P) 🔴 UNA CARPETA VACIA EN R2 NO ES UN LISTADO QUE FALLA ----------------
+# El 17-nov-2026 (run 44093016147) la carpeta vieja de la v1 en R2 ya no tenia
+# nada: `aws s3 ls` salio con 1, sin decir nada, y con `pipefail` el paso 4
+# tumbo la pasada entera. Se ejecuta el bash DE VERDAD del paso 4 (sacado por
+# estructura) con un `aws` de mentira delante en el PATH.
+print("\n(P) el listado de R2 del paso 4, ejecutando SU bash")
+
+_N_LISTAR = '4) Listar R2 bajo informes/keepa_escaparate/ (v1 y v2)'
+_P_LISTAR = _PASOS.get(_N_LISTAR) or {}
+eq('(P) el paso 4 existe con su nombre', bool(_P_LISTAR.get('run')), True)
+
+# Que contesta el `aws` de mentira para cada carpeta: (codigo, lineas).
+_LINEA = '2026-11-16 09:52:17    3191125 KeepaExport-2026-11-16-Visualizador (1).csv'
+
+
+def listar(v1, v2):
+    """Corre el paso 4 con esas respuestas. Devuelve (codigo, salida, tsv)."""
+    guion = _P_LISTAR.get('run') or ''
+    if not _BASH or not guion:
+        return (-1, '(no se ha podido ejecutar el paso 4)', '')
+    tmp = tempfile.mkdtemp()
+    try:
+        bin_ = os.path.join(tmp, 'bin')
+        os.mkdir(bin_)
+        for nombre, (cod, lineas) in (('v1', v1), ('v2', v2)):
+            with io.open(os.path.join(tmp, nombre + '.txt'), 'w',
+                         encoding='utf-8', newline='\n') as fh:
+                fh.write(''.join(l + '\n' for l in lineas))
+            with io.open(os.path.join(tmp, nombre + '.rc'), 'w',
+                         encoding='utf-8', newline='\n') as fh:
+                fh.write(str(cod))
+        # El prefijo va en el 3.er argumento: s3://moloka-backups/<prefijo>
+        falso = ('#!/usr/bin/env bash\n'
+                 'case "$3" in\n'
+                 '  s3://moloka-backups/v2/*) Q=v2 ;;\n'
+                 '  *) Q=v1 ;;\n'
+                 'esac\n'
+                 'D="$(dirname "$0")/.."\n'
+                 'cat "$D/$Q.txt"\n'
+                 'exit "$(cat "$D/$Q.rc")"\n')
+        ruta_aws = os.path.join(bin_, 'aws')
+        with io.open(ruta_aws, 'w', encoding='utf-8', newline='\n') as fh:
+            fh.write(falso)
+        os.chmod(ruta_aws, 0o755)
+        sh = os.path.join(tmp, 'paso4.sh')
+        with io.open(sh, 'w', encoding='utf-8', newline='\n') as fh:
+            fh.write(guion)
+        tsv = os.path.join(tmp, 'r2.tsv')
+        env = dict(os.environ, R2_ACCOUNT_ID='cuenta', R2_TSV=tsv,
+                   GITHUB_ENV=os.path.join(tmp, 'github_env'))
+        env['PATH'] = bin_ + os.pathsep + env.get('PATH', '')
+        p = subprocess.run([_BASH, '-e', sh], env=env, capture_output=True,
+                           text=True, encoding='utf-8', errors='replace')
+        contenido = ''
+        if os.path.exists(tsv):
+            with io.open(tsv, encoding='utf-8') as fh:
+                contenido = fh.read()
+        return (p.returncode, (p.stdout or '') + (p.stderr or ''), contenido)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+_V1 = 'storage/informes/keepa_escaparate/'
+_V2 = 'v2/storage/informes/keepa_escaparate/'
+_ESPERADO = 'KeepaExport-2026-11-16-Visualizador (1).csv\t3191125\n'
+
+# Lo de siempre: las dos con ficheros.
+_c, _s, _t = listar((0, [_LINEA.replace(' K', ' ' + _V1 + 'K', 1)]),
+                    (0, [_LINEA.replace(' K', ' ' + _V2 + 'K', 1)]))
+eq('(P) las dos con ficheros: verde', _c, 0)
+eq('(P) … y el TSV trae los dos, nombre con espacios entero y su tamaño',
+   _t, _ESPERADO * 2)
+
+# Lo del 17-nov: la vieja vacia (sale con 1 sin escribir nada), la viva bien.
+_c, _s, _t = listar((1, []), (0, [_LINEA.replace(' K', ' ' + _V2 + 'K', 1)]))
+eq('(P) 🔴 la copia vieja vacia NO tumba el paso', _c, 0)
+eq('(P) … sigue con lo de la viva', _t, _ESPERADO)
+eq('(P) … y lo dice con un aviso', '::warning::La copia VIEJA' in _s, True)
+eq('(P) … con el recuento por carpeta', f'{_V1}: 0 objeto(s)' in _s, True)
+
+# La viva vacia: eso es un problema de la copia de seguridad, y se grita.
+_c, _s, _t = listar((0, [_LINEA.replace(' K', ' ' + _V1 + 'K', 1)]), (1, []))
+eq('(P) 🔴 la copia VIVA vacia: rojo', _c, 1)
+eq('(P) … diciendo que es la viva', '::error::La copia VIVA' in _s, True)
+
+# Un fallo de verdad (credenciales, red): rojo, nunca "vacia".
+_c, _s, _t = listar((255, []), (0, [_LINEA.replace(' K', ' ' + _V2 + 'K', 1)]))
+eq('(P) 🔴 un listado que falla (255) es rojo', _c, 1)
+eq('(P) … y dice con que salio', 'aws salio con 255' in _s, True)
+
+# Salida 1 CON algo escrito tampoco es "vacia".
+_c, _s, _t = listar((1, [_LINEA.replace(' K', ' ' + _V1 + 'K', 1)]),
+                    (0, [_LINEA.replace(' K', ' ' + _V2 + 'K', 1)]))
+eq('(P) 🔴 salida 1 a medias es rojo, no vacia', _c, 1)
+
 print()
 if fallos:
     print(f'❌ {len(fallos)} FALLOS: ' + ', '.join(fallos))
