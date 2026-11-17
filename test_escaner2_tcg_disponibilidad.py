@@ -478,10 +478,46 @@ telegramas.clear()
 base = Base()
 web = WebOtraPagina(catalogo(), FICHAS)
 codigo, reg = correr(base, web)
-eq('C14 un 200 sin formulario: fallida y el motivo lo dice con su tamaño',
-   (codigo, base.pasadas()[0]['estado'], 'iniciar-sesion: HTTP 200 sin casilla de contraseña (42 caracteres)'
+eq('C14 un 200 sin formulario: fallida y el motivo lo dice con su tamaño y qué página es',
+   (codigo, base.pasadas()[0]['estado'],
+    'iniciar-sesion: HTTP 200 sin casilla de contraseña (42 caracteres; sin título, formularios 0, servidor sin firma)'
     in base.pasadas()[0]['motivo']), (1, 'fallida', True))
 limpio('C15', reg)
+
+# (17-nov-2026) Tres paradas con un 200 corto sin saber que pagina era: el motivo lleva su titulo (limpio y recortado),
+# cuantos formularios trae y el servidor que la firma. Del cuerpo, nada.
+CUERPO_SECRETO = 'CUERPO-QUE-NO-SALE'
+PAGINA_RARA = ('<html><head><title>  Volvemos   enseguida - Tienda, S.L. ¡ya! ' + 'x' * 80 + '</title></head>'
+               '<body><form action="/buscar"><input type="text" name="s"></form><p>' + CUERPO_SECRETO + '</p></body></html>')
+
+
+class WebPaginaRara(Web):
+    """El login contesta 200 con una pagina con titulo, un formulario que no es el de entrar y la firma del servidor."""
+
+    def get(self, url, **k):
+        if url in tw.LOGIN_URLS:
+            self.pedidas.append(('GET', url))
+            r = _Resp(200, PAGINA_RARA)
+            r.headers = {'Content-Type': 'text/html', 'SERVER': 'nginx/1.2 <b>&'}
+            return r
+        return super().get(url, **k)
+
+
+telegramas.clear()
+base = Base()
+web = WebPaginaRara(catalogo(), FICHAS)
+codigo, reg = correr(base, web)
+motivo = base.pasadas()[0]['motivo']
+eq('C16 un 200 con otra página: el motivo dice su título (60 caracteres, sin signos), sus formularios y el servidor',
+   (codigo, 'iniciar-sesion: HTTP 200 sin casilla de contraseña (%d caracteres; título «Volvemos enseguida - Tienda, S.L. ya '
+    'xxxxxxxxxxxxxxxxxxxxxxx», formularios 1, servidor nginx/1.2 b)' % len(PAGINA_RARA) in motivo),
+   (1, True))
+eq('C16b lo que se limpia de un título: fuera los signos que rompen el Telegram, espacios juntados y tope',
+   (tw._limpio('  a <b> &amp; "c"   d.e,f-g  ', 60, '.,-'), tw._limpio('abcdef', 3)), ('a b amp c d.e,f-g', 'abc'))
+eq('C17 ni el motivo, ni el registro, ni el Telegram llevan el cuerpo de la página ni un «<» o un «&» suyos',
+   ([CUERPO_SECRETO in t for t in (motivo, reg, ' '.join(telegramas))], [c for c in '<>&' if c in motivo], len(telegramas)),
+   ([False, False, False], [], 1))
+limpio('C18', reg)
 
 # ── (D) El listado ───────────────────────────────────────────────────────────────────────
 base = Base()
