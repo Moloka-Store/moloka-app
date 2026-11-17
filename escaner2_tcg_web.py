@@ -189,23 +189,24 @@ def _limpio(texto, tope, de_mas=''):
 
 
 def _que_pagina(r, texto):
-    """(17-nov-2026) Que pagina es la que sale en vez del login: su titulo, cuantos formularios trae y que servidor la
-    firma. Tres paradas (16 y 17-nov) con un 200 de unos 12.000 caracteres sin saber si era un «volvemos enseguida» o
-    un filtro anti-robots. 🔴 REPO PUBLICO: es la pagina publica de ANTES de entrar (sin sesion: ni cuenta ni
-    productos), y de ella solo el titulo, recortado y limpio; nunca el cuerpo."""
+    """(17-nov-2026) Que pagina es la que sale en vez del login: su titulo, cuantos formularios trae, si llega entera
+    (con su `</html>`: una pagina normal cortada a medias tendria el titulo de siempre) y que servidor la firma. Tres
+    paradas (16 y 17-nov) con un 200 de unos 12.000 caracteres sin saber si era un «volvemos enseguida» o un filtro
+    anti-robots. 🔴 REPO PUBLICO: es la pagina publica de ANTES de entrar (sin sesion: ni cuenta ni productos), y de
+    ella solo el titulo, recortado y limpio; nunca el cuerpo."""
     from escaner2_tcg_tramos import arbol
     doc = arbol(texto)
     nodo = doc.primero('title')
     titulo = _limpio(nodo.texto(), _TITULO_MAX, '.,-') if nodo is not None else ''
-    servidor = ''
+    servidor = 'sin cabecera Server'
     try:
         for k, v in (getattr(r, 'headers', None) or {}).items():
             if str(k).lower() == 'server':
-                servidor = _limpio(str(v), _SERVIDOR_MAX, '.-/_')
+                servidor = _limpio(str(v), _SERVIDOR_MAX, '.-/_') or 'con la cabecera Server vacía'
     except Exception:  # noqa: BLE001 - unas cabeceras raras no pueden tapar el motivo de la parada
-        servidor = ''
+        servidor = 'cabeceras sin poder leer'
     return (f'{"título «" + titulo + "»" if titulo else "sin título"}, formularios {sum(1 for _ in doc.buscar("form"))}, '
-            f'servidor {servidor or "sin firma"}')
+            f'{"entera" if "</html>" in texto.lower() else "sin su cierre de html"}, servidor {servidor}')
 
 
 def sesion_de_verdad():

@@ -480,7 +480,8 @@ web = WebOtraPagina(catalogo(), FICHAS)
 codigo, reg = correr(base, web)
 eq('C14 un 200 sin formulario: fallida y el motivo lo dice con su tamaño y qué página es',
    (codigo, base.pasadas()[0]['estado'],
-    'iniciar-sesion: HTTP 200 sin casilla de contraseña (42 caracteres; sin título, formularios 0, servidor sin firma)'
+    'iniciar-sesion: HTTP 200 sin casilla de contraseña (42 caracteres; sin título, formularios 0, entera, servidor sin '
+    'cabecera Server)'
     in base.pasadas()[0]['motivo']), (1, 'fallida', True))
 limpio('C15', reg)
 
@@ -510,8 +511,23 @@ codigo, reg = correr(base, web)
 motivo = base.pasadas()[0]['motivo']
 eq('C16 un 200 con otra página: el motivo dice su título (60 caracteres, sin signos), sus formularios y el servidor',
    (codigo, 'iniciar-sesion: HTTP 200 sin casilla de contraseña (%d caracteres; título «Volvemos enseguida - Tienda, S.L. ya '
-    'xxxxxxxxxxxxxxxxxxxxxxx», formularios 1, servidor nginx/1.2 b)' % len(PAGINA_RARA) in motivo),
+    'xxxxxxxxxxxxxxxxxxxxxxx», formularios 1, entera, servidor nginx/1.2 b)' % len(PAGINA_RARA) in motivo),
    (1, True))
+
+
+class _CabecerasRotas:
+    def items(self):
+        raise RuntimeError('cabeceras rotas')
+
+
+CORTADA = tw._que_pagina(types.SimpleNamespace(headers=_CabecerasRotas()),
+                         '<html><head><title>Iniciar sesión</title></head><body><p>')
+VACIA = tw._que_pagina(types.SimpleNamespace(headers={'server': '<>'}), '')
+eq('C16c una página cortada a medias y unas cabeceras que no se dejan leer: el motivo lo dice, no lo calla',
+   (CORTADA, VACIA),
+   ('título «Iniciar sesión», formularios 0, sin su cierre de html, servidor cabeceras sin poder leer',
+    'sin título, formularios 0, sin su cierre de html, servidor con la cabecera Server vacía'))
+eq('C16d y tampoco ahí lleva un «<», un «>» o un «&» que rompa el Telegram', [c for c in '<>&' if c in CORTADA + VACIA], [])
 eq('C16b lo que se limpia de un título: fuera los signos que rompen el Telegram, espacios juntados y tope',
    (tw._limpio('  a <b> &amp; "c"   d.e,f-g  ', 60, '.,-'), tw._limpio('abcdef', 3)), ('a b amp c d.e,f-g', 'abc'))
 eq('C17 ni el motivo, ni el registro, ni el Telegram llevan el cuerpo de la página ni un «<» o un «&» suyos',
