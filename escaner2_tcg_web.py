@@ -12,7 +12,8 @@ listado filtrado (el POST de solo consulta del filtro de la web, 111 tarjetas po
 🆕 (Encargo T4, 14-oct-2026) El listado de UNA MARCA (Funko): el mismo POST con la casilla de marca del filtro, y
    `total_listado`, lo que la web dice tener (para saber si se ha leido entero).
 🔴 REPO PUBLICO: este modulo NO imprime. Los textos de `Bloqueo` los escribe el (codigos y que se pedia), nunca una URL
-   con datos, la respuesta, el usuario o la clave.
+   con datos, la respuesta, el usuario o la clave. Una sola cosa sale de una respuesta: el titulo de la pagina publica
+   que aparece en vez del login, antes de que haya sesion (`_que_pagina`).
 """
 import random
 import time
@@ -79,8 +80,8 @@ class Web:
         """Login de PrestaShop por formulario (como director_tcg_prep.py). Bloqueo si no entra."""
         from escaner2_tcg_tramos import arbol
         form, accion = None, None
-        # (16-nov-2026) Lo que contesto cada pagina de login, para el motivo si no sale el formulario: solo el codigo
-        # y el tamano, nunca el texto (repo publico). Hasta hoy el aviso no distinguia un error de la web de otra pagina.
+        # Lo que contesto cada pagina de login, para el motivo si no sale el formulario: el codigo y, si es un 200 sin
+        # casilla de contrasena, su tamano y que pagina es (`_que_pagina`: titulo, formularios y servidor; nunca el cuerpo).
         vistos = []
         for url in LOGIN_URLS:
             r = self._pedir('login (página)', 'GET', url, timeout=ESPERA_S)
@@ -97,7 +98,7 @@ class Web:
             if form is not None:
                 break
             texto = r.text if isinstance(r.text, str) else ''
-            vistos.append(f'{nombre}: HTTP 200 sin casilla de contraseña ({len(texto)} caracteres)')
+            vistos.append(f'{nombre}: HTTP 200 sin casilla de contraseña ({len(texto)} caracteres; {_que_pagina(r, texto)})')
         if form is None:
             raise Bloqueo(f'login: no aparece el formulario de entrada ({"; ".join(vistos)})')
         if accion.startswith('/'):
@@ -175,6 +176,37 @@ class Web:
 def _con_sesion(html):
     h = (html or '').lower()
     return 'cerrar sesión' in h or 'cerrar sesion' in h or 'logout' in h
+
+
+_TITULO_MAX = 60
+_SERVIDOR_MAX = 40
+
+
+def _limpio(texto, tope, de_mas=''):
+    """Solo letras, cifras, espacios y `de_mas`, con los espacios juntados y cortado a `tope`: el motivo sale por el
+    registro publico y por un Telegram en HTML, y un «<» o un «&» de la pagina lo romperia."""
+    return ' '.join(''.join(c if (c.isalnum() or c in de_mas) else ' ' for c in texto).split())[:tope].strip()
+
+
+def _que_pagina(r, texto):
+    """(17-nov-2026) Que pagina es la que sale en vez del login: su titulo, cuantos formularios trae, si llega entera
+    (con su `</html>`: una pagina normal cortada a medias tendria el titulo de siempre) y que servidor la firma. Tres
+    paradas (16 y 17-nov) con un 200 de unos 12.000 caracteres sin saber si era un «volvemos enseguida» o un filtro
+    anti-robots. 🔴 REPO PUBLICO: es la pagina publica de ANTES de entrar (sin sesion: ni cuenta ni productos), y de
+    ella solo el titulo, recortado y limpio; nunca el cuerpo."""
+    from escaner2_tcg_tramos import arbol
+    doc = arbol(texto)
+    nodo = doc.primero('title')
+    titulo = _limpio(nodo.texto(), _TITULO_MAX, '.,-') if nodo is not None else ''
+    servidor = 'sin cabecera Server'
+    try:
+        for k, v in (getattr(r, 'headers', None) or {}).items():
+            if str(k).lower() == 'server':
+                servidor = _limpio(str(v), _SERVIDOR_MAX, '.-/_') or 'con la cabecera Server vacía'
+    except Exception:  # noqa: BLE001 - unas cabeceras raras no pueden tapar el motivo de la parada
+        servidor = 'cabeceras sin poder leer'
+    return (f'{"título «" + titulo + "»" if titulo else "sin título"}, formularios {sum(1 for _ in doc.buscar("form"))}, '
+            f'{"entera" if "</html>" in texto.lower() else "sin su cierre de html"}, servidor {servidor}')
 
 
 def sesion_de_verdad():
