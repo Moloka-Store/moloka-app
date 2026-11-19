@@ -41,6 +41,14 @@ class Bloqueo(Exception):
     """La web ha dicho que no (o algo raro): se para. El texto lo escribe este modulo."""
 
 
+class Pared(Bloqueo):
+    """(19-nov-2026) Las paginas de login contestan TODAS 200, pero sin casilla de contrasena: la pagina corta «One
+    moment, please...» que un servidor puesto delante de la web de TCG (openresty; la web normal la sirve nginx) ensena a
+    ALGUNAS maquinas. Depende de la maquina, no de la hora: el 19-nov a las 12:40, 1 de 12 maquinas de GitHub la vio en el
+    mismo segundo en que las otras 11 veian el formulario. Para como cualquier Bloqueo; quien lanza la pasada puede
+    repetirla en OTRA maquina (escaner2_tcg_disponibilidad). Aqui no se reintenta nada ni se toca esa pagina."""
+
+
 class Web:
     """La sesion con TCG. `sesion` es un curl_cffi Session (o uno de mentira en las pruebas)."""
 
@@ -100,7 +108,11 @@ class Web:
             texto = r.text if isinstance(r.text, str) else ''
             vistos.append(f'{nombre}: HTTP 200 sin casilla de contraseña ({len(texto)} caracteres; {_que_pagina(r, texto)})')
         if form is None:
-            raise Bloqueo(f'login: no aparece el formulario de entrada ({"; ".join(vistos)})')
+            motivo = f'login: no aparece el formulario de entrada ({"; ".join(vistos)})'
+            # Pared solo si TODAS contestaron 200 sin casilla; un error HTTP (la web caida) sigue siendo un Bloqueo.
+            if vistos and all(' HTTP 200 sin casilla' in v for v in vistos):
+                raise Pared(motivo)
+            raise Bloqueo(motivo)
         if accion.startswith('/'):
             accion = BASE + accion
         datos = {i.attrs['name']: i.attrs.get('value', '') for i in form.buscar('input') if i.attrs.get('name')}

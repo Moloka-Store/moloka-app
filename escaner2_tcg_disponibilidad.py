@@ -88,6 +88,11 @@ PROVEEDOR = 'TCG'
 LOTE = 500
 PAGINA = 1000  # PostgREST devuelve como mucho 1.000 filas por consulta
 FICHAS_MAX = 150
+# (19-nov-2026, Fernando: «Monta el reintento») Cuantas veces se intenta una pasada que choca en el login con la pagina
+# anti-robots que la web ensena a ALGUNAS maquinas (escaner2_tcg_web.Pared): la 1.ª la lanza cron-job.org y cada
+# siguiente la lanza el workflow en una ejecucion nueva, o sea en OTRA maquina de GitHub. Rojo y Telegram, solo en la
+# ultima. Solo para la Pared: cualquier otro bloqueo para a la primera, como siempre.
+INTENTOS = 3
 # (Encargo T4) La marca de las novedades (Fernando, 13-oct: «el escnear automatico solo de Funko»), la categoria de la web
 # donde vive (sonda T4: las 2.122 de la marca Funko de la web estan en «merchandising», como las 2.122 de la foto), cuantas
 # fichas suyas se leen como mucho antes de la foto, y el listado mas corto que se cree (frente a lo que el Excel da disponible).
@@ -117,9 +122,9 @@ def abortar(motivo):
 class Rechazo(Exception):
     """La pasada no se aplica: `estado` y un `motivo` escrito por este programa (estados y recuentos)."""
 
-    def __init__(self, estado, motivo, bloqueo=False):
+    def __init__(self, estado, motivo, bloqueo=False, pared=False):
         super().__init__(motivo)
-        self.estado, self.motivo, self.bloqueo = estado, motivo, bloqueo
+        self.estado, self.motivo, self.bloqueo, self.pared = estado, motivo, bloqueo, pared
 
 
 class AlDia(Rechazo):
@@ -195,14 +200,15 @@ def _minimos(c, minimo, min_disp):
         raise Rechazo('rechazada_vaciado', f"vaciado: {c['n_disponibles']} disponibles, por debajo del mínimo {min_disp}")
 
 
-def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX):
+def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX, intento=1):
     """La pasada de la foto. Devuelve (codigo, estado, catalogo, guardados, pid, previos): `estado` 'aplicada',
-    'al_dia' u otro; `previos`, (fichas de Funko con dato imposible, fichas de Funko leidas) (encargos DI y DT: cuentan
+    'al_dia', 'pared' (choco en el login con la pagina anti-robots y queda otro intento en otra maquina: sin Telegram y
+    codigo 0) u otro; `previos`, (fichas de Funko con dato imposible, fichas de Funko leidas) (encargos DI y DT: cuentan
     para el tope del lector);
     `catalogo` y `guardados` para el lector de tramos (None si la pasada no ha llegado a entender el Excel)."""
     import escaner2_tcg as tcg
     import escaner2_tcg_tramos as tr
-    from escaner2_tcg_web import Bloqueo
+    from escaner2_tcg_web import Bloqueo, Pared
 
     abrir = {'proveedor': PROVEEDOR, 'estado': 'leyendo', 'run_id': int(run_id) if run_id.isdigit() else None}
     pid = sb.table('disp_pasada').insert(abrir).execute().data[0]['id']
@@ -224,6 +230,9 @@ def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX
         try:
             web.entrar(usuario, clave)
             contenido = web.excel()
+        except Pared as ex:
+            raise Rechazo('fallida', f'la web de TCG no deja: {ex} · intento {intento} de {INTENTOS}', bloqueo=True,
+                          pared=True) from None
         except Bloqueo as ex:
             raise Rechazo('fallida', f'la web de TCG no deja: {ex}', bloqueo=True) from None
         md5, n_bytes = tcg.huella_fichero(contenido)
@@ -287,9 +296,15 @@ def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX
             print(f"TCG_AL_DIA: el contenido es el de la pasada aplicada {ex.pasada_aplicada}; nada nuevo.", flush=True)
             return 0, 'al_dia', catalogo, guardados, pid, previos
         print(f"TCG_NO_APLICADA: pasada {pid} {ex.estado}: {ex.motivo}", flush=True)
+        if ex.pared and intento < INTENTOS:
+            # (19-nov-2026) Sin Telegram ni rojo: la pasada se repite en otra maquina (el workflow la relanza).
+            print(f"TCG_PARED_REINTENTO: la web ha enseñado su página anti-robots a esta máquina; intento {intento} de "
+                  f"{INTENTOS}: se lanza el {intento + 1}.º en otra máquina.", flush=True)
+            return 0, 'pared', None, None, pid, previos
         if ex.bloqueo:
-            avisar(f'⚠️ Escáner 2 · TCG: la pasada de la foto se ha parado porque la web de TCG no deja ({ex.motivo}). '
-                   f'Nada inventado; el escáner viejo sigue como siempre.')
+            tras = f' Ya van {INTENTOS} intentos, cada uno en otra máquina.' if ex.pared else ''
+            avisar(f'⚠️ Escáner 2 · TCG: la pasada de la foto se ha parado porque la web de TCG no deja ({ex.motivo}).'
+                   f'{tras} Nada inventado; el escáner viejo sigue como siempre.')
         return 1, ex.estado, None, None, pid, previos
     except Exception as ex:
         # 🔴 REPO PÚBLICO: el texto de un error puede llevar una URL, la respuesta de la web o una fila de la base.
@@ -516,6 +531,10 @@ def principal(argv, env=None, sb=None, sesion=None, dormir=None):
     listado = (env.get('LISTADO') or 'auto').strip()
     if not fichas_txt.isdigit() or listado not in ('auto', 'si', 'no'):
         abortar('FICHAS_MAX tiene que ser un número entero y LISTADO auto, si o no')
+    intento_txt = (env.get('INTENTO') or '1').strip()
+    if not (intento_txt.isdigit() and 1 <= int(intento_txt) <= INTENTOS):
+        abortar(f'INTENTO tiene que ser un número de 1 a {INTENTOS}')
+    intento = int(intento_txt)
     run_id = env.get('GITHUB_RUN_ID') or ''
     if sb is None:
         from escaner2_base import cliente
@@ -530,7 +549,17 @@ def principal(argv, env=None, sb=None, sesion=None, dormir=None):
     from escaner2_tcg_web import Web, sesion_de_verdad
     web = Web(sesion if sesion is not None else sesion_de_verdad(), **({'dormir': dormir} if dormir else {}))
     ahora = _ahora()
-    codigo, estado, catalogo, guardados, pid, previos = pasada(sb, web, run_id, env['TCG_USER'], env['TCG_PASS'], ahora)
+    codigo, estado, catalogo, guardados, pid, previos = pasada(sb, web, run_id, env['TCG_USER'], env['TCG_PASS'], ahora,
+                                                               intento=intento)
+    if estado == 'pared':
+        # (19-nov-2026) El workflow lee esto y lanza la pasada otra vez, en una ejecucion nueva (otra maquina).
+        salida = env.get('GITHUB_OUTPUT')
+        if not salida:
+            print(">>> OTRA MÁQUINA: sin GITHUB_OUTPUT no se puede pedir el siguiente intento; sale en rojo.", flush=True)
+            return 1
+        with open(salida, 'a', encoding='utf-8') as fh:
+            fh.write(f'pared=1\nsiguiente={intento + 1}\n')
+        return 0
     if estado not in ('aplicada', 'al_dia') or catalogo is None:
         print(">>> TRAMOS: no se leen (la pasada no ha entendido el Excel o la web no deja).", flush=True)
         return codigo or 1
