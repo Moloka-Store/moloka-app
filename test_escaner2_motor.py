@@ -532,6 +532,45 @@ _filas_bib = [{'fichero': 'resultados/Escaneo_HEO_TODAS_20260924_1135.xlsx', 'mo
 _elegidas, _hay = e2.elegir_excels_viejos(_filas_bib)
 eq('(H) se comparan el ULTIMO completo y las novedades POSTERIORES, no las anteriores',
    ([f['fichero'][-18:] for f in _elegidas], _hay), (['20260924_1135.xlsx', '20260923_2006.xlsx'], True))
+# (19-nov-2026) Como esta la biblioteca hoy: filas de HEO, ninguna con fichero → nada que comparar.
+eq('(H) sin ningun Excel del viejo (todas las filas sin fichero) no se elige nada',
+   e2.elegir_excels_viejos([{'fichero': None, 'modo': 'todo'}, {'fichero': '', 'modo': 'nuevos'}]), ([], False))
+eq('(H) SinExcelViejo es un RuntimeError (quien no lo distinga lo sigue tratando como fallo)',
+   issubclass(e2.SinExcelViejo, RuntimeError), True)
+
+
+def _handlers_de_la_comparacion():
+    """Los `except` del try del cruce que llama a comparar_con_el_viejo, en orden: (tipo, asigna rojo)."""
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'escaner2_heo_cruce.py'),
+              encoding='utf-8') as fh:
+        arbol = ast.parse(fh.read())
+    salida = []
+    for nodo in ast.walk(arbol):
+        if isinstance(nodo, ast.Try) and any(
+                isinstance(n, ast.Call) and getattr(n.func, 'id', None) == 'comparar_con_el_viejo'
+                for b in nodo.body for n in ast.walk(b)):
+            for h in nodo.handlers:
+                rojo = any(isinstance(n, ast.Name) and n.id == 'rojo' and isinstance(n.ctx, ast.Store)
+                           for b in h.body for n in ast.walk(b))
+                salida.append((ast.unparse(h.type) if h.type else None, rojo))
+    return salida
+
+
+def _lanza_sin_excel_viejo():
+    """¿comparar_con_el_viejo lanza e2.SinExcelViejo (y no un RuntimeError suelto) cuando no hay Excel?"""
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'escaner2_heo_cruce.py'),
+              encoding='utf-8') as fh:
+        arbol = ast.parse(fh.read())
+    fn = next(n for n in ast.walk(arbol) if isinstance(n, ast.FunctionDef) and n.name == 'comparar_con_el_viejo')
+    return sorted({ast.unparse(n.exc.func) for n in ast.walk(fn) if isinstance(n, ast.Raise) and n.exc is not None
+                   and isinstance(n.exc, ast.Call)})
+
+
+eq('(H) 🔴 sin Excel del viejo el cruce AVISA sin rojo; cualquier otro fallo de la comparacion, ROJO '
+   '(19-nov-2026: salia rojo en cada cruce y mandaba un correo de error)',
+   _handlers_de_la_comparacion(), [('e2.SinExcelViejo', False), ('Exception', True)])
+eq('(H) …y comparar_con_el_viejo lanza SinExcelViejo, no un RuntimeError suelto',
+   'e2.SinExcelViejo' in _lanza_sin_excel_viejo(), True)
 _viejo = e2.fusionar_viejos([
     ({'fichero': 'resultados/Escaneo_HEO_TODAS_20260924_1135.xlsx', 'fecha': datetime(2026, 9, 24, 11, 35, tzinfo=timezone.utc), 'modo': 'nuevos'},
      e2.leer_excel_viejo(_novedad, M)),

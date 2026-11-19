@@ -1427,6 +1427,14 @@ def fusionar_viejos(excels):
     return salida
 
 
+class SinExcelViejo(RuntimeError):
+    """(19-nov-2026) No queda NINGUN Excel del escaner viejo de HEO en `escaner_resultados` (las 189
+    filas de HEO tienen hoy `fichero` vacio: el viejo ya no escanea). Sin el no hay con que comparar,
+    pero el cruce es bueno: el cruce lo dice como aviso y el run NO sale rojo (desde el 11-oct salia
+    rojo en cada cruce y mandaba un correo de error que no pedia nada). Cualquier otro fallo de la
+    comparacion sigue en rojo."""
+
+
 def elegir_excels_viejos(filas_resultados):
     """De las filas de `escaner_resultados` de HEO con fichero (las mas nuevas primero) → las que
     hacen falta: el ULTIMO escaneo completo ('todo') y todas las pasadas de novedades
