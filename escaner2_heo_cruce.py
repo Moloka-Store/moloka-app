@@ -347,6 +347,7 @@ def cruzar(cruce, params, pasada):
         motivo_fallo = f'la base no guarda lo calculado: {n_bd} frente a {cq["conteo"]}'
 
     # ── 5 · La comparacion con el viejo (si falla, se avisa y el run sale rojo al final) ─
+    #    (19-nov-2026) Salvo que no quede ningun Excel del viejo (e2.SinExcelViejo): aviso, sin rojo.
     cmp_filas, cmp_resumen, viejos_meta, rank_max, lista_viejo = [], {}, [], None, None
     try:
         lista_viejo = lista_del_viejo(pasada)
@@ -354,6 +355,9 @@ def cruzar(cruce, params, pasada):
             M, foto, resultados, dict(params, usados=usados), fecha_datos, lista_viejo)
         _en_lotes('escaner2_comparacion', [dict(c, cruce_id=cruce, fecha_viejo=_iso(c['fecha_viejo']),
                                                 fecha_nuevo=_iso(c['fecha_nuevo'])) for c in cmp_filas])
+    except e2.SinExcelViejo as ex:
+        avisos.append(f'Sin comparación con el viejo: {ex}')
+        print('>>> ' + avisos[-1], flush=True)
     except Exception as ex:
         rojo = True
         avisos.append(f'Comparación con el viejo no disponible: {type(ex).__name__}: {ex}')
@@ -436,7 +440,7 @@ def comparar_con_el_viejo(M, foto, resultados, params, fecha_datos, lista_viejo=
              .eq('proveedor', e2.PROVEEDOR).order('fecha', desc=True).limit(300).execute().data) or []
     elegidas, hay_completo = e2.elegir_excels_viejos(filas)
     if not elegidas:
-        raise RuntimeError('no hay ningún Excel del escáner viejo de HEO en la biblioteca')
+        raise e2.SinExcelViejo('no hay ningún Excel del escáner viejo de HEO en la biblioteca')
     excels, meta = [], []
     for f in elegidas:
         fecha = e2.fecha_del_excel_viejo(f['fichero']) or datetime.fromisoformat(
