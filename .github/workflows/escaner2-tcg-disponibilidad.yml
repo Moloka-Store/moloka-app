@@ -38,6 +38,13 @@
 #     minuto 20, para no entrar a la vez que el director viejo, que lo hace a las horas en punto). Tiene que coincidir
 #     con disp_parametros.horario_* de TCG.
 #     A MANO: la PRIMERA LECTURA de todas las fichas disponibles (~1.640, ~100 min) con fichas_max = 2000.
+#
+# 🆕 OTRA MAQUINA (19-nov-2026, Fernando: «Monta el reintento»): a ALGUNAS maquinas de GitHub la web de TCG les ensena
+#    en el login una pagina anti-robots («One moment, please...», servidor openresty) en vez del formulario; depende de
+#    la maquina, no de la hora (sonda del 19-nov: 1 de 12 en el mismo segundo). Si pasa (escaner2_tcg_web.Pared), la
+#    pasada queda 'fallida' con su motivo, este run sale VERDE y sin Telegram, y el job `otra_maquina` lanza el workflow
+#    otra vez con intento+1: una ejecucion nueva, o sea otra maquina. En el intento 3 (INTENTOS), rojo y Telegram, como
+#    antes. Cualquier otro bloqueo para a la primera. No se toca la pagina anti-robots: solo se vuelve a intentar.
 # ============================================================
 name: Moloka - Escaner 2 · Disponibilidad TCG
 
@@ -53,6 +60,10 @@ on:
         type: choice
         options: [auto, si, 'no']
         default: auto
+      intento:
+        description: 'Intento tras la página anti-robots de TCG (1 a 3; lo pone el propio workflow, a mano déjalo en 1)'
+        type: string
+        default: '1'
 
 # 🔒 GRUPO PROPIO: nunca dos pasadas de TCG a la vez, sin cancelar la que corre.
 concurrency:
@@ -62,6 +73,9 @@ concurrency:
 jobs:
   leer:
     runs-on: ubuntu-24.04
+    outputs:
+      pared:     ${{ steps.leer.outputs.pared }}
+      siguiente: ${{ steps.leer.outputs.siguiente }}
     permissions:
       contents: read
     timeout-minutes: 170
@@ -100,6 +114,7 @@ jobs:
         run: pip install --quiet supabase==2.31.0 openpyxl==3.1.5 curl_cffi==0.15.0 requests==2.34.2
 
       - name: Leer TCG, aplicar la pasada y leer los tramos
+        id: leer
         # El tope va en el PASO (160 min: la primera lectura entera son ~100), no solo en el job: si se agota, el rescate corre.
         timeout-minutes: 160
         env:
@@ -116,6 +131,7 @@ jobs:
           # Los inputs llegan por env:, nunca dentro del run: (cron-job.org no manda ninguno: valen los de defecto).
           FICHAS_MAX:           ${{ inputs.fichas_max }}
           LISTADO:              ${{ inputs.listado }}
+          INTENTO:              ${{ inputs.intento }}
           PYTHONIOENCODING:     utf-8
         run: python -u escaner2_tcg_disponibilidad.py
 
@@ -127,3 +143,28 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           PYTHONIOENCODING:     utf-8
         run: python -u escaner2_tcg_disponibilidad.py --rescate
+
+  # 🆕 (19-nov-2026) OTRA MAQUINA: si `leer` choco en el login con la pagina anti-robots y queda intento, se lanza el
+  #    workflow otra vez (una ejecucion nueva = otra maquina), con los mismos inputs y intento+1. Espera en la cola del
+  #    grupo `escaner2-tcg` a que este run acabe. 🔒 Job aparte para que `actions: write` (lanzar con el GITHUB_TOKEN de
+  #    este run, sin llave nueva) viva SOLO aqui, como `encadenar` en procesar-keepa-escaparate.yml. Sin
+  #    continue-on-error: si no se puede lanzar, el run sale ROJO (la pasada se ha parado y nadie la repite).
+  otra_maquina:
+    needs: leer
+    if: needs.leer.outputs.pared == '1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Lanzar la pasada otra vez, en otra máquina
+        env:
+          GH_TOKEN:   ${{ github.token }}
+          SIGUIENTE:  ${{ needs.leer.outputs.siguiente }}
+          FICHAS_MAX: ${{ inputs.fichas_max }}
+          LISTADO:    ${{ inputs.listado }}
+        run: |
+          gh workflow run escaner2-tcg-disponibilidad.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" \
+            -f intento="$SIGUIENTE" -f fichas_max="$FICHAS_MAX" -f listado="$LISTADO"
+          echo "intento $SIGUIENTE lanzado"

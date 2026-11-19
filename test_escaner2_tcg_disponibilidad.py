@@ -477,7 +477,9 @@ class WebOtraPagina(Web):
 telegramas.clear()
 base = Base()
 web = WebOtraPagina(catalogo(), FICHAS)
-codigo, reg = correr(base, web)
+# (19-nov-2026) Con INTENTO 3, el ultimo: la pagina sin formulario para como antes (rojo y Telegram). Los intentos
+# anteriores, en (P).
+codigo, reg = correr(base, web, env={'INTENTO': '3'})
 eq('C14 un 200 sin formulario: fallida y el motivo lo dice con su tamaño y qué página es',
    (codigo, base.pasadas()[0]['estado'],
     'iniciar-sesion: HTTP 200 sin casilla de contraseña (42 caracteres; sin título, formularios 0, entera, servidor sin '
@@ -507,7 +509,7 @@ class WebPaginaRara(Web):
 telegramas.clear()
 base = Base()
 web = WebPaginaRara(catalogo(), FICHAS)
-codigo, reg = correr(base, web)
+codigo, reg = correr(base, web, env={'INTENTO': '3'})
 motivo = base.pasadas()[0]['motivo']
 eq('C16 un 200 con otra página: el motivo dice su título (60 caracteres, sin signos), sus formularios y el servidor',
    (codigo, 'iniciar-sesion: HTTP 200 sin casilla de contraseña (%d caracteres; título «Volvemos enseguida - Tienda, S.L. ya '
@@ -534,6 +536,90 @@ eq('C17 ni el motivo, ni el registro, ni el Telegram llevan el cuerpo de la pág
    ([CUERPO_SECRETO in t for t in (motivo, reg, ' '.join(telegramas))], [c for c in '<>&' if c in motivo], len(telegramas)),
    ([False, False, False], [], 1))
 limpio('C18', reg)
+
+# ── (P) Otra máquina (19-nov-2026) ───────────────────────────────────────────────────────
+# La pagina anti-robots («One moment, please...») sale a ALGUNAS maquinas: en los intentos 1 y 2 la pasada queda
+# 'fallida', el run VERDE y sin Telegram, y deja al workflow la marca para lanzar el siguiente en otra maquina. En el 3,
+# rojo y Telegram (C14-C18). Cualquier otro bloqueo, a la primera (C8, C11).
+PARED = ('<html><head><title>One moment, please...</title></head><body><p>Please wait while your request is being '
+         'verified...</p><script>var x=1;</script></body></html>')
+
+
+class WebPared(Web):
+    """Las dos paginas de login contestan 200 con la pagina anti-robots (sin formulario), firmada por openresty."""
+
+    def get(self, url, **k):
+        if url in tw.LOGIN_URLS:
+            self.pedidas.append(('GET', url))
+            r = _Resp(200, PARED)
+            r.headers = {'server': 'openresty/1.31.1.1'}
+            return r
+        return super().get(url, **k)
+
+
+def con_salida(env=None):
+    """Corre la pasada con un GITHUB_OUTPUT de verdad. Devuelve (codigo, registro, base, web, lo escrito en la salida)."""
+    import tempfile
+    fd, ruta = tempfile.mkstemp(suffix='.out')
+    os.close(fd)
+    try:
+        b, w = Base(), WebPared(catalogo(), FICHAS)
+        c, r = correr(b, w, env=dict({'GITHUB_OUTPUT': ruta}, **(env or {})))
+        with open(ruta, encoding='utf-8') as fh:
+            return c, r, b, w, fh.read()
+    finally:
+        os.remove(ruta)
+
+
+telegramas.clear()
+codigo, reg, base, web, salida = con_salida()
+eq('P1 intento 1 (cron-job.org no manda ninguno) con la página anti-robots: VERDE, la pasada fallida, ni Excel ni fichas, '
+   'sin Telegram',
+   (codigo, [p['estado'] for p in base.pasadas()], tw.EXCEL_URL in [u for m, u in web.pedidas], web.fichas_pedidas(),
+    len(telegramas)), (0, ['fallida'], False, [], 0))
+eq('P2 …y deja al workflow la marca y el intento siguiente', salida, 'pared=1\nsiguiente=2\n')
+eq('P3 …el motivo dice qué página salió y qué intento era',
+   (base.pasadas()[0]['motivo'].endswith('· intento 1 de 3'), 'One moment, please' in base.pasadas()[0]['motivo'],
+    'openresty/1.31.1.1' in base.pasadas()[0]['motivo']), (True, True, True))
+eq('P4 …y el registro lo dice', ('TCG_PARED_REINTENTO' in reg, 'se lanza el 2.º en otra máquina' in reg), (True, True))
+limpio('P5', reg)
+codigo, reg, base, web, salida = con_salida({'INTENTO': '2'})
+eq('P6 intento 2: VERDE, sin Telegram, y pide el 3', (codigo, len(telegramas), salida), (0, 0, 'pared=1\nsiguiente=3\n'))
+codigo, reg, base, web, salida = con_salida({'INTENTO': '3'})
+eq('P7 🔴 intento 3, el último: ROJO, un Telegram que dice que van 3 intentos, y no pide otro',
+   (codigo, len(telegramas), 'Ya van 3 intentos, cada uno en otra máquina' in ''.join(telegramas), salida),
+   (1, 1, True, ''))
+eq('P8 …y el Telegram sin URLs ni EAN', any(p in ''.join(telegramas) for p in PROHIBIDO), False)
+telegramas.clear()
+base = Base()
+codigo, reg = correr(base, WebPared(catalogo(), FICHAS))
+eq('P9 🔴 sin GITHUB_OUTPUT (fuera de Actions) no se puede pedir el siguiente: ROJO', (codigo, 'OTRA MÁQUINA' in reg), (1, True))
+for malo in ('0', '4', 'x', '1.5'):
+    base = Base()
+    codigo, reg = correr(base, WebPared(catalogo(), FICHAS), env={'INTENTO': malo})
+    eq('P10 INTENTO %r no vale: ROJO y sin abrir pasada' % malo, (codigo, base.pasadas()), (1, []))
+eq('P11 la pared solo si las DOS páginas contestan 200 sin casilla; un 500 en una sigue siendo un bloqueo a la primera',
+   (issubclass(tw.Pared, tw.Bloqueo), prog.INTENTOS), (True, 3))
+
+
+class WebMedioPared(Web):
+    """Una pagina de login da 500 y la otra la pagina anti-robots: la web puede estar caida; no es la pared."""
+
+    def get(self, url, **k):
+        if url == tw.LOGIN_URLS[0]:
+            self.pedidas.append(('GET', url))
+            return _Resp(500, 'error')
+        if url in tw.LOGIN_URLS:
+            self.pedidas.append(('GET', url))
+            return _Resp(200, PARED)
+        return super().get(url, **k)
+
+
+telegramas.clear()
+base = Base()
+codigo, reg = correr(base, WebMedioPared(catalogo(), FICHAS))
+eq('P12 🔴 un 500 y una pared: bloqueo de siempre, ROJO y Telegram en el intento 1', (codigo, len(telegramas),
+   'TCG_PARED_REINTENTO' in reg), (1, 1, False))
 
 # ── (D) El listado ───────────────────────────────────────────────────────────────────────
 base = Base()
@@ -965,6 +1051,27 @@ eq('H6 el rescate: si falla o se cancela y los secretos estaban; sin Telegram ni
 eq('H7 sin artefactos (el repo es público)', [p.get('uses', '') for p in pasos if 'upload-artifact' in p.get('uses', '')], [])
 eq('H8 descargar-tcg.yml ya no está (publicaba el Excel sin cifrar)',
    os.path.exists(os.path.join(RAIZ, '.github', 'workflows', 'descargar-tcg.yml')), False)
+# (19-nov-2026) Otra máquina.
+entradas = on['workflow_dispatch']['inputs']
+eq('H9 el input intento, con 1 por defecto (cron-job.org no manda inputs)',
+   (entradas['intento']['type'], entradas['intento']['default']), ('string', '1'))
+eq('H10 el intento llega al programa por env:', paso['env'].get('INTENTO'), '${{ inputs.intento }}')
+eq('H11 el job leer saca la marca y el siguiente intento del paso de la pasada',
+   (paso.get('id'), wf['jobs']['leer']['outputs']),
+   ('leer', {'pared': '${{ steps.leer.outputs.pared }}', 'siguiente': '${{ steps.leer.outputs.siguiente }}'}))
+eq('H12 🔒 el job leer sigue sin poder lanzar workflows (solo contents: read)', wf['jobs']['leer']['permissions'],
+   {'contents': 'read'})
+om = wf['jobs'].get('otra_maquina') or {}
+eq('H13 otra_maquina: tras leer, solo con la marca, y actions: write SOLO aquí',
+   (om.get('needs'), om.get('if'), om.get('permissions'), om.get('continue-on-error')),
+   ('leer', "needs.leer.outputs.pared == '1'", {'actions': 'write', 'contents': 'read'}, None))
+lanza = om['steps'][-1] if om.get('steps') else {}
+eq('H14 …lanza ESTE workflow con intento+1 y los mismos inputs, todo por env: (nada de ${{ en el run:) y con el token del run',
+   ('gh workflow run escaner2-tcg-disponibilidad.yml' in lanza.get('run', ''), '-f intento="$SIGUIENTE"' in lanza.get('run', ''),
+    '${{' in lanza.get('run', ''), lanza.get('env')),
+   (True, True, False, {'GH_TOKEN': '${{ github.token }}', 'SIGUIENTE': '${{ needs.leer.outputs.siguiente }}',
+                        'FICHAS_MAX': '${{ inputs.fichas_max }}', 'LISTADO': '${{ inputs.listado }}'}))
+eq('H15 los jobs son leer y otra_maquina, nada más', sorted(wf['jobs']), ['leer', 'otra_maquina'])
 
 print()
 print('TODO OK' if not fallos else 'FALLOS: %d (%s)' % (len(fallos), ', '.join(fallos)))
