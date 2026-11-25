@@ -12,9 +12,8 @@ reales de los cuatro países.
     «agotado», «Caja de Compra Usado» a «Buy Box usada»…). Seis de ellas ya habían cambiado el 9-nov y
     vuelven a cambiar («Buy Box: 90 días A.G.» → «Buy Box: 90 días agotado»). «Encuesta» → «Encuadernación»
     es la misma columna: lo de antes era una mala traducción de binding. Comparados los del 24-nov con los
-    del 25-nov, las dos veces 560 columnas. Y un valor: el plazo en singular se escribe ahora con tilde
+    del 25-nov, las dos veces 560 columnas. Y un formato: el plazo en singular se escribe ahora con tilde
     («0 día», «1 día»; antes «0 dia», «1 dia») en «Tiempo de envío» de la caja y en el retraso de Amazon.
-    ⚠️ BORRADOR: eso aún NO se normaliza aquí; espera decisión.
 
 QUÉ HACE ESTO. Devuelve el fichero a LOS NOMBRES Y FORMATOS DE SIEMPRE (los de antes del 9-nov) justo al leerlo,
 antes de mirar ninguna columna. Cada nombre de cualquier generación va directo al MÁS ANTIGUO, en un solo paso.
@@ -32,6 +31,7 @@ heredado, por su desvío en escaner2_desvios.py).
 🔒 UN FICHERO DE CUALQUIER GENERACIÓN SIGUE ENTRANDO: ningún nombre de siempre es clave de la tabla, y las claves
    del 9-nov se quedan aunque el 25-nov vuelvan a cambiar seis de ellas.
 """
+import re
 from decimal import Decimal, InvalidOperation
 
 # 🔑 NUEVO → EL DE SIEMPRE. Generada de los ficheros reales, por generaciones y en el orden en que aparecen en el CSV.
@@ -225,10 +225,13 @@ del _nuevo, _antiguo
 # La que desaparece. 🔬 Vacía en las 2.405 filas de los cuatro export del 6-nov: nadie la lee, y `crudo` conserva la clave.
 COLUMNA_RETIRADA = 'Clasificación de Ventas: Histórico'
 
-# Los dos valores que cambian de formato, por su nombre de siempre (la cabecera ya viene traducida).
+# Las columnas cuyo valor cambia de formato, por su nombre de siempre (la cabecera ya viene traducida).
 COL_PLAZO_CAJA = 'Caja de Compra: Tiempo de envío'
+COL_RETRASO_AMAZON = 'Amazon: Retraso en el envío de la oferta de Amazon'
 COL_PRECIO_INFERIOR = 'Precio inferior sugerido'
 PLAZO_SIN_DATO_NUEVO = '0 dia'
+# El plazo en singular con tilde, como lo escribe Keepa desde el 25-nov: el valor ENTERO, nunca un trozo.
+_RE_DIA_CON_TILDE = re.compile(r'([0-9]+) día')
 
 _BOM, _NBSP = chr(0xFEFF), chr(0xA0)
 
@@ -274,14 +277,23 @@ def normalizar_cabecera(cabecera):
 
 
 def normalizar_valor(cabecera_antigua, valor):
-    """El valor con el formato de siempre. Solo toca las dos columnas que han cambiado; el resto, tal cual.
+    """El valor con el formato de siempre. Solo toca las tres columnas que han cambiado; el resto, tal cual.
 
-    · «Tiempo de envío» de la caja: antes vacío si no había plazo, ahora '0 dia'. 🔴 Solo ESTA columna:
-      «Amazon: Retraso en el envío…» ya traía '0 dia' antes del cambio, y ahí es un dato.
+    · El plazo en singular (en «Tiempo de envío» de la caja y en «Amazon: Retraso en el envío…»): antes
+      «1 dia», desde el 25-nov «1 día». Vuelve a «1 dia» solo si es el valor ENTERO; el plural («1 - 2 días»,
+      «3 días») ya llevaba tilde y se deja como viene.
+    · «Tiempo de envío» de la caja: antes vacío si no había plazo; desde el 9-nov '0 dia' (y desde el 25-nov
+      '0 día'), que vuelve a vacío. 🔴 Solo ESTA columna: «Amazon: Retraso en el envío…» ya traía '0 dia'
+      antes del 9-nov, y ahí es un dato.
     · «Precio inferior sugerido»: antes céntimos enteros (1898) y vacío; ahora euros (18.98) y '-'.
       Lo que no sean céntimos exactos se deja como viene: aquí no se redondea ni se adivina."""
-    if cabecera_antigua == COL_PLAZO_CAJA:
-        return '' if _limpia(valor) == PLAZO_SIN_DATO_NUEVO else valor
+    if cabecera_antigua in (COL_PLAZO_CAJA, COL_RETRASO_AMAZON):
+        singular = _RE_DIA_CON_TILDE.fullmatch(_limpia(valor))
+        if singular:
+            valor = '%s dia' % singular.group(1)
+        if cabecera_antigua == COL_PLAZO_CAJA and _limpia(valor) == PLAZO_SIN_DATO_NUEVO:
+            return ''
+        return valor
     if cabecera_antigua == COL_PRECIO_INFERIOR:
         texto = _limpia(valor)
         if texto == '-':
@@ -305,7 +317,7 @@ def normalizar_export(cabecera, filas):
     limpias = [_limpia(h) for h in cabecera]
     es_nueva = any(h in EQUIVALENCIAS for h in limpias)
     salida = normalizar_cabecera(limpias)
-    a_tocar = [(i, h) for i, h in enumerate(salida) if h in (COL_PLAZO_CAJA, COL_PRECIO_INFERIOR)]
+    a_tocar = [(i, h) for i, h in enumerate(salida) if h in (COL_PLAZO_CAJA, COL_RETRASO_AMAZON, COL_PRECIO_INFERIOR)]
     anadir_retirada = es_nueva and COLUMNA_RETIRADA not in salida
     n = len(salida)
     resultado = []

@@ -143,7 +143,7 @@ eq('(1) con BOM y espacio duro también', kc.normalizar_cabecera([chr(0xFEFF) + 
 eq('(1) las celdas de cabecera vacías no son una ambigüedad', kc.normalizar_cabecera(['ASIN', '', ' ']), ['ASIN', '', ''])
 
 # ══════════════════════════════════════════════════════════════════
-print('2 · los dos formatos de valor')
+print('2 · los formatos de valor')
 for col, antes, despues, nombre in (
         (PLAZO, '0 dia', '', "'0 dia' → vacío"),
         (PLAZO, ' 0 dia ', '', "'0 dia' con espacios → vacío"),
@@ -159,8 +159,24 @@ for col, antes, despues, nombre in (
         (PIS, 'a.b', 'a.b', 'lo que no es un número se deja'),
         (RETRASO_AMAZON, '0 dia', '0 dia', "🔴 el '0 dia' de Amazon es un dato: no se toca"),
         ('Otra columna', '-', '-', "el '-' de otra columna no se toca"),
-        ('Otra columna', '18.98', '18.98', 'los decimales de otra columna no se tocan')):
+        ('Otra columna', '18.98', '18.98', 'los decimales de otra columna no se tocan'),
+        # 25-nov: el singular con tilde vuelve a «dia», solo si es el valor entero.
+        (PLAZO, '0 día', '', "25-nov: '0 día' → vacío, igual que '0 dia'"),
+        (PLAZO, ' 0 día ', '', "'0 día' con espacios → vacío"),
+        (PLAZO, '1 día', '1 dia', "'1 día' → '1 dia'"),
+        (PLAZO, '12 día', '12 dia', "'12 día' → '12 dia'"),
+        (PLAZO, '1 - 2 días', '1 - 2 días', 'el plural de la caja se queda'),
+        (PLAZO, '3 días', '3 días', "'3 días' se queda"),
+        (PLAZO, 'Hoy 1 día', 'Hoy 1 día', 'un trozo «1 día» dentro de otro texto NO se toca'),
+        (PLAZO, '1 días', '1 días', "'1 días' no es el singular: se queda"),
+        (RETRASO_AMAZON, '0 día', '0 dia', "🔴 el '0 día' de Amazon vuelve a '0 dia': es un dato, no se vacía"),
+        (RETRASO_AMAZON, '1 día', '1 dia', "el '1 día' de Amazon → '1 dia'"),
+        (RETRASO_AMAZON, '190 días', '190 días', 'el plural de Amazon se queda'),
+        (RETRASO_AMAZON, '180 - 190 días', '180 - 190 días', 'el tramo de Amazon se queda'),
+        (RETRASO_AMAZON, '', '', 'el retraso vacío se queda'),
+        ('Otra columna', '1 día', '1 día', "el '1 día' de otra columna no se toca")):
     eq('(2) %s' % nombre, kc.normalizar_valor(col, antes), despues)
+eq('(2) la columna del retraso es la de la tabla', kc.COL_RETRASO_AMAZON, RETRASO_AMAZON)
 
 # ══════════════════════════════════════════════════════════════════
 print('3 · las tres cabeceras: la misma fila tipada y el mismo crudo')
