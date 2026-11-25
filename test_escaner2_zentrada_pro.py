@@ -488,15 +488,36 @@ eq('A7 · 🔴 …y ese candado SOLO con el recuento en español: un puzzle «3x
     _fz(_sz(n_art='5'), 'Gummibärchen 24er'), ez.cantidad_zentrada('Gummibärchen 24er')['n_es'],
     ez.cantidad_zentrada('Paño de esponja Vileda Original 8 piezas')['n_es']],
    [(ez.PACK_NO, 1), (ez.PACK_NO, 1), False, True])
-eq('A7 · …y el pack de 3 de Vileda que Amazon cuenta entero (24 unidades) y por packs («Pack de 3»): 3 y 0,375 no '
-   'cuadran → «posible pack», como antes del ZP (24 y 3)',
+eq('A7 · …y el pack de 3 de Vileda que Amazon cuenta entero (contenido 24, n.º de artículos 24) y por paquetes («Pack de '
+   '3»): el contenido da 3 y los recuentos son 3 (paquetes) y 24 (3 × 8 unidades) → ×3',
    _fz(_sz(valor_ud='24', tipo_ud='unidad', n_art='24', titulo='Bayeta Pack de 3'),
-       'Paño de esponja Vileda Original 8 piezas'), (ez.PACK_DUDOSO, 1))
-eq('A7 · un puzzle de 1000 piezas frente a «1000 Piezas» en el título: no es pack (sin el ZP, «posible pack»)',
+       'Paño de esponja Vileda Original 8 piezas'), (ez.PACK_SI, 3))
+eq('A7 · un puzzle de 1000 piezas frente a «contenido 1 unidad» (lo que Amazon pone por defecto) y «1000 Piezas» en el '
+   'título: sin una lectura de lo que lleva el ASIN, «posible pack», como antes del ZP; con «contenido 1000», no es pack',
    [_fz(_sz(valor_ud='1', tipo_ud='unidad', titulo='Puzzle 1000 Piezas'), 'Rompecabezas compacto de 1000 piezas'),
-    _fz(_sz(valor_ud='1', tipo_ud='unidad', titulo='Puzzle 1000 Piezas'), 'Rompecabezas compacto')],
-   [(ez.PACK_NO, 1), (ez.PACK_DUDOSO, 1)])
+    _fz(_sz(valor_ud='1000', tipo_ud='pieza', titulo='Puzzle 1000 Piezas'), 'Rompecabezas compacto de 1000 piezas')],
+   [(ez.PACK_DUDOSO, 1), (ez.PACK_NO, 1)])
+eq('A7 · «Pack de 2 x 10 unidades»: el 2x10 = 20 de siempre, no ambigua (y no es un recuento en español)',
+   (ez.cantidad_zentrada('Tapones Ohropax Pack de 2 x 10 unidades')['n'],
+    ez.cantidad_zentrada('Tapones Ohropax Pack de 2 x 10 unidades')['ambigua'],
+    ez.cantidad_zentrada('Tapones Ohropax Pack de 2 x 10 unidades')['n_es']), (20, False, False))
 _fo = dict(_fg, nombre='Tapones para los oídos suaves Ohropax 10 unidades')
+_p20 = _sz(tamano='10 unidades (Paquete de 20)', n_art='20', titulo='Ohropax Soft, Pack de 20')
+_p10 = _sz(tamano='10 unidades (Paquete de 10)', n_art='10', titulo='Ohropax Soft, Pack de 10')
+_sin_t = lambda sen: dict(sen, tamano='')  # noqa: E731
+
+
+def _deco(sen):
+    r = ez.decidir_zentrada(_fo, {'ES': [_rg]}, {'ES': {'B0ZAMZ0024': 30}}, _params, M, None, {}, None,
+                            {'ES': {'B0ZAMZ0024': sen}})
+    return (r['factor'], r['pa'], r['pack'], r['puerta'])
+
+
+eq('A7 · 🔴 (quien dirige) «Ohropax 10 unidades» (una caja de 10) contra «Pack de 20» y «Pack de 10» DE CAJAS: con el '
+   'tamaño «10 unidades (Paquete de 20/10)», ×20 y ×10 (20,00 y 10,00, no COMPRAR); sin el tamaño no se sabe si el 20 '
+   'son cajas o tapones: «posible pack», coste de una y VALORAR. Nunca ×2, nunca «no es pack», nunca COMPRAR',
+   [_deco(_p20), _deco(_sin_t(_p20)), _deco(_p10), _deco(_sin_t(_p10)), _deco(_sz(paquete='10', titulo='Pack de 10'))],
+   [(20, 20.0, 'amazon', 'd'), (1, 1.0, None, 'e'), (10, 10.0, 'amazon', 'd'), (1, 1.0, None, 'e'), (1, 1.0, None, 'e')])
 _ro = ez.decidir_zentrada(_fo, {'ES': [_rg]}, {'ES': {'B0ZAMZ0024': 30}}, _params, M, None, {}, None,
                           {'ES': {'B0ZAMZ0024': _ohr}})
 _rs = ez.decidir_zentrada(dict(_fo, nombre='Tapones para los oídos suaves Ohropax'), {'ES': [_rg]},
