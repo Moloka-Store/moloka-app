@@ -1,30 +1,42 @@
 # -*- coding: utf-8 -*-
-"""LA TABLA ÚNICA DE LOS NOMBRES DE COLUMNA DEL CSV DE KEEPA (encargo keepa-nombres-columnas, 9-nov-2026).
+"""LA TABLA ÚNICA DE LOS NOMBRES DE COLUMNA DEL CSV DE KEEPA.
 
-QUÉ PASÓ. Desde el 9-nov-2026 (el 8-nov aún entró con los nombres de siempre) el Visualizador de Keepa
-en español llama distinto a 124 columnas. No hay columnas nuevas: es una equivalencia 1 a 1 y en el mismo
-orden, y desaparece una que venía vacía («Clasificación de Ventas: Histórico»). Además cambian dos formatos
-de valor. Medido columna a columna sobre los cuatro export del 6-nov (561 columnas) y los cuatro del 9-nov
-(560), comparando por posición.
+QUÉ PASA. El Visualizador de Keepa en español ha cambiado ya dos veces los nombres de sus columnas, sin añadir
+ni quitar ninguna y sin cambiar su orden: una equivalencia 1 a 1, medida comparando por posición los export
+reales de los cuatro países.
+  · 9-nov-2026 (el 8-nov aún entró con los nombres de siempre): 124 columnas cambian de nombre («Caja de
+    Compra» pasa a «Buy Box», «Lista de precio» a «Precio recomendado»…), desaparece una que venía vacía
+    («Clasificación de Ventas: Histórico») y cambian dos formatos de valor. Comparados los cuatro del 6-nov
+    (561 columnas) con los cuatro del 9-nov (560).
+  · 25-nov-2026: 52 columnas más («Localización» pasa a «Mercado», «Opiniones» a «Reseñas», «A.G.» a
+    «agotado», «Caja de Compra Usado» a «Buy Box usada»…). Seis de ellas ya habían cambiado el 9-nov y
+    vuelven a cambiar («Buy Box: 90 días A.G.» → «Buy Box: 90 días agotado»). «Encuesta» → «Encuadernación»
+    es la misma columna: lo de antes era una mala traducción de binding. Comparados los del 24-nov con los
+    del 25-nov, las dos veces 560 columnas. Y un formato: el plazo en singular se escribe ahora con tilde
+    («0 día», «1 día»; antes «0 dia», «1 dia») en «Tiempo de envío» de la caja y en el retraso de Amazon.
 
-QUÉ HACE ESTO. Devuelve el fichero a LOS NOMBRES Y FORMATOS DE SIEMPRE justo al leerlo, antes de mirar
-ninguna columna. Por eso `TIPADAS`, las claves de `keepa_escaparate.crudo` y las vistas que leen
-`crudo ->> '…'` (v_escaparate, v_suficiencia_decision) no cambian ni una letra, y el histórico sigue
-siendo homogéneo. Lo usan los dos sitios que leen el CSV: procesador_keepa_escaparate.py y el escáner 2
-(escaner2_motor._leer_crudo y el lector heredado, por su desvío en escaner2_desvios.py).
+QUÉ HACE ESTO. Devuelve el fichero a LOS NOMBRES Y FORMATOS DE SIEMPRE (los de antes del 9-nov) justo al leerlo,
+antes de mirar ninguna columna. Cada nombre de cualquier generación va directo al MÁS ANTIGUO, en un solo paso.
+Por eso `TIPADAS`, las claves de `keepa_escaparate.crudo` y las vistas que leen `crudo ->> '…'` (v_escaparate,
+v_suficiencia_decision) no cambian ni una letra, y el histórico sigue siendo homogéneo. Lo usan los dos sitios
+que leen el CSV: procesador_keepa_escaparate.py y el escáner 2 (escaner2_motor._leer_crudo y el lector
+heredado, por su desvío en escaner2_desvios.py).
 
 🔒 LA TABLA ES LITERAL, NO UNA REGLA DE «CAMBIA BUY BOX POR CAJA DE COMPRA». Es la regla de la casa que mató al
-   PR #26 («ningún encabezado se conjetura») y aquí además sería falsa, dos veces:
-     · «Comisión de referencia basada en el precio actual de la Buy Box» se llamaba ya así y NO se traduce;
-     · las 19 columnas «Caja de Compra Usado: …» NO han cambiado de nombre.
-   Una columna que Keepa añada mañana con «Buy Box» en el nombre se guarda con su nombre, sin inventarle otro.
+   PR #26 («ningún encabezado se conjetura») y aquí además sería falsa: el nombre de siempre de la comisión,
+   «Comisión de referencia basada en el precio actual de la Buy Box», ya decía «Buy Box», y «Buy Box usada: …»
+   vuelve a «Caja de Compra Usado: …», no a «Caja de Compra usada: …». Una columna que Keepa añada mañana se
+   guarda con su nombre, sin inventarle otro.
 
-🔒 UN FICHERO DE ANTES SIGUE ENTRANDO IGUAL: ningún nombre antiguo está en la tabla como clave.
+🔒 UN FICHERO DE CUALQUIER GENERACIÓN SIGUE ENTRANDO: ningún nombre de siempre es clave de la tabla, y las claves
+   del 9-nov se quedan aunque el 25-nov vuelvan a cambiar seis de ellas.
 """
+import re
 from decimal import Decimal, InvalidOperation
 
-# 🔑 NUEVO → ANTIGUO. Generada de los ficheros reales, en el orden en que aparecen en el CSV.
+# 🔑 NUEVO → EL DE SIEMPRE. Generada de los ficheros reales, por generaciones y en el orden en que aparecen en el CSV.
 EQUIVALENCIAS = {
+    # ── 9-nov-2026 (export del 6-nov contra los del 9-nov) ──
     'Buy Box: Actual': 'Caja de Compra: Actual',
     'Buy Box: Gastos de envío': 'Caja de Compra: Gastos de envío',
     'Buy Box: Promedio de 30 días': 'Caja de Compra: Promedio de 30 días',
@@ -149,24 +161,84 @@ EQUIVALENCIAS = {
     'Precio recomendado: Es el mínimo en 90 días': 'Lista de precio: Es el mínimo en 90 días',
     'Precio recomendado: El más bajo': 'Lista de precio: El más bajo',
     'Precio recomendado: El más alto': 'Lista de precio: El más alto',
+    # ── 25-nov-2026 (export del 24-nov contra los del 25-nov) ──
+    'Mercado': 'Localización',
+    'Clasificación de Ventas: Clasificaciones de Ventas por subcategoría': 'Clasificación de Ventas: Subcategoría Clasificación de Ventas',
+    'Reseñas: Valoraciones': 'Opiniones: Valoraciones',
+    'Reseñas: Cantidad de valoraciones': 'Opiniones: Cantidad de valoraciones',
+    'Reseñas: Cantidad de valoraciones - Promedio de 30 días': 'Opiniones: Cantidad de valoraciones - Promedio de 30 días',
+    'Reseñas: Cantidad de valoraciones - Promedio de 90 días': 'Opiniones: Cantidad de valoraciones - Promedio de 90 días',
+    'Reseñas: Cantidad de valoraciones - Promedio de 180 días': 'Opiniones: Cantidad de valoraciones - Promedio de 180 días',
+    'Reseñas: Cantidad de valoraciones - Promedio de 365 días': 'Opiniones: Cantidad de valoraciones - Promedio de 365 días',
+    'Reseñas: Cantidad de valoraciones - Caída de 1 día %': 'Opiniones: Cantidad de valoraciones - Caída de 1 día %',
+    'Reseñas: Cantidad de valoraciones - Caída de 7 días %': 'Opiniones: Cantidad de valoraciones - Caída de 7 días %',
+    'Reseñas: Cantidad de valoraciones - Caída de 30 días %': 'Opiniones: Cantidad de valoraciones - Caída de 30 días %',
+    'Reseñas: Cantidad de valoraciones - Caída de 90 días %': 'Opiniones: Cantidad de valoraciones - Caída de 90 días %',
+    'Reseñas: Recuento de reseñas - Específico del formato': 'Opiniones: Recuento de Revisiones - Específico del formato',
+    'Buy Box: 90 días agotado': 'Caja de Compra: 90 días A.G.',
+    'Buy Box: Flipability 30 días': 'Caja de Compra: Capacidad de cambio 30 días',
+    'Buy Box: Flipability 90 días': 'Caja de Compra: Capacidad de cambio 90 días',
+    'Buy Box: Flipability 365 días': 'Caja de Compra: Capacidad de cambio 365 días',
+    'Buy Box: Preventa': 'Caja de Compra: Pre-ordenado',
+    'Buy Box: Suscríbete y ahorra': 'Caja de Compra: Compra recurrente',
+    'Amazon: 90 días agotado': 'Amazon: 90 días A.G.',
+    'Amazon: Veces agotado 30 días': 'Amazon: Contador A.G. 30 días',
+    'Amazon: Veces agotado 90 días': 'Amazon: Contador A.G. 90 días',
+    'Nuevo: 90 días agotado': 'Nuevo: 90 días A.G.',
+    '% de tarifa por referencia': '% de comisión de referencia',
+    'Tarifa por referencia basada en el precio actual de la Buy Box': 'Comisión de referencia basada en el precio actual de la Buy Box',
+    'Ofertas flash: Actual': 'Oferta flash: Actual',
+    'Ofertas flash: Es el mínimo': 'Oferta flash: Es el mínimo',
+    'Ofertas flash: Es el mínimo en 90 días': 'Oferta flash: Es el mínimo en 90 días',
+    'Buy Box usada: Actual': 'Caja de Compra Usado: Actual',
+    'Buy Box usada: Promedio de 30 días': 'Caja de Compra Usado: Promedio de 30 días',
+    'Buy Box usada: Promedio de 90 días': 'Caja de Compra Usado: Promedio de 90 días',
+    'Buy Box usada: Promedio de 180 días': 'Caja de Compra Usado: Promedio de 180 días',
+    'Buy Box usada: Promedio de 365 días': 'Caja de Compra Usado: Promedio de 365 días',
+    'Buy Box usada: Caída de 1 día %': 'Caja de Compra Usado: Caída de 1 día %',
+    'Buy Box usada: Caída de 7 días %': 'Caja de Compra Usado: Caída de 7 días %',
+    'Buy Box usada: Caída de 30 días %': 'Caja de Compra Usado: Caída de 30 días %',
+    'Buy Box usada: Caída de 90 días %': 'Caja de Compra Usado: Caída de 90 días %',
+    'Buy Box usada: Caída desde la última visita': 'Caja de Compra Usado: Caída desde la última visita',
+    'Buy Box usada: Caída % desde la última visita': 'Caja de Compra Usado: Caída % desde la última visita',
+    'Buy Box usada: Última visita': 'Caja de Compra Usado: Última visita',
+    'Buy Box usada: Es el mínimo': 'Caja de Compra Usado: Es el mínimo',
+    'Buy Box usada: Es el mínimo en 90 días': 'Caja de Compra Usado: Es el mínimo en 90 días',
+    'Buy Box usada: El más bajo': 'Caja de Compra Usado: El más bajo',
+    'Buy Box usada: El más alto': 'Caja de Compra Usado: El más alto',
+    'Buy Box usada: Buy Box usada Vendedor': 'Caja de Compra Usado: Caja de Compra Usado Vendedor',
+    'Buy Box usada: Es FBA': 'Caja de Compra Usado: Es FBA',
+    'Buy Box usada: Condición': 'Caja de Compra Usado: Condición',
+    'Usado: 90 días agotado': 'Usado: 90 días A.G.',
+    'ASIN principal': 'ASIN Padre',
+    'Frec. comprados juntos': 'Frecuencia comprados juntos',
+    'Encuadernación': 'Encuesta',
+    'Cupón de un sólo uso: Suscríbete y ahorra %': 'Cupón de un sólo uso: Compra recurrente %',
 }
 
-# ANTIGUO → NUEVO, solo para decir los dos nombres cuando falta una columna.
-_NUEVO_DE = {antiguo: nuevo for nuevo, antiguo in EQUIVALENCIAS.items()}
+# EL DE SIEMPRE → los nombres que ha tenido después, por orden de generación. Solo para los avisos.
+_NUEVOS_DE = {}
+for _nuevo, _antiguo in EQUIVALENCIAS.items():
+    _NUEVOS_DE.setdefault(_antiguo, []).append(_nuevo)
+del _nuevo, _antiguo
 
 # La que desaparece. 🔬 Vacía en las 2.405 filas de los cuatro export del 6-nov: nadie la lee, y `crudo` conserva la clave.
 COLUMNA_RETIRADA = 'Clasificación de Ventas: Histórico'
 
-# Los dos valores que cambian de formato, por su nombre ANTIGUO (la cabecera ya viene traducida).
+# Las columnas cuyo valor cambia de formato, por su nombre de siempre (la cabecera ya viene traducida).
 COL_PLAZO_CAJA = 'Caja de Compra: Tiempo de envío'
+COL_RETRASO_AMAZON = 'Amazon: Retraso en el envío de la oferta de Amazon'
 COL_PRECIO_INFERIOR = 'Precio inferior sugerido'
 PLAZO_SIN_DATO_NUEVO = '0 dia'
+# El plazo en singular con tilde, como lo escribe Keepa desde el 25-nov: el valor ENTERO, nunca un trozo.
+_RE_DIA_CON_TILDE = re.compile(r'([0-9]+) día')
 
 _BOM, _NBSP = chr(0xFEFF), chr(0xA0)
 
 
 class CabeceraAmbigua(ValueError):
-    """El fichero trae a la vez el nombre nuevo y el antiguo de una columna: no se elige."""
+    """Dos columnas del fichero acaban con el mismo nombre al traducirlo (p. ej. el nombre nuevo y el antiguo de
+    una misma columna, o los de dos generaciones): no se elige."""
 
 
 def _limpia(texto):
@@ -174,36 +246,54 @@ def _limpia(texto):
 
 
 def nombre_para_aviso(antiguo):
-    """Cómo se nombra una columna que falta: con los dos nombres si los tiene, para que el aviso sirva con
-    cualquiera de los dos ficheros."""
-    nuevo = _NUEVO_DE.get(antiguo)
-    return "'%s' (o '%s')" % (antiguo, nuevo) if nuevo else "'%s'" % antiguo
+    """Cómo se nombra una columna que falta: con todos los nombres que ha tenido, para que el aviso sirva con
+    un fichero de cualquier generación."""
+    nuevos = _NUEVOS_DE.get(antiguo)
+    if not nuevos:
+        return "'%s'" % antiguo
+    return "'%s' (o %s)" % (antiguo, ', '.join("'%s'" % n for n in nuevos))
 
 
 def normalizar_cabecera(cabecera):
     """La cabecera con los nombres de siempre. Sin BOM ni espacios sobrantes.
 
-    🔴 Si trae a la vez el nombre nuevo y el antiguo de una columna, CabeceraAmbigua: al traducir saldrían
-       dos columnas con el mismo nombre y una taparía a la otra sin que nadie se enterase."""
+    🔴 Si al traducirla un nombre sale repetido, CabeceraAmbigua: dos columnas con el mismo nombre y una
+       taparía a la otra sin que nadie se enterase. Pasa con el nombre nuevo y el antiguo de una columna, con
+       los de dos generaciones, y también con un nombre que venga dos veces tal cual. Las celdas de cabecera
+       vacías no cuentan."""
     limpias = [_limpia(h) for h in cabecera]
-    presentes = set(limpias)
-    choques = [h for h in limpias if h in EQUIVALENCIAS and EQUIVALENCIAS[h] in presentes]
+    salida = [EQUIVALENCIAS.get(h, h) for h in limpias]
+    origenes = {}
+    for h, t in zip(limpias, salida):
+        if t:
+            origenes.setdefault(t, []).append(h)
+    choques = [hs for hs in origenes.values() if len(hs) > 1]
     if choques:
-        raise CabeceraAmbigua('El CSV trae la misma columna con su nombre nuevo y con el antiguo: '
-                              + ', '.join("'%s' y '%s'" % (h, EQUIVALENCIAS[h]) for h in choques)
+        raise CabeceraAmbigua('El CSV trae la misma columna dos veces, con su nombre nuevo y con el antiguo o '
+                              'repetida: '
+                              + ', '.join(' y '.join("'%s'" % h for h in hs) for hs in choques)
                               + '. No se elige ninguna: vuelve a exportarlo de Keepa.')
-    return [EQUIVALENCIAS.get(h, h) for h in limpias]
+    return salida
 
 
 def normalizar_valor(cabecera_antigua, valor):
-    """El valor con el formato de siempre. Solo toca las dos columnas que han cambiado; el resto, tal cual.
+    """El valor con el formato de siempre. Solo toca las tres columnas que han cambiado; el resto, tal cual.
 
-    · «Tiempo de envío» de la caja: antes vacío si no había plazo, ahora '0 dia'. 🔴 Solo ESTA columna:
-      «Amazon: Retraso en el envío…» ya traía '0 dia' antes del cambio, y ahí es un dato.
+    · El plazo en singular (en «Tiempo de envío» de la caja y en «Amazon: Retraso en el envío…»): antes
+      «1 dia», desde el 25-nov «1 día». Vuelve a «1 dia» solo si es el valor ENTERO; el plural («1 - 2 días»,
+      «3 días») ya llevaba tilde y se deja como viene.
+    · «Tiempo de envío» de la caja: antes vacío si no había plazo; desde el 9-nov '0 dia' (y desde el 25-nov
+      '0 día'), que vuelve a vacío. 🔴 Solo ESTA columna: «Amazon: Retraso en el envío…» ya traía '0 dia'
+      antes del 9-nov, y ahí es un dato.
     · «Precio inferior sugerido»: antes céntimos enteros (1898) y vacío; ahora euros (18.98) y '-'.
       Lo que no sean céntimos exactos se deja como viene: aquí no se redondea ni se adivina."""
-    if cabecera_antigua == COL_PLAZO_CAJA:
-        return '' if _limpia(valor) == PLAZO_SIN_DATO_NUEVO else valor
+    if cabecera_antigua in (COL_PLAZO_CAJA, COL_RETRASO_AMAZON):
+        singular = _RE_DIA_CON_TILDE.fullmatch(_limpia(valor))
+        if singular:
+            valor = '%s dia' % singular.group(1)
+        if cabecera_antigua == COL_PLAZO_CAJA and _limpia(valor) == PLAZO_SIN_DATO_NUEVO:
+            return ''
+        return valor
     if cabecera_antigua == COL_PRECIO_INFERIOR:
         texto = _limpia(valor)
         if texto == '-':
@@ -227,7 +317,7 @@ def normalizar_export(cabecera, filas):
     limpias = [_limpia(h) for h in cabecera]
     es_nueva = any(h in EQUIVALENCIAS for h in limpias)
     salida = normalizar_cabecera(limpias)
-    a_tocar = [(i, h) for i, h in enumerate(salida) if h in (COL_PLAZO_CAJA, COL_PRECIO_INFERIOR)]
+    a_tocar = [(i, h) for i, h in enumerate(salida) if h in (COL_PLAZO_CAJA, COL_RETRASO_AMAZON, COL_PRECIO_INFERIOR)]
     anadir_retirada = es_nueva and COLUMNA_RETIRADA not in salida
     n = len(salida)
     resultado = []

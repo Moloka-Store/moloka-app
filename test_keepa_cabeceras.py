@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
-"""La tabla única de nombres de columna del CSV de Keepa (encargo keepa-nombres-columnas, 9-nov-2026).
+"""La tabla única de nombres de columna del CSV de Keepa (encargos keepa-nombres-columnas, 9-nov-2026, y KN2, 25-nov-2026).
 
 🔴 QUÉ COMPRUEBA, EJECUTANDO lo de verdad (`analizar` del procesador, `examinar_csv` y el lector heredado del escáner):
-   1. La tabla contra las DOS cabeceras reales (test_keepa_cabeceras.json: solo nombres de columna, ninguna fila).
-   2. Los dos formatos de valor, y que no se toca ninguna otra columna.
-   3. CABECERA VIEJA Y CABECERA NUEVA DAN LA MISMA FILA TIPADA Y EL MISMO CRUDO (dos filas inventadas).
-   4. Lo que tiene que parar: los dos nombres a la vez y una columna obligatoria que falta, diciendo cuál.
-   5. El escáner lee igual los dos ficheros.
+   1. La tabla contra las TRES cabeceras reales: la de siempre (6-nov), la del 9-nov y la del 25-nov
+      (test_keepa_cabeceras.json: solo nombres de columna, ninguna fila).
+   2. Los formatos de valor que cambian, y que no se toca ninguna otra columna.
+   3. LAS TRES CABECERAS DAN LA MISMA FILA TIPADA Y EL MISMO CRUDO (dos filas inventadas).
+   4. Lo que tiene que parar: dos nombres de la misma columna a la vez (de cualquier generación) y una columna
+      obligatoria que falta, diciendo cuál con todos sus nombres.
+   5. El escáner lee igual los tres ficheros.
 
 🔒 Lo que NO ve: la carga real ni la base. Sin red, sin secretos y sin ningún dato de producto.
 """
@@ -26,7 +28,7 @@ RAIZ = os.path.dirname(os.path.abspath(__file__))
 os.chdir(RAIZ)
 with io.open('test_keepa_cabeceras.json', encoding='utf-8') as fh:
     REAL = json.load(fh)
-ANTIGUA, NUEVA = REAL['antigua_6nov2026'], REAL['nueva_9nov2026']
+ANTIGUA, NUEVA, NUEVA25 = REAL['antigua_6nov2026'], REAL['nueva_9nov2026'], REAL['nueva_25nov2026']
 fallos = []
 
 
@@ -40,7 +42,6 @@ def eq(nombre, got, exp):
 FICHERO = 'KeepaExport-2026-11-09-VisualizadorDeProductos.csv'
 PLAZO, PIS, HIST = kc.COL_PLAZO_CAJA, kc.COL_PRECIO_INFERIOR, kc.COLUMNA_RETIRADA
 RETRASO_AMAZON = 'Amazon: Retraso en el envío de la oferta de Amazon'
-INVERSA = {v: k for k, v in kc.EQUIVALENCIAS.items()}
 
 # ── Dos filas INVENTADAS, por el nombre antiguo. Lo que no se dice va vacío, como en un export real. ──
 COMUNES = {
@@ -63,6 +64,8 @@ FILA_FBM = dict(COMUNES, **{
 })
 # Cómo escribe Keepa esos dos valores desde el 9-nov.
 FORMATO_NUEVO = {'B0INVENTA1': {PLAZO: '0 dia', PIS: '18.98'}, 'B0INVENTA2': {PIS: '-'}}
+# Y desde el 25-nov: el plazo en singular, con tilde (en la caja y en el retraso de Amazon).
+FORMATO_25 = {'B0INVENTA1': {PLAZO: '0 día', PIS: '18.98', RETRASO_AMAZON: '0 día'}, 'B0INVENTA2': {PIS: '-'}}
 
 
 def csv_de(cabecera, filas):
@@ -77,12 +80,13 @@ def texto_viejo(filas=(FILA_FBA, FILA_FBM)):
     return csv_de(ANTIGUA, [[f.get(h, '') for h in ANTIGUA] for f in filas])
 
 
-def texto_nuevo(filas=(FILA_FBA, FILA_FBM), quitar=()):
-    # Se construye desde la cabecera REAL nueva: cada columna busca su valor por su nombre antiguo.
-    cab = [h for h in NUEVA if h not in quitar]
+def texto_nuevo(filas=(FILA_FBA, FILA_FBM), quitar=(), cabecera=None, formato=None):
+    # Se construye desde una cabecera REAL nueva (la del 9-nov, si no se dice otra): cada columna busca su valor
+    # por su nombre antiguo, y lo escribe con el formato de esa generación.
+    cab = [h for h in (cabecera or NUEVA) if h not in quitar]
     salida = []
     for f in filas:
-        cambios = FORMATO_NUEVO[f['ASIN']]
+        cambios = (formato or FORMATO_NUEVO)[f['ASIN']]
         fila = []
         for h in cab:
             antiguo = kc.EQUIVALENCIAS.get(h, h)
@@ -104,23 +108,42 @@ def aborta(texto):
 
 
 # ══════════════════════════════════════════════════════════════════
-print('1 · la tabla contra las dos cabeceras reales')
+print('1 · la tabla contra las tres cabeceras reales')
 SIN_HIST = [h for h in ANTIGUA if h != HIST]
-eq('(1) 561 columnas la antigua y 560 la nueva', (len(ANTIGUA), len(NUEVA)), (561, 560))
-eq('(1) 124 equivalencias', len(kc.EQUIVALENCIAS), 124)
-eq('(1) 🔴 la nueva traducida es la antigua sin la retirada, COLUMNA A COLUMNA', kc.normalizar_cabecera(NUEVA), SIN_HIST)
+eq('(1) 561 columnas la antigua y 560 las dos nuevas', (len(ANTIGUA), len(NUEVA), len(NUEVA25)), (561, 560, 560))
+eq('(1) 52 posiciones cambian de nombre del 9 al 25-nov', sum(a != b for a, b in zip(NUEVA, NUEVA25)), 52)
+eq('(1) 176 equivalencias: las 124 del 9-nov y 52 del 25-nov',
+   (len(kc.EQUIVALENCIAS), len([h for h in kc.EQUIVALENCIAS if h in NUEVA]),
+    len([h for h in kc.EQUIVALENCIAS if h in NUEVA25 and h not in NUEVA])), (176, 124, 52))
+eq('(1) 🔴 la del 9-nov traducida es la antigua sin la retirada, COLUMNA A COLUMNA', kc.normalizar_cabecera(NUEVA), SIN_HIST)
+eq('(1) 🔴 la del 25-nov traducida es la antigua sin la retirada, COLUMNA A COLUMNA', kc.normalizar_cabecera(NUEVA25), SIN_HIST)
 eq('(1) una cabecera antigua no cambia', kc.normalizar_cabecera(ANTIGUA), ANTIGUA)
 eq('(1) ningún nombre antiguo es clave de la tabla', [h for h in ANTIGUA if h in kc.EQUIVALENCIAS], [])
-eq('(1) todas las claves están en la cabecera nueva', [h for h in kc.EQUIVALENCIAS if h not in NUEVA], [])
-eq('(1) dos nuevos no van a parar al mismo antiguo', len(set(kc.EQUIVALENCIAS.values())), 124)
+eq('(1) todas las claves están en alguna cabecera nueva', [h for h in kc.EQUIVALENCIAS if h not in NUEVA and h not in NUEVA25], [])
+eq('(1) un solo paso: ningún destino es a su vez clave', [v for v in kc.EQUIVALENCIAS.values() if v in kc.EQUIVALENCIAS], [])
+# Las seis que cambian las dos veces: el nombre de siempre recibe dos claves, y ninguno más.
+DOS_VECES = ['Caja de Compra: 90 días A.G.', 'Caja de Compra: Capacidad de cambio 30 días',
+             'Caja de Compra: Capacidad de cambio 90 días', 'Caja de Compra: Capacidad de cambio 365 días',
+             'Caja de Compra: Pre-ordenado', 'Caja de Compra: Compra recurrente']
+eq('(1) solo esas seis tienen dos nombres nuevos (170 destinos distintos)',
+   (sorted(a for a, ns in kc._NUEVOS_DE.items() if len(ns) > 1), len(set(kc.EQUIVALENCIAS.values()))),
+   (sorted(DOS_VECES), 170))
+eq('(1) y van las dos al mismo de siempre', kc._NUEVOS_DE['Caja de Compra: 90 días A.G.'],
+   ['Buy Box: 90 días A.G.', 'Buy Box: 90 días agotado'])
 EXC = 'Comisión de referencia basada en el precio actual de la Buy Box'
-eq('(1) 🔒 la excepción: la comisión de la Buy Box no se traduce', (EXC in NUEVA, EXC in ANTIGUA, EXC in kc.EQUIVALENCIAS), (True, True, False))
+eq('(1) 🔒 la comisión de la Buy Box: el 9-nov se llamaba igual; el 25-nov cambia y vuelve a su nombre',
+   (EXC in ANTIGUA, EXC in NUEVA, EXC in NUEVA25, EXC in kc.EQUIVALENCIAS,
+    kc.EQUIVALENCIAS.get('Tarifa por referencia basada en el precio actual de la Buy Box')), (True, True, False, False, EXC))
 USADO = [h for h in NUEVA if h.startswith('Caja de Compra Usado')]
-eq('(1) 🔒 las 19 «Caja de Compra Usado» se llaman igual en las dos', (len(USADO), all(h in ANTIGUA for h in USADO)), (19, True))
+USADA25 = [h for h in NUEVA25 if h.startswith('Buy Box usada')]
+eq('(1) 🔒 las 19 «Caja de Compra Usado»: igual el 9-nov, «Buy Box usada» el 25-nov y de vuelta a las mismas',
+   (len(USADO), all(h in ANTIGUA for h in USADO), len(USADA25), kc.normalizar_cabecera(USADA25) == USADO), (19, True, 19, True))
+eq('(1) «Mercado» vuelve a «Localización», la del país', kc.normalizar_cabecera(['Mercado']), ['Localización'])
 eq('(1) con BOM y espacio duro también', kc.normalizar_cabecera([chr(0xFEFF) + 'Buy' + chr(0xA0) + 'Box: Actual ']), ['Caja de Compra: Actual'])
+eq('(1) las celdas de cabecera vacías no son una ambigüedad', kc.normalizar_cabecera(['ASIN', '', ' ']), ['ASIN', '', ''])
 
 # ══════════════════════════════════════════════════════════════════
-print('2 · los dos formatos de valor')
+print('2 · los formatos de valor')
 for col, antes, despues, nombre in (
         (PLAZO, '0 dia', '', "'0 dia' → vacío"),
         (PLAZO, ' 0 dia ', '', "'0 dia' con espacios → vacío"),
@@ -136,11 +159,27 @@ for col, antes, despues, nombre in (
         (PIS, 'a.b', 'a.b', 'lo que no es un número se deja'),
         (RETRASO_AMAZON, '0 dia', '0 dia', "🔴 el '0 dia' de Amazon es un dato: no se toca"),
         ('Otra columna', '-', '-', "el '-' de otra columna no se toca"),
-        ('Otra columna', '18.98', '18.98', 'los decimales de otra columna no se tocan')):
+        ('Otra columna', '18.98', '18.98', 'los decimales de otra columna no se tocan'),
+        # 25-nov: el singular con tilde vuelve a «dia», solo si es el valor entero.
+        (PLAZO, '0 día', '', "25-nov: '0 día' → vacío, igual que '0 dia'"),
+        (PLAZO, ' 0 día ', '', "'0 día' con espacios → vacío"),
+        (PLAZO, '1 día', '1 dia', "'1 día' → '1 dia'"),
+        (PLAZO, '12 día', '12 dia', "'12 día' → '12 dia'"),
+        (PLAZO, '1 - 2 días', '1 - 2 días', 'el plural de la caja se queda'),
+        (PLAZO, '3 días', '3 días', "'3 días' se queda"),
+        (PLAZO, 'Hoy 1 día', 'Hoy 1 día', 'un trozo «1 día» dentro de otro texto NO se toca'),
+        (PLAZO, '1 días', '1 días', "'1 días' no es el singular: se queda"),
+        (RETRASO_AMAZON, '0 día', '0 dia', "🔴 el '0 día' de Amazon vuelve a '0 dia': es un dato, no se vacía"),
+        (RETRASO_AMAZON, '1 día', '1 dia', "el '1 día' de Amazon → '1 dia'"),
+        (RETRASO_AMAZON, '190 días', '190 días', 'el plural de Amazon se queda'),
+        (RETRASO_AMAZON, '180 - 190 días', '180 - 190 días', 'el tramo de Amazon se queda'),
+        (RETRASO_AMAZON, '', '', 'el retraso vacío se queda'),
+        ('Otra columna', '1 día', '1 día', "el '1 día' de otra columna no se toca")):
     eq('(2) %s' % nombre, kc.normalizar_valor(col, antes), despues)
+eq('(2) la columna del retraso es la de la tabla', kc.COL_RETRASO_AMAZON, RETRASO_AMAZON)
 
 # ══════════════════════════════════════════════════════════════════
-print('3 · cabecera vieja y cabecera nueva: la misma fila tipada y el mismo crudo')
+print('3 · las tres cabeceras: la misma fila tipada y el mismo crudo')
 VIEJO, NUEVO = analizar(texto_viejo()), analizar(texto_nuevo())
 eq('(3) dos filas en cada uno', (len(VIEJO['filas']), len(NUEVO['filas'])), (2, 2))
 for pos, nombre in ((0, 'caja FBA'), (1, 'caja FBM')):
@@ -161,6 +200,16 @@ eq("(3) 🔴 el crudo no conserva ningún nombre nuevo", [k for k in C0 if k in 
 eq('(3) la retirada sigue como clave, vacía', C0[HIST], '')
 eq('(3) lo que vino en las otras columnas, igual', (C0['Oferta de almacén: Actual'], C0['Lista de precio: Actual'], C0[RETRASO_AMAZON]), ('15.5', '24.99', '0 dia'))
 eq('(3) un fichero antiguo que traiga la retirada la conserva', len(analizar(texto_viejo())['filas'][0]['crudo']), 561)
+# El fichero del 25-nov: su cabecera real y sus formatos. Tiene que dar lo MISMO que el de siempre.
+NUEVO25 = analizar(texto_nuevo(cabecera=NUEVA25, formato=FORMATO_25))
+eq('(3) 25-nov: dos filas', len(NUEVO25['filas']), 2)
+for pos, nombre in ((0, 'caja FBA'), (1, 'caja FBM')):
+    eq('(3) 🔴 25-nov, %s: la MISMA fila tipada que la de siempre' % nombre, NUEVO25['filas'][pos]['registro'], VIEJO['filas'][pos]['registro'])
+    eq('(3) 🔴 25-nov, %s: el MISMO crudo que el de siempre' % nombre, NUEVO25['filas'][pos]['crudo'], VIEJO['filas'][pos]['crudo'])
+R25, C25 = NUEVO25['filas'][0]['registro'], NUEVO25['filas'][0]['crudo']
+eq('(3) 25-nov: el país llega por «Mercado»', R25['dominio'], 'es')
+eq('(3) 25-nov: el precio y el vendedor de la caja llegan', (R25['bb_precio'], R25['bb_seller_id']), (19.99, 'A1INVENTADO1'))
+eq('(3) 25-nov: el crudo no conserva ningún nombre nuevo', [k for k in C25 if k in kc.EQUIVALENCIAS], [])
 
 # ══════════════════════════════════════════════════════════════════
 print('4 · lo que tiene que parar, diciendo qué')
@@ -173,9 +222,29 @@ _msg = aborta(_ambos)
 eq('(4) 🔴 los dos nombres a la vez: aborta, no elige', (_msg or '').startswith('[Guarda 1 bis]'), True)
 eq('(4) y nombra la columna', "'Buy Box: Actual' y 'Caja de Compra: Actual'" in (_msg or ''), True)
 eq('(4) una columna sin nombre antiguo se nombra sola', kc.nombre_para_aviso('ASIN'), "'ASIN'")
+# Entre generaciones: el nombre del 9-nov y el del 25-nov de la misma columna, y los tres de una vez.
+_gen = csv_de(NUEVA25 + ['Buy Box: 90 días A.G.'], [[''] * len(NUEVA25) + ['1']])
+_mg = aborta(_gen)
+eq('(4) 🔴 el nombre del 9-nov y el del 25-nov a la vez: aborta, no elige', (_mg or '').startswith('[Guarda 1 bis]'), True)
+eq('(4) y nombra los dos', "'Buy Box: 90 días agotado' y 'Buy Box: 90 días A.G.'" in (_mg or ''), True)
+_tres = NUEVA25 + ['Buy Box: 90 días A.G.', 'Caja de Compra: 90 días A.G.']
+try:
+    kc.normalizar_cabecera(_tres)
+    _m3 = ''
+except kc.CabeceraAmbigua as ex:
+    _m3 = str(ex)
+eq('(4) los tres nombres de una columna: los nombra los tres',
+   "'Buy Box: 90 días agotado' y 'Buy Box: 90 días A.G.' y 'Caja de Compra: 90 días A.G.'" in _m3, True)
+_rep = aborta(csv_de(NUEVA25 + ['ASIN'], [[''] * len(NUEVA25) + ['1']]))
+eq("(4) un nombre repetido tal cual también aborta", ((_rep or '').startswith('[Guarda 1 bis]'), "'ASIN' y 'ASIN'" in (_rep or '')), (True, True))
+_sin25 = aborta(texto_nuevo(quitar=('Mercado',), cabecera=NUEVA25, formato=FORMATO_25))
+eq('(4) falta una tipada en un fichero del 25-nov: Guarda 1, con sus dos nombres',
+   ((_sin25 or '').startswith('[Guarda 1]'), "'Localización' (o 'Mercado')" in (_sin25 or '')), (True, True))
+eq('(4) 🔑 el aviso de una que cambió dos veces dice sus tres nombres', kc.nombre_para_aviso('Caja de Compra: 90 días A.G.'),
+   "'Caja de Compra: 90 días A.G.' (o 'Buy Box: 90 días A.G.', 'Buy Box: 90 días agotado')")
 
 # ══════════════════════════════════════════════════════════════════
-print('5 · el escáner lee igual los dos ficheros')
+print('5 · el escáner lee igual los tres ficheros')
 COL_PAIS, COL_CAIDAS = e2.columnas_keepa()
 COLS_FICHA = e2.columnas_ficha_compartida()
 with tempfile.TemporaryDirectory() as tmp:
@@ -191,6 +260,10 @@ with tempfile.TemporaryDirectory() as tmp:
     eq('(5) y lee el fichero nuevo de verdad', (b['pais'], b['filas'], b['caidas']['B0INVENTA1']), ('ES', 2, 5.0))
     l_v, l_n = pro.leer_csv_visualizador(viejo), pro.leer_csv_visualizador(nuevo)
     eq('(5) 🔴 el lector heredado da lo mismo con los dos', l_n, l_v)
+    nuevo25 = ruta('nuevo25.csv', texto_nuevo(cabecera=NUEVA25, formato=FORMATO_25))
+    c = e2.examinar_csv(nuevo25, pro, COL_PAIS, COL_CAIDAS, COLS_FICHA)
+    eq('(5) 🔴 examinar_csv da lo mismo con el del 25-nov', c, a)
+    eq('(5) 🔴 el lector heredado da lo mismo con el del 25-nov', pro.leer_csv_visualizador(nuevo25), l_v)
     rec = l_n['8400000000017'][0]
     eq('(5) el lector ve la caja y si es FBA', (rec['buybox'], rec['es_fba']), (19.99, True))
 
