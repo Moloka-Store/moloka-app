@@ -442,6 +442,91 @@ eq('A6 · el nombre de Zentrada: «45g» es la medida; «24er» un recuento; sin
    [ez.cantidad_zentrada('Golosina R-0 45g')['medida'], ez.cantidad_zentrada('Gummibärchen 24er')['n'],
     ez.cantidad_zentrada('Producto R-9')['texto']], [(45.0, 'g'), 24, 'sin cantidad: 1 unidad'])
 
+print('A7 · (ZP) el recuento en español del nombre de Zentrada (la lectura es en español)')
+_cz = lambda nombre: (lambda c: (c['n'], c['ambigua']))(ez.cantidad_zentrada(nombre))  # noqa: E731
+eq('A7 · 🔴 «Ohropax 10 unidades» y «Vileda Original 8 piezas»: 10 y 8 (sin el ZP, ninguna cantidad)',
+   [_cz('Tapones para los oídos suaves Ohropax 10 unidades'), _cz('Paño de esponja Vileda Original 8 piezas')],
+   [(10, False), (8, False)])
+eq('A7 · 🔴 «1 pieza», «3 uds.», «12uds», «(23 unidades)», «4 piezas»: se leen',
+   [_cz('Golpe Motiv: redondo, 1 pieza'), _cz('Superpegamento 3 uds.'), _cz('Tatuaje risa 12uds'),
+    _cz('Pañales talla 5 (23 unidades)'), _cz('Pilas AA R6 - 4 piezas')],
+   [(1, False), (3, False), (12, False), (23, False), (4, False)])
+eq('A7 · «Puzzle de 2x60 piezas»: el 2x60 = 120 de siempre, sin leer el 60 otra vez (si no, saldría ambigua)',
+   [_cz('Puzzle de 2x60 piezas La casa de muñecas de Gabi M'), _cz('Rompecabezas de 3x48 piezas')],
+   [(120, False), (144, False)])
+eq('A7 · un nombre sin cantidad sigue siendo una unidad',
+   (ez.cantidad_zentrada('Discos de algodón, bolsa grande')['n'],
+    ez.cantidad_zentrada('Discos de algodón, bolsa grande')['texto']), (None, 'sin cantidad: 1 unidad'))
+eq('A7 · 🔴 expositor, vitrina o surtido (delante o detrás): no se lee; un nombre cortado («4 pie»), tampoco',
+   [_cz('Colorete en barra en 24 piezas Expositor'), _cz('Expositor crema labial + tester 36 piezas'),
+    _cz('Rotulador resaltador en 24 piezas Exposi'), _cz('Pato - SE VENDE EN VITRINAS DE 12 UNIDADES'),
+    _cz('Peluches, 6 unidades surtidas de 30'), _cz('Batería AA de alta resistencia, 4 pie')],
+   [(None, False)] * 6)
+
+
+def _sz(**k):
+    return dict({'n_art': '', 'valor_ud': '', 'tipo_ud': '', 'paquete': '', 'tamano': '', 'titulo': ''}, **k)
+
+
+_ohr = _sz(valor_ud='10', tipo_ud='unidad', tamano='10 unidades', n_art='10', titulo='Tapones Ohropax 10 unidades')
+_vil = _sz(valor_ud='8', tipo_ud='unidad', tamano='8 Unidad (Paquete de 1)', n_art='8', titulo='Bayeta paquete de 8')
+_fz = lambda sen, nombre: (lambda r: (r['estado'], r['factor']))(  # noqa: E731
+    ez.factor_pack_amazon(sen, ez.cantidad_zentrada(nombre)))
+eq('A7 · 🔴 EL CASO QUE MANDA: la ficha de Amazon dice «10 unidades» y Zentrada «Ohropax 10 unidades» → no es pack '
+   '(factor 1); igual Vileda «8 piezas»; sin cantidad en el nombre, sí (×10, ×8: lo de antes del ZP)',
+   [_fz(_ohr, 'Tapones para los oídos suaves Ohropax 10 unidades'), _fz(_vil, 'Paño de esponja Vileda Original 8 piezas'),
+    _fz(_ohr, 'Tapones para los oídos suaves Ohropax'), _fz(_vil, 'Paño de esponja Vileda Original')],
+   [(ez.PACK_NO, 1), (ez.PACK_NO, 1), (ez.PACK_SI, 10), (ez.PACK_SI, 8)])
+eq('A7 · 🔴 un pack de verdad de Amazon con un recuento que no es múltiplo («Vileda 8 piezas» frente a «Pack de 3» y '
+   '«n.º de artículos 3»: 0,375) es «posible pack», nunca «no es pack»; con «contenido 8» al lado, también',
+   [_fz(_sz(n_art='3', titulo='Bayeta Pack de 3'), 'Paño de esponja Vileda Original 8 piezas'),
+    _fz(_sz(valor_ud='8', tipo_ud='unidad', n_art='3'), 'Paño de esponja Vileda Original 8 piezas')],
+   [(ez.PACK_DUDOSO, 1), (ez.PACK_DUDOSO, 1)])
+eq('A7 · 🔴 …y ese candado SOLO con el recuento en español: un puzzle «3x48» (144, como antes) con «48 piezas» en el título '
+   '(0,33) sigue sin ser pack, y un «24er» con «n.º de artículos 5», también (lo de antes no cambia)',
+   [_fz(_sz(titulo='Puzzle 3 x 48 piezas'), 'Casa de muñecas Gabi Playland Puzzle 3x48 piezas C'),
+    _fz(_sz(n_art='5'), 'Gummibärchen 24er'), ez.cantidad_zentrada('Gummibärchen 24er')['n_es'],
+    ez.cantidad_zentrada('Paño de esponja Vileda Original 8 piezas')['n_es']],
+   [(ez.PACK_NO, 1), (ez.PACK_NO, 1), False, True])
+eq('A7 · …y el pack de 3 de Vileda que Amazon cuenta entero (contenido 24, n.º de artículos 24) y por paquetes («Pack de '
+   '3»): el contenido da 3 y los recuentos son 3 (paquetes) y 24 (3 × 8 unidades) → ×3',
+   _fz(_sz(valor_ud='24', tipo_ud='unidad', n_art='24', titulo='Bayeta Pack de 3'),
+       'Paño de esponja Vileda Original 8 piezas'), (ez.PACK_SI, 3))
+eq('A7 · un puzzle de 1000 piezas frente a «contenido 1 unidad» (lo que Amazon pone por defecto) y «1000 Piezas» en el '
+   'título: sin una lectura de lo que lleva el ASIN, «posible pack», como antes del ZP; con «contenido 1000», no es pack',
+   [_fz(_sz(valor_ud='1', tipo_ud='unidad', titulo='Puzzle 1000 Piezas'), 'Rompecabezas compacto de 1000 piezas'),
+    _fz(_sz(valor_ud='1000', tipo_ud='pieza', titulo='Puzzle 1000 Piezas'), 'Rompecabezas compacto de 1000 piezas')],
+   [(ez.PACK_DUDOSO, 1), (ez.PACK_NO, 1)])
+eq('A7 · «Pack de 2 x 10 unidades»: el 2x10 = 20 de siempre, no ambigua (y no es un recuento en español)',
+   (ez.cantidad_zentrada('Tapones Ohropax Pack de 2 x 10 unidades')['n'],
+    ez.cantidad_zentrada('Tapones Ohropax Pack de 2 x 10 unidades')['ambigua'],
+    ez.cantidad_zentrada('Tapones Ohropax Pack de 2 x 10 unidades')['n_es']), (20, False, False))
+_fo = dict(_fg, nombre='Tapones para los oídos suaves Ohropax 10 unidades')
+_p20 = _sz(tamano='10 unidades (Paquete de 20)', n_art='20', titulo='Ohropax Soft, Pack de 20')
+_p10 = _sz(tamano='10 unidades (Paquete de 10)', n_art='10', titulo='Ohropax Soft, Pack de 10')
+_sin_t = lambda sen: dict(sen, tamano='')  # noqa: E731
+
+
+def _deco(sen):
+    r = ez.decidir_zentrada(_fo, {'ES': [_rg]}, {'ES': {'B0ZAMZ0024': 30}}, _params, M, None, {}, None,
+                            {'ES': {'B0ZAMZ0024': sen}})
+    return (r['factor'], r['pa'], r['pack'], r['puerta'])
+
+
+eq('A7 · 🔴 (quien dirige) «Ohropax 10 unidades» (una caja de 10) contra «Pack de 20» y «Pack de 10» DE CAJAS: con el '
+   'tamaño «10 unidades (Paquete de 20/10)», ×20 y ×10 (20,00 y 10,00, no COMPRAR); sin el tamaño no se sabe si el 20 '
+   'son cajas o tapones: «posible pack», coste de una y VALORAR. Nunca ×2, nunca «no es pack», nunca COMPRAR',
+   [_deco(_p20), _deco(_sin_t(_p20)), _deco(_p10), _deco(_sin_t(_p10)), _deco(_sz(paquete='10', titulo='Pack de 10'))],
+   [(20, 20.0, 'amazon', 'd'), (1, 1.0, None, 'e'), (10, 10.0, 'amazon', 'd'), (1, 1.0, None, 'e'), (1, 1.0, None, 'e')])
+_ro = ez.decidir_zentrada(_fo, {'ES': [_rg]}, {'ES': {'B0ZAMZ0024': 30}}, _params, M, None, {}, None,
+                          {'ES': {'B0ZAMZ0024': _ohr}})
+_rs = ez.decidir_zentrada(dict(_fo, nombre='Tapones para los oídos suaves Ohropax'), {'ES': [_rg]},
+                          {'ES': {'B0ZAMZ0024': 30}}, _params, M, None, {}, None, {'ES': {'B0ZAMZ0024': _ohr}})
+eq('A7 · 🔴 de punta a punta: «Ohropax 10 unidades» con su ficha de «10 unidades» sale con el coste de UNA (1,00) y '
+   'COMPRAR; sin la cantidad en el nombre, ×10 = 10,00 y no COMPRAR (el fallo del 13-nov)',
+   [(_ro['factor'], _ro['pa'], _ro['pack'], _ro['puerta']), (_rs['factor'], _rs['pa'], _rs['pack'], _rs['puerta'])],
+   [(1, 1.0, None, 'f'), (10, 10.0, 'amazon', 'd')])
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PARTE B · LOS DOS PROGRAMAS, DE PUNTA A PUNTA
