@@ -673,6 +673,16 @@ _RE_NXM = re.compile(r'(?<![\d.,])(\d{1,2})\s*[xX]\s*(\d{1,2})(?![\d.,])(?!\s*(?
                      + _MEDIDA + _FIN_PALABRA + r'))', re.I)
 # «im 18er Tray», «12 St. im Aufsteller»: el expositor, no lo que se vende.
 _RE_EXPOSITOR = re.compile(r'^\W*(?:im\s+)?(?:tray|display|aufsteller|karton)' + _FIN_PALABRA, re.I)
+# (ZP, 25-nov-2026) El recuento EN ESPAÑOL (la lectura de Zentrada es en español: «Ohropax 10 unidades», «Vileda Original
+# 8 piezas», «Superpegamento 3 uds.», «12uds»). Medido en la lectura del 24-nov-2026: ninguno de los 2.214 nombres casaba
+# con el recuento alemán y unos 130 traían este. Ni «pcs» ni «psc» salen en ella: no se leen. Un nombre cortado a 50
+# letras («… 4 pie», «… 12 UNIDADE») se queda sin leer: es el lado seguro.
+_RE_ES = re.compile(r'(?<![\d.,])(\d+)\s*(?:piezas?|unidad(?:es)?|uds?\.?)' + _FIN_PALABRA, re.I)
+# …pero el de un expositor o un surtido es lo que trae la caja, no lo que se vende («Colorete en barra en 24 piezas
+# Expositor», o cortado «… Exposi»; «SE VENDE EN VITRINAS DE 12 UNIDADES»; «Squishmallows, 6 unidades surtidas»), y
+# puede ir delante o detrás del número: con una de estas palabras EN CUALQUIER SITIO del nombre, el recuento español no
+# se lee (queda como hasta ahora: una unidad). 🔑 Leer de más es lo caro: un recuento leído divide las señales de Amazon y quita multiplicaciones.
+_RE_CAJA_ES = re.compile(r'exposi|display|vitrina|surtid', re.I)
 _RE_TAMANO = re.compile(r'^\s*(?:(\d{1,3})\s*x\s*)?(\d+(?:[.,]\d+)?)\s*([a-zà-ÿ]+)\b(?:\s*\((?:paquete de|pack of|'
                         r'confezione da|lot de|packung mit)\s*(\d+)\)|\s*\((\d+)er[\s-]*pack\))?', re.I)
 _RES_TITULO = [re.compile(p, re.I) for p in (
@@ -715,7 +725,9 @@ def senales_pack_csv(rutas):
 def cantidad_zentrada(nombre):
     """Lo que dice el nombre de Zentrada de su cantidad → {'n': recuento o None, 'medida': (total, 'g'|'ml') o None,
     'ambigua': bool, 'texto': lo leido}. El recuento: «24er», «8 Stück», «132 St.», «77Stk», «32 teil.», «4tlg»,
-    «56x10», o el N de «6x50g»; el de un expositor («im 18er Tray») no cuenta. La medida, en g o ml: «45g», «1,35 Liter», «6x50g» = 300 g,
+    «56x10», o el N de «6x50g»; el de un expositor («im 18er Tray») no cuenta. (ZP) Y en español: «10 unidades»,
+    «8 piezas», «1 pieza», «3 uds.», salvo en un expositor o un surtido (`_RE_CAJA_ES`); el «60 piezas» de «2x60 piezas»
+    no se lee otra vez (ya es el 2x60 = 120 de siempre). La medida, en g o ml: «45g», «1,35 Liter», «6x50g» = 300 g,
     y las de un set con «+» se suman («100ml + 250ml» = 350 ml). Dos recuentos distintos, o dos medidas distintas sin
     «+», no se adivinan: 'ambigua'."""
     s = str(nombre or '')
@@ -736,6 +748,11 @@ def cantidad_zentrada(nombre):
                 recuentos.append(int(m.group(1)))
     for m in _RE_NXM.finditer(s):
         recuentos.append(int(m.group(1)) * int(m.group(2)))
+        tapado.append((m.start(), m.end()))
+    if not _RE_CAJA_ES.search(s):
+        for m in _RE_ES.finditer(s):
+            if not any(a <= m.start(1) < b for a, b in tapado):
+                recuentos.append(int(m.group(1)))
     recuentos = [n for n in recuentos if n > 0]
     ambigua = len(set(recuentos)) > 1
     n = recuentos[0] if (recuentos and not ambigua) else None
@@ -770,7 +787,8 @@ def _entero_pack(v):
 def lecturas_pack(senal, cant):
     """Las lecturas de N (unidades de Zentrada que lleva el ASIN) de cada señal del CSV → [{'fuente', 'grupo', 'texto',
     'valor', 'trivial'}]. `trivial`: comparada contra el «1 unidad» que se supone a un nombre de Zentrada sin recuento
-    (no contra una cantidad leida)."""
+    (no contra una cantidad leida). (ZP) `cuenta`, solo en las que se dividen por el recuento de Zentrada: el recuento
+    de Amazon tal cual (sin dividir)."""
     if not senal:
         return []
     recuento = cant.get('n') or 1
@@ -781,7 +799,7 @@ def lecturas_pack(senal, cant):
     def contra(total, dim, fuente, texto, grupo=None):
         if dim == 'ud':
             salida.append({'fuente': fuente, 'grupo': grupo or fuente, 'texto': texto, 'valor': total / recuento,
-                           'trivial': sin_recuento})
+                           'trivial': sin_recuento, 'cuenta': total})
         elif medida and medida[1] == dim and medida[0] > 0:
             salida.append({'fuente': fuente, 'grupo': grupo or fuente, 'texto': texto, 'valor': total / medida[0],
                            'trivial': False})
@@ -801,13 +819,13 @@ def lecturas_pack(senal, cant):
         elif por >= 2:
             # «20 g (Paquete de 3)» sin medida en el nombre de Zentrada: cuenta el «Paquete de».
             salida.append({'fuente': 'tamaño', 'grupo': 'tamaño', 'texto': texto, 'valor': por / recuento,
-                           'trivial': sin_recuento})
+                           'trivial': sin_recuento, 'cuenta': por})
     for clave, fuente, grupo, rotulo in (('n_art', 'recuento', 'recuento', 'n.º de artículos'),
                                          ('paquete', 'paquete', 'paquete', 'paquete: cantidad')):
         x = _numero_pack(senal.get(clave))
         if x is not None and x >= 2 and x == int(x):
             salida.append({'fuente': fuente, 'grupo': grupo, 'texto': '%s %d' % (rotulo, x), 'valor': x / recuento,
-                           'trivial': sin_recuento})
+                           'trivial': sin_recuento, 'cuenta': x})
     vistos = set()
     for rx in _RES_TITULO:
         for mt in rx.finditer(str(senal.get('titulo') or '')):
@@ -815,7 +833,7 @@ def lecturas_pack(senal, cant):
             if x >= 2 and x not in vistos:
                 vistos.add(x)
                 salida.append({'fuente': 'título', 'grupo': 'título', 'texto': 'título «%s»' % mt.group(0).strip(),
-                               'valor': x / recuento, 'trivial': sin_recuento})
+                               'valor': x / recuento, 'trivial': sin_recuento, 'cuenta': x})
     return salida
 
 
@@ -825,6 +843,12 @@ def factor_pack_amazon(senal, cant):
     texto = 'Zentrada %s; Amazon: %s' % (cant['texto'], ' · '.join(
         '%s → %s' % (x['texto'], _cifra_pack(x['valor'])) for x in lecturas) or 'sin señales')
     no = {'estado': PACK_NO, 'factor': 1, 'senales': texto}
+    dudoso = {'estado': PACK_DUDOSO, 'factor': 1, 'senales': texto}
+    # (ZP, 25-nov-2026) Con un recuento LEIDO en el nombre, un recuento de Amazon de 2 o más que no es un múltiplo de él
+    # («8 piezas» en Zentrada; «Pack de 3» o «n.º de artículos 3» en Amazon → 0,375) es un posible pack que no se sabe
+    # contar: nunca COMPRAR. Va antes que el 1: un «contenido 8» que da 1 no basta para tapar un «Pack de 3».
+    if any(x.get('cuenta', 0) >= 2 and not x['trivial'] and _entero_pack(x['valor']) is None for x in lecturas):
+        return dudoso
     totales = [x for x in lecturas if x['fuente'] in ('contenido', 'tamaño') and not x['trivial']]
     if totales and all(_entero_pack(x['valor']) == 1 for x in totales):
         return no
