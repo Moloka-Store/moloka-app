@@ -57,6 +57,12 @@ _RE_A_PARTIR = re.compile(r'A partir de\s+(\d+)\s+uds?\.?', re.I)
 _RE_EUROS = re.compile(r'(\d{1,3}(?:\.\d{3})+|\d+),(\d{1,2})')
 _RE_DECIMAL = re.compile(r'\d+(?:\.\d+)?')
 _RE_CAMPO_FILTRO = re.compile(r'f\[\d+\]\[\]')
+# (Encargo TC2, 25-nov-2026) Las etiquetas del codigo de barras de una ficha: «EAN:» en lo suelto; en cajas y displays,
+# «EAN case:» o «EAN display:» (el de la caja: en una «C», el GS1 largo) y «EAN unidad:» (el que trae el Excel de TCG).
+# Medido a mano en cuatro fichas el 25-nov-2026 (una caja «5 + 1» de Funko, una de 6 de Mighty Jaxx y dos displays de
+# sobres): leyendo solo «EAN:» las cuatro salian «otro_ean» y sin tramo (23 cajas y 75 sueltas ese dia). Se leen todas:
+# el EAN del Excel tiene que seguir casando con alguna (`ean_casa`), asi que no se fia de una ficha mas que antes.
+_RE_ETIQUETA_EAN = re.compile(r'^EAN(?:\s+\w+)?:$')
 VACIOS = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'}
 
 
@@ -212,7 +218,7 @@ def leer_ficha(html):
     eans = []
     for bloque in raiz.buscar('div', clase='product-availability-date'):
         etiqueta = bloque.primero('label')
-        if etiqueta is not None and etiqueta.texto().strip() == 'EAN:':
+        if etiqueta is not None and _RE_ETIQUETA_EAN.match(etiqueta.texto().strip()):
             sp = bloque.primero('span')
             if sp is not None and sp.texto().strip():
                 eans.append(sp.texto().strip())

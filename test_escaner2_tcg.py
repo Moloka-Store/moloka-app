@@ -214,6 +214,28 @@ TABLA = [(2, '10.000000', '0.005800'), (6, '10.000000', '0.017500'), (12, '10.00
 f = tr.leer_ficha(ficha(tabla=TABLA))
 eq('C1 precio actual, tramos y EAN', (f['precio_actual'], [u for u, _r, _d in f['tramos']], f['eans'][0]),
    (Decimal('10.00'), [2, 6, 12], '8000000000017'))
+# (Encargo TC2, 25-nov-2026) Cajas y displays: la ficha no dice «EAN:» sino «EAN case:» o «EAN display:» y «EAN unidad:»
+# (la forma medida a mano en cuatro fichas; la de la caja «5 + 1» con <strong> dentro). Se leen todas y el EAN del Excel
+# tiene que seguir casando con alguna; la fecha y el PVPR no son códigos.
+def ficha_etiquetas(pares):
+    bloques = ''.join('<div class="product-availability-date"><label class="label">%s</label> <span>%s</span></div>' % p
+                      for p in pares)
+    return ficha(eans=()).replace('<div class="product-prices">', bloques + '<div class="product-prices">', 1)
+
+
+_gs1 = '01' + '10800000000039' + '2110000'
+_fc = tr.leer_ficha(ficha_etiquetas([('<strong>EAN case:</strong>', '<strong>%s</strong>' % _gs1),
+                                     ('EAN unidad:', '800000000031C'), ('Fecha de lanzamiento:  ', '30-05-2025')]))
+_fd = tr.leer_ficha(ficha_etiquetas([('EAN display:', '8000000000215'), ('EAN unidad:', '8000000000208')]))
+eq('C1b (TC2) caja «5 + 1»: lee «EAN case:» (con <strong>) y «EAN unidad:», no la fecha; y casa con su «C»',
+   (_fc['eans'][:2], tr.ean_casa(_fc['eans'], '800000000031C', '800000000031', True)),
+   ([_gs1, '800000000031C'], True))
+eq('C1c (TC2) display de sobres: lee «EAN display:» y «EAN unidad:», y casa con el de unidad (el que trae el Excel)',
+   (_fd['eans'][:2], tr.ean_casa(_fd['eans'], '8000000000208', '8000000000208', False)),
+   (['8000000000215', '8000000000208'], True))
+eq('C1d (TC2) …y sigue sin casar con el EAN de otro producto: leer más etiquetas no fía más una ficha',
+   (tr.ean_casa(_fc['eans'], '800000000048C', '800000000048', True), tr.ean_casa(_fd['eans'], '8000000000017', '8000000000017', False)),
+   (False, False))
 t = tr.tramo_de_ficha(f, Decimal('10.00'))
 eq('C2 el más barato: rel × (1 − dis) del tramo de 12, exacto', (t['mas_barato'], t['uds_mas_barato'], t['suelto_exacto']),
    (Decimal('9.766000000000'), 12, Decimal('10.000000')))
