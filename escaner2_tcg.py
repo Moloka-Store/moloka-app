@@ -24,8 +24,8 @@ mismo que baja el director viejo (login + smcatalog downloadcatalog?format=excel
      «H», «-2»…) entran con la regla 'ean_forma_rara' y SIN EAN de cruce: se CUENTAN, no se tiran.
   3. DISPONIBLE = «Estado producto» Disponible, Oferta o Saldo, Y Stock > 0 (Fernando: solo disponible). PreOrder →
      `preorder` true; Backorder → `disponibilidad` 'En reposición'. Fuera de lo disponible, pero GUARDADOS (como HEO).
-     `disponibilidad` lleva la palabra de la web: Disponible, En reposición, Preventa, Oferta, Saldo. `en_oferta` =
-     Oferta. Un estado que no es ninguno de los cinco → LecturaInvalida (con un estado nuevo no se sabe si se compra).
+     `disponibilidad` lleva la palabra de la web: Disponible, En reposición, Preventa, Oferta, Saldo, Agotado. `en_oferta` =
+     Oferta. Un estado que no es ninguno de los seis → LecturaInvalida (con un estado nuevo no se sabe si se compra).
   4. STOCK: el del Excel tal cual (50 = «50 o más»; Fernando, 13-oct: «No creo que haga falta leer stock»). No se
      guarda: solo decide «disponible». Compra minima: ni se lee ni se enseña («Compr minima fuera tambien»).
   5. PRECIO: `precio_catalogo` = «Precio» del Excel (en una caja C, el de la caja); `precio_unidad` = ese, ÷ 6 en una
@@ -82,6 +82,9 @@ ESTADOS = {
     'Saldo': ('Saldo', True, False),
     'Backorder': ('En reposición', False, False),
     'PreOrder': ('Preventa', False, True),
+    # (Encargo TA, 25-nov-2026) «Agotado»: lo estrenó el Excel de TCG el 25-nov (4 cartas de Yu-Gi-Oh con stock 0) y la
+    # pasada de las 17:20 se paró por no conocerlo. No se compra: fuera de lo disponible, guardado como los demás.
+    'Agotado': ('Agotado', False, False),
 }
 AVISO_SIN_TRAMO = 'sin tramo leído'
 AVISO_TRAMO_VIEJO = 'tramo leído hace más de 7 días'
