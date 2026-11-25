@@ -687,7 +687,19 @@ _RE_ES = re.compile(r'(?<![\d.,])(\d+)\s*(?:piezas?|unidad(?:es)?|uds?\.?)' + _F
 # Expositor», o cortado «… Exposi»; «SE VENDE EN VITRINAS DE 12 UNIDADES»; «Squishmallows, 6 unidades surtidas»), y
 # puede ir delante o detrás del número: con una de estas palabras EN CUALQUIER SITIO del nombre, el recuento español no
 # se lee (queda como hasta ahora: una unidad). 🔑 Leer de más es lo caro: un recuento leído divide las señales de Amazon y quita multiplicaciones.
-_RE_CAJA_ES = re.compile(r'exposi|display|vitrina|surtid', re.I)
+_RE_CAJA_ES = re.compile(r'exposi|display|vitrina|surtid|\bex(?:p(?:os?)?)?\W*$', re.I)
+# (ZP2, 25-nov-2026) …y lo mismo con «paquete de N» y «pack de N» («Pampers Splashers tamaño 5-6, paquete de 10», «Paños
+# Zeiss, paquete de 30», «Pack de 3 calcetines», «(paquete de 3)»): en las lecturas del 11-oct, 13-nov y 24-nov el número
+# es lo que trae el artículo que se vende (el precio es el del paquete); solo un nombre de los 2.214 + 7.167 + 5.107 tiene
+# el número igual a sus «unidades por caja» («Yogur … paquete de 12») y otro es un expositor (abajo). Con «de» siempre:
+# sin él, «Jumbo Play Pack 2 surtdos» (13-nov) leería un 2 que son dos modelos. No se lee:
+#   · un número detrás del que va una medida o un «x» («en un paquete de 6 cm», «paquete de 2x70», «paquete de 3 x 10»:
+#     ese ya lo lee el «NxM»), ni uno con decimales;
+#   · «pack de 1» o «1 paquete»: es lo que se supone a un nombre sin cantidad, y leerlo solo lo pasaría a la regla 0;
+#   · lo de un expositor (también el «… Exp» o «… Ex» de un nombre cortado: «Slime de 90 gramos, en paquete de 12 Exp»),
+#     un display, una vitrina o un surtido, como arriba.
+_RE_PAQUETE_ES = re.compile(r'(?<![a-zà-ÿ])(?:paquete|pack)\s+de\s+(\d+)(?!\d|[.,]\d)(?!\s*(?:[xX×]\s*\d|(?:cm|mm|m|'
+                            r'ml|cl|l|ltr|litros?|kg|g|gr|gramos?)' + _FIN_PALABRA + r'))', re.I)
 _RE_TAMANO = re.compile(r'^\s*(?:(\d{1,3})\s*x\s*)?(\d+(?:[.,]\d+)?)\s*([a-zà-ÿ]+)\b(?:\s*\((?:paquete de|pack of|'
                         r'confezione da|lot de|packung mit)\s*(\d+)\)|\s*\((\d+)er[\s-]*pack\))?', re.I)
 _RES_TITULO = [re.compile(p, re.I) for p in (
@@ -732,7 +744,8 @@ def cantidad_zentrada(nombre):
     'ambigua': bool, 'n_es': el recuento se ha leido en español (ZP), 'texto': lo leido}. El recuento: «24er», «8 Stück», «132 St.», «77Stk», «32 teil.», «4tlg»,
     «56x10», o el N de «6x50g»; el de un expositor («im 18er Tray») no cuenta. (ZP) Y en español: «10 unidades»,
     «8 piezas», «1 pieza», «3 uds.», salvo en un expositor o un surtido (`_RE_CAJA_ES`); el «60 piezas» de «2x60 piezas»
-    no se lee otra vez (ya es el 2x60 = 120 de siempre). La medida, en g o ml: «45g», «1,35 Liter», «6x50g» = 300 g,
+    no se lee otra vez (ya es el 2x60 = 120 de siempre). (ZP2) Y «paquete de 10», «pack de 3», de 2 en
+    adelante (`_RE_PAQUETE_ES`). La medida, en g o ml: «45g», «1,35 Liter», «6x50g» = 300 g,
     y las de un set con «+» se suman («100ml + 250ml» = 350 ml). Dos recuentos distintos, o dos medidas distintas sin
     «+», no se adivinan: 'ambigua'."""
     s = str(nombre or '')
@@ -754,10 +767,14 @@ def cantidad_zentrada(nombre):
     for m in _RE_NXM.finditer(s):
         recuentos.append(int(m.group(1)) * int(m.group(2)))
         tapado.append((m.start(), m.end()))
+    antiguos = [n for n in recuentos if n > 0]
     en_espanol = []
     if not _RE_CAJA_ES.search(s):
         for m in _RE_ES.finditer(s):
             if not any(a <= m.start(1) < b for a, b in tapado):
+                en_espanol.append(int(m.group(1)))
+        for m in _RE_PAQUETE_ES.finditer(s):
+            if int(m.group(1)) >= 2 and not any(a <= m.start(1) < b for a, b in tapado):
                 en_espanol.append(int(m.group(1)))
     recuentos += en_espanol
     recuentos = [n for n in recuentos if n > 0]
@@ -775,7 +792,10 @@ def cantidad_zentrada(nombre):
         else:
             ambigua = True
     partes = ([('%d ud' % n)] if n else []) + ([_cifra_pack(medida[0]) + ' ' + medida[1]] if medida else [])
-    return {'n': n, 'medida': medida, 'ambigua': ambigua, 'n_es': n is not None and n in en_espanol,
+    # (ZP2) `n_es` solo si el recuento lo da el español y no lo daba ya lo de antes: «Play-Doh pack 4 colores (4x 112gr.)»
+    # es el 4 del «4x 112gr» de siempre y sigue por la regla de siempre.
+    return {'n': n, 'medida': medida, 'ambigua': ambigua,
+            'n_es': n is not None and n in en_espanol and n not in antiguos,
             'texto': ' · '.join(partes) or ('cantidad ambigua' if ambigua else 'sin cantidad: 1 unidad')}
 
 

@@ -527,6 +527,59 @@ eq('A7 · 🔴 de punta a punta: «Ohropax 10 unidades» con su ficha de «10 un
    [(_ro['factor'], _ro['pa'], _ro['pack'], _ro['puerta']), (_rs['factor'], _rs['pa'], _rs['pack'], _rs['puerta'])],
    [(1, 1.0, None, 'f'), (10, 10.0, 'amazon', 'd')])
 
+print('A8 · (ZP2) «paquete de N» y «pack de N» en el nombre de Zentrada')
+_cze = lambda nombre: (lambda c: (c['n'], c['ambigua'], c['n_es']))(ez.cantidad_zentrada(nombre))  # noqa: E731
+eq('A8 · 🔴 «paquete de 10», «paquete de 30», «Pack de 3», «(paquete de 3)»: se leen, en español',
+   [_cze('Pampers Splashers tamaño 5-6, paquete de 10'), _cze('Paños de limpieza para gafas Zeiss, paquete de 30'),
+    _cze('Barbie - Pack de 3 calcetines'), _cze('Borradores 3D (paquete de 3) de colores')],
+   [(10, False, True), (30, False, True), (3, False, True), (3, False, True)])
+eq('A8 · 🔴 no se lee con una medida detrás («en un paquete de 6 cm»), con un «x» detrás que el «NxM» no coge («paquete de '
+   '2 x 100»), con decimales («paquete de 2,5»), «pack de 1» (lo de siempre: una unidad) ni sin «de» («Play Pack 2 '
+   'surtdos», dos modelos; «pack 77»)',
+   [_cze('Un juego de 12 bolas en un paquete de 6 cm de diám'), _cze('Toallitas húmedas, paquete de 2 x 100'),
+    _cze('Cinta adhesiva, paquete de 2,5'), _cze('Escobilla para biberón Nuk 2 en 1, pack de 1'),
+    _cze('Major Combat Soldiers Jumbo Play Pack 2 surtdos 19,5x25cm'), _cze('Calgon 4en1 pastillas 77, pack 77')],
+   [(None, False, False)] * 6)
+eq('A8 · «paquete de 2x70» y «paquete de 3 x 10»: el «NxM» de siempre (140 y 30), no ambiguos ni en español',
+   [_cze('¡Sí! enjuague húmedo sen toipa, paquete de 2x70 p'), _cze('Wrigleys Airwaves Cherrymenthol, paquete de 3 x 10')],
+   [(140, False, False), (30, False, False)])
+eq('A8 · 🔴 expositor (también el «… Exp» o «… Ex» de un nombre cortado) o surtido: no se lee',
+   [_cze('Slime unicornio de 90 gramos, en paquete de 12 Exp'), _cze('Pegatinas de One Piece, paquete de 5, 8x10,5 cm Ex'),
+    _cze('Cubos surtidos Haribo Maoam, paquete de 50')],
+   [(None, False, False)] * 3)
+eq('A8 · 🔴 «Play-Doh pack 4 (4x 112gr.)»: el 4 ya lo daba el «4x 112gr» de siempre, y sigue por la regla de siempre '
+   '(no en español); «Snickers paquete de 2 barras de 80 g», 2 y 80 g',
+   [_cze('Play-Doh pack 4 colores clásicos (4x 112gr.)'),
+    (ez.cantidad_zentrada('Snickers paquete de 2 barras grandes de 80 g')['n'],
+     ez.cantidad_zentrada('Snickers paquete de 2 barras grandes de 80 g')['medida'])],
+   [(4, False, False), (2, (80.0, 'g'))])
+_fpa = dict(_fg, nombre='Pampers Splashers tamaño 5-6, paquete de 10')
+_pam = _sz(valor_ud='10', tipo_ud='unidad', tamano='10 Unidad (Paquete de 1)', n_art='10',
+           titulo='Pampers Splashers Talla 5-6, 10 Unidades')
+
+
+def _dpa(sen, nombre=None):
+    r = ez.decidir_zentrada(dict(_fpa, nombre=nombre or _fpa['nombre']), {'ES': [_rg]}, {'ES': {'B0ZAMZ0024': 30}},
+                            _params, M, None, {}, None, {'ES': {'B0ZAMZ0024': sen}})
+    return (r['factor'], r['pa'], r['pack'], r['puerta'])
+
+
+eq('A8 · 🔴 EL CASO QUE MANDA: «Pampers Splashers, paquete de 10» contra su ficha de 10 unidades → el coste de UNO (1,00) '
+   'y COMPRAR, con el tamaño y sin él (con el contenido); sin «paquete de 10» en el nombre, ×10 (el fallo del 24-nov)',
+   [_dpa(_pam), _dpa(dict(_pam, tamano='')), _dpa(_pam, 'Pampers Splashers tamaño 5-6')],
+   [(1, 1.0, None, 'f'), (1, 1.0, None, 'f'), (10, 10.0, 'amazon', 'd')])
+eq('A8 · 🔴 sin tamaño ni contenido («n.º de artículos 10», «10 Unidades» en el título) no se sabe qué lleva el ASIN: '
+   '«posible pack», coste de uno y nunca COMPRAR (VALORAR)',
+   _dpa(_sz(n_art='10', titulo='Pampers Splashers Talla 5-6, 10 Unidades')), (1, 1.0, None, 'e'))
+_p20z = _sz(tamano='10 unidades (Paquete de 20)', n_art='20', titulo='Pampers Splashers, Pack de 20')
+eq('A8 · 🔴 un «Pack de 20» de Amazon contra «paquete de 10»: con el tamaño «10 unidades (Paquete de 20)», ×20 (20,00, no '
+   'COMPRAR); sin él, «posible pack» (VALORAR). Nunca ×2 ni «no es pack»',
+   [_dpa(_p20z), _dpa(dict(_p20z, tamano=''))], [(20, 20.0, 'amazon', 'd'), (1, 1.0, None, 'e')])
+eq('A8 · 🔴 un expositor («Slime …, en paquete de 12 Exp», 1 slime) contra un «Pack de 12» de Amazon: el 12 no se lee y '
+   'sale ×12, lo de siempre (si se leyera, el pack de 12 no se multiplicaría)',
+   _dpa(_sz(n_art='12', titulo='Slime unicornio, Pack de 12'), 'Slime unicornio de 90 gramos, en paquete de 12 Exp'),
+   (12, 12.0, 'amazon', 'd'))
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PARTE B · LOS DOS PROGRAMAS, DE PUNTA A PUNTA
