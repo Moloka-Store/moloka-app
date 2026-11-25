@@ -8,7 +8,7 @@ fichas y las tarjetas, con la ESTRUCTURA medida en la web (parte T1) y numeros i
 
 QUE PRUEBA:
   (A) el Excel: la llave cruda con su «C», el repetido (manda el disponible), la caja de 6 (precio por figura, chase
-      con «5+1»), los cinco estados, el stock que decide disponible, las formas raras contadas, el EAN de 11 cifras,
+      con «5+1»), los seis estados (con «Agotado», 25-nov-2026), el stock que decide disponible, las formas raras contadas, el EAN de 11 cifras,
       la URL de la ficha desde la primera imagen, y lo que no se entiende (cabecera, estado, stock) → LecturaInvalida;
   (B) el precio de compra: el cociente aplicado al Precio del Excel (tambien en caja), sin cociente el suelto con su
       aviso, el cociente viejo con el suyo; y la huella de contenido (un stock que no cambia «disponible» no la mueve;
@@ -145,6 +145,9 @@ cab_mala = list(tcg.COLUMNAS)
 cab_mala[2], cab_mala[3] = cab_mala[3], cab_mala[2]
 t = lanza('A18 cabecera movida: LecturaInvalida', tcg.LecturaInvalida, tcg.convertir, excel(FILAS, cab_mala))
 eq('A18b y dice qué columna, sin valores', 'Precio' in (t or ''), True)
+lk_ag, c_ag, _ = tcg.convertir(excel([fila('8000000000017', estado='Agotado', stock=0)]), {}, AHORA)
+eq('A19b «Agotado» (TCG, 25-nov-2026): se entiende, no disponible y guardado con su palabra',
+   (lk_ag[0]['disponible'], lk_ag[0]['disponibilidad'], lk_ag[0]['preorder'], c_ag['n_agotados']), (False, 'Agotado', False, 1))
 lanza('A19 estado desconocido: LecturaInvalida', tcg.LecturaInvalida, tcg.convertir,
       excel([fila('8000000000017', estado='Agotadísimo')]))
 lanza('A20 stock que no es un número: LecturaInvalida', tcg.LecturaInvalida, tcg.convertir,
