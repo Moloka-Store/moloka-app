@@ -628,6 +628,10 @@ def precios_sin_pedir(ofertas):
 #   · título      «Pack 48», «paquete de 4», «lote de 12», «3 x 50 ml», «10 piezas», «24 unidades» (2 o más), igual.
 #   El contenido en unidades y el recuento son, los dos, el recuento que escribe el vendedor: cuentan como UNA señal.
 # Y el veredicto, por este orden:
+#   0. (ZP, 25-nov-2026) SOLO con un recuento leído EN ESPAÑOL en el nombre («8 piezas»): si un recuento de Amazon de 2 o
+#      más no es múltiplo de él («Pack de 3» → 0,375), es «posible pack», diga lo que diga el 1. Leer el recuento divide
+#      las señales y podría tapar un multipack de verdad. Los recuentos de antes (alemán, «2x60», «6x50g») no lo miran:
+#      el «48 piezas» del título de un puzzle «3x48» (144) daría 0,33 y bajaría un COMPRAR bueno.
 #   1. Si las lecturas de CONTENIDO y TAMAÑO que hay dan todas 1 contra una cantidad LEIDA en el nombre de Zentrada, el
 #      ASIN lleva justo lo que vende Zentrada: no es pack, diga lo que diga el recuento (el set de Adidas: 100 + 250 ml =
 #      350 ml, aunque Amazon diga «6 artículos»).
@@ -724,7 +728,7 @@ def senales_pack_csv(rutas):
 
 def cantidad_zentrada(nombre):
     """Lo que dice el nombre de Zentrada de su cantidad → {'n': recuento o None, 'medida': (total, 'g'|'ml') o None,
-    'ambigua': bool, 'texto': lo leido}. El recuento: «24er», «8 Stück», «132 St.», «77Stk», «32 teil.», «4tlg»,
+    'ambigua': bool, 'n_es': el recuento se ha leido en español (ZP), 'texto': lo leido}. El recuento: «24er», «8 Stück», «132 St.», «77Stk», «32 teil.», «4tlg»,
     «56x10», o el N de «6x50g»; el de un expositor («im 18er Tray») no cuenta. (ZP) Y en español: «10 unidades»,
     «8 piezas», «1 pieza», «3 uds.», salvo en un expositor o un surtido (`_RE_CAJA_ES`); el «60 piezas» de «2x60 piezas»
     no se lee otra vez (ya es el 2x60 = 120 de siempre). La medida, en g o ml: «45g», «1,35 Liter», «6x50g» = 300 g,
@@ -749,10 +753,12 @@ def cantidad_zentrada(nombre):
     for m in _RE_NXM.finditer(s):
         recuentos.append(int(m.group(1)) * int(m.group(2)))
         tapado.append((m.start(), m.end()))
+    en_espanol = []
     if not _RE_CAJA_ES.search(s):
         for m in _RE_ES.finditer(s):
             if not any(a <= m.start(1) < b for a, b in tapado):
-                recuentos.append(int(m.group(1)))
+                en_espanol.append(int(m.group(1)))
+    recuentos += en_espanol
     recuentos = [n for n in recuentos if n > 0]
     ambigua = len(set(recuentos)) > 1
     n = recuentos[0] if (recuentos and not ambigua) else None
@@ -768,7 +774,7 @@ def cantidad_zentrada(nombre):
         else:
             ambigua = True
     partes = ([('%d ud' % n)] if n else []) + ([_cifra_pack(medida[0]) + ' ' + medida[1]] if medida else [])
-    return {'n': n, 'medida': medida, 'ambigua': ambigua,
+    return {'n': n, 'medida': medida, 'ambigua': ambigua, 'n_es': n is not None and n in en_espanol,
             'texto': ' · '.join(partes) or ('cantidad ambigua' if ambigua else 'sin cantidad: 1 unidad')}
 
 
@@ -844,10 +850,10 @@ def factor_pack_amazon(senal, cant):
         '%s → %s' % (x['texto'], _cifra_pack(x['valor'])) for x in lecturas) or 'sin señales')
     no = {'estado': PACK_NO, 'factor': 1, 'senales': texto}
     dudoso = {'estado': PACK_DUDOSO, 'factor': 1, 'senales': texto}
-    # (ZP, 25-nov-2026) Con un recuento LEIDO en el nombre, un recuento de Amazon de 2 o más que no es un múltiplo de él
-    # («8 piezas» en Zentrada; «Pack de 3» o «n.º de artículos 3» en Amazon → 0,375) es un posible pack que no se sabe
-    # contar: nunca COMPRAR. Va antes que el 1: un «contenido 8» que da 1 no basta para tapar un «Pack de 3».
-    if any(x.get('cuenta', 0) >= 2 and not x['trivial'] and _entero_pack(x['valor']) is None for x in lecturas):
+    # (0, ZP) Con un recuento leído EN ESPAÑOL, un recuento de Amazon de 2 o más que no es múltiplo de él («8 piezas» en
+    # Zentrada; «Pack de 3» o «n.º de artículos 3» en Amazon → 0,375) es un posible pack que no se sabe contar: nunca
+    # COMPRAR. Va antes que el 1: un «contenido 8» que da 1 no basta para tapar un «Pack de 3».
+    if cant.get('n_es') and any(x.get('cuenta', 0) >= 2 and _entero_pack(x['valor']) is None for x in lecturas):
         return dudoso
     totales = [x for x in lecturas if x['fuente'] in ('contenido', 'tamaño') and not x['trivial']]
     if totales and all(_entero_pack(x['valor']) == 1 for x in totales):

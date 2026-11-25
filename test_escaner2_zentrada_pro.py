@@ -482,6 +482,12 @@ eq('A7 · 🔴 un pack de verdad de Amazon con un recuento que no es múltiplo (
    [_fz(_sz(n_art='3', titulo='Bayeta Pack de 3'), 'Paño de esponja Vileda Original 8 piezas'),
     _fz(_sz(valor_ud='8', tipo_ud='unidad', n_art='3'), 'Paño de esponja Vileda Original 8 piezas')],
    [(ez.PACK_DUDOSO, 1), (ez.PACK_DUDOSO, 1)])
+eq('A7 · 🔴 …y ese candado SOLO con el recuento en español: un puzzle «3x48» (144, como antes) con «48 piezas» en el título '
+   '(0,33) sigue sin ser pack, y un «24er» con «n.º de artículos 5», también (lo de antes no cambia)',
+   [_fz(_sz(titulo='Puzzle 3 x 48 piezas'), 'Casa de muñecas Gabi Playland Puzzle 3x48 piezas C'),
+    _fz(_sz(n_art='5'), 'Gummibärchen 24er'), ez.cantidad_zentrada('Gummibärchen 24er')['n_es'],
+    ez.cantidad_zentrada('Paño de esponja Vileda Original 8 piezas')['n_es']],
+   [(ez.PACK_NO, 1), (ez.PACK_NO, 1), False, True])
 eq('A7 · …y el pack de 3 de Vileda que Amazon cuenta entero (24 unidades) y por packs («Pack de 3»): 3 y 0,375 no '
    'cuadran → «posible pack», como antes del ZP (24 y 3)',
    _fz(_sz(valor_ud='24', tipo_ud='unidad', n_art='24', titulo='Bayeta Pack de 3'),
