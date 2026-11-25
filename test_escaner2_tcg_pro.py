@@ -437,7 +437,9 @@ ASIN1, ASIN2, ASIN5, ASIN10, ASIN13 = 'B0TCGX0001', 'B0TCGX0002', 'B0TCGX0005', 
 PADRE = 'B0TCGXPADR'
 PRODUCTOS = [{'id': 1, 'ean': E1, 'asin': ASIN1, 'nombre': 'Figura de Moloka', 'activo': True, 'es_chase': False,
               'iva_pct': 0.21, 'stock_moloka': 3}]
-SEMBRADAS = ('productos', 'inventario_fba', 'disp_pasada', 'disp_estado', 'reglas_director', 'escaner2_parametros', 'parametro_coste', 'mv_coste_preparacion', 'v_fijo_preparacion_asin')
+SEMBRADAS = ('productos', 'inventario_fba', 'disp_pasada', 'disp_estado', 'reglas_director', 'escaner2_parametros', 'parametro_coste', 'mv_coste_preparacion', 'v_fijo_preparacion_asin', 'disp_tramo')
+URL_E1 = 'https://tienda.test/distribucion/figura-uno.html'
+URL_E2C = 'https://tienda.test/distribucion/caja-inventada-5-1.html'
 
 
 def estado_inicial(escena):
@@ -468,6 +470,14 @@ def estado_inicial(escena):
         'parametro_coste': [{'clave': 'coste_almacen_ud', 'valor': 0.15, 'desde': '2000-01-01', 'hasta': None}],
         'mv_coste_preparacion': [{'producto_id': 'p0', 'eur_kg': None, 'refrescada_el': '2026-10-23T05:10:00Z'}],
         'v_fijo_preparacion_asin': [],
+        # (TE, 25-nov-2026) Las URL de las fichas que guarda el lector de tramos (inventadas, .test): la suelta E1, la caja
+        # E2C (su EAN no casó: 'otro_ean', y la URL vale igual), E5 «sin_ficha» (lleva a otra página: sin enlace) y la de
+        # otro proveedor con la llave de E1 (no se coge).
+        'disp_tramo': [{'proveedor': 'TCG', 'producto_prov': E1, 'url': URL_E1, 'intento_resultado': 'ok'},
+                       {'proveedor': 'TCG', 'producto_prov': E2 + 'C', 'url': URL_E2C, 'intento_resultado': 'otro_ean'},
+                       {'proveedor': 'TCG', 'producto_prov': E5, 'url': 'https://tienda.test/otra.html',
+                        'intento_resultado': 'sin_ficha'},
+                       {'proveedor': 'HEO', 'producto_prov': E1, 'url': 'https://heo.test/x.html', 'intento_resultado': 'ok'}],
     }, 'storage': {'escaner2': {}}}
 
 
@@ -596,6 +606,13 @@ eq('🔴 B2 · E5: «sin tramo leído» en «Aviso del tramo», con 1 ud y su su
 eq('🔴 B2 · la caja: «caja de 6» en «Coherencia caja», PA 2,00, 6 figuras de escalón y 2,50 del Excel',
    {(r[_ix['Coherencia caja']], r[_ix['PA (€)']], r[_ix['Uds. escalón']], r[_ix['Precio unidad']])
     for r in _por[E2 + 'C']}, {('caja de 6', 2.0, 6, 2.5)})
+_enl = {}
+for _fila in _wb['Análisis'].iter_rows(min_row=2):
+    _c = _fila[_ix['Nombre']]
+    _enl.setdefault(_fila[_ix['EAN']].value, set()).add((_c.hyperlink.target if _c.hyperlink else None, _c.font.underline))
+eq('🔴 B2 · (TE) el «Nombre» lleva el enlace a la ficha de TCG: la suelta E1 y la caja E2C (aunque su EAN no casara), en '
+   'las cuatro filas, subrayado; E5 («sin_ficha») y E13 (sin fila en disp_tramo), sin enlace',
+   _enl, {E1: {(URL_E1, 'single')}, E2 + 'C': {(URL_E2C, 'single')}, E5: {(None, None)}, E13: {(None, None)}})
 _tabla = list(_wb['Análisis'].tables.values())[0]
 eq('B2 · la tabla de «Análisis» cubre las tres columnas nuevas',
    (_tabla.ref.split(':')[1].rstrip('0123456789'), [c.name for c in _tabla.tableColumns][-5:]),
