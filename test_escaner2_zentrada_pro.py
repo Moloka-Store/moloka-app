@@ -529,16 +529,17 @@ eq('A7 · 🔴 de punta a punta: «Ohropax 10 unidades» con su ficha de «10 un
 
 print('A8 · (ZP2) «paquete de N» y «pack de N» en el nombre de Zentrada')
 _cze = lambda nombre: (lambda c: (c['n'], c['ambigua'], c['n_es']))(ez.cantidad_zentrada(nombre))  # noqa: E731
-eq('A8 · 🔴 «paquete de 10», «paquete de 30», «Pack de 3», «(paquete de 3)», «pack 77»: se leen, en español',
+eq('A8 · 🔴 «paquete de 10», «paquete de 30», «Pack de 3», «(paquete de 3)»: se leen, en español',
    [_cze('Pampers Splashers tamaño 5-6, paquete de 10'), _cze('Paños de limpieza para gafas Zeiss, paquete de 30'),
-    _cze('Barbie - Pack de 3 calcetines'), _cze('Borradores 3D (paquete de 3) de colores'),
-    _cze('Calgon 4en1 pastillas 77, pack 77')],
-   [(10, False, True), (30, False, True), (3, False, True), (3, False, True), (77, False, True)])
+    _cze('Barbie - Pack de 3 calcetines'), _cze('Borradores 3D (paquete de 3) de colores')],
+   [(10, False, True), (30, False, True), (3, False, True), (3, False, True)])
 eq('A8 · 🔴 no se lee con una medida detrás («en un paquete de 6 cm»), con un «x» detrás que el «NxM» no coge («paquete de '
-   '2 x 100»), con decimales («paquete de 2,5») ni «pack de 1» (lo de siempre: una unidad)',
+   '2 x 100»), con decimales («paquete de 2,5»), «pack de 1» (lo de siempre: una unidad) ni sin «de» («Play Pack 2 '
+   'surtdos», dos modelos; «pack 77»)',
    [_cze('Un juego de 12 bolas en un paquete de 6 cm de diám'), _cze('Toallitas húmedas, paquete de 2 x 100'),
-    _cze('Cinta adhesiva, paquete de 2,5'), _cze('Escobilla para biberón Nuk 2 en 1, pack de 1')],
-   [(None, False, False)] * 4)
+    _cze('Cinta adhesiva, paquete de 2,5'), _cze('Escobilla para biberón Nuk 2 en 1, pack de 1'),
+    _cze('Major Combat Soldiers Jumbo Play Pack 2 surtdos 19,5x25cm'), _cze('Calgon 4en1 pastillas 77, pack 77')],
+   [(None, False, False)] * 6)
 eq('A8 · «paquete de 2x70» y «paquete de 3 x 10»: el «NxM» de siempre (140 y 30), no ambiguos ni en español',
    [_cze('¡Sí! enjuague húmedo sen toipa, paquete de 2x70 p'), _cze('Wrigleys Airwaves Cherrymenthol, paquete de 3 x 10')],
    [(140, False, False), (30, False, False)])

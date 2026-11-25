@@ -689,15 +689,16 @@ _RE_ES = re.compile(r'(?<![\d.,])(\d+)\s*(?:piezas?|unidad(?:es)?|uds?\.?)' + _F
 # se lee (queda como hasta ahora: una unidad). 🔑 Leer de más es lo caro: un recuento leído divide las señales de Amazon y quita multiplicaciones.
 _RE_CAJA_ES = re.compile(r'exposi|display|vitrina|surtid|\bex(?:p(?:os?)?)?\W*$', re.I)
 # (ZP2, 25-nov-2026) …y lo mismo con «paquete de N» y «pack de N» («Pampers Splashers tamaño 5-6, paquete de 10», «Paños
-# Zeiss, paquete de 30», «Pack de 3 calcetines», «(paquete de 3)», «Calgon pastillas 77, pack 77»): en las lecturas del
-# 11-oct, 13-nov y 24-nov el número es siempre lo que trae el artículo que se vende (el precio es el del paquete), y
-# nunca las «unidades por caja». No se lee:
+# Zeiss, paquete de 30», «Pack de 3 calcetines», «(paquete de 3)»): en las lecturas del 11-oct, 13-nov y 24-nov el número
+# es lo que trae el artículo que se vende (el precio es el del paquete); solo un nombre de los 2.214 + 7.167 + 5.107 tiene
+# el número igual a sus «unidades por caja» («Yogur … paquete de 12») y otro es un expositor (abajo). Con «de» siempre:
+# sin él, «Jumbo Play Pack 2 surtdos» (13-nov) leería un 2 que son dos modelos. No se lee:
 #   · un número detrás del que va una medida o un «x» («en un paquete de 6 cm», «paquete de 2x70», «paquete de 3 x 10»:
 #     ese ya lo lee el «NxM»), ni uno con decimales;
 #   · «pack de 1» o «1 paquete»: es lo que se supone a un nombre sin cantidad, y leerlo solo lo pasaría a la regla 0;
 #   · lo de un expositor (también el «… Exp» o «… Ex» de un nombre cortado: «Slime de 90 gramos, en paquete de 12 Exp»),
 #     un display, una vitrina o un surtido, como arriba.
-_RE_PAQUETE_ES = re.compile(r'(?<![a-zà-ÿ])(?:paquete|pack)\s*(?:de\s+)?(\d+)(?!\d|[.,]\d)(?!\s*(?:[xX×]\s*\d|(?:cm|mm|m|'
+_RE_PAQUETE_ES = re.compile(r'(?<![a-zà-ÿ])(?:paquete|pack)\s+de\s+(\d+)(?!\d|[.,]\d)(?!\s*(?:[xX×]\s*\d|(?:cm|mm|m|'
                             r'ml|cl|l|ltr|litros?|kg|g|gr|gramos?)' + _FIN_PALABRA + r'))', re.I)
 _RE_TAMANO = re.compile(r'^\s*(?:(\d{1,3})\s*x\s*)?(\d+(?:[.,]\d+)?)\s*([a-zà-ÿ]+)\b(?:\s*\((?:paquete de|pack of|'
                         r'confezione da|lot de|packung mit)\s*(\d+)\)|\s*\((\d+)er[\s-]*pack\))?', re.I)
@@ -743,7 +744,7 @@ def cantidad_zentrada(nombre):
     'ambigua': bool, 'n_es': el recuento se ha leido en español (ZP), 'texto': lo leido}. El recuento: «24er», «8 Stück», «132 St.», «77Stk», «32 teil.», «4tlg»,
     «56x10», o el N de «6x50g»; el de un expositor («im 18er Tray») no cuenta. (ZP) Y en español: «10 unidades»,
     «8 piezas», «1 pieza», «3 uds.», salvo en un expositor o un surtido (`_RE_CAJA_ES`); el «60 piezas» de «2x60 piezas»
-    no se lee otra vez (ya es el 2x60 = 120 de siempre). (ZP2) Y «paquete de 10», «pack de 3», «pack 77», de 2 en
+    no se lee otra vez (ya es el 2x60 = 120 de siempre). (ZP2) Y «paquete de 10», «pack de 3», de 2 en
     adelante (`_RE_PAQUETE_ES`). La medida, en g o ml: «45g», «1,35 Liter», «6x50g» = 300 g,
     y las de un set con «+» se suman («100ml + 250ml» = 350 ml). Dos recuentos distintos, o dos medidas distintas sin
     «+», no se adivinan: 'ambigua'."""
