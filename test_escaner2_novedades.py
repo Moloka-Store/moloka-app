@@ -1324,12 +1324,128 @@ eq('(TC3) 🔑 el Excel de TCG: en tcg/novedades/<día>/, Novedades_TCG_Funko_<h
    ([ruta for _c, ruta, _x, _o in b.subidos], [(x['proveedor'], x['ruta_excel'], x['pasada_id']) for x in b.tablas['nov_excel']], ok),
    (['tcg/novedades/2026-09-29/Novedades_TCG_Funko_2026-09-29_2005.xlsx'],
     [('TCG', 'tcg/novedades/2026-09-29/Novedades_TCG_Funko_2026-09-29_2005.xlsx', 'PASADA-TC')], True))
+res_tc_libro = b.subidos[0][2]
 hoja = [list(r) for r in load_workbook(_io.BytesIO(b.subidos[0][2]))['Novedades'].iter_rows(values_only=True)]
 eq('(TC3) …la hoja «Novedades» lleva AL FINAL «Uds. escalón» y «Precio unidad» (las del tramo y el suelto que guardó la '
    'selección)', (hoja[0][-2:], hoja[1][-2:]), (['Uds. escalón', 'Precio unidad'], [12, 8.55]))
 _cuenta_tc = next(p for p in b.llamadas('nov_guardar_cuenta') if p['p_novedad'] == 'tc-49')
 eq('(TC4) 🔑 el PA de la cuenta es el precio de compra de la novedad tal cual (sin × 0,99)',
    sorted({x['pa'] for x in _cuenta_tc['p_paises']}), [_tc9['precio_ahora']])
+# ── (TE) (encargo TE, 25-nov-2026) EL ENLACE A LA FICHA DE TCG EN EL «Nombre» ───────────────────────────────────
+#    El buscador de TCG no encuentra sus cajas por ningún código: el «Nombre» de «Análisis» y de «Novedades» lleva la URL
+#    que el lector de tramos guarda en disp_tramo (por producto_prov). URLs inventadas (.test).
+def _enlaces_de(ws):
+    """[(EAN, nombre, destino del enlace o None)] de una hoja, con la cabecera buscada por nombre."""
+    filas = [list(r) for r in ws.iter_rows()]
+    i_cab = next(i for i, r in enumerate(filas) if 'EAN' in [c.value for c in r] and 'Nombre' in [c.value for c in r])
+    cab = [c.value for c in filas[i_cab]]
+    i_e, i_n = cab.index('EAN'), cab.index('Nombre')
+    return [(r[i_e].value, r[i_n].value, r[i_n].hyperlink.target if r[i_n].hyperlink else None) for r in filas[i_cab + 1:]]
+
+
+_URL_TC = 'https://tienda.test/distribucion/figura-49.html'
+b = con_tcg(Base(), [_tc9], VALS_TC, escalon={'tc-49': {'uds_escalon': 12, 'precio_unidad': 8.55}})
+b.tablas['disp_tramo'] = [{'proveedor': 'TCG', 'producto_prov': '889698100491', 'url': _URL_TC, 'intento_resultado': 'otro_ean'},
+                          {'proveedor': 'OCIOSTOCK', 'producto_prov': '889698100491', 'url': 'https://otra.test/x.html',
+                           'intento_resultado': 'ok'}]
+_log_te = []
+ok, _r = nv.valorar_pasada(b, 'PASADA-TC', keepa_llave=LLAVE, http=KeepaFalso(), dormir=lambda s: None, ahora=lambda: AHORA,
+                           imprimir=lambda *a, **k: _log_te.append(' '.join(map(str, a))), run_id='36700000049', env={},
+                           post=post_falso, proveedor='TCG')
+_wb_te = load_workbook(_io.BytesIO(b.subidos[0][2]))
+_an_te, _nv_te = _enlaces_de(_wb_te['Análisis']), _enlaces_de(_wb_te['Novedades'])
+eq('(TE1) 🔑 el «Nombre» lleva el enlace a SU ficha de TCG (la de disp_tramo de TCG, no la de otro proveedor), en las cuatro '
+   'filas de «Análisis» y en «Novedades»; azul y subrayado, como el ASIN; sin aviso del enlace',
+   (ok, len(_an_te), {(e, u) for e, _n, u in _an_te}, [(e, u) for e, _n, u in _nv_te],
+    _wb_te['Análisis'].cell(row=2, column=[c.value for c in _wb_te['Análisis'][1]].index('Nombre') + 1).font.underline,
+    any('sin el enlace a la ficha' in x for x in _log_te)),
+   (True, 4, {('889698100491', _URL_TC)}, [('889698100491', _URL_TC)], 'single', False))
+eq('(TE1) …y no corre ninguna columna: la cabecera de «Análisis» y de «Novedades» es la del Excel sin enlace (TC3)',
+   ([c.value for c in _wb_te['Novedades'][1]], [c.value for c in _wb_te['Análisis'][1]]),
+   ([c.value for c in load_workbook(_io.BytesIO(res_tc_libro))['Novedades'][1]],
+    [c.value for c in load_workbook(_io.BytesIO(res_tc_libro))['Análisis'][1]]))
+
+
+class _SbTramo:
+    """Una base que solo sabe responder disp_tramo (o fallar con un texto que no debe salir)."""
+    def __init__(self, filas, falla=False):
+        self.filas, self.falla, self.pedidos = filas, falla, []
+
+    def table(self, nombre):
+        base = self
+
+        class _C:
+            def __init__(self):
+                self.f = []
+
+            def select(self, *_a):
+                return self
+
+            def eq(self, c, v):
+                self.f.append(lambda r: r.get(c) == v)
+                return self
+
+            def in_(self, c, vs):
+                base.pedidos.append(len(vs))
+                vs = set(vs)
+                self.f.append(lambda r: r.get(c) in vs)
+                return self
+
+            def execute(self):
+                import types
+                if base.falla:
+                    raise RuntimeError('fallo con datos 889698100491 dentro')
+                return types.SimpleNamespace(data=[r for r in base.filas if nombre == 'disp_tramo' and all(f(r) for f in self.f)])
+        return _C()
+
+
+_filas_te = [{'proveedor': 'TCG', 'producto_prov': 'A1', 'url': 'https://t.test/a1.html', 'intento_resultado': 'ok'},
+             {'proveedor': 'TCG', 'producto_prov': 'A2C', 'url': 'https://t.test/a2.html', 'intento_resultado': 'otro_ean'},
+             {'proveedor': 'TCG', 'producto_prov': 'A3', 'url': 'https://t.test/a3.html', 'intento_resultado': 'sin_ficha'},
+             {'proveedor': 'TCG', 'producto_prov': 'A4', 'url': 'http://t.test/a4.html', 'intento_resultado': 'ok'},
+             {'proveedor': 'TCG', 'producto_prov': 'A5', 'url': None, 'intento_resultado': None},
+             {'proveedor': 'HEO', 'producto_prov': 'A6', 'url': 'https://h.test/a6.html', 'intento_resultado': 'ok'}]
+_sb_te = _SbTramo(_filas_te)
+_av_te = []
+eq('(TE2) el lector: la URL de la caja «C» y la de la suelta (aunque su EAN no casara), y fuera la «sin_ficha» (lleva a otra '
+   'página), la que no es https, la vacía y la de otro proveedor; por tandas de 100',
+   (e2.lector_enlaces_ficha(_sb_te, 'TCG', _av_te)(['A1', 'A2C', 'A3', 'A4', 'A5', 'A6', None] + ['X%03d' % i for i in range(150)]),
+    _sb_te.pedidos, _av_te),
+   ({'A1': 'https://t.test/a1.html', 'A2C': 'https://t.test/a2.html'}, [100, 56], []))
+_av_te = []
+eq('(TE2) …si la lectura falla: nada (los nombres van sin enlace) y el aviso SIN el texto del error (repo público)',
+   (e2.lector_enlaces_ficha(_SbTramo(_filas_te, falla=True), 'TCG', _av_te)(['A1']), len(_av_te),
+    '889698100491' in ' '.join(_av_te)), ({}, 1, False))
+_v_te = lambda prod, ean: {'nov': {'producto_prov': prod}, 'foto': {'ean_core': ean}}  # noqa: E731
+eq('(TE3) un EAN con dos novedades (la suelta y su caja) y URL distintas, o una sin URL, va SIN enlace: la fila no dice cuál '
+   'es; con una sola, la suya',
+   (nv.enlaces_por_ean([_v_te('E1', '1'), _v_te('E1C', '1')], {'E1': 'https://a', 'E1C': 'https://b'}),
+    nv.enlaces_por_ean([_v_te('E1', '1'), _v_te('E1C', '1')], {'E1': 'https://a'}),
+    nv.enlaces_por_ean([_v_te('E2C', '2'), _v_te('E3', '3')], {'E2C': 'https://c'})),
+   ({}, {}, {'2': 'https://c'}))
+
+
+class _BaseRota(Base):
+    def table(self, nombre):
+        if nombre == 'disp_tramo':
+            raise RuntimeError('fallo con datos 889698100491 dentro')
+        return super().table(nombre)
+
+
+b = con_tcg(_BaseRota(), [_tc9], VALS_TC, escalon={'tc-49': {'uds_escalon': 12, 'precio_unidad': 8.55}})
+_log_te = []
+ok, _r = nv.valorar_pasada(b, 'PASADA-TC', keepa_llave=LLAVE, http=KeepaFalso(), dormir=lambda s: None, ahora=lambda: AHORA,
+                           imprimir=lambda *a, **k: _log_te.append(' '.join(map(str, a))), run_id='36700000049', env={},
+                           post=post_falso, proveedor='TCG')
+eq('(TE4) 🔒 con disp_tramo caída el Excel sale igual (subido y en nov_excel), los nombres sin enlace, y el registro lo avisa '
+   'sin el texto del error',
+   (ok, len(b.subidos), len(b.tablas['nov_excel']),
+    {u for _e, _n, u in _enlaces_de(load_workbook(_io.BytesIO(b.subidos[0][2]))['Análisis'])},
+    sum('sin el enlace a la ficha' in x for x in _log_te), any('889698100491' in x and 'AVISO' in x for x in _log_te)),
+   (True, 1, 1, {None}, 1, False))
+eq('(TE5) solo TCG lleva el enlace: HEO, OcioStock y DBLine, como siempre (ni leen disp_tramo)',
+   sorted(p for p, d in nv.PROVEEDORES.items() if d.get('enlace_ficha')), ['TCG'])
+
 b = con_tcg(Base(), valorar=False)
 ok, sel = nv.novedades_tras_la_pasada(b, 'PASADA-TC', 'TCG', keepa_llave=LLAVE, imprimir=lambda *a, **k: None,
                                       http=KeepaFalso(), dormir=lambda s: None, ahora=lambda: AHORA, env={}, post=post_falso)

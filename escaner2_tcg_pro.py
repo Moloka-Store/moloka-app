@@ -38,6 +38,8 @@ LO PROPIO DE TCG (decidido por Fernando; partes T2 y encargo T3):
  10. EL EXCEL, EL DEL PRO DE HEO, mismo formato y orden, con TRES columnas mas AL FINAL de «Análisis»: «Uds. escalón»,
      «Precio unidad» (el del Excel de TCG, por figura, sin tramo) y «Aviso del tramo» («sin tramo leído» o «tramo leído
      hace más de 7 días»). Sin «Chase_manual» (es de HEO) ni comparacion con el viejo.
+     (Encargo TE, 25-nov-2026) Y el «Nombre» de «Análisis» con el enlace a la ficha de TCG (`info['enlaces']`, de
+     disp_tramo): su buscador no encuentra las cajas por ningun codigo. Sin URL, el nombre va sin enlace.
 
 🔴 REPO PUBLICO: aqui no hay ni un precio ni un EAN reales; los del banco son inventados (Seguridad 21).
 """
@@ -350,6 +352,19 @@ def poner_columnas_escalon(wb, foto, escalon):
     return n
 
 
+def poner_enlaces_ficha(wb, foto, enlaces):
+    """(Encargo TE, 25-nov-2026) El enlace a la ficha de TCG en el «Nombre» de «Análisis», fila a fila por su EAN (como
+    `poner_columnas_escalon`). `enlaces`: {producto_prov: url}, lo que devuelve escaner2_motor.lector_enlaces_ficha; sin
+    el, o sin URL de una fila, el nombre va sin enlace. Su buscador no encuentra las cajas «Case 5+1» por ningun codigo.
+    Devuelve cuantas celdas lo llevan."""
+    por_ean = {}
+    for f in foto:
+        url = (enlaces or {}).get(str(f.get('producto_heo') or ''))
+        if url:
+            por_ean[str(f['ean_original'])] = url
+    return e2.poner_enlace_nombre(wb, por_ean, ('Análisis',))
+
+
 def escribir_excel(foto, resultados, apartados, M, info):
     """El Excel del cruce de TCG: el del PRO de HEO (`escaner2_heo_cruce.escribir_excel`), mismo formato y orden.
     DELANTE las hojas del viejo (la Celda 9: Análisis con «Ventas», Descartados, Ambiguos, Sin_rank, Precio por lote),
@@ -363,6 +378,7 @@ def escribir_excel(foto, resultados, apartados, M, info):
     wb = e2.escribir_celda9(datos, M)
     e2.poner_columna_ficha_compartida(wb, foto, resultados)
     poner_columnas_escalon(wb, foto, info.get('escalon'))
+    poner_enlaces_ficha(wb, foto, info.get('enlaces'))
 
     def hoja(nombre, cabecera, filas, anchos=None):
         ws = wb.create_sheet(nombre)
