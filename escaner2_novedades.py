@@ -1105,11 +1105,12 @@ def excel_de_novedades(sb, valoradas, origen, pasada, run_id=None, ahora=_ahora,
         if avisos_tl:
             imprimir('    AVISO: la columna «%s» va «%s»: no se pudo leer' % (e2.COLUMNA_TAMBIEN,
                      e2.TEXTO_SIN_CONSULTAR_TAMBIEN), flush=True)
-        # (EX, 27-oct-2026) EL PASO FINAL: «Almacén», «FBA» y «También lo tiene» detrás de «Decisión» (fuera «En mi BD»)
-        e2.poner_almacen_fba_tambien(wb, comprar[0]['M'])
-        # (TE, 25-nov-2026) El enlace a la ficha del proveedor en el «Nombre», sobre el libro ya terminado (no corre nada).
+        # (TE, 25-nov-2026) El enlace a la ficha del proveedor en el «Nombre» (no corre nada; el paso final lo mueve con
+        # su celda si reordena «Análisis»).
         if _de(proveedor, 'enlace_ficha', False):
             poner_enlaces_novedades(sb, wb, valoradas, proveedor, imprimir)
+        # (EX, 27-oct-2026) EL PASO FINAL: «Almacén», «FBA» y «También lo tiene» detrás de «Decisión» (fuera «En mi BD»)
+        e2.poner_almacen_fba_tambien(wb, comprar[0]['M'])
         buf = io.BytesIO()
         wb.save(buf)
         ruta = ruta_del_excel(ahora(), proveedor)
