@@ -28,6 +28,9 @@ seleccion siguen aplicadas, el fallo queda apuntado (nov_pasada.valoracion_*) y 
    que en TCG es el del tramo mas barato, SIN el × 0,99: Fernando, T3) y el Excel lleva al final «Uds. escalón» (las
    del tramo) y «Precio unidad» (el suelto del Excel de TCG); «Novedades TCG Funko» en el Telegram, el Excel en
    tcg/novedades/ (Novedades_TCG_Funko_…). Sus cuentas sueltas: escaner2_tcg_novedades_cuentas.py.
+   (Encargo TE, 25-nov-2026) El «Nombre» de «Análisis» y de «Novedades» lleva el enlace a la ficha de TCG (la URL que el
+   lector de tramos guarda en disp_tramo, por producto_prov: escaner2_motor.lector_enlaces_ficha). Sin URL, o con la
+   lectura caida, el nombre va sin enlace y el Excel sale igual.
 
 QUE HACE, EN ORDEN:
   0. EL INTERRUPTOR (nov_parametros.valorar). Apagado: ni una llamada a Keepa, ni una cuenta; solo se cierra la
@@ -124,7 +127,8 @@ PROVEEDORES = {
     'DBLINE': {'nombre': 'DBLine', 'carpeta': 'dbline/novedades', 'escalon': False, 'marcas': 'Funko y Pyramid',
                'marca_ruta': 'FunkoPyramid', 'marca_de_la_foto': True, 'fin_oferta': True},
     # (Encargo T4) TCG, solo Funko, con las dos columnas del escalon (las uds del tramo mas barato y el suelto).
-    'TCG': {'nombre': 'TCG', 'carpeta': 'tcg/novedades', 'escalon': True},
+    # (Encargo TE, 25-nov-2026) Y el enlace a su ficha en el «Nombre» (`enlace_ficha`): su buscador no encuentra las cajas.
+    'TCG': {'nombre': 'TCG', 'carpeta': 'tcg/novedades', 'escalon': True, 'enlace_ficha': True},
 }
 
 
@@ -1054,6 +1058,30 @@ def fin_oferta_de(sb, ids):
             for f in _en_trozos(sb, 'nov_novedad', 'id,fin_oferta', 'id', 'id', ids)}
 
 
+def enlaces_por_ean(valoradas, por_producto):
+    """(Encargo TE) {EAN de cruce de la fila: url de la ficha} desde {producto_prov: url}. Si dos novedades con el mismo
+    EAN (la suelta y su caja «C») traen URL distintas, ese EAN va SIN enlace: la fila no dice cual de las dos es. Puro."""
+    vistos = {}
+    for v in valoradas:
+        url = por_producto.get(str(v['nov'].get('producto_prov') or ''))
+        vistos.setdefault(str(v['foto']['ean_core']), set()).add(url)
+    return {ean: urls.pop() for ean, urls in vistos.items() if len(urls) == 1 and None not in urls}
+
+
+def poner_enlaces_novedades(sb, wb, valoradas, proveedor, imprimir=print):
+    """(Encargo TE) El enlace a la ficha en el «Nombre» de «Análisis» y «Novedades». NUNCA LANZA: si algo falla, los
+    nombres van sin enlace y el registro (publico) lo dice sin el texto del error. Devuelve cuantas celdas lo llevan."""
+    try:
+        avisos = []
+        por_producto = e2.lector_enlaces_ficha(sb, proveedor, avisos)([v['nov'].get('producto_prov') for v in valoradas])
+        if avisos:
+            imprimir('    AVISO: los nombres van sin el enlace a la ficha: no se pudo leer', flush=True)
+        return e2.poner_enlace_nombre(wb, enlaces_por_ean(valoradas, por_producto), ('Análisis', 'Novedades'))
+    except Exception as ex:
+        imprimir('    AVISO: los nombres van sin el enlace a la ficha (%s)' % type(ex).__name__, flush=True)
+        return 0
+
+
 def excel_de_novedades(sb, valoradas, origen, pasada, run_id=None, ahora=_ahora, imprimir=print, avalancha=None,
                        proveedor=PROVEEDOR):
     """EL EXCEL de las novedades valoradas en esta ejecucion, si al menos una sale COMPRAR: al bucket escaner2 y a
@@ -1079,6 +1107,9 @@ def excel_de_novedades(sb, valoradas, origen, pasada, run_id=None, ahora=_ahora,
                      e2.TEXTO_SIN_CONSULTAR_TAMBIEN), flush=True)
         # (EX, 27-oct-2026) EL PASO FINAL: «Almacén», «FBA» y «También lo tiene» detrás de «Decisión» (fuera «En mi BD»)
         e2.poner_almacen_fba_tambien(wb, comprar[0]['M'])
+        # (TE, 25-nov-2026) El enlace a la ficha del proveedor en el «Nombre», sobre el libro ya terminado (no corre nada).
+        if _de(proveedor, 'enlace_ficha', False):
+            poner_enlaces_novedades(sb, wb, valoradas, proveedor, imprimir)
         buf = io.BytesIO()
         wb.save(buf)
         ruta = ruta_del_excel(ahora(), proveedor)

@@ -1902,6 +1902,70 @@ def poner_columna_amazon(wb, leer):
     return n
 
 
+# (TE, 25-nov-2026) EL ENLACE A LA FICHA DEL PROVEEDOR, EN EL «Nombre» (Fernando: «de aqui en adelante los escaneos de
+# tcg lleven el enlace»). El buscador de la web de TCG no encuentra sus cajas «Case 5+1» por ningun codigo (ni el EAN, ni
+# el EAN con su «C», ni el GS1 largo de la caja: probado a mano con sesion, 25-nov-2026), y solo se llega a ellas por su
+# URL, que el lector de tramos de TCG ya guarda en `disp_tramo.url`. Va EN LA CELDA DEL NOMBRE (como el ASIN lleva el de
+# Amazon), sin columna nueva: no corre ninguna letra de «Análisis» ni su tabla. Sin URL leida, el nombre va sin enlace.
+TANDA_ENLACES = 100
+COLOR_ENLACE = '0563C1'
+
+
+def lector_enlaces_ficha(sb, proveedor, avisos=None):
+    """Una funcion productos → {producto_prov: url de su ficha} que lee `disp_tramo` del proveedor por tandas. Fuera las
+    URL vacias, las que no son https y las «sin_ficha» (la URL lleva a otra pagina, no al producto). Si la lectura
+    falla, devuelve {} (los nombres van sin enlace) y deja el porque en `avisos`, sin el texto del error (repo publico)."""
+    def leer(productos):
+        lista = sorted({str(p) for p in productos if p})
+        enlaces = {}
+        try:
+            for i in range(0, len(lista), TANDA_ENLACES):
+                filas = (sb.table('disp_tramo').select('producto_prov,url,intento_resultado').eq('proveedor', proveedor)
+                         .in_('producto_prov', lista[i:i + TANDA_ENLACES]).execute().data) or []
+                for f in filas:
+                    url = (f.get('url') or '').strip()
+                    if url.startswith('https://') and f.get('intento_resultado') != 'sin_ficha':
+                        enlaces[str(f['producto_prov'])] = url
+        except Exception as ex:
+            if avisos is not None:
+                avisos.append(f'Los nombres van sin el enlace a la ficha del proveedor: no se pudo leer ({type(ex).__name__})')
+            return {}
+        return enlaces
+    return leer
+
+
+def poner_enlace_nombre(wb, enlaces, hojas=('Análisis',)):
+    """Pone en la celda «Nombre» de cada fila el enlace de su EAN (`enlaces`: {texto de la celda «EAN»: url}), en azul y
+    subrayado como el ASIN. Busca la cabecera por nombre en las tres primeras filas de cada hoja (la de «Novedades»
+    puede llevar delante la linea de la avalancha). Una hoja que no esta, o sin «EAN» y «Nombre», se salta. Devuelve
+    cuantas celdas llevan enlace."""
+    from openpyxl.styles import Font
+    n = 0
+    for nombre in hojas:
+        if nombre not in wb.sheetnames:
+            continue
+        ws = wb[nombre]
+        cabecera = None
+        for fila in range(1, min(3, ws.max_row) + 1):
+            valores = [c.value for c in ws[fila]]
+            if 'EAN' in valores and 'Nombre' in valores:
+                cabecera = (fila, valores.index('EAN') + 1, valores.index('Nombre') + 1)
+                break
+        if cabecera is None:
+            continue
+        fila_cab, i_ean, i_nombre = cabecera
+        for fila in range(fila_cab + 1, ws.max_row + 1):
+            ean = ws.cell(row=fila, column=i_ean).value
+            url = enlaces.get(str(ean)) if ean is not None else None
+            if not url:
+                continue
+            celda = ws.cell(row=fila, column=i_nombre)
+            celda.hyperlink = url
+            celda.font = Font(color=COLOR_ENLACE, underline='single')
+            n += 1
+    return n
+
+
 # (TL, 24-oct-2026) La columna «También lo tiene» de «Análisis», UNA columna nueva AL FINAL (detras de «Amazon»): que
 # OTROS proveedores tienen ese EAN disponible hoy y a que precio de compra por unidad, del mas barato al mas caro
 # (Fernando: «me sale un funko rentable en dbline pero resulta que esta semana estaba en oferta en TCG… me voy a TCG y

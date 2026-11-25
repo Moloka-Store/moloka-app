@@ -315,6 +315,8 @@ def cruzar(cruce, params, pasada):
         contenido = etc.escribir_excel(foto, resultados, apartados, M, {
             'restricciones': e2.lector_restricciones(sb, avisos),  # (RS) la columna «Amazon»
             'tambien': etl.lector_tambien(sb, etc.PROVEEDOR, M, avisos),  # (TL) la columna «También lo tiene»
+            # (TE) el enlace a la ficha de TCG en el «Nombre»: si no se puede leer, sin enlace y con su aviso
+            'enlaces': e2.lector_enlaces_ficha(sb, etc.PROVEEDOR, avisos)([f.get('producto_heo') for f in foto]),
             'pasada': PASADA, 'cruce': cruce, 'params': params, 'usados': usados, 'ficheros': ficheros,
             'n_entradas': n_entradas, 'n_bd': n_bd, 'cuadra': cuadra and not motivo_fallo, 'n_crudo': n_crudo,
             'previas': previas, 'modo': pasada.get('modo'), 'marcas': pasada.get('marcas'), 'eleccion': eleccion,
