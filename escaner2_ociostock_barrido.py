@@ -11,9 +11,10 @@ sobre la FOTO DE DISPONIBILIDAD que ya esta en la base (escaner2_ociostock_dispo
 web ni baja el fichero YA NO VALE: antes del paso 2, `escaner2_pro_en_directo.leer_en_directo` corre la lectura de OcioStock
 de AHORA, la MISMA pasada que la horaria (escaner2_ociostock_disponibilidad.py, con sus guardas y disp_aplicar_pasada). Solo se sigue si
 esa pasada de ESTE run queda 'aplicada' o «al día», y el paso 2 exige que la ultima aplicada sea la suya; si no, la
-pasada queda 'fallida' con el motivo y sin foto. Lo que la horaria hace tras aplicar (las novedades) se hace al final, con la
-pasada ya cerrada. Con `--abrir` (el job `abrir` del workflow) solo abre la pasada y deja su id en GITHUB_OUTPUT; sin
-argumentos, retoma esa (ESCANER2_PASADA). Lo que escribe de mas, lo escribe esa lectura (disp_*, nov_*), no este programa.
+pasada queda 'fallida' con el motivo y sin foto. Lo que la horaria hace tras aplicar (las novedades) va en su propio paso del workflow
+(`escaner2_pro_en_directo.py --despues`), que corre aunque este falle. Con `--abrir` (el job `abrir`, sin el grupo de la
+horaria) abre la pasada y decide: lectura de hace menos de 15 min (se barre desde ella, FOTO_RECIENTE, sin leer), leer,
+o 'fallida' si una lectura horaria a medias no acaba en 4 min. Sin argumentos, retoma esa pasada (ESCANER2_PASADA). Lo que escribe de mas, lo escribe esa lectura (disp_*, nov_*), no este programa.
 
 QUE HACE, EN ORDEN:
   1. abre una pasada en `escaner2_pasada` (proveedor OCIOSTOCK, su modo, estado 'descargando') con el id del run;
@@ -138,7 +139,7 @@ def main():
                        maximo_intentos=1)
 
 
-def barrer(pasada, foto):
+def barrer(pasada, foto, nota=None):
     # ── 1 · La foto de la que sale la pasada: la ultima APLICADA ───────────────────────────────
     ult = (sb.table('disp_pasada').select('id,creada_en,terminada_en,n_leidas,n_crudo,n_sin_gtin,fichero_md5')
            .eq('proveedor', eoc.PROVEEDOR).eq('estado', 'aplicada').order('creada_en', desc=True).limit(1)
@@ -221,7 +222,8 @@ def barrer(pasada, foto):
     if len(tandas) > 1:
         for i, t in enumerate(tandas, 1):
             sb.storage.from_(BUCKET).upload(f'{base}/eans_{i}.txt', '\n'.join(t).encode('utf-8'), texto)
-    sidecar = {'pasada': pasada, 'modo': MODO, 'disp_pasada': ult['id'],
+    # 🆕 (Encargo PD) `lectura`: de qué lectura sale la foto y cuándo se comprobó (escaner2_pro_en_directo.nota_de).
+    sidecar = {'pasada': pasada, 'modo': MODO, 'disp_pasada': ult['id'], 'lectura': nota,
                'foto_en': ult.get('terminada_en') or ult.get('creada_en'), 'fichero_md5': ult.get('fichero_md5'),
                'escalon': escalon}
     sb.storage.from_(BUCKET).upload(f'{base}/barrido.json', json.dumps(sidecar, ensure_ascii=False, default=str)

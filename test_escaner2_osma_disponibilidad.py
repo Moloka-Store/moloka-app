@@ -739,9 +739,27 @@ r, reg, _x = lector_pro(base, g)
 pp = list(base.pasadas.values())[0]
 eq('PD1 la lectura del PRO: la pasada de la horaria, APLICADA, con su id en la lectura',
    (pp['estado'], r.pid == pp['id'], r.pared), ('aplicada', True, False))
-eq('PD2 🔴 lo de después de aplicar NO antes de tiempo: solo disp_aplicar_pasada', ([n for n, _p in base.rpcs], base.subidas), (['disp_aplicar_pasada'], []))
+eq('PD2 🔴 la copia del Excel, YA (justo tras aplicar: la necesita la confirmación de sábado a lunes); las fechas de '
+   'vuelta, no todavía', ([n for n, _p in base.rpcs], [(x[0], x[1]) for x in base.subidas]),
+   (['disp_aplicar_pasada'], [('escaner2', 'osma/ultimo/osma_articles.xlsx')]))
 _ok = r.despues()
-eq('PD3 …y con `despues()` (al final del barrido), lo de la horaria tras aplicar, de ESA pasada', [(s[0], s[1]) for s in base.subidas], [('escaner2', 'osma/ultimo/osma_articles.xlsx')])
+eq('PD3 …y con `despues()` (su paso, tras el barrido), las fechas de vuelta con la MISMA sesión (sin volver a entrar), y la '
+   'copia sigue siendo una', (_ok, [(s[0], s[1]) for s in base.subidas], len(_x)),
+   (True, [('escaner2', 'osma/ultimo/osma_articles.xlsx')], 1))
+# …y en su paso de verdad (otro proceso: sin la sesión de la lectura), entra otra vez, UNA sola, y repasa las fechas
+_w = Web()
+_g = sys.modules.get('requests')
+sys.modules['requests'] = _modulo_requests(_w, [])
+try:
+    with contextlib.redirect_stdout(io.StringIO()):
+        _ok = epd._despues_osma(base, {'OSMA_USER': USUARIO, 'OSMA_PASS': CLAVE}, '4242', pp['id'], pp)
+finally:
+    if _g is None:
+        sys.modules.pop('requests', None)
+    else:
+        sys.modules['requests'] = _g
+eq('PD3b lo de después de OSMA en su paso: entra UNA vez (con los secretos) y repasa las fechas, bien',
+   (_ok, len(_w.de('POST'))), (True, 1))
 eq('PD4 el registro no suelta datos', [x for x in (USUARIO, CLAVE, ID_FICHERO) if x in reg], [])
 base = Base(minimo=50000)
 r, reg, _x = lector_pro(base, epd.GuardaPro(base, 'OSMA'))

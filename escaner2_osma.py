@@ -1381,6 +1381,7 @@ def escribir_excel(foto, resultados, apartados, M, info):
     filas_res = filas_vivas + [['Pasada', info['pasada']], ['Cruce', info['cruce']],
                  ['Proveedor', 'OSMA · artículos con marca y existencias'],
                  ['Descarga de OSMA', '%s (pasada %s)' % (info.get('descarga_en') or '—', info.get('disp_pasada') or '—')],
+                 ['Lectura de OSMA (encargo PD: en directo)', info.get('lectura') or '—'],
                  ['Porte en el precio (el de la puerta común, una sola vez)',
                   ('%s € de la factura %s (%s) ÷ pedido previsto %s € = %s'
                    % (_coma(po.get('gastos_envio')), po.get('factura') or '—', po.get('fecha') or '—',

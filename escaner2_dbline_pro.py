@@ -296,6 +296,7 @@ def escribir_excel(foto, resultados, apartados, M, info):
     elif modo == 'marcas':
         filas_res += [['Marcas del director', ', '.join(info.get('marcas') or []) or '(ninguna)']]
     filas_res += [['Foto de DBLine (pasada de disponibilidad)', info.get('foto') or '—'],
+                  ['Lectura de DBLine (encargo PD: en directo)', info.get('lectura') or '—'],
                   ['Precio de compra (PA)', 'el vigente, por unidad: el precio del catálogo, o el de la promo si '
                                             'está vigente y es más barata que el del catálogo; sin escalón, '
                                             'sin 1 %, sin porte'],

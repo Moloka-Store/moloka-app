@@ -1406,6 +1406,155 @@ eq('(PD) los cuatro proveedores tienen lector y secretos (los de su workflow hor
    (['DBLINE', 'OCIOSTOCK', 'OSMA', 'TCG'], ['DBLINE', 'OCIOSTOCK', 'OSMA', 'TCG'], ('TCG_USER', 'TCG_PASS'),
     ('OSMA_USER', 'OSMA_PASS')))
 
+# 🔑 (Revisión de quien dirige) LO QUE DECIDE `abrir`, ANTES de entrar en el grupo de la horaria
+_dormidas = []
+eq('(PD) previo: una lectura buena de hace 4 min → «reciente», su foto y cuánto hace, sin esperar',
+   (epd.previo(_base_pd(5), 'TCG', ahora=lambda: _AHORA, dormir=_dormidas.append), _dormidas), (('reciente', 'A', 4), []))
+eq('(PD) previo: nada en marcha y la última de hace hora y media → «leer», sin esperar',
+   (epd.previo(_base_pd(90), 'TCG', ahora=lambda: _AHORA, dormir=_dormidas.append), _dormidas), (('leer', None, None), []))
+_bl = _base_pd(90, extra=[{'id': 'L', 'proveedor': 'TCG', 'estado': 'leyendo', 'creada_en': _iso(1)}])
+_reloj = [_AHORA]
+
+
+def _duerme(s, base=_bl):
+    _dormidas.append(s)
+    _reloj[0] += _td(seconds=s)
+    if len(_dormidas) == 3:   # la horaria acaba bien a los 45 s: la lectura de ahora
+        for p in base.t['disp_pasada']:
+            if p['id'] == 'L':
+                p.update(estado='aplicada', creada_en=_iso(1), terminada_en=_reloj[0].isoformat())
+
+
+_r = epd.previo(_bl, 'TCG', ahora=lambda: _reloj[0], dormir=_duerme)
+eq('(PD) 🔑 previo: con la horaria leyendo, espera mirando la base; cuando acaba bien, sale de ella («reciente», 0 min)',
+   (_r, _dormidas), (('reciente', 'L', 0), [15, 15, 15]))
+_dormidas.clear()
+_bl = _base_pd(90, extra=[{'id': 'L', 'proveedor': 'TCG', 'estado': 'leyendo', 'creada_en': _iso(3)}])
+_r = epd.previo(_bl, 'TCG', ahora=lambda: _AHORA, dormir=_dormidas.append, espera_max_s=60)
+eq('(PD) 🔴 previo: si la horaria no acaba en el tope, «fallida» con el motivo (desde cuándo), sin esperar más',
+   (_r[0], 'se está leyendo ahora (la lectura horaria, desde el 27-11-2026 a las 11:27)' in (_r[1] or ''), _dormidas),
+   ('fallida', True, [15, 15, 15, 15]))
+_dormidas.clear()
+_bl = _base_pd(90, extra=[{'id': 'L', 'proveedor': 'TCG', 'estado': 'leyendo', 'creada_en': _iso(3)}])
+_r = epd.previo(_bl, 'TCG', ahora=lambda: _AHORA, dormir=_dormidas.append, espera_max_s=0)
+eq('(PD) previo: con el tope a 0 (el del banco de los barridos), falla al momento', (_r[0], _dormidas), ('fallida', []))
+eq('(PD) el tope de la espera es 4 min, y se mira cada 15 s', (epd.ESPERA_MAX_S, epd.ESPERA_CADA_S), (240, 15))
+
+# 🔑 LO QUE EL BARRIDO DEJA ESCRITO (barrido.json y el «Resumen» del Excel)
+_bn = _base_pd(90)
+eq('(PD) la nota: leída ahora / confirmada hoy / leída hace N min, en hora de Madrid',
+   [epd.nota_de(_bn, 'A', c, _AHORA, 7)['texto'] for c in ('ahora', 'confirmada', 'reciente')],
+   ['leída ahora (la lectura del 27-11-2026 a las 10:01)',
+    'confirmada hoy a las 11:30; el contenido es el de la lectura del 27-11-2026 a las 10:01',
+    'leída hace 7 min (la lectura del 27-11-2026 a las 10:01); no se ha vuelto a leer'])
+eq('(PD) …y con las dos fechas (la de la comprobación y la del contenido)',
+   {k: v for k, v in epd.nota_de(_bn, 'A', 'confirmada', _AHORA).items() if k != 'texto'},
+   {'como': 'confirmada', 'comprobada_en': _AHORA.isoformat(), 'contenido_de': _iso(89)})
+
+# 🔑 EL PASO DE DESPUÉS DE LA LECTURA: lo de después de aplicar, aunque el barrido falle, y el vaciado que se quedó a medias
+_bt = _BasePD(disp_pasada=[
+    {'id': 'AP', 'proveedor': 'TCG', 'estado': 'aplicada', 'run_id': 77},
+    {'id': 'AH', 'proveedor': 'TCG', 'estado': 'aplicada', 'run_id': 77},
+    {'id': 'VA', 'proveedor': 'TCG', 'estado': 'rechazada_vaciado', 'run_id': 77, 'motivo': 'vaciado: x'},
+    {'id': 'OT', 'proveedor': 'TCG', 'estado': 'aplicada', 'run_id': 78},
+    {'id': 'VO', 'proveedor': 'TCG', 'estado': 'rechazada_vaciado', 'run_id': 78, 'motivo': 'vaciado: y'},
+    {'id': 'HE', 'proveedor': 'HEO', 'estado': 'aplicada', 'run_id': 77}],
+    nov_pasada=[{'pasada_id': 'AH', 'estado': 'hecha'}])
+_hechos = []
+_cod = epd.tras_la_lectura(_bt, 'TCG', '77', {}, {'TCG': lambda sb, env, run, pid, fila: _hechos.append((run, pid)) is None})
+eq('(PD) 🔴 tras la lectura: lo de después de la aplicada de ESTE run que no lo tiene (AP), no la que ya lo tiene (AH) '
+   'ni las de otro run u otro proveedor; y el vaciado de ESTE run pasa a «fallida» (el de otro, no)',
+   (_cod, _hechos, {p['id']: p['estado'] for p in _bt.t['disp_pasada'] if p['id'] in ('VA', 'VO')},
+    [p['motivo'] for p in _bt.t['disp_pasada'] if p['id'] == 'VA'][0].startswith(epd.PREFIJO_VACIADO)),
+   (0, [('77', 'AP')], {'VA': 'fallida', 'VO': 'rechazada_vaciado'}, True))
+_cod = epd.tras_la_lectura(_BasePD(disp_pasada=[{'id': 'AP', 'proveedor': 'TCG', 'estado': 'aplicada', 'run_id': 77}]),
+                           'TCG', '77', {}, {'TCG': lambda *a: False})
+eq('(PD) tras la lectura: si lo de después sale mal, ROJO (la pasada sigue aplicada)', _cod, 1)
+_cod = epd.tras_la_lectura(_BasePD(disp_pasada=[{'id': 'AP', 'proveedor': 'TCG', 'estado': 'aplicada', 'run_id': 77}]),
+                           'TCG', '77', {}, {'TCG': _revienta})
+eq('(PD) tras la lectura: si revienta, ROJO y solo el tipo al registro (nunca lanza)', _cod, 1)
+_hechos.clear()
+_bo = _BasePD(disp_pasada=[{'id': 'OS', 'proveedor': 'OSMA', 'estado': 'aplicada', 'run_id': 77}],
+              nov_pasada=[{'pasada_id': 'OS'}])
+epd.tras_la_lectura(_bo, 'OSMA', '77', {}, {'OSMA': lambda sb, env, run, pid, fila: _hechos.append(pid) is None})
+eq('(PD) tras la lectura: OSMA no tiene novedades: sus fechas de vuelta, siempre que haya una aplicada de este run',
+   _hechos, ['OS'])
+eq('(PD) tras la lectura: sin el id del run no se sabe qué pasadas son: ROJO', epd.tras_la_lectura(_bo, 'OSMA', '', {}), 1)
+eq('(PD) el paso, por la línea de órdenes: uso y llave', (epd.principal([]), epd.principal(['--despues', 'HEO']),
+                                                          epd.principal(['--despues', 'TCG'], env={})), (1, 1, 1))
+
+# 🔴 LA MITAD ROJA, AUTOMÁTICA: cada guarda de escaner2_pro_en_directo, rota a propósito, la ve el banco.
+#    (ancla única en el fuente; el módulo mutado, en este proceso; su comprobación tiene que dar «mal»)
+_FUENTE_PD = open(epd.__file__, encoding='utf-8').read()
+
+
+def _base_tras():
+    return _BasePD(disp_pasada=[{'id': 'AP', 'proveedor': 'TCG', 'estado': 'aplicada', 'run_id': 77},
+                                {'id': 'AH', 'proveedor': 'TCG', 'estado': 'aplicada', 'run_id': 77},
+                                {'id': 'VA', 'proveedor': 'TCG', 'estado': 'rechazada_vaciado', 'run_id': 77,
+                                 'motivo': 'vaciado: x'}],
+                   nov_pasada=[{'pasada_id': 'AH'}])
+
+
+def _tras_bien(m):
+    b, hechos = _base_tras(), []
+    m.tras_la_lectura(b, 'TCG', '77', {}, {'TCG': lambda sb, env, run, pid, fila: hechos.append(pid) is None})
+    return hechos == ['AP'] and [p['estado'] for p in b.t['disp_pasada'] if p['id'] == 'VA'] == ['fallida']
+
+
+def _vaciado_tras(m):
+    b = _base_pd(5, extra=[{'id': 'V', 'proveedor': 'TCG', 'estado': 'rechazada_vaciado', 'motivo': 'v'}])
+    return m.GuardaPro(b, 'TCG').tras_aplicar('V', {'id': 'V', 'estado': 'rechazada_vaciado'})['estado'] == 'fallida'
+
+
+def _osma(m, copia, prevista):
+    b = _BaseOsma(copia, _fresc(prevista), disp_pasada=_APL_OSMA)
+    return m.confirmar_osma(b, _FICHERO, _dt(2026, 11, 30, 9, 0, tzinfo=_tz.utc), 'r', 'escaner2', _CREADO)[0]
+
+
+_LEYENDO = [{'id': 'L', 'proveedor': 'TCG', 'estado': 'leyendo', 'creada_en': _iso(3)}]
+_MUTANTES_PD = [
+    ('sin_freno que no cambia', "            return 'fallida', PREFIJO_VACIADO + motivo", "            return estado, motivo",
+     lambda m: m.GuardaPro(None, 'TCG').sin_freno('rechazada_vaciado', 'v')[0] == 'fallida'),
+    ('tras_aplicar que no toca', "        if fila.get('estado') != 'rechazada_vaciado':\n            return fila",
+     "        if True:\n            return fila", _vaciado_tras),
+    ('sin turno', "    if vivas:\n        desde = min(", "    if False:\n        desde = min(",
+     lambda m: m.antes_de_leer(_base_pd(90, extra=_LEYENDO), 'TCG', _AHORA) is not None),
+    ('sin freno', "    if n >= k:\n", "    if False:\n",
+     lambda m: m.antes_de_leer(_base_pd(90, extra=_rech), 'TCG', _AHORA) is not None),
+    ('«al día» sin mirar qué aplicada nombra', "        if not ult or str(ult.get('id')) not in motivo:",
+     "        if not ult:", lambda m: m.decidir(_bd, 'TCG', 'D3')[0] is None),
+    ('«al día» anterior vale', "        if t_ult is None or t_esta is None or t_ult > t_esta:",
+     "        if t_ult is None or t_esta is None:", lambda m: m.decidir(_bd, 'TCG', 'D2')[0] is None),
+    ('la lectura reciente sin tope', "        if t is None or not (timedelta(0) <= ahora - t < timedelta(minutes=minutos)):",
+     "        if t is None:", lambda m: m.lectura_reciente(_base_pd(16), 'TCG', _AHORA) is None),
+    ('la lectura reciente sin decidir', "            foto, _por_que = decidir(sb, proveedor, f['id'])",
+     "            foto, _por_que = f['id'], None", lambda m: m.lectura_reciente(_bd4, 'TCG', _AHORA) is None),
+    ('OSMA sin comparar el fichero',
+     "    if not contenido or hashlib.md5(copia).hexdigest() != hashlib.md5(contenido).hexdigest():",
+     "    if not contenido:", lambda m: _osma(m, b'otro', _dt(2026, 11, 27, 6, 15, tzinfo=_tz.utc)) is None),
+    ('OSMA sin mirar el horario', "    if u is None or (p is not None and u < p):", "    if u is None:",
+     lambda m: _osma(m, _FICHERO, _dt(2026, 11, 30, 6, 15, tzinfo=_tz.utc)) is None),
+    ('previo sin tope de espera', "        if esperado >= espera_max_s:", "        if False:",
+     lambda m: m.previo(_base_pd(90, extra=_LEYENDO), 'TCG', ahora=lambda: _AHORA,
+                        dormir=lambda s: (_ for _ in ()).throw(RuntimeError('esperaría para siempre')),
+                        espera_max_s=0)[0] == 'fallida'),
+    ('tras la lectura sin pasar el vaciado a fallida', "        g.tras_aplicar(p['id'], dict(p, estado='rechazada_vaciado'))",
+     "        pass", _tras_bien),
+    ('tras la lectura repite lo ya hecho', "            ya += 1\n            continue", "            ya += 1", _tras_bien),
+]
+for _nombre, _antes, _despues, _bien in _MUTANTES_PD:
+    eq('(PD) mutante «%s»: el ancla es única y, sin mutar, la comprobación da bien' % _nombre,
+       (_FUENTE_PD.count(_antes), bool(_bien(epd))), (1, True))
+    _m = _types.ModuleType('mutante_pd')
+    _m.__file__ = epd.__file__
+    exec(compile(_FUENTE_PD.replace(_antes, _despues), 'mutante_pd', 'exec'), _m.__dict__)
+    try:
+        _vista = not _bien(_m)
+    except Exception:  # noqa: BLE001 — revienta: también lo ve
+        _vista = True
+    eq('(PD) 🔴 mutante «%s»: el banco lo ve (ROJO)' % _nombre, _vista, True)
+
 # Los cuatro workflows del barrido: el grupo de la horaria en la lectura, sus secretos y sus dependencias
 import yaml as _yaml  # noqa: E402
 for _p, _sec in (('tcg', ('TCG_USER', 'TCG_PASS')), ('dbline', ('DBLINE_USER', 'DBLINE_PASS')),
@@ -1415,25 +1564,47 @@ for _p, _sec in (('tcg', ('TCG_USER', 'TCG_PASS')), ('dbline', ('DBLINE_USER', '
     _wh = _yaml.safe_load(open(os.path.join(_raiz, '.github', 'workflows', 'escaner2-%s-disponibilidad.yml' % _p),
                                encoding='utf-8'))
     _grupo_h = _wh['concurrency']['group']
-    _lect = [j for n, j in _wb['jobs'].items() if n.startswith('barrer')]
+    _lect = [j for n, j in _wb['jobs'].items() if n.startswith('barrer') and n != 'barrer_ya']
     _pasos = [s for j in _lect for s in j['steps'] if 'barrido.py' in str(s.get('run', '')) and '--abrir' not in s['run']]
+    _desp = [s for j in _lect for s in j['steps'] if '--despues' in str(s.get('run', ''))]
     _pip_h = {x for s in _wh['jobs']['leer']['steps'] for x in str(s.get('run', '')).split() if '==' in x}
     _pip_b = [{x for s in j['steps'] for x in str(s.get('run', '')).split() if '==' in x} for j in _lect]
     _env_h = {k for s in _wh['jobs']['leer']['steps'] if 'disponibilidad.py' in str(s.get('run', ''))
               and '--rescate' not in str(s.get('run')) for k in (s.get('env') or {})}
-    eq('(PD) workflow %s: abrir → lectura(s) en el grupo de la horaria (%s) → rescate final; el barrido, en su grupo PRO'
-       % (_p, _grupo_h),
-       (list(_wb['jobs'])[0], list(_wb['jobs'])[-1], {j['concurrency']['group'] for j in _lect},
-        _wb['concurrency']['group'], 'always()' in _wb['jobs']['rescate']['if']),
-       ('abrir', 'rescate', {_grupo_h}, _grupo_h + '-pro', True))
-    eq('(PD) workflow %s: el paso de la lectura lleva los secretos y las claves del paso horario (menos sus inputs: FICHAS_MAX, LISTADO, el MODO de OSMA), y '
-       'las dependencias de la horaria' % _p,
+    _J = _wb['jobs']
+    _ab = _J['abrir']
+    eq('(PD) workflow %s: abrir (decide, sin grupo) → barrer_ya (la lectura reciente, sin grupo) | la(s) lectura(s) en el '
+       'grupo de la horaria (%s) → rescate final (always); el barrido, en su grupo PRO; y solo lee el repo' % (_p, _grupo_h),
+       (list(_J)[0], list(_J)[1], list(_J)[-1], {j['concurrency']['group'] for j in _lect},
+        'concurrency' in _J['barrer_ya'] or 'concurrency' in _ab, _wb['concurrency']['group'], _J['rescate']['if'],
+        _J['barrer_ya']['if'], _J['barrer']['if'], _wb.get('permissions')),
+       ('abrir', 'barrer_ya', 'rescate', {_grupo_h}, False, _grupo_h + '-pro', 'always()',
+        "needs.abrir.outputs.camino == 'reciente'", "needs.abrir.outputs.camino == 'leer'", {'contents': 'read'}))
+    eq('(PD) workflow %s: abrir deja pasada, camino, foto y hace, y tiene su rescate (si muere tras abrir la pasada)' % _p,
+       (sorted(_ab['outputs']), [s['if'] for s in _ab['steps'] if 'rescate' in str(s.get('run', ''))],
+        ['--abrir' in str(s.get('run', '')) for s in _ab['steps']].count(True)),
+       (['camino', 'foto', 'hace', 'pasada'], ['failure() || cancelled()'], 1))
+    eq('(PD) workflow %s: barrer_ya sale de la foto que dice abrir (FOTO_RECIENTE), sin secretos del proveedor' % _p,
+       [(s['env'].get('FOTO_RECIENTE'), s['env'].get('ESCANER2_PASADA'), bool(set(_sec) & set(s['env'])))
+        for s in _J['barrer_ya']['steps'] if 'barrido.py' in str(s.get('run', ''))],
+       [('${{ needs.abrir.outputs.foto }}', '${{ needs.abrir.outputs.pasada }}', False)])
+    eq('(PD) workflow %s: el paso de la lectura lleva los secretos y las claves del paso horario (menos sus inputs: '
+       'FICHAS_MAX, LISTADO, el MODO de OSMA), y las dependencias de la horaria' % _p,
        (all(set(_sec) <= set(s['env']) for s in _pasos),
         sorted((_env_h - {'FICHAS_MAX', 'LISTADO', 'INTENTO', 'MODO'}) - set(_pasos[0]['env'])),
         all(_pip_h <= b for b in _pip_b), len(_pasos)), (True, [], True, 3 if _p == 'tcg' else 1))
-    eq('(PD) workflow %s: los secretos del proveedor SOLO en el paso de la lectura (ni en abrir ni en los rescates)' % _p,
+    eq('(PD) workflow %s: 🔴 lo de después, en SU paso de cada lectura, SIEMPRE (aunque el barrido falle), con su tope, '
+       'detrás del barrido y con las claves del horario (menos sus inputs)' % _p,
+       ([(s['if'], bool(s.get('timeout-minutes')), s['run'].split()[-1]) for s in _desp],
+        all(j['steps'].index([s for s in j['steps'] if '--despues' in str(s.get('run', ''))][0])
+            > j['steps'].index([s for s in j['steps'] if 'barrido.py' in str(s.get('run', ''))][0]) for j in _lect),
+        sorted((_env_h - {'FICHAS_MAX', 'LISTADO', 'INTENTO', 'MODO'}) - set(_desp[0]['env']))),
+       ([('always()', True, epd.PROVEEDORES and {'tcg': 'TCG', 'dbline': 'DBLINE', 'ociostock': 'OCIOSTOCK',
+                                                 'osma': 'OSMA'}[_p])] * len(_lect), True, []))
+    eq('(PD) workflow %s: los secretos del proveedor SOLO en los pasos de la lectura y de lo de después (ni en abrir, ni '
+       'en barrer_ya, ni en los rescates)' % _p,
        sorted({n for n, j in _wb['jobs'].items() for s in j['steps'] for k in (s.get('env') or {})
-               if k in _sec and s not in _pasos}), [])
+               if k in _sec and s not in _pasos and s not in _desp}), [])
 
 print()
 if fallos:

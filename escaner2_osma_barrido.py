@@ -10,9 +10,10 @@ cada dia a las 07:15, encargo AE). Cero Keepa, cero Amazon.
 web ni baja el fichero YA NO VALE: antes del paso 2, `escaner2_pro_en_directo.leer_en_directo` corre la lectura de OSMA
 de AHORA, la MISMA pasada que la horaria (escaner2_osma_disponibilidad.py, con sus guardas y disp_aplicar_pasada). Solo se sigue si
 esa pasada de ESTE run queda 'aplicada' o «al día», y el paso 2 exige que la ultima aplicada sea la suya; si no, la
-pasada queda 'fallida' con el motivo y sin foto. Lo que la horaria hace tras aplicar (la copia del Excel y las fechas de vuelta) se hace al final, con la
-pasada ya cerrada. Con `--abrir` (el job `abrir` del workflow) solo abre la pasada y deja su id en GITHUB_OUTPUT; sin
-argumentos, retoma esa (ESCANER2_PASADA). Lo que escribe de mas, lo escribe esa lectura (disp_*), no este programa.
+pasada queda 'fallida' con el motivo y sin foto. Lo que la horaria hace tras aplicar (la copia del Excel y las fechas de vuelta) va en su propio paso del workflow
+(`escaner2_pro_en_directo.py --despues`), que corre aunque este falle. Con `--abrir` (el job `abrir`, sin el grupo de la
+horaria) abre la pasada y decide: lectura de hace menos de 15 min (se barre desde ella, FOTO_RECIENTE, sin leer), leer,
+o 'fallida' si una lectura horaria a medias no acaba en 4 min. Sin argumentos, retoma esa pasada (ESCANER2_PASADA). Lo que escribe de mas, lo escribe esa lectura (disp_*), no este programa.
 
 QUE HACE, EN ORDEN:
   1. abre una pasada en `escaner2_pasada` (proveedor OSMA, modo 'todas', estado 'descargando') con el id del run;
@@ -123,7 +124,7 @@ def main():
                        maximo_intentos=1)
 
 
-def barrer(pasada, foto):
+def barrer(pasada, foto, nota=None):
     # ── 1 · La descarga de la que sale la foto: la ultima APLICADA ─────────────────────────────
     ult = (sb.table('disp_pasada').select('id,creada_en,terminada_en,n_leidas').eq('proveedor', eo.PROVEEDOR)
            .eq('estado', 'aplicada').order('creada_en', desc=True).limit(1).execute().data or [None])[0]
@@ -242,7 +243,9 @@ def barrer(pasada, foto):
     # (Mapa de OSMA) Siempre, aunque vaya vacia: la v2 la lee para saber si espera uno o dos CSV.
     sb.storage.from_(BUCKET).upload(f'{base}/asins.txt', '\n'.join(lista_asin).encode('utf-8'), texto)
     en_foto = {f['producto_heo'] for f in foto}
+    # 🆕 (Encargo PD) `lectura`: de qué lectura sale la foto y cuándo se comprobó (escaner2_pro_en_directo.nota_de).
     sidecar = {
+        'lectura': nota,
         'pasada': pasada, 'disp_pasada': ult['id'], 'descarga_en': ult.get('terminada_en') or ult.get('creada_en'),
         'porte': dict(porte, pct=None if porte['pct'] is None else str(porte['pct'])),
         'enlaces': {c: e for c, e in enlaces.items() if c in en_foto},

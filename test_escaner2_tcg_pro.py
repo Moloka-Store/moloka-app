@@ -692,6 +692,8 @@ eq('B2 · «Puertas»: la caja con su rótulo y el precio de la caja (6 × 2,50)
    (_pcaja[_pcab.index('Caja')], _pcaja[_pcab.index('Precio caja (€)')], len(_pu) - 1),
    ('caja con chase · 6 uds', 15.0, 7))
 _resu = {r[0]: r[1] for r in _wb['Resumen'].iter_rows(values_only=True)}
+eq('B2 · 🆕 (encargo PD) el Resumen dice de qué lectura de TCG sale la foto (en hora de Madrid)',
+   _resu.get('Lectura de TCG (encargo PD: en directo)'), 'leída ahora (la lectura del 14-10-2026 a las 09:21)')
 eq('B2 · el Resumen: modo, marcas, cuadre, sin tramo, líneas, compartidas y las puertas previas con nombre de TCG',
    (_resu.get('Modo del barrido'),
     _resu.get('Marcas del director (Magic y Yu-Gi-Oh en cualquier idioma, sin corte de rank)'), _resu.get('Cuadra'),
@@ -786,7 +788,7 @@ def caso_pd(fila_run=None, lector=None, env=None, args=(), quitar_run=True, extr
                                             'GITHUB_OUTPUT': salida}, **(env or {})), args, secretos)
     bd = json.load(open(ruta, encoding='utf-8'))
     salidas = dict(x.split('=', 1) for x in open(salida, encoding='utf-8').read().split('\n') if '=' in x)
-    pas = [p for p in bd['tablas']['escaner2_pasada'] if str(p.get('run_id')) == str(RUN_PD)]
+    pas = [p for p in bd['tablas'].get('escaner2_pasada', []) if str(p.get('run_id')) == str(RUN_PD)]
     return cod, log, bd, salidas, pas, ruta
 
 
@@ -840,17 +842,25 @@ cod, log, bd, _sal, _p, _r = caso_pd(fila_run={'id': 'pd-al-dia', 'estado': 'rec
                                                'creada_en': _DESPUES}, lector={})
 _side = json.loads(base64.b64decode(bd['storage']['escaner2'][[k for k in bd['storage']['escaner2']
                                                                 if k.endswith('barrido.json')][0]]).decode('utf-8'))
-eq('B6 · [al día] VERDE: la lectura de ahora confirma la foto aplicada y el barrido sale de ella (sin lo de después)',
-   (cod, _p[0]['estado'], _side['disp_pasada'], bd.get('despues')), (0, 'esperando_csv', _PD_DISP, None))
+eq('B6 · [al día] VERDE: la lectura de ahora confirma la foto aplicada y el barrido sale de ella (sin lo de después), '
+   'y barrido.json lo dice: «confirmada hoy a las HH:MM; el contenido es el de la lectura del …»',
+   (cod, _p[0]['estado'], _side['disp_pasada'], bd.get('despues'),
+    (_side.get('lectura') or {}).get('texto', '').startswith('confirmada hoy a las '),
+    (_side.get('lectura') or {}).get('como'), bool((_side.get('lectura') or {}).get('comprobada_en'))),
+   (0, 'esperando_csv', _PD_DISP, None, True, 'confirmada', True))
 cod, log, bd, _sal, _p, _r = caso_pd(quitar_run=False, lector={})
-eq('B6 · [aplicada] VERDE, de la pasada de este run, y lo de después de aplicar (novedades…) se hace, al final',
-   (cod, _p[0]['estado'], bd.get('despues'), log.index('PASADA LISTA') < log.index('TRAS LA LECTURA')),
-   (0, 'esperando_csv', [_PD_DISP], True))
+_side = json.loads(base64.b64decode(bd['storage']['escaner2'][[k for k in bd['storage']['escaner2']
+                                                                if k.endswith('barrido.json')][0]]).decode('utf-8'))
+eq('B6 · [aplicada] VERDE, de la pasada de este run; lo de después de aplicar NO va en el barrido (va en su paso, '
+   '«--despues», que corre aunque el barrido falle); y barrido.json dice «leída ahora (la lectura del …)»',
+   (cod, _p[0]['estado'], bd.get('despues'), (_side.get('lectura') or {}).get('texto', '').startswith('leída ahora (')),
+   (0, 'esperando_csv', None, True))
 # --abrir y la pasada que retoma el job siguiente del MISMO run
 cod, log, bd, _sal, _p, _r = caso_pd(quitar_run=False, lector={}, args=['--abrir'])
-eq('B6 · [abrir] VERDE: abre la pasada (descargando), deja su id en GITHUB_OUTPUT y NO lee',
-   (cod, [x['estado'] for x in _p], _sal.get('pasada') == (_p[0]['id'] if _p else None), bd.get('lecturas')),
-   (0, ['descargando'], True, None))
+eq('B6 · [abrir] VERDE: abre la pasada (descargando), deja su id en GITHUB_OUTPUT, decide «leer» (no hay lectura '
+   'reciente ni en marcha) y NO lee',
+   (cod, [x['estado'] for x in _p], _sal.get('pasada') == (_p[0]['id'] if _p else None), _sal.get('camino'),
+    bd.get('lecturas')), (0, ['descargando'], True, 'leer', None))
 _abierta = _p[0]['id']
 cod, log, bd, _sal, _p, _r = caso_pd(ruta=_r, env={'ESCANER2_PASADA': _abierta})
 eq('B6 · [retoma] el job de la lectura retoma ESA pasada: una sola fila, lista',
@@ -880,11 +890,34 @@ eq('B6 · [pared] intento 2, en otra máquina: retoma la MISMA pasada y sale de 
 cod, log, bd, _sal, _p, _r = caso_pd(quitar_run=False, lector={}, env={'INTENTO': '4'})
 eq('B6 · INTENTO fuera de 1 a 3: ROJO y sin abrir nada', (cod, _p), (1, []))
 
+# 🆕 (Revisión de quien dirige) `abrir` decide ANTES de entrar en el grupo de la horaria
+cod, log, bd, _sal, _p, _r = caso_pd(lector={}, reciente=True, args=['--abrir'])
+eq('B6 · 🔑 [abrir, reciente] una lectura buena de hace 5 min: camino «reciente» con su foto y cuánto hace, sin leer',
+   (cod, [x['estado'] for x in _p], _sal.get('camino'), _sal.get('foto'), _sal.get('hace') in ('4', '5'),
+    bd.get('lecturas')), (0, ['descargando'], 'reciente', _PD_DISP, True, None))
+_abierta = _p[0]['id']
+cod, log, bd, _sal, _p, _r = caso_pd(ruta=_r, secretos=False,
+                                     env={'ESCANER2_PASADA': _abierta, 'FOTO_RECIENTE': _PD_DISP, 'LEIDA_HACE': '5'})
+_side = json.loads(base64.b64decode(bd['storage']['escaner2'][[k for k in bd['storage']['escaner2']
+                                                                if k.endswith('barrido.json')][0]]).decode('utf-8'))
+eq('B6 · 🔑 [barrer_ya] el job sin grupo barre desde ESA foto, sin secretos del proveedor y sin leer, y barrido.json '
+   'dice «leída hace 5 min …»',
+   (cod, [(x['id'], x['estado']) for x in _p], bd.get('lecturas'), _side['disp_pasada'],
+    (_side.get('lectura') or {}).get('texto', '').startswith('leída hace 5 min (la lectura del ')),
+   (0, [(_abierta, 'esperando_csv')], None, _PD_DISP, True))
+cod, log, bd, _sal, _p, _r = caso_pd(quitar_run=False, lector={}, args=['--abrir'],
+                                     extra=_ESCENAS['turno']['extra'], env={'ESCANER2_ESPERA_MAX_S': '0'})
+eq('B6 · 🔴 [abrir, en marcha] una lectura del proveedor a medias que no acaba en el tope: ROJO, la pasada «fallida» '
+   '«… se está leyendo ahora …», sin leer y sin camino',
+   (cod, [x['estado'] for x in _p], 'se está leyendo ahora' in (_p[0].get('motivo_fallo') or ''), bd.get('lecturas'),
+    _sal.get('camino')), (1, ['fallida'], True, None, None))
+
 # 🆕 (Decisiones de quien dirige, 27-nov-2026) La lectura buena de hace menos de 15 min: el PRO no vuelve a leer.
 cod, log, bd, _sal, _p, _r = caso_pd(lector={}, reciente=True)
 eq('B6 · 🔑 [reciente] una lectura buena terminada hace 5 min: VERDE desde ella, SIN volver a leer, y lo dice',
    (cod, _p[0]['estado'], bd.get('lecturas'), 'leída hace' in log, sin_foto(bd)), (0, 'esperando_csv', None, True, False))
-cod, log, bd, _sal, _p, _r = caso_pd(lector={}, reciente=True, mutante_modulo=('    if reciente:\n', '    if False:\n'))
+cod, log, bd, _sal, _p, _r = caso_pd(lector={}, reciente=True, mutante_modulo=('    if reciente:\n        print(f">>> LECTURA EN DIRECTO',
+                                                     '    if False:\n        print(f">>> LECTURA EN DIRECTO'))
 eq('B6 · 🔴 mutante «sin la lectura reciente»: el ancla es única y el barrido vuelve a leer (y aquí, sin lectura de este '
    'run, falla): el banco lo ve', ('ANCLA_NO_UNICA' in log, cod, len(bd.get('lecturas', []))), (False, 1, 1))
 # Una lectura que CONFIRMA la última aplicada sin decir «al día» (OSMA de sábado a lunes), y el porqué que da el lector

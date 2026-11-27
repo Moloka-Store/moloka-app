@@ -316,7 +316,9 @@ def cruzar(cruce, params, pasada):
             'n_entradas': n_entradas, 'n_bd': n_bd, 'cuadra': cuadra and not motivo_fallo, 'n_crudo': n_crudo,
             'previas': previas, 'modo': pasada.get('modo'), 'marcas': pasada.get('marcas'), 'eleccion': eleccion,
             'n_compartidas': n_compartidas, 'avisos': avisos, 'escalon': escalon,
-            'foto': '%s · %s' % (barrido.get('disp_pasada') or '—', barrido.get('foto_en') or '—')})
+            'foto': '%s · %s' % (barrido.get('disp_pasada') or '—', barrido.get('foto_en') or '—'),
+            # 🆕 (Encargo PD) de qué lectura del proveedor sale y cuándo se comprobó, en hora de Madrid
+            'lectura': (barrido.get('lectura') or {}).get('texto')})
         sb.storage.from_(BUCKET).upload(ruta, contenido, {
             'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'upsert': 'true'})
     except Exception as ex:

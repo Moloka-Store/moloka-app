@@ -25,6 +25,10 @@ name: Moloka - Escaner 2 · Barrido OSMA
 on:
   workflow_dispatch:
 
+# 🔒 (Encargo PD) Los jobs llevan ahora los secretos del proveedor: el token del run, solo para leer el repo.
+permissions:
+  contents: read
+
 # 🔒 Barrido y cruce de OSMA, de uno en uno (el cruce lee la foto que el barrido deja): grupo PROPIO, que no espera
 #    a HEO. 🆕 (Encargo PD) La LECTURA del barrido (sus jobs `barrer…`) entra ADEMAS en el grupo de la horaria.
 concurrency:
@@ -32,13 +36,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # 🆕 (Encargo PD, 27-nov-2026) PRIMERO SE ABRE LA PASADA, en un job aparte y sin esperar turno: la pantalla de la v2
-  #    la ve «descargando» al momento, aunque la lectura tenga que esperar a la horaria.
+  # 🆕 (Encargo PD, 27-nov-2026) PRIMERO SE ABRE LA PASADA Y SE DECIDE, en un job SIN el grupo de la horaria: la pantalla
+  #    la ve «descargando» al momento. Si hay una lectura buena de hace menos de 15 min, `camino` = reciente (se barre
+  #    desde ella, sin leer); si hay una lectura en marcha, espera a que acabe como mucho 4 min (si no, «fallida» con el
+  #    motivo); si no, `camino` = leer.
   abrir:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 8
     outputs:
       pasada: ${{ steps.abrir.outputs.pasada }}
+      camino: ${{ steps.abrir.outputs.camino }}
+      foto:   ${{ steps.abrir.outputs.foto }}
+      hace:   ${{ steps.abrir.outputs.hace }}
     steps:
       - name: Descargar el repo
         uses: actions/checkout@v7
@@ -51,20 +60,67 @@ jobs:
       - name: Instalar dependencias
         run: pip install --quiet supabase==2.31.0
 
-      - name: Abrir la pasada del barrido
+      - name: Abrir la pasada del barrido y decidir de qué lectura sale
         id: abrir
+        timeout-minutes: 6
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           PYTHONIOENCODING:     utf-8
         run: python -u escaner2_osma_barrido.py --abrir
 
-  barrer:
+      - name: Rescate · la pasada de este run, si se ha quedado descargando
+        if: failure() || cancelled()
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_rescate.py pasada
+
+  # La lectura buena de hace menos de 15 min: se barre desde ella, SIN leer y SIN el grupo de la horaria.
+  barrer_ya:
     needs: abrir
+    if: needs.abrir.outputs.camino == 'reciente'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    # 🔒 EL GRUPO DE LA LECTURA HORARIA (escaner2-osma): nunca dos lecturas de OSMA a la vez, ni dos sesiones en su web. Si la
-    #    horaria esta leyendo, este job espera a que acabe (la pasada del barrido ya esta abierta: la pantalla la ve).
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install --quiet supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13
+
+      - name: De la lectura de hace menos de 15 min, la pasada y la lista
+        timeout-minutes: 15
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          ESCANER2_PASADA:      ${{ needs.abrir.outputs.pasada }}
+          FOTO_RECIENTE:        ${{ needs.abrir.outputs.foto }}
+          LEIDA_HACE:           ${{ needs.abrir.outputs.hace }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_osma_barrido.py
+
+      - name: Rescate · la pasada de este run, si se ha quedado descargando
+        if: failure() || cancelled()
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_rescate.py pasada
+
+  barrer:
+    needs: abrir
+    if: needs.abrir.outputs.camino == 'leer'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # 🔒 EL GRUPO DE LA LECTURA HORARIA (escaner2-osma): nunca dos lecturas de OSMA a la vez, ni dos sesiones en su web. Solo se llega
+    #    aqui cuando `abrir` no ha visto ninguna lectura en marcha, asi que casi nunca se espera (ni se queda pendiente).
     concurrency:
       group: escaner2-osma
       cancel-in-progress: false
@@ -82,7 +138,7 @@ jobs:
 
       - name: La lectura de OSMA en directo, y de ella la pasada y la lista
         id: barrer
-        # El tope en el PASO (15 min), no solo en el job (20): si se agota, los rescates de abajo tienen tiempo.
+        # El tope en el PASO (15 min), no solo en el job: si se agota, lo de despues y los rescates tienen tiempo.
         timeout-minutes: 15
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
@@ -93,6 +149,19 @@ jobs:
           ESCANER2_PASADA:      ${{ needs.abrir.outputs.pasada }}
           PYTHONIOENCODING:     utf-8
         run: python -u escaner2_osma_barrido.py
+
+      # 🔑 LO DE DESPUES DE APLICAR (las fechas de vuelta), EN SU PASO, AUNQUE EL BARRIDO FALLE O MUERA: ninguna pasada aplicada por
+      #    este run se queda sin ello (y un vaciado que se quedo sin pasar a «fallida», pasa ahora).
+      - name: Lo de después de la lectura (fechas de vuelta), aunque el barrido falle
+        if: always()
+        timeout-minutes: 10
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          OSMA_USER:            ${{ secrets.OSMA_USER }}
+          OSMA_PASS:            ${{ secrets.OSMA_PASS }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_pro_en_directo.py --despues OSMA
 
       # 🔴 SI EL RUN MUERE A MEDIAS, NADA SE QUEDA COLGADO: ni la lectura de este run en 'leyendo' ni la pasada del
       #    barrido en 'descargando' (las dos quedan 'fallida'; solo las de ESTE run).
@@ -112,11 +181,11 @@ jobs:
           PYTHONIOENCODING:     utf-8
         run: python -u escaner2_rescate.py pasada
 
-  # 🔴 EL ULTIMO RESCATE: si un job de la lectura no llega a correr (cancelado mientras esperaba su turno, o un intento
-  #    de otra maquina que no arranca), la pasada de este run no se queda 'descargando' para siempre.
+  # 🔴 EL ULTIMO RESCATE: si un job no llega a correr (cancelado mientras esperaba su turno, un intento de otra maquina
+  #    que no arranca, o `abrir` que murio tras abrir la pasada), la pasada de este run no se queda 'descargando'.
   rescate:
-    needs: [abrir, barrer]
-    if: always() && needs.abrir.result == 'success'
+    needs: [abrir, barrer_ya, barrer]
+    if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -131,7 +200,8 @@ jobs:
       - name: Instalar dependencias
         run: pip install --quiet supabase==2.31.0
 
-      - name: Rescate · la pasada de este run, si sigue descargando
+      - name: Rescate · la pasada de este run, si se ha quedado descargando
+        if: always()
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}

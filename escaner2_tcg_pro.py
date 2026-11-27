@@ -401,6 +401,7 @@ def escribir_excel(foto, resultados, apartados, M, info):
         filas_res += [['Marcas del director (Magic y Yu-Gi-Oh en cualquier idioma, sin corte de rank)',
                        ', '.join(info.get('marcas') or []) or '(ninguna)']]
     filas_res += [['Foto de TCG (pasada de disponibilidad)', info.get('foto') or '—'],
+                  ['Lectura de TCG (encargo PD: en directo)', info.get('lectura') or '—'],
                   ['Precio de compra (PA)', 'el del tramo más barato de la web de TCG (el de la foto), sin descuento '
                                             'añadido; por figura en la caja de 6; «Uds. escalón» dice cuántas pedir '
                                             'para ese precio (en la caja, figuras). Sin tramo leído, el suelto del '

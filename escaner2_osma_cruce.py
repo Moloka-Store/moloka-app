@@ -403,7 +403,9 @@ def cruzar(cruce, params, pasada):
             'enlaces': enlaces, 'enlaces_foto': list(enlaces), 'eans_fichas': eans_fichas,
             'n_eans_fichas_nuevos': barrido.get('n_eans_fichas_nuevos'), 'fuera_keepa': fuera_keepa, 'n_packs': n_packs,
             'porte': barrido.get('porte'), 'descarga_en': barrido.get('descarga_en'),
-            'disp_pasada': barrido.get('disp_pasada'), 'mapa': mapa_res, 'agotados': agotados})
+            'disp_pasada': barrido.get('disp_pasada'), 'mapa': mapa_res, 'agotados': agotados,
+            # 🆕 (Encargo PD) de qué lectura de OSMA sale y cuándo se comprobó, en hora de Madrid
+            'lectura': (barrido.get('lectura') or {}).get('texto')})
         sb.storage.from_(BUCKET).upload(ruta, contenido, {
             'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'upsert': 'true'})
     except Exception as ex:
