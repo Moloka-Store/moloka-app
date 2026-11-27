@@ -155,6 +155,16 @@ def _cerrar(sb, pasada, estado, motivo, extra=None):
 
 def pasada(sb, run_id, hoy):
     """La pasada entera. Devuelve el codigo de salida del programa."""
+    codigo, pid, fila = aplicar(sb, run_id, hoy)
+    if fila is None or fila.get('estado') != 'aplicada':
+        return codigo
+    return tras_aplicar(sb, pid, fila, run_id)
+
+
+def aplicar(sb, run_id, hoy, guarda=None):
+    """(Encargo PD, 27-nov-2026: lo que era la primera parte de `pasada`, sin cambiar nada) Abre la pasada, baja, lee,
+    aplica y relee. Devuelve (codigo, pid, fila): `fila`, la de disp_pasada tras aplicar (None si no ha llegado a
+    llamar a la funcion). `guarda`: la del Escaneo PRO (escaner2_pro_en_directo.GuardaPro), o None en la horaria."""
     import escaner2_dbline as db
 
     abrir = {'proveedor': PROVEEDOR, 'estado': 'leyendo', 'run_id': int(run_id) if run_id.isdigit() else None}
@@ -199,6 +209,9 @@ def pasada(sb, run_id, hoy):
         if ult[0].get('huella_contenido') == c['huella_contenido']:
             raise AlDia(ult[0].get('id'))
         print(">>> Contenido nuevo (la huella no es la de la última pasada aplicada): se sube.", flush=True)
+        no = guarda.antes_de_aplicar(lectura) if guarda else None
+        if no:
+            raise Rechazo('fallida', no)
 
         sb.table('disp_pasada').update(rec).eq('id', pid).execute()
         # `fecha_salida` no tiene columna en disp_lectura (no la pide nadie): fuera antes de subir.
@@ -211,13 +224,15 @@ def pasada(sb, run_id, hoy):
         }).eq('id', pid).execute()
         sb.rpc('disp_aplicar_pasada', {'p_pasada': pid}).execute()
     except Rechazo as ex:
+        if guarda:
+            ex.estado, ex.motivo_base = guarda.sin_freno(ex.estado, ex.motivo_base)
         _cerrar(sb, pid, ex.estado, ex.motivo_base, rec)
         if isinstance(ex, AlDia):
             print(f"DBLINE_AL_DIA: el contenido es el de la pasada aplicada {ex.pasada_aplicada}; nada nuevo.", flush=True)
             print(">>> MEDICIÓN: al día, ningún cambio en esta pasada (Funko, Pyramid y total, 0).", flush=True)
-            return 0
+            return 0, pid, None
         print(f"DBLINE_NO_APLICADA: pasada {pid} {ex.estado}: {ex.motivo}", flush=True)
-        return 1
+        return 1, pid, None
     except Exception as ex:
         # 🔴 REPO PÚBLICO: el texto de un error puede llevar una URL, la respuesta de DBLine o una fila de la base.
         motivo_log = f'error inesperado ({type(ex).__name__}); el detalle queda en disp_pasada.motivo'
@@ -227,18 +242,26 @@ def pasada(sb, run_id, hoy):
         except Exception as ex2:
             motivo_log += f'; tampoco se ha podido cerrar la pasada ({type(ex2).__name__})'
         print(f"DBLINE_NO_APLICADA: pasada {pid} fallida: {motivo_log}", flush=True)
-        return 1
+        return 1, pid, None
 
     fila = sb.table('disp_pasada').select('*').eq('id', pid).execute().data[0]
+    if guarda:
+        fila = guarda.tras_aplicar(pid, fila)
     print(">>> EN LA BASE: " + ' · '.join(f'{k} {fila.get(k)}' for k in (
         'estado', 'primera', 'caida_aceptada', 'n_crudo', 'n_leidas', 'n_disponibles', 'n_agotados',
         'n_sin_dato_precio', 'n_entran', 'n_vuelven', 'n_salen', 'n_a_disponible', 'n_a_agotado', 'n_cambio_precio',
         'n_ausentes', 'n_en_catalogo', 'n_disponibles_estado')), flush=True)
     if fila.get('estado') != 'aplicada':
         print(f"DBLINE_NO_APLICADA: pasada {pid} {fila.get('estado')}: {fila.get('motivo')}", flush=True)
-        return 1
+        return 1, pid, fila
     print(f">>> PASADA APLICADA: {fila.get('n_en_catalogo')} productos de DBLine en el catálogo, "
           f"{fila.get('n_disponibles_estado')} disponibles.", flush=True)
+    return 0, pid, fila
+
+
+def tras_aplicar(sb, pid, fila, run_id):
+    """Lo de despues de una pasada APLICADA (la segunda parte de `pasada`, sin cambiar nada): la medicion, el aviso de
+    la caida aceptada y las novedades. Devuelve el codigo de salida."""
     codigo = 0
     try:
         if not medir(sb, pid, fila):

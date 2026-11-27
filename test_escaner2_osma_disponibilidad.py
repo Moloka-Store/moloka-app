@@ -675,9 +675,9 @@ MUTANTES = [
      '(C) entrada rechazada: UN solo intento (un POST) y ni siquiera abre la página de descargas'),
     ('al_dia_en_rojo',
      '            print(f"OSMA_AL_DIA: el fichero de hoy ya está aplicado (pasada {ex.pasada_aplicada}); nada nuevo.", flush=True)\n'
-     '            return 0\n',
+     '            return 0, pid, None, contenido\n',
      '            print(f"OSMA_AL_DIA: el fichero de hoy ya está aplicado (pasada {ex.pasada_aplicada}); nada nuevo.", flush=True)\n'
-     '            return 1\n',
+     '            return 1, pid, None, contenido\n',
      '(a) relanzar el mismo día: VERDE, OSMA_AL_DIA con la pasada de esta mañana'),
     ('dia_en_utc', '        if hora_de_madrid(ultima_aplicada).date() == hora_de_madrid(ahora).date():\n',
      '        if ultima_aplicada.date() == ahora.date():\n',

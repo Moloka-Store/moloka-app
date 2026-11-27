@@ -99,6 +99,11 @@ INTENTOS = 3
 MARCA_NOVEDADES = 'Funko'
 CATEGORIA_FUNKO = 'distribucion-merchandising'
 FICHAS_FUNKO_MAX = 300
+# (Encargo PD, 27-nov-2026) El Escaneo PRO lee al proveedor en directo (escaner2_pro_en_directo.py) y tiene que quedar en
+# pocos minutos: como mucho estas fichas de Funko antes de la foto (medido en 30 dias de disp_tramo: mediana 5,4 s por
+# ficha, p90 9,6 s → ~3 min, ~5 min). Las que no se leen entran con su tramo guardado o, sin el, con su suelto y el aviso
+# «sin tramo leído»; las lee la siguiente pasada horaria. Y el lector de tramos de despues, nunca en el PRO.
+FICHAS_FUNKO_PRO = 30
 WEB_MINIMO = 0.5
 SIN_FICHA_SEGUIDAS = 5  # tantas fichas seguidas sin producto (404 o a otra pagina) ya no son casualidad: se para
 # (Encargo DI, 2-nov-2026) Una ficha con un numero imposible en su tabla de tramos (una errata de TCG) se apunta y se sigue.
@@ -200,12 +205,13 @@ def _minimos(c, minimo, min_disp):
         raise Rechazo('rechazada_vaciado', f"vaciado: {c['n_disponibles']} disponibles, por debajo del mínimo {min_disp}")
 
 
-def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX, intento=1):
+def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX, intento=1, guarda=None):
     """La pasada de la foto. Devuelve (codigo, estado, catalogo, guardados, pid, previos): `estado` 'aplicada',
     'al_dia', 'pared' (choco en el login con la pagina anti-robots y queda otro intento en otra maquina: sin Telegram y
     codigo 0) u otro; `previos`, (fichas de Funko con dato imposible, fichas de Funko leidas) (encargos DI y DT: cuentan
     para el tope del lector);
-    `catalogo` y `guardados` para el lector de tramos (None si la pasada no ha llegado a entender el Excel)."""
+    `catalogo` y `guardados` para el lector de tramos (None si la pasada no ha llegado a entender el Excel).
+    (Encargo PD) `guarda`: la del Escaneo PRO (escaner2_pro_en_directo.GuardaPro), o None en la horaria."""
     import escaner2_tcg as tcg
     import escaner2_tcg_tramos as tr
     from escaner2_tcg_web import Bloqueo, Pared
@@ -281,6 +287,9 @@ def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX
         if ult[0].get('huella_contenido') == c['huella_contenido']:
             raise AlDia(ult[0].get('id'))
         print(">>> Contenido nuevo (la huella no es la de la última pasada aplicada): se sube.", flush=True)
+        no = guarda.antes_de_aplicar(lectura) if guarda else None
+        if no:
+            raise Rechazo('fallida', no)
 
         sb.table('disp_pasada').update(rec).eq('id', pid).execute()
         for i in range(0, len(lectura), LOTE):
@@ -291,6 +300,8 @@ def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX
         }).eq('id', pid).execute()
         sb.rpc('disp_aplicar_pasada', {'p_pasada': pid}).execute()
     except Rechazo as ex:
+        if guarda:
+            ex.estado, ex.motivo = guarda.sin_freno(ex.estado, ex.motivo)
         _cerrar(sb, pid, ex.estado, ex.motivo, rec)
         if isinstance(ex, AlDia):
             print(f"TCG_AL_DIA: el contenido es el de la pasada aplicada {ex.pasada_aplicada}; nada nuevo.", flush=True)
@@ -317,6 +328,8 @@ def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX
         return 1, 'fallida', None, None, pid, previos
 
     fila = sb.table('disp_pasada').select('*').eq('id', pid).execute().data[0]
+    if guarda:
+        fila = guarda.tras_aplicar(pid, fila)
     print(">>> EN LA BASE: " + ' · '.join(f'{k} {fila.get(k)}' for k in (
         'estado', 'primera', 'caida_aceptada', 'n_crudo', 'n_duplicados', 'n_leidas', 'n_disponibles', 'n_agotados',
         'n_sin_dato_precio', 'n_entran', 'n_vuelven', 'n_salen', 'n_a_disponible', 'n_a_agotado', 'n_cambio_precio',

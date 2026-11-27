@@ -128,6 +128,16 @@ def _cerrar(sb, pasada, estado, motivo, extra=None):
 
 def pasada(sb, sesion, url, run_id):
     """La pasada entera. Devuelve el codigo de salida del programa."""
+    codigo, pid, fila = aplicar(sb, sesion, url, run_id)
+    if fila is None or fila.get('estado') != 'aplicada':
+        return codigo
+    return tras_aplicar(sb, pid, fila, run_id)
+
+
+def aplicar(sb, sesion, url, run_id, guarda=None):
+    """(Encargo PD, 27-nov-2026: lo que era la primera parte de `pasada`, sin cambiar nada) Abre la pasada, baja, lee,
+    aplica y relee. Devuelve (codigo, pid, fila): `fila`, la de disp_pasada tras aplicar (None si no ha llegado a
+    llamar a la funcion). `guarda`: la del Escaneo PRO (escaner2_pro_en_directo.GuardaPro), o None en la horaria."""
     import escaner2_ociostock as oc
 
     abrir = {'proveedor': PROVEEDOR, 'estado': 'leyendo', 'run_id': int(run_id) if run_id.isdigit() else None}
@@ -176,6 +186,9 @@ def pasada(sb, sesion, url, run_id):
               f"chase sueltos {c['n_chase_suelto']} (disponibles {c['n_chase_suelto_disponibles']}) · EAN de forma rara "
               f"{c['n_ean_forma_rara']} · GTIN-14 {c['n_gtin14']} · el escalón gana en {c['n_escalon_gana']} · fichero "
               f"modificado hasta {c['fecha_max']}", flush=True)
+        no = guarda.antes_de_aplicar(lectura) if guarda else None
+        if no:
+            raise Rechazo('fallida', no)
         sb.table('disp_pasada').update(rec).eq('id', pid).execute()
         for i in range(0, len(lectura), LOTE):
             sb.table('disp_lectura').insert([dict(f, pasada_id=pid) for f in lectura[i:i + LOTE]]).execute()
@@ -185,12 +198,14 @@ def pasada(sb, sesion, url, run_id):
         }).eq('id', pid).execute()
         sb.rpc('disp_aplicar_pasada', {'p_pasada': pid}).execute()
     except Rechazo as ex:
+        if guarda:
+            ex.estado, ex.motivo = guarda.sin_freno(ex.estado, ex.motivo)
         _cerrar(sb, pid, ex.estado, ex.motivo, rec)
         if isinstance(ex, AlDia):
             print(f"OCIOSTOCK_AL_DIA: el fichero es el de la pasada aplicada {ex.pasada_aplicada}; nada nuevo.", flush=True)
-            return 0
+            return 0, pid, None
         print(f"OCIOSTOCK_NO_APLICADA: pasada {pid} {ex.estado}: {ex.motivo}", flush=True)
-        return 1
+        return 1, pid, None
     except Exception as ex:
         # 🔴 REPO PÚBLICO: el texto de un error puede llevar la URL del fichero o una fila de la base. Al registro,
         #    SOLO su tipo; el detalle, limpio, a la base.
@@ -200,10 +215,12 @@ def pasada(sb, sesion, url, run_id):
         except Exception as ex2:
             motivo_log += f'; tampoco se ha podido cerrar la pasada ({type(ex2).__name__})'
         print(f"OCIOSTOCK_NO_APLICADA: pasada {pid} fallida: {motivo_log}", flush=True)
-        return 1
+        return 1, pid, None
 
     # Lo que vale es lo que hay en la base.
     fila = sb.table('disp_pasada').select('*').eq('id', pid).execute().data[0]
+    if guarda:
+        fila = guarda.tras_aplicar(pid, fila)
     print(">>> EN LA BASE: " + ' · '.join(f'{k} {fila.get(k)}' for k in (
         'estado', 'primera', 'caida_aceptada', 'n_crudo', 'n_sin_gtin', 'n_leidas', 'n_disponibles', 'n_agotados',
         'n_sin_dato_precio', 'n_entran', 'n_vuelven', 'n_salen', 'n_a_disponible', 'n_a_agotado', 'n_cambio_precio',
@@ -211,9 +228,15 @@ def pasada(sb, sesion, url, run_id):
     if fila.get('estado') != 'aplicada':
         # Los motivos de disp_aplicar_pasada son recuentos (los escribe la función, no el fichero).
         print(f"OCIOSTOCK_NO_APLICADA: pasada {pid} {fila.get('estado')}: {fila.get('motivo')}", flush=True)
-        return 1
+        return 1, pid, fila
     print(f">>> PASADA APLICADA: {fila.get('n_en_catalogo')} productos de OcioStock en el catálogo, "
           f"{fila.get('n_disponibles_estado')} disponibles.", flush=True)
+    return 0, pid, fila
+
+
+def tras_aplicar(sb, pid, fila, run_id):
+    """Lo de despues de una pasada APLICADA (la segunda parte de `pasada`, sin cambiar nada): el aviso de la caida
+    aceptada y las novedades. Devuelve el codigo de salida."""
     codigo = 0
     if fila.get('caida_aceptada'):
         print(f"CAIDA_ACEPTADA: la pasada {pid} se ha aplicado como NUEVA REFERENCIA tras varios rechazos estables por "

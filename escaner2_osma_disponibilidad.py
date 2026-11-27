@@ -546,6 +546,17 @@ def _fecha_base(v):
 
 def pasada(sb, sesion, usuario, clave, run_id, ahora=None):
     """La pasada entera. Devuelve el codigo de salida del programa."""
+    codigo, pid, fila, contenido = aplicar(sb, sesion, usuario, clave, run_id, ahora)
+    if fila is None or fila.get('estado') != 'aplicada':
+        return codigo
+    return tras_aplicar(sb, sesion, pid, fila, contenido, ahora)
+
+
+def aplicar(sb, sesion, usuario, clave, run_id, ahora=None, guarda=None):
+    """(Encargo PD, 27-nov-2026: lo que era la primera parte de `pasada`, sin cambiar nada) Abre la pasada, entra, baja,
+    lee, aplica y relee. Devuelve (codigo, pid, fila, contenido): `fila`, la de disp_pasada tras aplicar (None si no ha
+    llegado a llamar a la funcion); `contenido`, el Excel bajado. `guarda`: la del Escaneo PRO
+    (escaner2_pro_en_directo.GuardaPro), o None en la horaria."""
     abrir = {'proveedor': PROVEEDOR, 'estado': 'leyendo', 'run_id': int(run_id) if run_id.isdigit() else None}
     pid = sb.table('disp_pasada').insert(abrir).execute().data[0]['id']
     print(f">>> Pasada de disponibilidad de OSMA {pid} abierta (leyendo).", flush=True)
@@ -590,6 +601,9 @@ def pasada(sb, sesion, usuario, clave, run_id, ahora=None):
               f"más de 10.000 {cuentas['mas_de_10000']}) · sin precio {cuentas['n_sin_dato_precio']} · sin EAN "
               f"{cuentas['sin_ean']} · EAN de forma rara {cuentas['ean_forma_rara']} · sin marca {cuentas['sin_marca']}",
               flush=True)
+        no = guarda.antes_de_aplicar(filas) if guarda else None
+        if no:
+            raise Rechazo('fallida', no)
         sb.table('disp_pasada').update(rec).eq('id', pid).execute()
         for i in range(0, len(filas), LOTE):
             sb.table('disp_lectura').insert([dict(f, pasada_id=pid) for f in filas[i:i + LOTE]]).execute()
@@ -600,18 +614,20 @@ def pasada(sb, sesion, usuario, clave, run_id, ahora=None):
         }).eq('id', pid).execute()
         sb.rpc('disp_aplicar_pasada', {'p_pasada': pid}).execute()
     except Rechazo as ex:
+        if guarda:
+            ex.estado, ex.motivo = guarda.sin_freno(ex.estado, ex.motivo)
         _cerrar(sb, pid, ex.estado, ex.motivo, rec)
         if isinstance(ex, AlDia):
             # 🔑 Relanzar el mismo día no es un fallo (Fernando, 01-oct-2026, del rojo: «eso no me gusta»).
             print(f"OSMA_AL_DIA: el fichero de hoy ya está aplicado (pasada {ex.pasada_aplicada}); nada nuevo.", flush=True)
-            return 0
+            return 0, pid, None, contenido
         if ex.estado == 'rechazada' and hora_de_madrid(ahora or _ahora()).weekday() >= 5:
             # 🔑 El fin de semana no es hora prevista (disp_parametros.horario_finde vacío): un fichero sin
             #    regenerar el sábado o el domingo no es un fallo. Se dice y el run sale bien.
             print(f"OSMA_SIN_FICHERO_NUEVO: pasada {pid} {ex.estado}: {ex.motivo} · fin de semana: no es un fallo.", flush=True)
-            return 0
+            return 0, pid, None, contenido
         print(f"OSMA_NO_APLICADA: pasada {pid} {ex.estado}: {ex.motivo}", flush=True)
-        return 1
+        return 1, pid, None, contenido
     except Exception as ex:
         # 🔴 REPO PÚBLICO: el texto de un error puede llevar datos (la URL del fichero, una fila de la base…).
         #    Al registro, SOLO su tipo; el detalle, a la base, que es privada.
@@ -621,10 +637,12 @@ def pasada(sb, sesion, usuario, clave, run_id, ahora=None):
         except Exception as ex2:
             motivo_log += f'; tampoco se ha podido cerrar la pasada ({type(ex2).__name__})'
         print(f"OSMA_NO_APLICADA: pasada {pid} fallida: {motivo_log}", flush=True)
-        return 1
+        return 1, pid, None, contenido
 
     # Lo que vale es lo que hay en la base.
     fila = sb.table('disp_pasada').select('*').eq('id', pid).execute().data[0]
+    if guarda:
+        fila = guarda.tras_aplicar(pid, fila)
     print(">>> EN LA BASE: " + ' · '.join(f'{k} {fila.get(k)}' for k in (
         'estado', 'primera', 'caida_aceptada', 'n_crudo', 'n_leidas', 'n_disponibles', 'n_agotados',
         'n_sin_dato_precio', 'n_entran', 'n_vuelven', 'n_salen', 'n_a_disponible', 'n_a_agotado',
@@ -632,9 +650,15 @@ def pasada(sb, sesion, usuario, clave, run_id, ahora=None):
     if fila.get('estado') != 'aplicada':
         # Los motivos de disp_aplicar_pasada son recuentos (los escribe la función, no la web).
         print(f"OSMA_NO_APLICADA: pasada {pid} {fila.get('estado')}: {fila.get('motivo')}", flush=True)
-        return 1
+        return 1, pid, fila, contenido
     print(f">>> PASADA APLICADA: {fila.get('n_en_catalogo')} artículos de OSMA en el catálogo, "
           f"{fila.get('n_disponibles_estado')} disponibles.", flush=True)
+    return 0, pid, fila, contenido
+
+
+def tras_aplicar(sb, sesion, pid, fila, contenido, ahora=None):
+    """Lo de despues de una pasada APLICADA (la segunda parte de `pasada`, sin cambiar nada): la copia del Excel, las
+    fechas de vuelta (con la misma sesion) y el aviso de la caida aceptada. Devuelve el codigo de salida."""
     codigo = 0
     # 🔑 LA COPIA, SOLO DE UNA PASADA APLICADA y en la ruta fija: un fichero rechazado no pisa la última buena.
     try:

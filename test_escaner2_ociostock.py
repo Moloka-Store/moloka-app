@@ -667,7 +667,8 @@ MUTANTES_REGLAS = [
     ('el GTIN-14 tal cual', "        return base[1:13] + _chk13(base[1:13]), None", "        return None, 'ean_forma_rara'"),
 ]
 MUTANTES_PASADA = [
-    ('«al día» en rojo', "            return 0\n        print(f\"OCIOSTOCK_NO_APLICADA", "            return 1\n        print(f\"OCIOSTOCK_NO_APLICADA"),
+    ('«al día» en rojo', "            return 0, pid, None\n        print(f\"OCIOSTOCK_NO_APLICADA",
+     "            return 1, pid, None\n        print(f\"OCIOSTOCK_NO_APLICADA"),
     ('sin «al día»', "        if ult[0].get('fichero_md5') == md5:\n            raise AlDia(ult[0].get('id'))\n", ''),
     ('imprime el error', "motivo_log = f'error inesperado ({type(ex).__name__}); el detalle queda en disp_pasada.motivo'",
      "motivo_log = f'error inesperado: {ex}'"),

@@ -11,14 +11,21 @@
 # 🔴 LOS INPUTS VIAJAN POR `env:`, NUNCA DENTRO DE `run:` (como en el de HEO): por env llegan como texto y el programa
 #    los valida antes de abrir ningun cliente.
 #
-# NO entra en la web de DBLine ni baja su fichero: trabaja sobre la foto de disponibilidad que ya esta en la base
+# trabaja sobre la foto de disponibilidad que ya esta en la base
 # (escaner2-dbline-disponibilidad.yml). Construye la FOTO de la pasada (con unidades hoy, sin chase suelto, con su precio
 # vigente por unidad y la promo solo hasta su fin, un EAN con su codigo mas barato) y deja en el almacen cerrado `escaner2` la lista de EAN para los cuatro
 # Visualizadores de Keepa (ES, IT, FR, DE).
 #
+# 🆕 EN DIRECTO (encargo PD, 27-nov-2026; Fernando: «El PRO tiene que ser en directo»): ANTES de construir la foto,
+#    el barrido LEE A DBLine EN ESE MOMENTO con la MISMA pasada que la lectura horaria (escaner2_dbline_disponibilidad.py, con sus guardas
+#    y disp_aplicar_pasada; escaner2_pro_en_directo.py). Solo sigue si esa pasada de ESTE run queda 'aplicada' o
+#    «al día»; si no, la pasada del barrido queda 'fallida' con el motivo y NO hay foto: nunca se valora con la lectura
+#    guardada. Por eso este workflow lleva ahora los secretos de DBLine y, para las novedades de esa pasada, los de Keepa y
+#    Telegram, como el horario.
+#
 # 🔴 REPO PUBLICO: este registro lo ve cualquiera. El programa SOLO imprime estados y recuentos; nada de precios,
 #    EAN, nombres ni el texto de un error (va a la base, que es privada).
-# 🔒 Cero tokens de Keepa, cero Amazon, cero credenciales de DBLine: solo la llave de servicio de Supabase.
+# 🔒 Los secretos del proveedor (y los de Keepa y Telegram) SOLO en el paso de la lectura; los rescates, solo la base.
 # >>> SIN RELOJ <<<  Solo cuando se pulsa el boton (o a mano desde Actions).
 # ============================================================
 name: Moloka - Escaner 2 · Barrido DBLine
@@ -43,16 +50,20 @@ on:
         default: false
         required: false
 
-# 🔒 Barrido y cruce de DBLine, de uno en uno (el cruce lee la foto que el barrido deja). Grupo PROPIO: no espera a
-#    HEO ni a la foto de disponibilidad (si coincide con ella, el barrido lo nota y falla con el motivo).
+# 🔒 Barrido y cruce de DBLine, de uno en uno (el cruce lee la foto que el barrido deja): grupo PROPIO, que no espera
+#    a HEO. 🆕 (Encargo PD) La LECTURA del barrido (sus jobs `barrer…`) entra ADEMAS en el grupo de la horaria.
 concurrency:
   group: escaner2-dbline-pro
   cancel-in-progress: false
 
 jobs:
-  barrer:
+  # 🆕 (Encargo PD, 27-nov-2026) PRIMERO SE ABRE LA PASADA, en un job aparte y sin esperar turno: la pantalla de la v2
+  #    la ve «descargando» al momento, aunque la lectura tenga que esperar a la horaria.
+  abrir:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 5
+    outputs:
+      pasada: ${{ steps.abrir.outputs.pasada }}
     steps:
       - name: Descargar el repo
         uses: actions/checkout@v7
@@ -63,11 +74,43 @@ jobs:
           python-version: '3.11'
 
       - name: Instalar dependencias
-        # Las mismas versiones FIJADAS que el barrido de OSMA.
-        run: pip install supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13
+        run: pip install --quiet supabase==2.31.0
 
-      - name: De la foto de DBLine a la pasada y la lista
-        # El tope en el PASO (15 min), no solo en el job (20): si se agota, el rescate de abajo tiene tiempo.
+      - name: Abrir la pasada del barrido
+        id: abrir
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          MODO_BARRIDO:         ${{ inputs.modo }}
+          MARCAS_ELEGIDAS:      ${{ inputs.marcas }}
+          OFERTAS_ELEGIDAS:     ${{ inputs.ofertas }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_dbline_barrido.py --abrir
+
+  barrer:
+    needs: abrir
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # 🔒 EL GRUPO DE LA LECTURA HORARIA (escaner2-dbline): nunca dos lecturas de DBLine a la vez, ni dos sesiones en su web. Si la
+    #    horaria esta leyendo, este job espera a que acabe (la pasada del barrido ya esta abierta: la pantalla la ve).
+    concurrency:
+      group: escaner2-dbline
+      cancel-in-progress: false
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install --quiet supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13 curl_cffi==0.15.0 requests==2.34.2
+
+      - name: La lectura de DBLine en directo, y de ella la pasada y la lista
+        id: barrer
+        # El tope en el PASO (15 min), no solo en el job (20): si se agota, los rescates de abajo tienen tiempo.
         timeout-minutes: 15
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
@@ -75,12 +118,56 @@ jobs:
           MODO_BARRIDO:         ${{ inputs.modo }}
           MARCAS_ELEGIDAS:      ${{ inputs.marcas }}
           OFERTAS_ELEGIDAS:     ${{ inputs.ofertas }}
+          DBLINE_USER:          ${{ secrets.DBLINE_USER }}
+          DBLINE_PASS:          ${{ secrets.DBLINE_PASS }}
+          KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}
+          TELEGRAM_TOKEN:       ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+          INTENTO:              '1'
+          ESCANER2_PASADA:      ${{ needs.abrir.outputs.pasada }}
+          PYTHONIOENCODING:     utf-8
         run: python -u escaner2_dbline_barrido.py
 
-      # 🔴 SI EL RUN MUERE A MEDIAS, LA PASADA NO SE QUEDA COLGADA en 'descargando'.
-      - name: Rescate · si el run ha fallado, la pasada de este run queda 'fallida'
+      # 🔴 SI EL RUN MUERE A MEDIAS, NADA SE QUEDA COLGADO: ni la lectura de este run en 'leyendo' ni la pasada del
+      #    barrido en 'descargando' (las dos quedan 'fallida'; solo las de ESTE run).
+      - name: Rescate · la lectura de este run, si se ha quedado leyendo
         if: failure() || cancelled()
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_dbline_disponibilidad.py --rescate
+
+      - name: Rescate · la pasada de este run, si se ha quedado descargando
+        if: failure() || cancelled()
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_rescate.py pasada
+
+  # 🔴 EL ULTIMO RESCATE: si un job de la lectura no llega a correr (cancelado mientras esperaba su turno, o un intento
+  #    de otra maquina que no arranca), la pasada de este run no se queda 'descargando' para siempre.
+  rescate:
+    needs: [abrir, barrer]
+    if: always() && needs.abrir.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install --quiet supabase==2.31.0
+
+      - name: Rescate · la pasada de este run, si sigue descargando
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PYTHONIOENCODING:     utf-8
         run: python -u escaner2_rescate.py pasada
