@@ -1121,24 +1121,21 @@ r, reg = lector_pro(base, Web(catalogo(), FICHAS), guarda=epd.GuardaPro(base, 'T
 eq('PD7 🔴 un vaciado leído por el PRO queda «fallida» (no «rechazada_vaciado»): no suma rechazos al freno',
    (base.pasadas()[0]['estado'], base.pasadas()[0]['motivo'].startswith(epd.PREFIJO_VACIADO + 'vaciado: 6 filas')),
    ('fallida', True))
+telegramas.clear()
 base = Base()
-r, reg = lector_pro(base, WebPared(catalogo(), FICHAS), intento=1)
-eq('PD8 la página anti-robots en el intento 1: otro intento (el 2), sin Telegram; la pasada de la lectura, fallida',
-   (r.pared, r.siguiente, base.pasadas()[0]['estado'], 'Telegram' in reg), (True, 2, 'fallida', False))
-r, reg = lector_pro(Base(), WebPared(catalogo(), FICHAS), intento=prog.INTENTOS)
-eq('PD9 …en el último intento, ya no: fallida, sin más intentos', (r.pared, r.pid is not None), (False, True))
-eq('PD10 🔴 (quien dirige) …y el motivo lo dice claro: la web no deja entrar a las máquinas de lectura, con los intentos y '
-   'la última lectura buena (aquí, ninguna); y ni uno más (3, como la horaria)',
-   (r.motivo_entero, prog.INTENTOS),
-   ('la web de TCG no deja entrar ahora a las máquinas de lectura (3 intentos); y no hay ninguna lectura buena', 3))
+r, reg = lector_pro(base, WebPared(catalogo(), FICHAS), guarda=epd.GuardaPro(base, 'TCG'))
+eq('PD8 🔴 (quien dirige) la página anti-robots: UN intento, sin otro ni Telegram; la pasada de la lectura, fallida, y el '
+   'motivo, claro, con la última lectura buena (aquí, ninguna)',
+   (r.pared, r.siguiente, base.pasadas()[0]['estado'], telegramas, r.motivo_entero, 'no reintenta' in reg),
+   (False, None, 'fallida', [], 'la web de TCG no deja entrar ahora a las máquinas de lectura; no hay ninguna lectura '
+                                'buena; vuelve a barrer', True))
 base = Base()
-r, reg = lector_pro(base, WebPared(catalogo(), FICHAS), intento=2)
-eq('PD11 en el intento 2 (no el último), la página anti-robots pide otro intento, sin motivo de «sin intentos»',
-   (r.pared, r.siguiente, r.motivo_entero), (True, 3, None))
+r, reg = lector_pro(base, Web(catalogo(), FICHAS, login=403), guarda=epd.GuardaPro(base, 'TCG'))
+eq('PD9 🔴 otro bloqueo (un 403): fallida con su motivo de siempre (no el de la página), y SIN Telegram (el PRO lo ve en la '
+   'pantalla)', (r.pared, r.motivo_entero, base.pasadas()[0]['estado'], telegramas), (False, None, 'fallida', []))
 base = Base()
-r, reg = lector_pro(base, Web(catalogo(), FICHAS, login=403), intento=prog.INTENTOS)
-eq('PD12 en el último intento, otro bloqueo (un 403, no la página anti-robots): el motivo de siempre, no el de «sin '
-   'intentos»', (r.pared, r.motivo_entero, base.pasadas()[0]['estado']), (False, None, 'fallida'))
+correr(base, Web(catalogo(), FICHAS, login=403))
+eq('PD10 …y la horaria, con el mismo 403, sí manda su Telegram (no cambia)', len(telegramas), 1)
 
 print()
 print('TODO OK' if not fallos else 'FALLOS: %d (%s)' % (len(fallos), ', '.join(fallos)))

@@ -67,7 +67,7 @@ jobs:
   #    motivo); si no, `camino` = leer.
   abrir:
     runs-on: ubuntu-24.04
-    timeout-minutes: 8
+    timeout-minutes: 10
     outputs:
       pasada: ${{ steps.abrir.outputs.pasada }}
       camino: ${{ steps.abrir.outputs.camino }}
@@ -148,7 +148,8 @@ jobs:
     needs: abrir
     if: needs.abrir.outputs.camino == 'leer'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # 45 min: cabe con holgura la instalacion (~2) + la lectura (12) + el barrido (10) + lo de despues (10) + rescates.
+    timeout-minutes: 45
     # 🔒 EL GRUPO DE LA LECTURA HORARIA (escaner2-dbline): nunca dos lecturas de DBLine a la vez, ni dos sesiones en su web. Solo se llega
     #    aqui cuando `abrir` no ha visto ninguna lectura en marcha, asi que casi nunca se espera (ni se queda pendiente).
     concurrency:
@@ -179,9 +180,6 @@ jobs:
           OFERTAS_ELEGIDAS:     ${{ inputs.ofertas }}
           DBLINE_USER:          ${{ secrets.DBLINE_USER }}
           DBLINE_PASS:          ${{ secrets.DBLINE_PASS }}
-          KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}
-          TELEGRAM_TOKEN:       ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
           INTENTO:              '1'
           ESCANER2_PASADA:      ${{ needs.abrir.outputs.pasada }}
           PYTHONIOENCODING:     utf-8
@@ -212,8 +210,6 @@ jobs:
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          DBLINE_USER:          ${{ secrets.DBLINE_USER }}
-          DBLINE_PASS:          ${{ secrets.DBLINE_PASS }}
           KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}
           TELEGRAM_TOKEN:       ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -238,8 +234,8 @@ jobs:
           PYTHONIOENCODING:     utf-8
         run: python -u escaner2_rescate.py pasada
 
-  # 🔴 EL ULTIMO RESCATE: si un job no llega a correr (cancelado mientras esperaba su turno, un intento de otra maquina
-  #    que no arranca, o `abrir` que murio tras abrir la pasada), la pasada de este run no se queda 'descargando'.
+  # 🔴 EL ULTIMO RESCATE: si un job no llega a correr sus pasos (cancelado mientras esperaba su turno, o muerto), ni la
+  #    pasada del barrido se queda 'descargando' ni la lectura de este run 'leyendo' (que haria fallar todo PRO 1 h).
   rescate:
     needs: [abrir, barrer_ya, barrer]
     if: always()
@@ -263,3 +259,11 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           PYTHONIOENCODING:     utf-8
         run: python -u escaner2_rescate.py pasada
+
+      - name: Rescate · la lectura de este run, si se ha quedado leyendo
+        if: always()
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_dbline_disponibilidad.py --rescate

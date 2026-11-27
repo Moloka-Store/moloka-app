@@ -304,12 +304,17 @@ def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX
             print(f"TCG_AL_DIA: el contenido es el de la pasada aplicada {ex.pasada_aplicada}; nada nuevo.", flush=True)
             return 0, 'al_dia', catalogo, guardados, pid, previos
         print(f"TCG_NO_APLICADA: pasada {pid} {ex.estado}: {ex.motivo}", flush=True)
+        if ex.pared and guarda:
+            # (Encargo PD) El Escaneo PRO hace UN intento: sin Telegram ni reintento; la pantalla lo dice.
+            print("TCG_PARED: la web ha enseñado su página anti-robots a esta máquina; el Escaneo PRO no reintenta.",
+                  flush=True)
+            return 0, 'pared', None, None, pid, previos
         if ex.pared and intento < INTENTOS:
             # (19-nov-2026) Sin Telegram ni rojo: la pasada se repite en otra maquina (el workflow la relanza).
             print(f"TCG_PARED_REINTENTO: la web ha enseñado su página anti-robots a esta máquina; intento {intento} de "
                   f"{INTENTOS}: se lanza el {intento + 1}.º en otra máquina.", flush=True)
             return 0, 'pared', None, None, pid, previos
-        if ex.bloqueo:
+        if ex.bloqueo and not getattr(guarda, 'sin_telegram', False):   # (encargo PD) el PRO: lo ve en la pantalla
             tras = f' Ya van {INTENTOS} intentos, cada uno en otra máquina.' if ex.pared else ''
             avisar(f'⚠️ Escáner 2 · TCG: la pasada de la foto se ha parado porque la web de TCG no deja ({ex.motivo}).'
                    f'{tras} Nada inventado; el escáner viejo sigue como siempre.')

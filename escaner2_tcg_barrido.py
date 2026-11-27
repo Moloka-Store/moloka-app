@@ -61,7 +61,6 @@ if MODO not in ('marcas', 'todas', 'elegidas'):
 
 import escaner2_motor as e2  # noqa: E402
 import escaner2_tcg_pro as etc  # noqa: E402
-from escaner2_tcg_disponibilidad import INTENTOS as INTENTOS_TCG  # noqa: E402
 
 # 🔴 La seleccion del modo 'elegidas' se valida AQUI, antes de abrir ningun cliente (la MISMA regla que HEO). El
 #    selector de TCG no tiene casilla de ofertas: tiene que llegar a 'false'.
@@ -138,7 +137,7 @@ def main():
               f"{cierre['n_tandas']} tanda(s). Esperando los CSV de Keepa de ES, IT, FR y DE.", flush=True)
 
     epd.correr_barrido(sb, etc.PROVEEDOR, fila, barrer, (Fallo, etc.FalloTCG), abortar, listo, argv=sys.argv[1:],
-                       maximo_intentos=INTENTOS_TCG)
+                       maximo_intentos=1)
 
 
 def barrer(pasada, foto, nota=None):

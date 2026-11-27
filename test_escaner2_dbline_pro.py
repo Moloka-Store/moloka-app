@@ -847,6 +847,29 @@ eq('B6 · 🔴 [--leer, fallida] la lectura no deja: ROJO, la pasada fallida con
    (cod, _p[0]['estado'], 'no he podido leer' in (_p[0].get('motivo_fallo') or ''), sin_foto(bd), _sal.get('camino')),
    (1, 'fallida', True, True, None))
 
+# 🆕 (Segunda revisión) barrer_ya VUELVE A MEDIR, y la nota dice la verdad
+_ahora_iso = lambda m: (_dt.now(_tz.utc) - _td(minutes=m)).isoformat()  # noqa: E731
+cod, log, bd, _sal, _p, _r = caso_pd(lector={}, secretos=False, extra=[
+    {'id': 'pd-al-dia-rec', 'estado': 'rechazada', 'motivo': _AL_DIA, 'creada_en': _ahora_iso(6),
+     'terminada_en': _ahora_iso(5)}], env={'FOTO': _PD_DISP, 'FOTO_COMO': 'reciente', 'FOTO_HACE': '5'})
+_side = json.loads(base64.b64decode(bd['storage']['escaner2'][[k for k in bd['storage']['escaner2']
+                                                                if k.endswith('barrido.json')][0]]).decode('utf-8'))
+eq('B6 · 🔴 [barrer_ya, «al día» reciente] la nota NO dice «leída»: «confirmada hace 5 min; el contenido es el de la '
+   'lectura del …», comprobada cuando terminó ese «al día»',
+   (cod, (_side.get('lectura') or {}).get('texto', '').split(';')[0], (_side.get('lectura') or {}).get('como'),
+    (_side.get('lectura') or {}).get('comprobada_en', '')[:16] == _ahora_iso(5)[:16]),
+   (0, 'confirmada hace 5 min', 'confirmada_reciente', True))
+_viejo = dict(lector={}, secretos=False, env={'FOTO': _PD_DISP, 'FOTO_COMO': 'reciente', 'FOTO_HACE': '4'})
+cod, log, bd, _sal, _p, _r = caso_pd(**_viejo)
+eq('B6 · 🔴 [barrer_ya, ya no reciente] si al barrer la lectura ya pasa de los 15 min, no se sigue con el texto viejo: ROJO '
+   'y «fallida» con su motivo, sin foto',
+   (cod, _p[0]['estado'], 'ya no lo es' in (_p[0].get('motivo_fallo') or ''), sin_foto(bd)), (1, 'fallida', True, True))
+cod, log, bd, _sal, _p, _r = caso_pd(mutante_modulo=(
+    "                rec = lectura_reciente(sb, proveedor, datetime.now(timezone.utc))\n",
+    "                rec = (foto, 4, {'id': foto})\n"), **_viejo)
+eq('B6 · 🔴 mutante «barrer_ya se fía de lo que vio abrir»: el ancla es única y el barrido SALE (el banco lo ve)',
+   ('ANCLA_NO_UNICA' in log, cod, bool(_p) and _p[0]['estado']), (False, 0, 'esperando_csv'))
+
 # 🆕 (Decisiones de quien dirige, 27-nov-2026) La lectura buena de hace menos de 15 min: el PRO no vuelve a leer.
 cod, log, bd, _sal, _p, _r = caso_pd(lector={}, reciente=True)
 eq('B6 · 🔑 [reciente] una lectura buena terminada hace 5 min: VERDE desde ella, SIN volver a leer, y lo dice',

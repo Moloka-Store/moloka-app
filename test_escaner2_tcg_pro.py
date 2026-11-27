@@ -176,8 +176,9 @@ def lectura_de_mentira(bd, proveedor):
             if intento < int(lec.get('pared_hasta') or 0):
                 return epd.Lectura(pared=True, siguiente=intento + 1)
             pid = next((p['id'] for p in bd['tablas']['disp_pasada'] if str(p.get('run_id')) == run_id), None)
-            if lec.get('confirma') or lec.get('por_que'):
-                return epd.Lectura(pid=pid, confirma=lec.get('confirma'), por_que=lec.get('por_que'))
+            if lec.get('confirma') or lec.get('por_que') or lec.get('motivo_entero'):
+                return epd.Lectura(pid=pid, confirma=lec.get('confirma'), por_que=lec.get('por_que'),
+                                   motivo_entero=lec.get('motivo_entero'))
             aplicada = any(p['id'] == pid and p.get('estado') == 'aplicada' for p in bd['tablas']['disp_pasada'])
             return epd.Lectura(pid=pid, despues=(lambda: bd.setdefault('despues', []).append(pid) is None)
                                if aplicada else None)
@@ -877,18 +878,14 @@ eq('B6 · 🔴 [foto forzada] si la lectura diera otra foto que la última aplic
    (cod, _p[0]['estado'], 'no es la de la lectura de ahora' in (_p[0].get('motivo_fallo') or ''), sin_foto(bd)),
    (1, 'fallida', True, True))
 
-# La pagina anti-robots: la pasada sigue «descargando» y la retoma el job del intento 2, en otra maquina, del MISMO run
-cod, log, bd, _sal, _p, _r = caso_pd(quitar_run=False, lector={'pared_hasta': 2})
-eq('B6 · [pared] intento 1: VERDE, la pasada SIGUE descargando y GITHUB_OUTPUT pide el 2 con ESA pasada, sin foto',
-   (cod, [x['estado'] for x in _p], _sal.get('pared'), _sal.get('siguiente'), _sal.get('pasada') == _p[0]['id'],
-    sin_foto(bd)), (0, ['descargando'], '1', '2', True, True))
-_abierta = _p[0]['id']
-cod, log, bd, _sal, _p, _r = caso_pd(ruta=_r, env={'ESCANER2_PASADA': _abierta, 'INTENTO': '2'})
-eq('B6 · [pared] intento 2, en otra máquina: retoma la MISMA pasada y sale de la lectura de ahora',
-   (cod, [(x['id'], x['estado']) for x in _p], [x['intento'] for x in bd['lecturas']], _sal.get('pared')),
-   (0, [(_abierta, 'esperando_csv')], [1, 2], None))
-cod, log, bd, _sal, _p, _r = caso_pd(quitar_run=False, lector={}, env={'INTENTO': '4'})
-eq('B6 · INTENTO fuera de 1 a 3: ROJO y sin abrir nada', (cod, _p), (1, []))
+# La pagina anti-robots: UN intento (quien dirige); la pasada, fallida al momento con el motivo claro
+cod, log, bd, _sal, _p, _r = caso_pd(lector={'motivo_entero': 'la web de TCG no deja entrar ahora a las máquinas de '
+                                                             'lectura; la última lectura buena es del X; vuelve a barrer'})
+eq('B6 · 🔴 [pared] ROJO al momento, la pasada «fallida» con el motivo de la página tal cual, sin foto y sin pedir otro '
+   'intento', (cod, [x['estado'] for x in _p], (_p[0].get('motivo_fallo') or '').startswith('la web de TCG no deja entrar'),
+               sin_foto(bd), _sal.get('pared')), (1, ['fallida'], True, True, None))
+cod, log, bd, _sal, _p, _r = caso_pd(quitar_run=False, lector={}, env={'INTENTO': '2'})
+eq('B6 · INTENTO que no es 1: ROJO y sin abrir nada (ya no hay cadena de intentos)', (cod, _p), (1, []))
 
 # 🆕 (Revisión de quien dirige) `abrir` decide ANTES de entrar en el grupo de la horaria
 cod, log, bd, _sal, _p, _r = caso_pd(lector={}, reciente=True, args=['--abrir'])
@@ -933,6 +930,29 @@ cod, log, bd, _sal, _p, _r = caso_pd(args=['--leer'], **_ESCENAS['fallida'])
 eq('B6 · 🔴 [--leer, fallida] la lectura no deja: ROJO, la pasada fallida con su motivo, sin foto y sin camino',
    (cod, _p[0]['estado'], 'no he podido leer' in (_p[0].get('motivo_fallo') or ''), sin_foto(bd), _sal.get('camino')),
    (1, 'fallida', True, True, None))
+
+# 🆕 (Segunda revisión) barrer_ya VUELVE A MEDIR, y la nota dice la verdad
+_ahora_iso = lambda m: (_dt.now(_tz.utc) - _td(minutes=m)).isoformat()  # noqa: E731
+cod, log, bd, _sal, _p, _r = caso_pd(lector={}, secretos=False, extra=[
+    {'id': 'pd-al-dia-rec', 'estado': 'rechazada', 'motivo': _AL_DIA, 'creada_en': _ahora_iso(6),
+     'terminada_en': _ahora_iso(5)}], env={'FOTO': _PD_DISP, 'FOTO_COMO': 'reciente', 'FOTO_HACE': '5'})
+_side = json.loads(base64.b64decode(bd['storage']['escaner2'][[k for k in bd['storage']['escaner2']
+                                                                if k.endswith('barrido.json')][0]]).decode('utf-8'))
+eq('B6 · 🔴 [barrer_ya, «al día» reciente] la nota NO dice «leída»: «confirmada hace 5 min; el contenido es el de la '
+   'lectura del …», comprobada cuando terminó ese «al día»',
+   (cod, (_side.get('lectura') or {}).get('texto', '').split(';')[0], (_side.get('lectura') or {}).get('como'),
+    (_side.get('lectura') or {}).get('comprobada_en', '')[:16] == _ahora_iso(5)[:16]),
+   (0, 'confirmada hace 5 min', 'confirmada_reciente', True))
+_viejo = dict(lector={}, secretos=False, env={'FOTO': _PD_DISP, 'FOTO_COMO': 'reciente', 'FOTO_HACE': '4'})
+cod, log, bd, _sal, _p, _r = caso_pd(**_viejo)
+eq('B6 · 🔴 [barrer_ya, ya no reciente] si al barrer la lectura ya pasa de los 15 min, no se sigue con el texto viejo: ROJO '
+   'y «fallida» con su motivo, sin foto',
+   (cod, _p[0]['estado'], 'ya no lo es' in (_p[0].get('motivo_fallo') or ''), sin_foto(bd)), (1, 'fallida', True, True))
+cod, log, bd, _sal, _p, _r = caso_pd(mutante_modulo=(
+    "                rec = lectura_reciente(sb, proveedor, datetime.now(timezone.utc))\n",
+    "                rec = (foto, 4, {'id': foto})\n"), **_viejo)
+eq('B6 · 🔴 mutante «barrer_ya se fía de lo que vio abrir»: el ancla es única y el barrido SALE (el banco lo ve)',
+   ('ANCLA_NO_UNICA' in log, cod, bool(_p) and _p[0]['estado']), (False, 0, 'esperando_csv'))
 
 # 🆕 (Decisiones de quien dirige, 27-nov-2026) La lectura buena de hace menos de 15 min: el PRO no vuelve a leer.
 cod, log, bd, _sal, _p, _r = caso_pd(lector={}, reciente=True)

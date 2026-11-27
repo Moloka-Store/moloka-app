@@ -13,8 +13,8 @@ Esa funcion corre LA MISMA PASADA que la lectura horaria (escaner2_<proveedor>_d
   · quedo 'rechazada' con motivo «al día…», porque el contenido es el de la ultima aplicada. Esa foto queda
     confirmada como la de ahora: el motivo nombra la pasada aplicada y no puede haber otra aplicada despues, o
   · (solo OSMA) quedo 'rechazada' «OSMA no ha regenerado…», pero el fichero de ahora es EXACTAMENTE el de la ultima
-    aplicada (el md5 de su copia en el almacen) y desde ella no ha vencido ninguna lectura prevista de su horario
-    (`disp_frescura_en`: ultima_aplicada >= ultima_prevista). Es el fin de semana y el lunes antes de las 07:15: OSMA
+    aplicada (el md5 de su copia en el almacen) y la ultima lectura BUENA (la aplicada, o un «al día» posterior que la
+    confirma) no es anterior a la ultima lectura prevista de su horario (`disp_frescura_en`). Es el fin de semana y el lunes antes de las 07:15: OSMA
     no publica y ese fichero ES lo que tiene. Si ha vencido una prevista sin aplicar: «OSMA no ha publicado fichero
     nuevo hoy; el último es del <fecha>».
 En cualquier otro caso (fallida, rechazada_vaciado, otra rechazada, la web no deja, no se pudo lanzar) devuelve el
@@ -39,7 +39,10 @@ LOS CONTADORES POR PASADA (disp_aplicar_pasada no tiene reloj: cuenta pasadas, n
      los RECIENTE_MIN minutos. Contarlas por tiempo es una migracion de la v2: el siguiente paso, no este.
   3. «Al día» y 'fallida' no mueven ningun contador: la funcion de la base ni las ve.
 OTRAS:
-  4. TCG lee como mucho FICHAS_FUNKO_PRO fichas de Funko antes de la foto, y nunca el lector de tramos de despues.
+  4. TCG lee como mucho FICHAS_FUNKO_PRO fichas de Funko antes de la foto, y nunca el lector de tramos de despues. Ante
+     su pagina anti-robots, UN intento (quien dirige, 27-nov-2026): 'fallida' al momento, «la web de TCG no deja entrar
+     ahora a las máquinas de lectura; la última lectura buena es del …; vuelve a barrer», sin Telegram (`GuardaPro`
+     .sin_telegram: una lectura del PRO no manda el aviso de la parada; Fernando lo ve en la pantalla).
   5. Lo que la horaria hace tras aplicar (las novedades, con su aviso de avalancha; en OSMA, las fechas de vuelta) se
      hace igual, porque si no se perderia: la seleccion de novedades lee los cambios de ESA pasada. Va en SU PASO del
      workflow (`python escaner2_pro_en_directo.py --despues <PROVEEDOR>`, `tras_la_lectura`), con su tope, que corre
@@ -160,6 +163,9 @@ class GuardaPro:
     """Lo que la pasada de disponibilidad hace distinto cuando la lanza el Escaneo PRO (cabecera, punto 1: el vaciado del
     PRO no cuenta para el freno). La pasada la recibe como `guarda`; sin ella (la horaria), no cambia nada."""
 
+    # (Quien dirige) Una lectura del PRO no manda el Telegram de «la pasada se ha parado»: Fernando lo ve en la pantalla.
+    sin_telegram = True
+
     def __init__(self, sb, proveedor):
         self.sb, self.proveedor = sb, proveedor
 
@@ -206,8 +212,9 @@ def decidir(sb, proveedor, pid):
 
 
 def lectura_reciente(sb, proveedor, ahora, minutos=RECIENTE_MIN):
-    """(foto, hace_min) de la lectura buena del proveedor (aplicada, o «al día» de la ultima aplicada) TERMINADA hace
-    menos de `minutos`, o None. La buena es la que `decidir` daria por buena hoy (si despues se ha aplicado otra, no)."""
+    """(foto, hace_min, fila) de la lectura buena del proveedor (aplicada, o «al día» de la ultima aplicada) TERMINADA
+    hace menos de `minutos`, o None; `fila`, la de esa lectura (la aplicada misma, o el «al día» que la confirma). La
+    buena es la que `decidir` daria por buena hoy (si despues se ha aplicado otra, no)."""
     filas = (sb.table('disp_pasada').select('id,estado,motivo,terminada_en').eq('proveedor', proveedor)
              .order('terminada_en', desc=True).limit(20).execute().data or [])
     for f in filas:
@@ -218,8 +225,21 @@ def lectura_reciente(sb, proveedor, ahora, minutos=RECIENTE_MIN):
                                              and str(f.get('motivo') or '').startswith('al día')):
             foto, _por_que = decidir(sb, proveedor, f['id'])
             if foto:
-                return foto, int((ahora - t).total_seconds() // 60)
+                return foto, int((ahora - t).total_seconds() // 60), f
     return None
+
+
+def nota_reciente(sb, rec, ahora):
+    """La nota de una lectura reciente (`lectura_reciente`): si es la aplicada, «leída hace N min (la lectura del …)»; si es
+    un «al día», «confirmada hace N min; el contenido es el de la lectura del …». `comprobada_en`, cuando TERMINO esa
+    lectura (no la hora del barrido)."""
+    foto, hace, fila = rec
+    n = nota_de(sb, foto, 'reciente', _fecha(fila.get('terminada_en')) or ahora, hace)
+    if fila.get('id') != foto:
+        n.update(como='confirmada_reciente',
+                 texto=f"confirmada hace {hace} min; el contenido es el de la lectura del "
+                       f"{_madrid(_fecha(n['contenido_de'])) if n.get('contenido_de') else '—'}")
+    return n
 
 
 def confirmar_osma(sb, contenido, ahora, ruta_copia, bucket='escaner2', creado=None):
@@ -240,6 +260,15 @@ def confirmar_osma(sb, contenido, ahora, ruta_copia, bucket='escaner2', creado=N
     except Exception as ex:  # noqa: BLE001
         return None, f'no se ha podido mirar el horario de OSMA (disp_frescura_en: {type(ex).__name__})'
     u, p = _fecha(f.get('ultima_aplicada')), _fecha(f.get('ultima_prevista'))
+    # 🔑 La ultima lectura BUENA: la aplicada, o un «al día» posterior que la confirma (p. ej. el PRO aplica el fichero
+    #    nuevo a las 07:05 y la de las 07:15 sale «al día»: esa es la buena, no la de las 07:05).
+    al_dia = (sb.table('disp_pasada').select('motivo,terminada_en').eq('proveedor', 'OSMA').eq('estado', 'rechazada')
+              .order('terminada_en', desc=True).limit(20).execute().data or [])
+    for x in al_dia:
+        tx = _fecha(x.get('terminada_en'))
+        if tx and str(x.get('motivo') or '').startswith('al día') and str(ult['id']) in str(x.get('motivo')) \
+                and (u is None or tx > u):
+            u = tx
     if u is None or (p is not None and u < p):
         del_fichero = f'del {_madrid(creado)}' if creado else 'de antes de la última lectura prevista'
         return None, f'OSMA no ha publicado fichero nuevo hoy; el último es {del_fichero}'
@@ -326,25 +355,23 @@ def _leer_tcg(sb, env, run_id, intento, guarda, sesion=None, dormir=None):
     import escaner2_tcg_disponibilidad as d
     from escaner2_tcg_web import Web, sesion_de_verdad
     web = Web(sesion if sesion is not None else sesion_de_verdad(), **({'dormir': dormir} if dormir else {}))
+    # Con la guarda del PRO, la pasada, ante la pagina anti-robots, devuelve 'pared' sin Telegram ni reintento.
     _c, estado, _cat, _g, pid, _p = d.pasada(sb, web, run_id, env['TCG_USER'], env['TCG_PASS'], d._ahora(),
-                                             fichas_funko=d.FICHAS_FUNKO_PRO, intento=intento, guarda=guarda)
+                                             fichas_funko=d.FICHAS_FUNKO_PRO, intento=1, guarda=guarda)
     if estado == 'pared':
-        return Lectura(pid=pid, pared=True, siguiente=intento + 1)
-    if estado == 'fallida' and intento >= d.INTENTOS and pid:
-        m = str(((sb.table('disp_pasada').select('motivo').eq('id', pid).limit(1).execute().data or [{}])[0]).get('motivo')
-                 or '')
-        if m.endswith(f'intento {d.INTENTOS} de {d.INTENTOS}'):   # la pagina anti-robots, por ultima vez
-            return Lectura(pid=pid, motivo_entero=motivo_sin_intentos(sb, d.INTENTOS))
+        # (Quien dirige, 27-nov-2026) UN intento: la pagina anti-robots, al momento y dicho claro. Volver a pulsar es otra
+        # maquina; el PRO no encadena reintentos (se cancelaban con los de la horaria en su grupo).
+        return Lectura(pid=pid, motivo_entero=motivo_pared(sb))
     return Lectura(pid=pid, despues=(lambda: _despues_tcg(sb, env, run_id, pid, None)) if estado == 'aplicada' else None)
 
 
-def motivo_sin_intentos(sb, intentos):
-    """(Quien dirige, 27-nov-2026) TCG ha enseñado su pagina anti-robots a las `intentos` maquinas de lectura: dicho
-    claro, con la ultima lectura buena. No se reintenta mas ni mas deprisa."""
+def motivo_pared(sb):
+    """(Quien dirige, 27-nov-2026) TCG ha enseñado su pagina anti-robots a la maquina de lectura: dicho claro, con la
+    ultima lectura buena. Un intento: volver a barrer es otra maquina."""
     ult = _ultima_aplicada(sb, 'TCG')
     t = _fecha(ult.get('terminada_en') or ult.get('creada_en')) if ult else None
-    cola = f'la última lectura buena es del {_madrid(t)}' if t else 'y no hay ninguna lectura buena'
-    return f'la web de TCG no deja entrar ahora a las máquinas de lectura ({intentos} intentos); {cola}'
+    cola = f'la última lectura buena es del {_madrid(t)}' if t else 'no hay ninguna lectura buena'
+    return f'la web de TCG no deja entrar ahora a las máquinas de lectura; {cola}; vuelve a barrer'
 
 
 def _leer_dbline(sb, env, run_id, intento, guarda):
@@ -431,7 +458,7 @@ def leer_en_directo(sb, proveedor, env=None, run_id='', intento=1, lectores=None
     if reciente:
         print(f">>> LECTURA EN DIRECTO de {nombre}: leída hace {reciente[1]} min (menos de {RECIENTE_MIN}): no se vuelve a "
               f"leer; sale de esa lectura.", flush=True)
-        return Lectura(foto=reciente[0], nota=nota_de(sb, reciente[0], 'reciente', ahora, reciente[1]))
+        return Lectura(foto=reciente[0], nota=nota_reciente(sb, reciente, ahora))
     try:
         no = antes_de_leer(sb, proveedor, ahora)
     except Exception as ex:  # noqa: BLE001
@@ -563,8 +590,9 @@ def correr_barrido(sb, proveedor, fila, barrer, fallos, abortar, listo, env=None
         retoma la pasada, lee al proveedor en directo y, si la lectura deja, NO barre: deja en GITHUB_OUTPUT `camino=foto`,
         `foto`, `como`, `comprobada` y `hace` para el paso del barrido; si no deja, la pasada queda 'fallida';
       · sin argumentos: retoma esa pasada (ESCANER2_PASADA; sin ella, abre una). Con FOTO (la que ha decidido `abrir` o
-        el paso `--leer`, con FOTO_COMO, FOTO_HACE y FOTO_COMPROBADA), barre desde esa foto SIN leer; si no, lee al
-        proveedor en directo y, si la lectura deja, barre (lo de los bancos y una corrida a mano). Si la
+        el paso `--leer`, con FOTO_COMO, FOTO_HACE y FOTO_COMPROBADA), barre desde esa foto SIN leer (la reciente de
+        `abrir`, volviendo a medir que lo sigue siendo); si no, lee al proveedor en directo y, si la lectura deja, barre
+        (lo de los bancos y una corrida a mano). UN intento: la pagina anti-robots de TCG, 'fallida' al momento. Si la
         web de TCG enseña su pagina anti-robots y queda intento, la pasada SIGUE 'descargando' y GITHUB_OUTPUT dice
         `pared=1`, `siguiente` y `pasada`: la retoma el job siguiente, en otra maquina, en el MISMO run.
     Lo de despues de aplicar NO va aqui: es el paso `--despues` de este modulo, que corre aunque el barrido falle."""
@@ -604,19 +632,21 @@ def correr_barrido(sb, proveedor, fila, barrer, fallos, abortar, listo, env=None
         if foto:
             # La foto que ya ha decidido otro paso o job de ESTE run (`abrir`, o la lectura con --leer): sin leer.
             como = (env.get('FOTO_COMO') or 'reciente').strip()
-            hace = (env.get('FOTO_HACE') or '').strip() or None
-            cuando = _fecha((env.get('FOTO_COMPROBADA') or '').strip() or None) or datetime.now(timezone.utc)
+            if como == 'reciente':
+                # 🔴 Se VUELVE A MEDIR al barrer: `abrir` la vio de menos de 15 min, pero si este job ha tardado en coger
+                #    maquina y ya pasa (o ya no es la ultima buena), no se sigue con el texto viejo.
+                rec = lectura_reciente(sb, proveedor, datetime.now(timezone.utc))
+                if not rec or rec[0] != foto:
+                    raise FalloLectura(motivo_de_fallo(sb, proveedor, f'la lectura de hace menos de {RECIENTE_MIN} min que '
+                                                                      f'vio el arranque ya no lo es; vuelve a barrer'))
+                lectura = Lectura(foto=foto, nota=nota_reciente(sb, rec, datetime.now(timezone.utc)))
+            else:
+                cuando = _fecha((env.get('FOTO_COMPROBADA') or '').strip() or None) or datetime.now(timezone.utc)
+                hace = (env.get('FOTO_HACE') or '').strip() or None
+                lectura = Lectura(foto=foto, nota=nota_de(sb, foto, como, cuando, hace))
             print(f">>> Sale de la foto que ha decidido la lectura de este run ({como}): sin volver a leer.", flush=True)
-            lectura = Lectura(foto=foto, nota=nota_de(sb, foto, como, cuando, hace or ('?' if como == 'reciente' else None)))
         else:
             lectura = leer_en_directo(sb, proveedor, env, env.get('GITHUB_RUN_ID') or '', intento, lectores)
-        if lectura.pared:
-            if salida_github(env, pared=1, siguiente=lectura.siguiente, pasada=pasada):
-                print(f"ESCANER2_PARED_REINTENTO: la web de {nombre} ha enseñado su página anti-robots a esta máquina; la "
-                      f"pasada {pasada} sigue «descargando» y la retoma el intento {lectura.siguiente} en otra máquina.",
-                      flush=True)
-                return
-            raise FalloLectura(lectura.motivo + '; y sin GITHUB_OUTPUT no se puede pedir el siguiente intento')
         if lectura.foto is None:
             raise FalloLectura(lectura.motivo)
         if solo_leer:

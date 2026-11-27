@@ -1238,13 +1238,21 @@ def _base_pd(aplicada_hace=5, estado=(), extra=()):
 
 g = epd.GuardaPro(_base_pd(5), 'TCG')
 # 🔑 La lectura buena de hace menos de 15 min: se usa esa, sin volver a leer (quien dirige, 27-nov-2026)
-eq('(PD) reciente: la aplicada TERMINADA hace 4 min es la foto, y se dice cuánto hace',
-   epd.lectura_reciente(_base_pd(5), 'TCG', _AHORA), ('A', 4))
+eq('(PD) reciente: la aplicada TERMINADA hace 4 min es la foto, y se dice cuánto hace (y de qué lectura)',
+   epd.lectura_reciente(_base_pd(5), 'TCG', _AHORA)[:2] + (epd.lectura_reciente(_base_pd(5), 'TCG', _AHORA)[2]['id'],),
+   ('A', 4, 'A'))
 eq('(PD) reciente: terminada hace 15 min o más, ya no (se lee)', epd.lectura_reciente(_base_pd(16), 'TCG', _AHORA), None)
 _bd2 = _base_pd(90, extra=[{'id': 'D', 'proveedor': 'TCG', 'estado': 'rechazada', 'creada_en': _iso(6),
                             'terminada_en': _iso(5), 'motivo': 'al día: … pasada aplicada A; nada nuevo'}])
 eq('(PD) reciente: un «al día» de hace 5 min que confirma la última aplicada (de hace hora y media) vale: su foto',
-   epd.lectura_reciente(_bd2, 'TCG', _AHORA), ('A', 5))
+   epd.lectura_reciente(_bd2, 'TCG', _AHORA)[:2] + (epd.lectura_reciente(_bd2, 'TCG', _AHORA)[2]['id'],), ('A', 5, 'D'))
+eq('(PD) 🔴 la nota de una reciente DICE LA VERDAD: la aplicada, «leída hace 4 min»; el «al día», «confirmada hace 5 min; '
+   'el contenido es el de la lectura de hace hora y media»; y comprobada cuando TERMINÓ esa lectura, no ahora',
+   ([epd.nota_reciente(_base_pd(5), epd.lectura_reciente(_base_pd(5), 'TCG', _AHORA), _AHORA)[k]
+     for k in ('texto', 'comprobada_en')],
+    [epd.nota_reciente(_bd2, epd.lectura_reciente(_bd2, 'TCG', _AHORA), _AHORA)[k] for k in ('texto', 'comprobada_en')]),
+   (['leída hace 4 min (la lectura del 27-11-2026 a las 11:26); no se ha vuelto a leer', _iso(4)],
+    ['confirmada hace 5 min; el contenido es el de la lectura del 27-11-2026 a las 10:01', _iso(5)]))
 _bd3 = _base_pd(90, extra=[
     {'id': 'F', 'proveedor': 'TCG', 'estado': 'fallida', 'creada_en': _iso(3), 'terminada_en': _iso(2), 'motivo': 'x'},
     {'id': 'V', 'proveedor': 'TCG', 'estado': 'rechazada_vaciado', 'creada_en': _iso(4), 'terminada_en': _iso(3)},
@@ -1310,6 +1318,18 @@ eq('(PD) 🔴 OSMA el lunes a las 10:00, con la lectura prevista del lunes venci
                                                     'osma/ultimo/x.xlsx', 'escaner2', _CREADO),
    (None, 'OSMA no ha publicado fichero nuevo hoy; el último es del 27-11-2026 a las 03:33'))
 _b = _BaseOsma(b'PK\x03\x04 otro', _fresc(_dt(2026, 11, 27, 6, 15, tzinfo=_tz.utc)), disp_pasada=_APL_OSMA)
+# El PRO aplicó el fichero nuevo el viernes a las 07:05; la de las 07:15 salió «al día»: la última BUENA es la de las 07:15
+_APL_0705 = [{'id': 'OV', 'proveedor': 'OSMA', 'estado': 'aplicada', 'creada_en': '2026-11-27T06:04:00+00:00',
+              'terminada_en': '2026-11-27T06:05:00+00:00'},
+             {'id': 'OD', 'proveedor': 'OSMA', 'estado': 'rechazada', 'creada_en': '2026-11-27T06:15:00+00:00',
+              'terminada_en': '2026-11-27T06:16:00+00:00', 'motivo': 'al día: el fichero de hoy ya está aplicado (pasada OV)'}]
+_f0705 = [{'proveedor': 'OSMA', 'ultima_aplicada': '2026-11-27T06:05:00+00:00',
+           'ultima_prevista': '2026-11-27T06:15:00+00:00'}]
+eq('(PD) 🔴 OSMA: el PRO aplicó a las 07:05 y la de las 07:15 salió «al día»: el domingo CONFIRMA (la última buena es la de '
+   'las 07:15, no la aplicada de las 07:05)',
+   epd.confirmar_osma(_BaseOsma(_FICHERO, _f0705, disp_pasada=_APL_0705), _FICHERO, _DOMINGO, 'r', 'escaner2'), ('OV', None))
+eq('(PD) …sin ese «al día», no (la aplicada de las 07:05 es anterior a la prevista de las 07:15)',
+   epd.confirmar_osma(_BaseOsma(_FICHERO, _f0705, disp_pasada=_APL_0705[:1]), _FICHERO, _DOMINGO, 'r', 'escaner2')[0], None)
 eq('(PD) 🔴 OSMA: un fichero que no es el de la copia (no es más nuevo ni el mismo) no confirma, y ni mira el horario',
    (epd.confirmar_osma(_b, _FICHERO, _DOMINGO, 'r', 'escaner2')[0], [r[0] for r in _b.rpcs]), (None, ['download']))
 _b = _BaseOsma(None, _fresc(_dt(2026, 11, 27, 6, 15, tzinfo=_tz.utc)), disp_pasada=_APL_OSMA)
@@ -1401,10 +1421,10 @@ _r = epd.leer_en_directo(_bd, 'TCG', {'TCG_USER': 'u', 'TCG_PASS': 'p'}, '7', 2,
                                                                        or epd.Lectura(pid='R'))}, _AHORA)
 eq('(PD) el lector recibe el run, el intento y la guarda del PRO; con su pasada aplicada, sale su foto',
    (_vistos, _r.foto, _r.motivo), ([('7', 2, 'GuardaPro')], 'R', None))
-eq('(PD) 🔴 TCG sin intentos (la página anti-robots a las 3 máquinas): el motivo, claro, con la última lectura buena',
-   epd.motivo_sin_intentos(_base_pd(90), 3),
-   'la web de TCG no deja entrar ahora a las máquinas de lectura (3 intentos); la última lectura buena es del 27-11-2026 '
-   'a las 10:01')
+eq('(PD) 🔴 TCG, la página anti-robots (UN intento): el motivo, claro, con la última lectura buena',
+   epd.motivo_pared(_base_pd(90)),
+   'la web de TCG no deja entrar ahora a las máquinas de lectura; la última lectura buena es del 27-11-2026 a las 10:01; '
+   'vuelve a barrer')
 _r = epd.leer_en_directo(_base_pd(90), 'TCG', {'TCG_USER': 'u', 'TCG_PASS': 'p'}, '1', 3,
                          {'TCG': lambda *a: epd.Lectura(pid='P', motivo_entero='la web de TCG no deja entrar ahora …')}, _AHORA)
 eq('(PD) …y ese motivo va tal cual a la pantalla, sin foto', (_r.foto, _r.motivo), (None, 'la web de TCG no deja entrar ahora …'))
@@ -1542,6 +1562,12 @@ _MUTANTES_PD = [
      "    if not contenido:", lambda m: _osma(m, b'otro', _dt(2026, 11, 27, 6, 15, tzinfo=_tz.utc)) is None),
     ('OSMA sin mirar el horario', "    if u is None or (p is not None and u < p):", "    if u is None:",
      lambda m: _osma(m, _FICHERO, _dt(2026, 11, 30, 6, 15, tzinfo=_tz.utc)) is None),
+    ('OSMA solo con la aplicada (sin el «al día» posterior)', "                and (u is None or tx > u):\n            u = tx",
+     "                and False:\n            u = tx",
+     lambda m: m.confirmar_osma(_BaseOsma(_FICHERO, _f0705, disp_pasada=_APL_0705), _FICHERO, _DOMINGO, 'r',
+                                'escaner2')[0] == 'OV'),
+    ('la nota de un «al día» reciente como si fuera leída', "    if fila.get('id') != foto:", "    if False:",
+     lambda m: m.nota_reciente(_bd2, m.lectura_reciente(_bd2, 'TCG', _AHORA), _AHORA)['texto'].startswith('confirmada')),
     ('previo sin tope de espera', "        if esperado >= espera_max_s:", "        if False:",
      lambda m: m.previo(_base_pd(90, extra=_LEYENDO), 'TCG', ahora=lambda: _AHORA,
                         dormir=lambda s: (_ for _ in ()).throw(RuntimeError('esperaría para siempre')),
@@ -1562,66 +1588,77 @@ for _nombre, _antes, _despues, _bien in _MUTANTES_PD:
         _vista = True
     eq('(PD) 🔴 mutante «%s»: el banco lo ve (ROJO)' % _nombre, _vista, True)
 
-# Los cuatro workflows del barrido: el grupo de la horaria en la lectura, sus secretos y sus dependencias
+# Los cuatro workflows del barrido (encargo PD): el cableado entero, los rescates, los topes y los secretos de cada paso
 import yaml as _yaml  # noqa: E402
-for _p, _sec in (('tcg', ('TCG_USER', 'TCG_PASS')), ('dbline', ('DBLINE_USER', 'DBLINE_PASS')),
-                 ('ociostock', ('OCIOSTOCK_FEED_URL',)), ('osma', ('OSMA_USER', 'OSMA_PASS'))):
+_NOV = ('KEEPA_API_KEY', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID')
+for _p, _P, _sec in (('tcg', 'TCG', ('TCG_USER', 'TCG_PASS')), ('dbline', 'DBLINE', ('DBLINE_USER', 'DBLINE_PASS')),
+                     ('ociostock', 'OCIOSTOCK', ('OCIOSTOCK_FEED_URL',)), ('osma', 'OSMA', ('OSMA_USER', 'OSMA_PASS'))):
     _raiz = os.path.dirname(os.path.abspath(__file__))
     _wb = _yaml.safe_load(open(os.path.join(_raiz, '.github', 'workflows', 'escaner2-%s-barrido.yml' % _p), encoding='utf-8'))
     _wh = _yaml.safe_load(open(os.path.join(_raiz, '.github', 'workflows', 'escaner2-%s-disponibilidad.yml' % _p),
                                encoding='utf-8'))
     _grupo_h = _wh['concurrency']['group']
-    _lect = [j for n, j in _wb['jobs'].items() if n.startswith('barrer') and n != 'barrer_ya']
-    _pasos = [s for j in _lect for s in j['steps'] if 'barrido.py --leer' in str(s.get('run', ''))]
-    _barr = [s for j in _lect for s in j['steps'] if str(s.get('run', '')).strip().endswith('_barrido.py')]
-    _desp = [s for j in _lect for s in j['steps'] if '--despues' in str(s.get('run', ''))]
-    _pip_h = {x for s in _wh['jobs']['leer']['steps'] for x in str(s.get('run', '')).split() if '==' in x}
-    _pip_b = [{x for s in j['steps'] for x in str(s.get('run', '')).split() if '==' in x} for j in _lect]
-    _env_h = {k for s in _wh['jobs']['leer']['steps'] if 'disponibilidad.py' in str(s.get('run', ''))
-              and '--rescate' not in str(s.get('run')) for k in (s.get('env') or {})}
     _J = _wb['jobs']
-    _ab = _J['abrir']
-    eq('(PD) workflow %s: abrir (decide, sin grupo) → barrer_ya (la lectura reciente, sin grupo) | la(s) lectura(s) en el '
-       'grupo de la horaria (%s) → rescate final (always); el barrido, en su grupo PRO; y solo lee el repo' % (_p, _grupo_h),
-       (list(_J)[0], list(_J)[1], list(_J)[-1], {j['concurrency']['group'] for j in _lect},
-        'concurrency' in _J['barrer_ya'] or 'concurrency' in _ab, _wb['concurrency']['group'], _J['rescate']['if'],
-        _J['barrer_ya']['if'], _J['barrer']['if'], _wb.get('permissions')),
-       ('abrir', 'barrer_ya', 'rescate', {_grupo_h}, False, _grupo_h + '-pro', 'always()',
-        "needs.abrir.outputs.camino == 'reciente'", "needs.abrir.outputs.camino == 'leer'", {'contents': 'read'}))
-    eq('(PD) workflow %s: abrir deja pasada, camino, foto y hace, y tiene su rescate (si muere tras abrir la pasada)' % _p,
-       (sorted(_ab['outputs']), [s['if'] for s in _ab['steps'] if 'rescate' in str(s.get('run', ''))],
-        ['--abrir' in str(s.get('run', '')) for s in _ab['steps']].count(True)),
-       (['camino', 'foto', 'hace', 'pasada'], ['failure() || cancelled()'], 1))
-    eq('(PD) workflow %s: barrer_ya sale de la foto que dice abrir (FOTO, «reciente»), sin secretos del proveedor' % _p,
-       [(s['env'].get('FOTO'), s['env'].get('FOTO_COMO'), s['env'].get('ESCANER2_PASADA'), bool(set(_sec) & set(s['env'])))
-        for s in _J['barrer_ya']['steps'] if 'barrido.py' in str(s.get('run', ''))],
-       [('${{ needs.abrir.outputs.foto }}', 'reciente', '${{ needs.abrir.outputs.pasada }}', False)])
-    eq('(PD) workflow %s: 🔑 la lectura, en SU paso (--leer, separable), y el barrido en otro, detrás, solo si la lectura '
-       'da foto, con la foto de ese paso y SIN secretos del proveedor' % _p,
-       [(s.get('if'), s['env'].get('FOTO'), s['env'].get('FOTO_COMO'), bool(set(_sec) & set(s['env']))) for s in _barr],
-       [("steps.leer.outputs.camino == 'foto'", '${{ steps.leer.outputs.foto }}', '${{ steps.leer.outputs.como }}', False)]
-       * len(_lect))
-    eq('(PD) workflow %s: el paso de la lectura lleva los secretos y las claves del paso horario (menos sus inputs: '
-       'FICHAS_MAX, LISTADO, el MODO de OSMA), y las dependencias de la horaria' % _p,
-       (all(set(_sec) <= set(s['env']) for s in _pasos),
-        sorted((_env_h - {'FICHAS_MAX', 'LISTADO', 'INTENTO', 'MODO'}) - set(_pasos[0]['env'])),
-        all(_pip_h <= b for b in _pip_b), len(_pasos)), (True, [], True, 3 if _p == 'tcg' else 1))
-    eq('(PD) workflow %s: 🔴 lo de después, en SU paso de cada lectura, SIEMPRE (aunque el barrido falle), con su tope, '
-       'detrás del barrido y con las claves del horario (menos sus inputs)' % _p,
-       ([(s['if'], bool(s.get('timeout-minutes')), s['run'].split()[-1]) for s in _desp],
-        all(j['steps'].index([s for s in j['steps'] if '--despues' in str(s.get('run', ''))][0])
-            > j['steps'].index([s for s in j['steps'] if 'barrido.py' in str(s.get('run', ''))][0]) for j in _lect),
-        sorted((_env_h - {'FICHAS_MAX', 'LISTADO', 'INTENTO', 'MODO'}) - set(_desp[0]['env']))),
-       ([('always()', True, epd.PROVEEDORES and {'tcg': 'TCG', 'dbline': 'DBLINE', 'ociostock': 'OCIOSTOCK',
-                                                 'osma': 'OSMA'}[_p])] * len(_lect), True, []))
-    eq('(PD) workflow %s: los secretos del proveedor SOLO en los pasos de la lectura y de lo de después (ni en abrir, ni '
-       'en barrer_ya, ni en los rescates)' % _p,
-       sorted({n for n, j in _wb['jobs'].items() for s in j['steps'] for k in (s.get('env') or {})
-               if k in _sec and s not in _pasos and s not in _desp}), [])
-    eq('(PD) workflow %s: las salidas de cada lectura (pared, pasada) salen del paso de la lectura' % _p,
-       {n: j.get('outputs') for n, j in _J.items() if n.startswith('barrer_') is False and n.startswith('barrer')
-        and j.get('outputs')}, {'barrer': {'pared': '${{ steps.leer.outputs.pared }}',
-                                           'pasada': '${{ steps.leer.outputs.pasada }}'}} if _p == 'tcg' else {})
+    _prog, _lect = 'escaner2_%s_barrido.py' % _p, 'escaner2_%s_disponibilidad.py' % _p
+
+    def _paso(job, trozo):
+        ps = [s for s in _J[job]['steps'] if trozo in str(s.get('run', ''))]
+        return ps[0] if len(ps) == 1 else None
+
+    _pl, _pb = _paso('barrer', _prog + ' --leer'), [s for s in _J['barrer']['steps']
+                                                    if str(s.get('run', '')).strip() == 'python -u ' + _prog][0]
+    _pd = _paso('barrer', '--despues')
+    eq('(PD) workflow %s: 🔑 el cableado — abrir (sin needs ni grupo) → barrer_ya si camino=reciente | barrer si '
+       'camino=leer (en el grupo de la horaria, %s) → rescate siempre, con todos; ni un job más (ni reintentos)' % (_p, _grupo_h),
+       (list(_J), _J['abrir'].get('needs'), _J['abrir'].get('if'), 'concurrency' in _J['abrir'],
+        _J['barrer_ya']['needs'], _J['barrer_ya']['if'], 'concurrency' in _J['barrer_ya'],
+        _J['barrer']['needs'], _J['barrer']['if'], _J['barrer']['concurrency'],
+        _J['rescate']['needs'], _J['rescate']['if'], _wb['concurrency']['group'], _wb.get('permissions')),
+       (['abrir', 'barrer_ya', 'barrer', 'rescate'], None, None, False,
+        'abrir', "needs.abrir.outputs.camino == 'reciente'", False,
+        'abrir', "needs.abrir.outputs.camino == 'leer'", {'group': _grupo_h, 'cancel-in-progress': False},
+        ['abrir', 'barrer_ya', 'barrer'], 'always()', _grupo_h + '-pro', {'contents': 'read'}))
+    eq('(PD) workflow %s: abrir deja pasada, camino, foto y hace (de su paso --abrir), y tiene su rescate' % _p,
+       (_J['abrir']['outputs'], [s.get('if') for s in _J['abrir']['steps'] if 'escaner2_rescate.py pasada' in str(s.get('run'))]),
+       ({k: '${{ steps.abrir.outputs.%s }}' % k for k in ('pasada', 'camino', 'foto', 'hace')}, ['failure() || cancelled()']))
+    eq('(PD) workflow %s: barrer_ya barre la foto de abrir («reciente», que vuelve a medir), y tiene su rescate' % _p,
+       ([(s['env'].get('FOTO'), s['env'].get('FOTO_COMO'), s['env'].get('FOTO_HACE'), s['env'].get('ESCANER2_PASADA'))
+         for s in _J['barrer_ya']['steps'] if str(s.get('run', '')).strip() == 'python -u ' + _prog],
+        [s.get('if') for s in _J['barrer_ya']['steps'] if 'escaner2_rescate.py pasada' in str(s.get('run'))]),
+       ([('${{ needs.abrir.outputs.foto }}', 'reciente', '${{ needs.abrir.outputs.hace }}',
+          '${{ needs.abrir.outputs.pasada }}')], ['failure() || cancelled()']))
+    _orden = [s.get('run', '').strip() for s in _J['barrer']['steps'] if s.get('run', '').strip().startswith('python')]
+    eq('(PD) workflow %s: 🔑 barrer, en orden: la lectura (--leer, separable) → el barrido, solo si la lectura da foto y con '
+       'su foto → lo de después, SIEMPRE → los dos rescates (la lectura que siga leyendo y la pasada), si falla' % _p,
+       (_orden, _pl.get('id'), _pl.get('if'), _pb.get('if'), _pb['env'].get('FOTO'), _pb['env'].get('FOTO_COMO'),
+        _pb['env'].get('FOTO_COMPROBADA'), _pd.get('if'),
+        [s.get('if') for s in _J['barrer']['steps'] if '--rescate' in str(s.get('run')) or 'escaner2_rescate' in str(s.get('run'))]),
+       (['python -u %s --leer' % _prog, 'python -u %s' % _prog, 'python -u escaner2_pro_en_directo.py --despues %s' % _P,
+         'python -u %s --rescate' % _lect, 'python -u escaner2_rescate.py pasada'], 'leer', None,
+        "steps.leer.outputs.camino == 'foto'", '${{ steps.leer.outputs.foto }}', '${{ steps.leer.outputs.como }}',
+        '${{ steps.leer.outputs.comprobada }}', 'always()', ['failure() || cancelled()'] * 2))
+    eq('(PD) workflow %s: 🔴 el rescate final cierra la pasada del barrido Y la lectura de este run que siga leyendo' % _p,
+       [(s.get('if'), s.get('run', '').strip()) for s in _J['rescate']['steps'] if s.get('run', '').strip().startswith('python')],
+       [('always()', 'python -u escaner2_rescate.py pasada'), ('always()', 'python -u %s --rescate' % _lect)])
+    _tope_pasos = sum(int(s.get('timeout-minutes') or 0) for s in _J['barrer']['steps'])
+    eq('(PD) workflow %s: 🔴 el tope del job cubre la suma de los topes de sus pasos y la instalación con holgura (+8 min)'
+       % _p, (_tope_pasos, _J['barrer']['timeout-minutes'] >= _tope_pasos + 8,
+              all(int(j.get('timeout-minutes') or 0) >= sum(int(s.get('timeout-minutes') or 0) for s in j['steps']) + 3
+                  for j in _J.values())), (32, True, True))
+    _pip_h = {x for s in _wh['jobs']['leer']['steps'] for x in str(s.get('run', '')).split() if '==' in x}
+    _pip_b = {x for s in _J['barrer']['steps'] for x in str(s.get('run', '')).split() if '==' in x}
+    eq('(PD) workflow %s: barrer instala lo de la horaria' % _p, _pip_h <= _pip_b, True)
+    _con_sec = sorted('%s · %s' % (n, s.get('name')) for n, j in _J.items() for s in j['steps']
+                      if set(_sec) & set(s.get('env') or {}))
+    _con_nov = sorted('%s · %s' % (n, s.get('name')) for n, j in _J.items() for s in j['steps']
+                      if set(_NOV) & set(s.get('env') or {}))
+    _nombre = lambda s: 'barrer · ' + s['name']  # noqa: E731
+    eq('(PD) workflow %s: 🔴 cada paso, SOLO sus secretos: los del proveedor, en la lectura%s; Keepa y Telegram, %s'
+       % (_p, ' y en lo de después (OSMA vuelve a entrar)' if _p == 'osma' else '',
+          'en ningún paso (OSMA no tiene novedades)' if _p == 'osma' else 'solo en lo de después (las novedades)'),
+       (_con_sec, _con_nov, set(_sec) <= set(_pl['env']), set(_NOV) & set(_pl['env'])),
+       (sorted([_nombre(_pl)] + ([_nombre(_pd)] if _p == 'osma' else [])),
+        [] if _p == 'osma' else [_nombre(_pd)], True, set()))
 
 print()
 if fallos:
