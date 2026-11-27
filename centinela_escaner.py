@@ -5,7 +5,8 @@
 # ------------------------------------------------------------
 # QUE VIGILA: que cada proveedor con horario en `disp_parametros` (hoy TCG, HEO, DBLine,
 # OcioStock y OSMA; BEMS no tiene, lo sube Fernando a mano) siga LEYENDO. Si pierde
-# las dos ultimas lecturas previstas de su horario, avisa por Telegram.
+# las dos ultimas lecturas previstas de su horario -- o una, si ademas lleva mas de 26 h sin
+# lectura buena --, avisa por Telegram.
 #
 # POR QUE (27-nov-2026). Del 26-nov a las 13:20 al 27-nov a las 08:54 (Madrid) fallaron
 # TODAS las lecturas horarias de TCG y a Fernando no le llego nada: se entero al ver
@@ -23,6 +24,16 @@
 # adelante en hora de Madrid; una prevista esta VENCIDA cuando su hora + el margen ya
 # paso; el plazo es la N-esima vencida hacia atras (N = `pasadas_para_avisar`, hoy 2);
 # CADUCADO = sin ninguna lectura buena, o la ultima buena es anterior al plazo.
+# 🔴 LA REGLA DEL VIGILANTE ES LA DE REPONER *MAS UN SUELO DE 26 H*, NO LA MISMA. Tambien
+#    esta caducado el que ha perdido AL MENOS UNA lectura prevista y lleva mas de SUELO_H
+#    (26) horas sin lectura buena (quien dirige, revision del #403, 27-nov-2026). Por que: con
+#    dos lecturas perdidas, un proveedor de UNA lectura al dia avisaria MAS TARDE que el
+#    vigilante viejo de 26 h (OcioStock, unas 48 h; OSMA, el martes por un lunes perdido; TCG
+#    el domingo por un sabado perdido), y eso no puede empeorar. Con el suelo, nadie avisa mas
+#    tarde que antes, y los de cada hora siguen saltando a la segunda perdida. Lo de «al menos
+#    una perdida» es lo que evita la falsa alarma del fin de semana: sin lectura prevista no
+#    hay nada que perder (OSMA del viernes al lunes son 72 h, y no avisa hasta que se pierde
+#    la del lunes). Reponer no lleva el suelo: su franja sigue siendo la de la base.
 # 🔑 Por que no se llama a la funcion de la base y ya: cuenta SOLO las 'aplicada' y no
 #    devuelve el plazo, asi que no hay forma de sumarle las «al dia» (abajo). Cambiarla es
 #    una migracion con Fernando delante; esta copia de la cuenta la clava el banco con los
@@ -100,6 +111,10 @@ DIAS_ADELANTE = 8
 # Mientras un proveedor sigue caducado, un recordatorio cada 6 h como mucho: con el reloj
 # de 07:55 a 21:55, un fallo de la mañana da el aviso, uno por la tarde y otro a primera
 # hora del dia siguiente (el de la noche espera a las 07:55).
+# El suelo: con una lectura prevista perdida, mas de estas horas sin lectura buena es
+# caducado aunque la regla del horario aun no lo diga (ver la cabecera).
+SUELO_H = 26
+
 RECORDATORIO_H = 6
 # 🔑 Con holgura: la marca apunta la hora REAL de la vuelta, que se corre unos segundos o
 #    minutos de una a otra (el dispatch no arranca al segundo). Sin ella, el recordatorio de
@@ -171,6 +186,15 @@ def esta_caducado(ultima_buena, umbral):
     return umbral is not None and ultima_buena < umbral
 
 
+def suelo_vencido(ultima_buena, perdidas, ahora):
+    """El suelo de 26 h: AL MENOS una lectura prevista perdida desde la ultima buena y mas de
+    SUELO_H horas desde ella. Sin ninguna prevista perdida (un fin de semana sin horario) no
+    salta, lleve las horas que lleve."""
+    if ultima_buena is None or not perdidas:
+        return False
+    return (ahora - ultima_buena).total_seconds() / 3600.0 > SUELO_H
+
+
 def es_al_dia(pasada, aplicada):
     """Una 'rechazada' con el mismo contenido que la ultima aplicada: por la huella o por el
     md5 del fichero, nunca por el texto. Un valor vacio no casa con otro vacio."""
@@ -204,7 +228,8 @@ def diagnostico(par, pasadas, ahora):
                      and (ultima_buena is None or x['t'] > ultima_buena)),
                     key=lambda x: x['t'])
     perdidas = sorted(t for t in p['vencidas'] if ultima_buena is None or t > ultima_buena)
-    return {'caducado': esta_caducado(ultima_buena, p['umbral']),
+    return {'caducado': (esta_caducado(ultima_buena, p['umbral'])
+                         or suelo_vencido(ultima_buena, perdidas, ahora)),
             'ultima_buena': ultima_buena, 'ultima_aplicada': ultima_aplicada,
             'ultima_prevista': p['ultima_prevista'], 'siguiente_prevista': p['siguiente_prevista'],
             'umbral': p['umbral'], 'perdidas': perdidas, 'fallos': fallos}

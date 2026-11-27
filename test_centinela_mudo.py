@@ -186,24 +186,30 @@ def _escenario_de(caso):
             ('aplicada', _m('2026-11-24T09:13:10'), None, 'f-martes', None),
             ('rechazada', _m('2026-11-25T09:12:35'), None, m, 'al día: el fichero es el mismo')]})
     # --- Fines de semana ------------------------------------------------------------------------
-    # OSMA, de lunes a viernes a las 07:15: aplicada el viernes 20-nov. El domingo y el lunes a las
-    # 07:55 (la de las 07:15 del lunes vencida y perdida: una sola), AL DIA. El martes a las 07:55,
-    # sin lunes ni martes, CADUCADO.
+    # OSMA, de lunes a viernes a las 07:15: aplicada el viernes 20-nov. El domingo, AL DIA (sin ninguna
+    # prevista perdida el suelo no salta). El lunes a las 07:44, con la de las 07:15 sin vencer, AL DIA.
+    # El lunes a las 07:55, perdida la del lunes y 72 h sin lectura buena: CADUCADO por el suelo (sin
+    # el, el martes). El martes a las 07:55, CADUCADO por el horario.
     osma_vie = [('aplicada', _m('2026-11-20T07:16:02'), None, None, None)]
     if caso == 'osma_domingo':
         return _escenario(_m('2026-11-22T13:00:00'), {'OSMA': osma_vie})
+    if caso == 'osma_lunes_0744':
+        return _escenario(_m('2026-11-23T07:44:00'), {'OSMA': osma_vie})
     if caso == 'osma_lunes_0755':
         return _escenario(_m('2026-11-23T07:55:00'), {'OSMA': osma_vie})
     if caso == 'osma_martes_0755':
         return _escenario(_m('2026-11-24T07:55:00'), {'OSMA': osma_vie})
     # DBLine, de lunes a viernes de 07 a 21 (el sabado no esta en su horario): aplicada el viernes a
-    # las 21:06. El sabado, el domingo y el lunes a las 07:55 (perdida la de las 07:00), AL DIA. El
-    # lunes a las 09:55 sin nada del lunes, CADUCADO.
+    # las 21:06. El sabado y el domingo, AL DIA (sin prevista perdida). El lunes a las 07:25, sin vencer
+    # la de las 07:00, AL DIA. El lunes a las 07:55, perdida la de las 07:00 y 58,8 h sin lectura buena:
+    # CADUCADO por el suelo. A las 09:55, por el horario.
     db_vie = [('aplicada', _m('2026-11-20T21:06:12'), 'h-db', None, None)]
     if caso == 'dbline_sabado':
         return _escenario(_m('2026-11-21T13:00:00'), {'DBLINE': db_vie})
     if caso == 'dbline_domingo':
         return _escenario(_m('2026-11-22T21:55:00'), {'DBLINE': db_vie})
+    if caso == 'dbline_lunes_0725':
+        return _escenario(_m('2026-11-23T07:25:00'), {'DBLINE': db_vie})
     if caso == 'dbline_lunes_0755':
         return _escenario(_m('2026-11-23T07:55:00'), {'DBLINE': db_vie})
     if caso == 'dbline_lunes_0955':
@@ -213,6 +219,42 @@ def _escenario_de(caso):
     if caso == 'heo_domingo_0755':
         return _escenario(_m('2026-11-22T07:55:00'),
                           {'HEO': [('aplicada', _m('2026-11-21T09:06:30'), None, None, None)]})
+    # --- EL SUELO DE 26 H (quien dirige, revision del #403): nadie avisa mas tarde que el viejo ---
+    # OcioStock, una al dia a las 09:12: aplicada el martes 24 a las 09:13; el miercoles fallan la de
+    # las 09:12 y sus repasos de las 13 y las 17. Sin el suelo, el plazo seria la del martes hasta el
+    # jueves a las 09:42 (avisaria el jueves a las 09:55, ~48 h). Con el: el miercoles a las 10:55
+    # van 25,7 h -> AL DIA; a las 11:55, 26,7 h y una perdida -> CADUCADO.
+    ocio_d1 = [('aplicada', _m('2026-11-24T09:13:10'), None, 'f-mar', None),
+               ('fallida', _m('2026-11-25T09:13:00'), None, None, 'x'),
+               ('fallida', _m('2026-11-25T13:13:00'), None, None, 'x'),
+               ('fallida', _m('2026-11-25T17:13:00'), None, None, 'x')]
+    if caso in ('ocio_d1_1055', 'ocio_d1_1155'):
+        a = _m('2026-11-25T10:55:00' if caso == 'ocio_d1_1055' else '2026-11-25T11:55:00')
+        return _escenario(a, {'OCIOSTOCK': _hasta(ocio_d1, a)})
+    # TCG el fin de semana (una a las 12:20): ultima buena el viernes 20 a las 19:22; el sabado falla
+    # la de las 12:20. A las 20:55, 25,6 h -> AL DIA; a las 21:55, 26,6 h -> CADUCADO (sin el suelo,
+    # el domingo a las 12:55).
+    tcg_sab = [('aplicada', _m('2026-11-20T19:22:00'), 'h-vie', None, None),
+               ('fallida', _m('2026-11-21T12:21:00'), None, None, 'x')]
+    if caso in ('tcg_sabado_2055', 'tcg_sabado_2155'):
+        a = _m('2026-11-21T20:55:00' if caso == 'tcg_sabado_2055' else '2026-11-21T21:55:00')
+        return _escenario(a, {'TCG': tcg_sab})
+    # OSMA, un martes normal: aplicada el lunes 23 a las 07:16, el martes falla. A las 07:55, 24,7 h
+    # -> AL DIA; a las 09:55, 26,7 h -> CADUCADO (sin el suelo, el miercoles a las 07:55).
+    if caso in ('osma_martes_tras_lunes_0755', 'osma_martes_tras_lunes_0955'):
+        a = _m('2026-11-24T07:55:00' if caso.endswith('0755') else '2026-11-24T09:55:00')
+        return _escenario(a, {'OSMA': [('aplicada', _m('2026-11-23T07:16:00'), None, None, None),
+                                       ('fallida', _m('2026-11-24T07:16:00'), None, None, 'x')]})
+    # HEO con UNA fallida suelta: sabado 21 a las 08:00 (ultima buena, el viernes a las 18:06: 14,8 h)
+    # y lunes 23 a las 08:00 (ultima buena, el domingo a las 09:06: 23,8 h). A las 08:55, AL DIA.
+    if caso == 'heo_sabado_suelta':
+        return _escenario(_m('2026-11-21T08:55:00'), {'HEO': [
+            ('aplicada', _m('2026-11-20T18:06:00'), None, None, None),
+            ('fallida', _m('2026-11-21T08:01:00'), None, None, 'x')]})
+    if caso == 'heo_lunes_suelta':
+        return _escenario(_m('2026-11-23T08:55:00'), {'HEO': [
+            ('aplicada', _m('2026-11-22T09:06:00'), None, None, None),
+            ('fallida', _m('2026-11-23T08:01:00'), None, None, 'x')]})
     # --- El motivo, solo al Telegram -------------------------------------------------------------
     if caso == 'motivo_secreto':
         return _escenario(A_1455, {'TCG': [
@@ -396,8 +438,8 @@ def _nodo(nombre):
     sys.exit(1)
 
 
-CONSTANTES = ('DIAS_ATRAS', 'DIAS_ADELANTE', 'RECORDATORIO_H', 'HOLGURA_RECORDATORIO_MIN', 'HORAS_DE_AVISAR', 'RELOJ', 'MESES', 'LECTURA')
-FUNCIONES = ('previstas', 'plazo', 'esta_caducado', 'es_al_dia', 'lectura_buena', 'diagnostico', '_iso',
+CONSTANTES = ('DIAS_ATRAS', 'DIAS_ADELANTE', 'SUELO_H', 'RECORDATORIO_H', 'HOLGURA_RECORDATORIO_MIN', 'HORAS_DE_AVISAR', 'RELOJ', 'MESES', 'LECTURA')
+FUNCIONES = ('previstas', 'plazo', 'esta_caducado', 'suelo_vencido', 'es_al_dia', 'lectura_buena', 'diagnostico', '_iso',
              'eventos', 'marca_tras', 'hora_de_avisar', 'fecha_madrid', 'hora_madrid', '_motivo', '_detalle',
              'texto_de')
 _ns = {'timedelta': timedelta, 'datetime': datetime, 'timezone': timezone, 'MADRID': MAD, 'html': _html}
@@ -629,14 +671,40 @@ eq('(C) 🔴 [ocio_md5_distinto] con otro md5, no: ROJO', (_r['codigo'], _r['ver
 
 # --- Fines de semana -------------------------------------------------------------
 print()
-for _caso, _esperado in (('osma_domingo', 'al dia'), ('osma_lunes_0755', 'al dia'), ('osma_martes_0755', 'CADUCADO'),
-                         ('dbline_sabado', 'al dia'), ('dbline_domingo', 'al dia'), ('dbline_lunes_0755', 'al dia'),
+for _caso, _esperado in (('osma_domingo', 'al dia'), ('osma_lunes_0744', 'al dia'), ('osma_martes_0755', 'CADUCADO'),
+                         ('dbline_sabado', 'al dia'), ('dbline_domingo', 'al dia'), ('dbline_lunes_0725', 'al dia'),
                          ('dbline_lunes_0955', 'CADUCADO'), ('heo_domingo_0755', 'al dia')):
     _prov = _caso.split('_')[0].upper()
     _r = correr(_caso)
     eq('(C) 🔴 [%s] %s %s' % (_caso, _prov, 'sin falsa alarma: VERDE' if _esperado == 'al dia'
                               else 'entre semana, sin sus dos lecturas: ROJO'),
        (_r['codigo'], _r['veredicto']), (0 if _esperado == 'al dia' else 1, dict(_AL_DIA, **{_prov: _esperado})))
+
+# --- El suelo de 26 h: nadie avisa mas tarde que el vigilante viejo ------------------
+print()
+for _caso, _prov, _esperado, _dice in (
+        ('ocio_d1_1055', 'OCIOSTOCK', 'al dia', 'el dia siguiente a las 10:55 (25,7 h): aun no'),
+        ('ocio_d1_1155', 'OCIOSTOCK', 'CADUCADO', 'a las 11:55 (26,7 h, una perdida): SI, y no el D+2 a las 09:55'),
+        ('osma_lunes_0755', 'OSMA', 'CADUCADO', 'el lunes perdido avisa el lunes a las 07:55 (72 h), no el martes'),
+        ('osma_martes_tras_lunes_0755', 'OSMA', 'al dia', 'un martes perdido, a las 07:55 (24,7 h): aun no'),
+        ('osma_martes_tras_lunes_0955', 'OSMA', 'CADUCADO', '...a las 09:55 (26,7 h): SI'),
+        ('tcg_sabado_2055', 'TCG', 'al dia', 'el sabado perdido, a las 20:55 (25,6 h): aun no'),
+        ('tcg_sabado_2155', 'TCG', 'CADUCADO', '...a las 21:55 (26,6 h): SI, y no el domingo a las 12:55'),
+        ('heo_sabado_suelta', 'HEO', 'al dia', 'una fallida suelta el sabado a las 08:00 (14,8 h): NO avisa'),
+        ('heo_lunes_suelta', 'HEO', 'al dia', 'una fallida suelta el lunes a las 08:00 (23,8 h): NO avisa'),
+        ('dbline_lunes_0755', 'DBLINE', 'CADUCADO',
+         'la primera del lunes perdida (58,8 h desde el viernes): avisa a las 07:55')):
+    _r = correr(_caso)
+    eq('(C) 🔴 [%s] %s: %s' % (_caso, _prov, _dice),
+       (_r['codigo'], _r['veredicto']), (0 if _esperado == 'al dia' else 1, dict(_AL_DIA, **{_prov: _esperado})))
+eq('(A) el suelo son 26 h, las del vigilante viejo', _ns['SUELO_H'], 26)
+eq('(A) 🔴 el suelo NO salta sin ninguna prevista perdida, lleve las horas que lleve (el fin de semana de OSMA)',
+   _ns['suelo_vencido'](_m('2026-11-20T07:16:00'), [], _m('2026-11-23T07:44:00')), False)
+eq('(A) ...ni sin lectura buena (eso ya es caducado por la otra regla)',
+   _ns['suelo_vencido'](None, [1], _m('2026-11-23T07:44:00')), False)
+eq('(A) con una perdida: 26 h justas no, 26 h y un minuto si (mas de 26)',
+   [_ns['suelo_vencido'](_m('2026-11-24T09:13:00'), [1], _m(t))
+    for t in ('2026-11-25T11:13:00', '2026-11-25T11:14:00')], [False, True])
 
 # --- El motivo, solo al Telegram ---------------------------------------------------
 print()
@@ -720,7 +788,8 @@ def _sin_margen(fn):
 
 
 def _sin_al_dia(fn):
-    """`es_al_dia` siempre falso: una «al dia» deja de contar."""
+    """La funcion siempre falsa: con `es_al_dia`, una «al dia» deja de contar; con
+    `suelo_vencido`, desaparece el suelo de 26 h."""
     fn.body = [ast.Return(value=ast.Constant(value=False))]
     return True
 
@@ -734,6 +803,9 @@ eq('(R) 🔴 sin el margen, a las 14:45 ya saldria ROJO (el banco lo caza)', (_r
 _r = correr('tcg_al_dia_medio', ruta=estropeado('es_al_dia', _sin_al_dia))
 eq('(R) 🔴 sin contar las «al dia», la de en medio daria un aviso falso (el banco lo caza)',
    (_r['codigo'], _r['veredicto']['TCG']), (1, 'CADUCADO'))
+_r = correr('ocio_d1_1155', ruta=estropeado('suelo_vencido', _sin_al_dia))
+eq('(R) 🔴 sin el suelo de 26 h, OcioStock el dia siguiente a las 11:55 sale VERDE (el banco lo caza)',
+   (_r['codigo'], _r['veredicto']['OCIOSTOCK']), (0, 'al dia'))
 _r = correr('tcg_26nov_1455', ruta=estropeado('plazo', lambda fn: True))
 eq('(R) …y la copia SIN estropear (control) da lo mismo que el original: ROJO por TCG',
    (_r['codigo'], _r['veredicto']), (1, dict(_AL_DIA, TCG='CADUCADO')))
