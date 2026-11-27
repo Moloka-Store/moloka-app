@@ -1431,8 +1431,14 @@ eq('TO36 la corrida vieja dice la edad según GitHub y cuánto va el reloj del e
    (codigo, 'según la hora de GitHub' in reg, 'el reloj del equipo va +2.0 min respecto a GitHub' in reg), (0, True, True))
 base, web = Base(), Web(catalogo(), FICHAS)
 codigo, reg = correr_oficina(base, web, GitHub(hace_min=prog.EDAD_MAXIMA_MIN + 5, sin_hora=True))
-eq('TO37 si GitHub no da su hora, la del equipo (y no se puede ver el desfase)', (codigo, base.pasadas(), "va ¿? respecto" in reg),
-   (0, [], True))
+eq('TO37 🔴 si GitHub no da su hora (sin cabecera Date), ni la edad ni el reloj se pueden comprobar: ROJO sin leer',
+   (codigo, base.pasadas(), web.pedidas, 'TCG_SIN_EDAD' in reg), (1, [], [], True))
+base, web = Base(), Web(catalogo(), FICHAS)
+g = GitHub(hace_min=1)
+_pedir = g.pedir
+g.pedir = lambda *a, **k: (lambda r: (r.headers.update(Date='no es una fecha'), r)[1])(_pedir(*a, **k))
+codigo, reg = correr_oficina(base, web, g)
+eq('TO37b …y si la trae pero no se entiende, igual', (codigo, base.pasadas(), 'TCG_SIN_EDAD' in reg), (1, [], True))
 eq('TO38 el desfase que se consiente: 5 min', prog.DESFASE_MAX_MIN, 5)
 
 print()

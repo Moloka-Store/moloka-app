@@ -136,10 +136,18 @@ def cerrar_vieja(sb, f, ahora, avalancha, env=None, post=None):
     n = _novedades(f)
     if n > avalancha:
         import escaner2_novedades as nv
-        nv.enviar_telegram(f'⚠️ Avalancha con retraso: la pasada de TCG del {_madrid(f.get("creada_en"))} tuvo {n} cambios en '
-                           f'Funko (más de {avalancha}) y no se llegó a avisar a tiempo; no se ha valorado ninguna. Si sigue '
-                           f'interesando, lanza un Escaneo PRO.', env=env, post=post, imprimir=lambda *a, **k: None)
+        avisado = nv.enviar_telegram(f'⚠️ Avalancha con retraso: la pasada de TCG del {_madrid(f.get("creada_en"))} tuvo {n} '
+                                     f'cambios en Funko (más de {avalancha}) y no se llegó a avisar a tiempo; no se ha '
+                                     f'valorado ninguna. Si sigue interesando, lanza un Escaneo PRO.', env=env, post=post,
+                                     imprimir=lambda *a, **k: None)
+        if not avisado:
+            # La pasada ya esta cerrada: el aviso no se repite. ROJO y dicho (sin el texto).
+            raise AvisoNoEnviado(len(filas))
     return len(filas)
+
+
+class AvisoNoEnviado(Exception):
+    """La avalancha vieja se ha cerrado, pero su aviso con retraso no ha salido. Lleva cuantas novedades caducaron."""
 
 
 def cerrar_avalancha_y_avisar(sb, f, ahora, env, post, hacer):
@@ -211,6 +219,10 @@ def valorar(sb, pasada, env, ahora=None, valorar_pasada=None, post=None, cerrar_
             print(f">>> SIN VALORAR A TIEMPO: la pasada {f['pasada_id']} (seleccionada hace más de {TOPE_PENDIENTE_H} h"
                   f"{', avalancha: avisada con retraso' if _novedades(f) > nv.AVALANCHA else ''}) se cierra sin valorar · {n} "
                   f"novedad(es) caducadas.", flush=True)
+        except AvisoNoEnviado as ex:
+            print(f">>> SIN VALORAR A TIEMPO: la pasada {f['pasada_id']} (avalancha) se cierra sin valorar · {ex.args[0]} "
+                  f"novedad(es) caducadas · el aviso con retraso NO ha salido (no se repite: ya está cerrada).", flush=True)
+            mal += 1
         except Exception as ex:  # noqa: BLE001 — 🔴 solo el tipo
             print(f">>> SIN VALORAR A TIEMPO: la pasada {f['pasada_id']} no se ha podido cerrar ({type(ex).__name__}).",
                   flush=True)

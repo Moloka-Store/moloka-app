@@ -603,8 +603,9 @@ def _fecha_iso(v):
 def edad_de_la_corrida(env, pedir=None, ahora=_ahora):
     """(edad, desfase): los minutos desde que GitHub creo (o relanzo) ESTA corrida, medidos con la HORA DEL SERVIDOR de
     GitHub (la cabecera Date de su respuesta), y cuantos minutos va adelantado (+) o atrasado (-) el reloj de este equipo
-    respecto a ella. (None, None) si no se puede saber; desfase None si la respuesta no trae la hora. Asi un reloj del
-    ordenador desfasado no hace «viejas» todas las corridas. Lee la API del repo de la corrida con su token (permiso
+    respecto a ella. (None, None) si no se puede saber, TAMBIEN si la respuesta no trae su hora: nunca se mide con el reloj
+    del ordenador sin poder comprobarlo (quien llama sale en ROJO sin leer). Asi un reloj desfasado no hace «viejas» todas
+    las corridas ni deja pasar una vieja. Lee la API del repo de la corrida con su token (permiso
     actions: read). NUNCA LANZA. 🔴 No imprime nada: ni la URL ni la respuesta."""
     run, repo, token = (env.get('GITHUB_RUN_ID') or ''), (env.get('GITHUB_REPOSITORY') or ''), (env.get('GITHUB_TOKEN') or '')
     if not (run.isdigit() and repo and token):
@@ -625,16 +626,12 @@ def edad_de_la_corrida(env, pedir=None, ahora=_ahora):
         if not momentos:
             return None, None
         local = ahora()
-        servidor, desfase = local, None
-        try:
-            from email.utils import parsedate_to_datetime
-            fecha = (getattr(r, 'headers', None) or {}).get('Date')
-            if fecha:
-                servidor = parsedate_to_datetime(fecha)
-                desfase = (local - servidor).total_seconds() / 60
-        except Exception:  # noqa: BLE001 — sin la hora del servidor, la del equipo
-            servidor, desfase = local, None
-        return (servidor - max(momentos)).total_seconds() / 60, desfase
+        from email.utils import parsedate_to_datetime
+        fecha = (getattr(r, 'headers', None) or {}).get('Date')
+        if not fecha:
+            return None, None
+        servidor = parsedate_to_datetime(fecha)   # una fecha que no se entiende lanza: (None, None), abajo
+        return (servidor - max(momentos)).total_seconds() / 60, (local - servidor).total_seconds() / 60
     except Exception:  # noqa: BLE001 — sin saberlo, se lee (una lectura de mas no rompe nada)
         return None, None
 

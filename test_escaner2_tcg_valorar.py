@@ -401,6 +401,13 @@ eq('V7 🔴 una AVALANCHA seleccionada hace más de 24 h y nunca cerrada: se cie
 codigo, reg, val = correr(base, ahora=T0 + timedelta(hours=1))
 eq('V8 …y no vuelve a avisar', len(telegramas), 1)
 AHORA = T0
+base = Base(nov=[nov(P[5], prog.TOPE_PENDIENTE_H * 3600 + 900, novedades=AV + 3, subidas=0)])
+codigo, reg, val = correr(base, post=lambda url, data, timeout: types.SimpleNamespace(status_code=500))
+eq('V8b 🔴 si el aviso con retraso no sale: la pasada queda cerrada (no se repite), ROJO y dicho, sin el texto',
+   (codigo, estados(base)[P[5]], 'el aviso con retraso NO ha salido' in reg, 'Avalancha con retraso' in reg), (1, 'fallida', True, False))
+codigo, reg, val = correr(base, ahora=T0 + timedelta(hours=1))
+eq('V8c …y la corrida siguiente ni la vuelve a cerrar ni lo intenta otra vez', (codigo, 'SIN VALORAR A TIEMPO' in reg), (0, False))
+AHORA = T0
 base = Base(nov=[nov(P[4], prog.MIRAR_AVALANCHAS_D * 86400 + 600)])
 base.falla_cierre = {P[4]}
 codigo, reg, val = correr(base)
