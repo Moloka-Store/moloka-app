@@ -667,7 +667,8 @@ MUTANTES_REGLAS = [
     ('el GTIN-14 tal cual', "        return base[1:13] + _chk13(base[1:13]), None", "        return None, 'ean_forma_rara'"),
 ]
 MUTANTES_PASADA = [
-    ('«al día» en rojo', "            return 0\n        print(f\"OCIOSTOCK_NO_APLICADA", "            return 1\n        print(f\"OCIOSTOCK_NO_APLICADA"),
+    ('«al día» en rojo', "            return 0, pid, None\n        print(f\"OCIOSTOCK_NO_APLICADA",
+     "            return 1, pid, None\n        print(f\"OCIOSTOCK_NO_APLICADA"),
     ('sin «al día»', "        if ult[0].get('fichero_md5') == md5:\n            raise AlDia(ult[0].get('id'))\n", ''),
     ('imprime el error', "motivo_log = f'error inesperado ({type(ex).__name__}); el detalle queda en disp_pasada.motivo'",
      "motivo_log = f'error inesperado: {ex}'"),
@@ -696,6 +697,57 @@ with tempfile.TemporaryDirectory() as tmp:
         rotos = []
         comprobar(prog, lambda n, o, e: rotos.append(n) if o != e else None)
         eq('(F) 🔴 el banco se pone ROJO con el mutante de la pasada «%s»' % nombre, bool(rotos), True)
+
+# ── (PD) 🆕 (Encargo PD, 27-nov-2026) LA LECTURA DEL ESCANEO PRO: la MISMA pasada, con la guarda del PRO ─────────────
+#    escaner2_pro_en_directo._leer_ociostock (lo que corre el barrido antes de la foto): la pasada aplica igual; lo de despues de
+#    aplicar (las novedades) solo con `despues()`, al final del barrido; si la guarda dice que no, no se aplica; y el
+#    vaciado del PRO no cuenta para el freno.
+import escaner2_pro_en_directo as epd  # noqa: E402
+
+
+class GuardaDeMentira:
+    def __init__(self, no=None):
+        self.no, self.vistas = no, []
+
+    def sin_freno(self, estado, motivo):
+        return epd.GuardaPro.sin_freno(self, estado, motivo)
+
+    def tras_aplicar(self, pid, fila):
+        return fila
+
+
+def lector_pro(base, guarda=None, **web_k):
+    """El lector del PRO, en este proceso, con requests de mentira. Devuelve (lectura, registro, las sesiones)."""
+    _guardado = sys.modules.get('requests')
+    _extra = []
+    sys.modules['requests'] = _modulo_requests(Web(**web_k), _extra)
+    salida = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(salida), contextlib.redirect_stderr(salida):
+            r = epd._leer_ociostock(base, {'OCIOSTOCK_FEED_URL': URL}, '4242', 1, guarda or GuardaDeMentira())
+    finally:
+        if _guardado is None:
+            sys.modules.pop('requests', None)
+        else:
+            sys.modules['requests'] = _guardado
+    return r, salida.getvalue(), _extra
+
+
+g = GuardaDeMentira()
+base = Base()
+r, reg, _x = lector_pro(base, g)
+pp = list(base.pasadas.values())[0]
+eq('PD1 la lectura del PRO: la pasada de la horaria, APLICADA, con su id en la lectura',
+   (pp['estado'], r.pid == pp['id'], r.motivo_entero), ('aplicada', True, None))
+eq('PD2 🔴 lo de después de aplicar NO antes de tiempo: solo disp_aplicar_pasada', ([n for n, _p in base.rpcs], len(_x)), (['disp_aplicar_pasada'], 1))
+_ok = r.despues()
+eq('PD3 …y con `despues()` (al final del barrido), lo de la horaria tras aplicar, de ESA pasada', (_ok, [n for n, _p in base.rpcs][1:], base.rpcs[1][1]), (True, ['nov_seleccionar_pasada', 'nov_cerrar_valoracion'], {'p_pasada': pp['id']}))
+eq('PD4 el registro no suelta datos', [x for x in (URL, CUERPO_ERROR) if x in reg], [])
+base = Base(minimo=5000)
+r, reg, _x = lector_pro(base, epd.GuardaPro(base, 'OCIOSTOCK'))
+pp = list(base.pasadas.values())[0]
+eq('PD5 🔴 un vaciado leído por el PRO queda «fallida» (no «rechazada_vaciado»): no suma rechazos al freno',
+   (pp['estado'], pp['motivo'].startswith(epd.PREFIJO_VACIADO + 'vaciado: ')), ('fallida', True))
 
 print()
 if fallos:

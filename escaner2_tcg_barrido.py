@@ -8,6 +8,15 @@ elegidas») por el workflow escaner2-tcg-barrido.yml, con el input `modo` (marca
 DISPONIBILIDAD que ya esta en la base (escaner2_tcg_disponibilidad.py, encargo T2, con el precio del tramo mas barato
 ya aplicado). Cero Keepa.
 
+🆕 EN DIRECTO (encargo PD, 27-nov-2026; Fernando: «El PRO tiene que ser en directo»). Lo de arriba de que no entra en la
+web ni baja el fichero YA NO VALE: antes del paso 2, `escaner2_pro_en_directo.leer_en_directo` corre la lectura de TCG
+de AHORA, la MISMA pasada que la horaria (escaner2_tcg_disponibilidad.py, con sus guardas y disp_aplicar_pasada). Solo se sigue si
+esa pasada de ESTE run queda 'aplicada' o «al día», y el paso 2 exige que la ultima aplicada sea la suya; si no, la
+pasada queda 'fallida' con el motivo y sin foto. Lo que la horaria hace tras aplicar (las novedades) va en su propio paso del workflow
+(`escaner2_pro_en_directo.py --despues`), que corre aunque este falle. Con `--abrir` (el job `abrir`, sin el grupo de la
+horaria) abre la pasada y decide: lectura de hace menos de 15 min (se barre desde ella, FOTO_RECIENTE, sin leer), leer,
+o 'fallida' si una lectura horaria a medias no acaba en 4 min. Sin argumentos, retoma esa pasada (ESCANER2_PASADA). Lo que escribe de mas, lo escribe esa lectura (disp_*, nov_*), no este programa.
+
 QUE HACE, EN ORDEN:
   1. abre una pasada en `escaner2_pasada` (proveedor TCG, su modo, estado 'descargando') con el id del run;
   2. lee la ULTIMA pasada APLICADA de TCG en `disp_pasada` y sus filas en `disp_estado` (las vistas en ella,
@@ -67,6 +76,7 @@ if MODO == 'elegidas':
         abortar('selección de marcas no válida: ni una marca')
 
 from escaner2_base import cliente  # noqa: E402
+import escaner2_pro_en_directo as epd  # noqa: E402
 
 BUCKET = 'escaner2'
 LOTE = 500
@@ -114,30 +124,23 @@ def _todas(tabla, columnas, orden, **filtros):
 
 
 def main():
-    pasada = str(uuid.uuid4())
-    abrir = {'id': pasada, 'proveedor': etc.PROVEEDOR, 'estado': 'descargando', 'modo': MODO,
-             'run_id': int(RUN_ID) if (RUN_ID or '').isdigit() else None}
+    fila = {'id': str(uuid.uuid4()), 'proveedor': etc.PROVEEDOR, 'estado': 'descargando', 'modo': MODO,
+            'run_id': int(RUN_ID) if (RUN_ID or '').isdigit() else None}
     if MODO == 'elegidas':
         # La base no admite una pasada 'elegidas' sin su lista (check escaner2_pasada_elegidas_con_lista).
-        abrir.update(marcas=ELEGIDAS, ofertas=False)
-    sb.table('escaner2_pasada').insert(abrir).execute()
-    print(f">>> Pasada {pasada} abierta (descargando) · TCG · modo {MODO}.", flush=True)
-    try:
-        cierre, n_lista = barrer(pasada)
-        # 🔒 El cierre DENTRO del try: si la base lo rechaza (el check del cuadre), la pasada queda 'fallida'.
-        sb.table('escaner2_pasada').update(cierre).eq('id', pasada).execute()
-    except Exception as ex:
-        motivo = str(ex) if isinstance(ex, (Fallo, etc.FalloTCG)) else f'{type(ex).__name__}: {ex}'
-        sb.table('escaner2_pasada').update(dict({'estado': 'fallida', 'motivo_fallo': motivo[:1000],
-                                                 'terminada_en': _ahora()},
-                                                **getattr(ex, 'recuentos', {}))).eq('id', pasada).execute()
-        # Al log, solo el tipo: el motivo puede llevar precios o EAN y el repo es publico.
-        abortar(f'pasada {pasada} fallida ({type(ex).__name__}); el motivo está en escaner2_pasada.motivo_fallo')
-    print(f">>> PASADA LISTA: {cierre['n_foto']} en la foto · {n_lista} códigos para el Visualizador en "
-          f"{cierre['n_tandas']} tanda(s). Esperando los CSV de Keepa de ES, IT, FR y DE.", flush=True)
+        fila.update(marcas=ELEGIDAS, ofertas=False)
+    # 🆕 (Encargo PD, 27-nov-2026) EN DIRECTO: antes de la foto, la lectura del proveedor de AHORA (la misma pasada que
+    #    la horaria, escaner2_pro_en_directo.py). Si no se aplica ni sale «al día», la pasada queda 'fallida' con el
+    #    motivo y no hay foto: NUNCA se valora con la lectura guardada.
+    def listo(cierre, extra):
+        print(f">>> PASADA LISTA: {cierre['n_foto']} en la foto · {extra} códigos para el Visualizador en "
+              f"{cierre['n_tandas']} tanda(s). Esperando los CSV de Keepa de ES, IT, FR y DE.", flush=True)
+
+    epd.correr_barrido(sb, etc.PROVEEDOR, fila, barrer, (Fallo, etc.FalloTCG), abortar, listo, argv=sys.argv[1:],
+                       maximo_intentos=1)
 
 
-def barrer(pasada):
+def barrer(pasada, foto, nota=None):
     # ── 1 · La foto de la que sale la pasada: la ultima APLICADA ───────────────────────────────
     ult = (sb.table('disp_pasada').select('id,creada_en,terminada_en,n_leidas,n_crudo,n_duplicados,n_sin_gtin,'
                                           'fichero_md5,huella_contenido')
@@ -145,6 +148,10 @@ def barrer(pasada):
            .execute().data or [None])[0]
     if not ult:
         raise Fallo('no hay ninguna pasada de TCG aplicada en disp_pasada')
+    # 🔴 (Encargo PD) LA FOTO ES LA DE LA LECTURA DE AHORA: la pasada aplicada de este run, o la que su «al día» confirma.
+    if ult['id'] != foto:
+        raise Fallo('la última pasada aplicada de %s (%s) no es la de la lectura de ahora (%s): no se valora con otra'
+                    % ('TCG', ult['id'], foto))
     filas = _todas('disp_estado', 'producto_prov,ean_original,ean_core,marca,nombre,categoria,precio_unidad,'
                    'precio_escalon,uds_escalon,es_caja,uds_caja,es_chase,en_oferta,disponible,preorder,regla,aviso,'
                    'pasada_id,ausencias', 'producto_prov', proveedor=etc.PROVEEDOR, ausencias=0)
@@ -224,7 +231,8 @@ def barrer(pasada):
     if len(tandas) > 1:
         for i, t in enumerate(tandas, 1):
             sb.storage.from_(BUCKET).upload(f'{base}/eans_{i}.txt', '\n'.join(t).encode('utf-8'), texto)
-    sidecar = {'pasada': pasada, 'modo': MODO, 'disp_pasada': ult['id'],
+    # 🆕 (Encargo PD) `lectura`: de qué lectura sale la foto y cuándo se comprobó (escaner2_pro_en_directo.nota_de).
+    sidecar = {'pasada': pasada, 'modo': MODO, 'disp_pasada': ult['id'], 'lectura': nota,
                'foto_en': ult.get('terminada_en') or ult.get('creada_en'), 'fichero_md5': ult.get('fichero_md5'),
                'huella_contenido': ult.get('huella_contenido'), 'n_lineas_excel': int(ult['n_crudo']),
                'n_duplicados_excel': int(ult['n_duplicados']), 'n_sin_tramo': cuentas['n_sin_tramo'],

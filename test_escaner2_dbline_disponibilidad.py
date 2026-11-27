@@ -582,6 +582,57 @@ with tempfile.TemporaryDirectory() as _tmp:
                         lambda n, o, e: _rotos.append(n) if o != e else None)
         eq('(H) 🔴 el banco se pone ROJO con el mutante «%s»' % _nombre, bool(_rotos), True)
 
+# ── (PD) 🆕 (Encargo PD, 27-nov-2026) LA LECTURA DEL ESCANEO PRO: la MISMA pasada, con la guarda del PRO ─────────────
+#    escaner2_pro_en_directo._leer_dbline (lo que corre el barrido antes de la foto): la pasada aplica igual; lo de despues de
+#    aplicar (la medición y las novedades) solo con `despues()`, al final del barrido; si la guarda dice que no, no se aplica; y el
+#    vaciado del PRO no cuenta para el freno.
+import escaner2_pro_en_directo as epd  # noqa: E402
+
+
+class GuardaDeMentira:
+    def __init__(self, no=None):
+        self.no, self.vistas = no, []
+
+    def sin_freno(self, estado, motivo):
+        return epd.GuardaPro.sin_freno(self, estado, motivo)
+
+    def tras_aplicar(self, pid, fila):
+        return fila
+
+
+def lector_pro(base, guarda=None, **web_k):
+    """El lector del PRO, en este proceso, con descargar_dbline de mentira. Devuelve (lectura, registro, nada)."""
+    _guardado = sys.modules.get('descargar_dbline')
+    sys.modules['descargar_dbline'] = descarga_de_mentira(web_k.get('contenido', bueno))
+    _extra = None
+    salida = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(salida), contextlib.redirect_stderr(salida):
+            r = epd._leer_dbline(base, {'DBLINE_USER': USUARIO, 'DBLINE_PASS': CLAVE}, '4242', 1, guarda or GuardaDeMentira())
+    finally:
+        if _guardado is None:
+            sys.modules.pop('descargar_dbline', None)
+        else:
+            sys.modules['descargar_dbline'] = _guardado
+    return r, salida.getvalue(), _extra
+
+
+g = GuardaDeMentira()
+base = Base()
+r, reg, _x = lector_pro(base, g)
+pp = list(base.pasadas.values())[0]
+eq('PD1 la lectura del PRO: la pasada de la horaria, APLICADA, con su id en la lectura',
+   (pp['estado'], r.pid == pp['id'], r.motivo_entero), ('aplicada', True, None))
+eq('PD2 🔴 lo de después de aplicar NO antes de tiempo: solo disp_aplicar_pasada', [n for n, _p in base.rpcs], ['disp_aplicar_pasada'])
+_ok = r.despues()
+eq('PD3 …y con `despues()` (al final del barrido), lo de la horaria tras aplicar, de ESA pasada', (_ok, [n for n, _p in base.rpcs][1:], base.rpcs[1][1]), (True, ['nov_seleccionar_pasada', 'nov_cerrar_valoracion'], {'p_pasada': pp['id']}))
+eq('PD4 el registro no suelta datos', limpio_de_datos(reg), [])
+base = Base(minimo=5000)
+r, reg, _x = lector_pro(base, epd.GuardaPro(base, 'DBLINE'))
+pp = list(base.pasadas.values())[0]
+eq('PD5 🔴 un vaciado leído por el PRO queda «fallida» (no «rechazada_vaciado»): no suma rechazos al freno',
+   (pp['estado'], pp['motivo'].startswith(epd.PREFIJO_VACIADO + 'vaciado: ')), ('fallida', True))
+
 print()
 if fallos:
     print('ROJO: %d comprobación(es) fallida(s):' % len(fallos))

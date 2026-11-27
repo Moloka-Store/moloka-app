@@ -6,6 +6,15 @@ Lo lanza el boton «Barrer OSMA» de la v2 (Escaneo PRO · pestaña OSMA) por el
 No entra en la web de OSMA: trabaja sobre la DESCARGA DIARIA que ya esta en la base (escaner2_osma_disponibilidad.py,
 cada dia a las 07:15, encargo AE). Cero Keepa, cero Amazon.
 
+🆕 EN DIRECTO (encargo PD, 27-nov-2026; Fernando: «El PRO tiene que ser en directo»). Lo de arriba de que no entra en la
+web ni baja el fichero YA NO VALE: antes del paso 2, `escaner2_pro_en_directo.leer_en_directo` corre la lectura de OSMA
+de AHORA, la MISMA pasada que la horaria (escaner2_osma_disponibilidad.py, con sus guardas y disp_aplicar_pasada). Solo se sigue si
+esa pasada de ESTE run queda 'aplicada' o «al día», y el paso 2 exige que la ultima aplicada sea la suya; si no, la
+pasada queda 'fallida' con el motivo y sin foto. Lo que la horaria hace tras aplicar (la copia del Excel y las fechas de vuelta) va en su propio paso del workflow
+(`escaner2_pro_en_directo.py --despues`), que corre aunque este falle. Con `--abrir` (el job `abrir`, sin el grupo de la
+horaria) abre la pasada y decide: lectura de hace menos de 15 min (se barre desde ella, FOTO_RECIENTE, sin leer), leer,
+o 'fallida' si una lectura horaria a medias no acaba en 4 min. Sin argumentos, retoma esa pasada (ESCANER2_PASADA). Lo que escribe de mas, lo escribe esa lectura (disp_*), no este programa.
+
 QUE HACE, EN ORDEN:
   1. abre una pasada en `escaner2_pasada` (proveedor OSMA, modo 'todas', estado 'descargando') con el id del run;
   2. lee la ULTIMA pasada APLICADA de OSMA en `disp_pasada` y sus articulos en `disp_estado` (los vistos en ella,
@@ -54,6 +63,7 @@ if not _llave_svc:
 import escaner2_motor as e2  # noqa: E402
 import escaner2_osma as eo  # noqa: E402
 from escaner2_base import cliente  # noqa: E402
+import escaner2_pro_en_directo as epd  # noqa: E402
 
 BUCKET = 'escaner2'
 LOTE = 500
@@ -101,32 +111,29 @@ def _todas(tabla, columnas, orden, **filtros):
 
 
 def main():
-    pasada = str(uuid.uuid4())
-    sb.table('escaner2_pasada').insert({
-        'id': pasada, 'proveedor': eo.PROVEEDOR, 'estado': 'descargando', 'modo': eo.MODO,
-        'run_id': int(RUN_ID) if (RUN_ID or '').isdigit() else None}).execute()
-    print(f">>> Pasada {pasada} abierta (descargando) · OSMA, artículos con marca y existencias.", flush=True)
-    try:
-        cierre, n_lista, n_fichas = barrer(pasada)
-        # 🔒 El cierre DENTRO del try: si la base lo rechaza (el check del cuadre), la pasada queda 'fallida'.
-        sb.table('escaner2_pasada').update(cierre).eq('id', pasada).execute()
-    except Exception as ex:
-        motivo = str(ex) if isinstance(ex, (Fallo, eo.FalloOsma)) else f'{type(ex).__name__}: {ex}'
-        sb.table('escaner2_pasada').update(dict({'estado': 'fallida', 'motivo_fallo': motivo[:1000],
-                                                 'terminada_en': _ahora()},
-                                                **getattr(ex, 'recuentos', {}))).eq('id', pasada).execute()
-        # Al log, solo el tipo: el motivo puede llevar precios o EAN y el repo es publico.
-        abortar(f'pasada {pasada} fallida ({type(ex).__name__}); el motivo está en escaner2_pasada.motivo_fallo')
-    print(f">>> PASADA LISTA: {cierre['n_foto']} en la foto · una lista de {n_lista} códigos (de ellos, {n_fichas} "
-          f"EAN de nuestras fichas que no traía OSMA). Esperando el CSV de Keepa de España.", flush=True)
+    fila = {'id': str(uuid.uuid4()), 'proveedor': eo.PROVEEDOR, 'estado': 'descargando', 'modo': eo.MODO,
+            'run_id': int(RUN_ID) if (RUN_ID or '').isdigit() else None}
+    # 🆕 (Encargo PD, 27-nov-2026) EN DIRECTO: antes de la foto, la lectura del proveedor de AHORA (la misma pasada que
+    #    la horaria, escaner2_pro_en_directo.py). Si no se aplica ni sale «al día», la pasada queda 'fallida' con el
+    #    motivo y no hay foto: NUNCA se valora con la lectura guardada.
+    def listo(cierre, extra):
+        print(f">>> PASADA LISTA: {cierre['n_foto']} en la foto · una lista de {extra[0]} códigos (de ellos, {extra[1]} "
+              f"EAN de nuestras fichas que no traía OSMA). Esperando el CSV de Keepa de España.", flush=True)
+
+    epd.correr_barrido(sb, eo.PROVEEDOR, fila, barrer, (Fallo, eo.FalloOsma), abortar, listo, argv=sys.argv[1:],
+                       maximo_intentos=1)
 
 
-def barrer(pasada):
+def barrer(pasada, foto, nota=None):
     # ── 1 · La descarga de la que sale la foto: la ultima APLICADA ─────────────────────────────
     ult = (sb.table('disp_pasada').select('id,creada_en,terminada_en,n_leidas').eq('proveedor', eo.PROVEEDOR)
            .eq('estado', 'aplicada').order('creada_en', desc=True).limit(1).execute().data or [None])[0]
     if not ult:
         raise Fallo('no hay ninguna descarga de OSMA aplicada en disp_pasada')
+    # 🔴 (Encargo PD) LA FOTO ES LA DE LA LECTURA DE AHORA: la pasada aplicada de este run, o la que su «al día» confirma.
+    if ult['id'] != foto:
+        raise Fallo('la última pasada aplicada de %s (%s) no es la de la lectura de ahora (%s): no se valora con otra'
+                    % ('OSMA', ult['id'], foto))
     filas = _todas('disp_estado', 'producto_prov,ean_original,ean_core,marca,nombre,categoria,precio_unidad,'
                    'disponible,en_oferta,fin_de_vida,regla,pasada_id,ausencias,visto_en', 'producto_prov',
                    proveedor=eo.PROVEEDOR, ausencias=0)
@@ -236,7 +243,9 @@ def barrer(pasada):
     # (Mapa de OSMA) Siempre, aunque vaya vacia: la v2 la lee para saber si espera uno o dos CSV.
     sb.storage.from_(BUCKET).upload(f'{base}/asins.txt', '\n'.join(lista_asin).encode('utf-8'), texto)
     en_foto = {f['producto_heo'] for f in foto}
+    # 🆕 (Encargo PD) `lectura`: de qué lectura sale la foto y cuándo se comprobó (escaner2_pro_en_directo.nota_de).
     sidecar = {
+        'lectura': nota,
         'pasada': pasada, 'disp_pasada': ult['id'], 'descarga_en': ult.get('terminada_en') or ult.get('creada_en'),
         'porte': dict(porte, pct=None if porte['pct'] is None else str(porte['pct'])),
         'enlaces': {c: e for c, e in enlaces.items() if c in en_foto},
@@ -254,7 +263,7 @@ def barrer(pasada):
               'ruta_lista': f'{base}/eans.txt', 'n_eans_lista': len(lista), 'n_tandas': 1, 'tanda': max(len(lista), 1)}
     for p in e2.PUERTAS_PREVIAS:
         cierre['p_' + p] = previas[p]
-    return cierre, len(lista), n_fichas_nuevos
+    return cierre, (len(lista), n_fichas_nuevos)
 
 
 def leer_mapa():

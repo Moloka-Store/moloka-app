@@ -188,7 +188,9 @@ PROGRAMAS = [
     ('escaner2_tcg_novedades_cuentas.py', 'solo-servicio', 1),   # escaner2-tcg-novedades-cuentas
     # 🆕 02-oct-2026 (encargo AG, Escaneo PRO de OSMA): el barrido lee `productos` (los enlaces por código) y el
     #    cruce tambien (el IVA de la ficha y el factor de nuestros packs); los dos corren desatendidos.
-    ('escaner2_osma_barrido.py',   'solo-servicio',         1),   # escaner2-osma-barrido
+    # 🆕 27-nov-2026 (encargo PD, Escaneo PRO en directo): CUATRO pasos, el job `abrir` (--abrir), el de la lectura
+    #    reciente (barrer_ya), y en el job de la lectura en directo, la lectura (--leer) y el barrido.
+    ('escaner2_osma_barrido.py',   'solo-servicio',         4),   # escaner2-osma-barrido
     ('escaner2_osma_cruce.py',     'solo-servicio',         1),   # escaner2-osma-cruce
     # 🆕 07-oct-2026 (encargo OC3, Escaneo PRO de OcioStock): el cruce lee `productos` (el IVA de la ficha), como el de
     #    HEO, y corre desatendido.
@@ -658,7 +660,7 @@ eq('(B) 🔴 ningun paso lanza ninguno de estos programas sin la llave de servic
 # (Encargo T4, 14-oct-2026) +1, el paso de las cuentas de las novedades de TCG.
 # (16-oct-2026, jubilar los viejos) -6: los cuatro directores, escaner-pro y detector-bems.
 # (Encargo F2, 16-oct-2026) +1, el paso del escaneo de una factura (escaner2-factura.yml).
-eq('(D) …y en total se han mirado los DIECISEIS pasos que existen, no cero', _total, 16)
+eq('(D) …y en total se han mirado los DIECINUEVE pasos que existen, no cero', _total, 19)
 
 # (C) la otra direccion: un paso que lanza el escaner sin la llave tiene que
 # salir en la lista. Este es el estado exacto de `director-dbline.yml` ayer.

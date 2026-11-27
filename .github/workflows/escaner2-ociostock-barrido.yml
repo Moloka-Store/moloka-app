@@ -11,14 +11,21 @@
 # 🔴 LOS INPUTS VIAJAN POR `env:`, NUNCA DENTRO DE `run:` (como en el de HEO): por env llegan como texto y el programa
 #    los valida antes de abrir ningun cliente.
 #
-# NO entra en la web de OcioStock ni baja su fichero: trabaja sobre la foto de disponibilidad que ya esta en la base
+# trabaja sobre la foto de disponibilidad que ya esta en la base
 # (escaner2-ociostock-disponibilidad.yml). Construye la FOTO de la pasada (disponible y sin preventa, sin chase suelto,
 # una fila por EAN con su precio mas bajo) y deja en el almacen cerrado `escaner2` la lista de EAN para los cuatro
 # Visualizadores de Keepa (ES, IT, FR, DE).
 #
+# 🆕 EN DIRECTO (encargo PD, 27-nov-2026; Fernando: «El PRO tiene que ser en directo»): ANTES de construir la foto,
+#    el barrido LEE A OcioStock EN ESE MOMENTO con la MISMA pasada que la lectura horaria (escaner2_ociostock_disponibilidad.py, con sus guardas
+#    y disp_aplicar_pasada; escaner2_pro_en_directo.py). Solo sigue si esa pasada de ESTE run queda 'aplicada' o
+#    «al día»; si no, la pasada del barrido queda 'fallida' con el motivo y NO hay foto: nunca se valora con la lectura
+#    guardada. Por eso este workflow lleva ahora los secretos de OcioStock y, para las novedades de esa pasada, los de Keepa y
+#    Telegram, como el horario.
+#
 # 🔴 REPO PUBLICO: este registro lo ve cualquiera. El programa SOLO imprime estados y recuentos; nada de precios,
 #    EAN, nombres ni el texto de un error (va a la base, que es privada).
-# 🔒 Cero tokens de Keepa, cero Amazon, cero credenciales de OcioStock: solo la llave de servicio de Supabase.
+# 🔒 Los secretos del proveedor (y los de Keepa y Telegram) SOLO en el paso de la lectura; los rescates, solo la base.
 # >>> SIN RELOJ <<<  Solo cuando se pulsa el boton (o a mano desde Actions).
 # ============================================================
 name: Moloka - Escaner 2 · Barrido OcioStock
@@ -43,14 +50,64 @@ on:
         default: false
         required: false
 
-# 🔒 Barrido y cruce de OcioStock, de uno en uno (el cruce lee la foto que el barrido deja). Grupo PROPIO: no espera a
-#    HEO ni a la foto de disponibilidad (si coincide con ella, el barrido lo nota y falla con el motivo).
+# 🔒 (Encargo PD) Los jobs llevan ahora los secretos del proveedor: el token del run, solo para leer el repo.
+permissions:
+  contents: read
+
+# 🔒 Barrido y cruce de OcioStock, de uno en uno (el cruce lee la foto que el barrido deja): grupo PROPIO, que no espera
+#    a HEO. 🆕 (Encargo PD) La LECTURA del barrido (sus jobs `barrer…`) entra ADEMAS en el grupo de la horaria.
 concurrency:
   group: escaner2-ociostock-pro
   cancel-in-progress: false
 
 jobs:
-  barrer:
+  # 🆕 (Encargo PD, 27-nov-2026) PRIMERO SE ABRE LA PASADA Y SE DECIDE, en un job SIN el grupo de la horaria: la pantalla
+  #    la ve «descargando» al momento. Si hay una lectura buena de hace menos de 15 min, `camino` = reciente (se barre
+  #    desde ella, sin leer); si hay una lectura en marcha, espera a que acabe como mucho 4 min (si no, «fallida» con el
+  #    motivo); si no, `camino` = leer.
+  abrir:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      pasada: ${{ steps.abrir.outputs.pasada }}
+      camino: ${{ steps.abrir.outputs.camino }}
+      foto:   ${{ steps.abrir.outputs.foto }}
+      hace:   ${{ steps.abrir.outputs.hace }}
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install --quiet supabase==2.31.0
+      - name: Abrir la pasada del barrido y decidir de qué lectura sale
+        id: abrir
+        timeout-minutes: 6
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          MODO_BARRIDO:         ${{ inputs.modo }}
+          MARCAS_ELEGIDAS:      ${{ inputs.marcas }}
+          OFERTAS_ELEGIDAS:     ${{ inputs.ofertas }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_ociostock_barrido.py --abrir
+
+      - name: Rescate · la pasada de este run, si se ha quedado descargando
+        if: failure() || cancelled()
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_rescate.py pasada
+
+  # La lectura buena de hace menos de 15 min: se barre desde ella, SIN leer y SIN el grupo de la horaria.
+  barrer_ya:
+    needs: abrir
+    if: needs.abrir.outputs.camino == 'reciente'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -63,11 +120,8 @@ jobs:
           python-version: '3.11'
 
       - name: Instalar dependencias
-        # Las mismas versiones FIJADAS que el barrido de OSMA.
-        run: pip install supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13
-
-      - name: De la foto de OcioStock a la pasada y la lista
-        # El tope en el PASO (15 min), no solo en el job (20): si se agota, el rescate de abajo tiene tiempo.
+        run: pip install --quiet supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13
+      - name: De la lectura de hace menos de 15 min, la pasada y la lista
         timeout-minutes: 15
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
@@ -75,12 +129,140 @@ jobs:
           MODO_BARRIDO:         ${{ inputs.modo }}
           MARCAS_ELEGIDAS:      ${{ inputs.marcas }}
           OFERTAS_ELEGIDAS:     ${{ inputs.ofertas }}
+          ESCANER2_PASADA:      ${{ needs.abrir.outputs.pasada }}
+          FOTO:                 ${{ needs.abrir.outputs.foto }}
+          FOTO_COMO:            'reciente'
+          FOTO_HACE:            ${{ needs.abrir.outputs.hace }}
+          PYTHONIOENCODING:     utf-8
         run: python -u escaner2_ociostock_barrido.py
 
-      # 🔴 SI EL RUN MUERE A MEDIAS, LA PASADA NO SE QUEDA COLGADA en 'descargando'.
-      - name: Rescate · si el run ha fallado, la pasada de este run queda 'fallida'
+      - name: Rescate · la pasada de este run, si se ha quedado descargando
         if: failure() || cancelled()
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PYTHONIOENCODING:     utf-8
         run: python -u escaner2_rescate.py pasada
+
+  barrer:
+    needs: abrir
+    if: needs.abrir.outputs.camino == 'leer'
+    runs-on: ubuntu-24.04
+    # 45 min: cabe con holgura la instalacion (~2) + la lectura (12) + el barrido (10) + lo de despues (10) + rescates.
+    timeout-minutes: 45
+    # 🔒 EL GRUPO DE LA LECTURA HORARIA (escaner2-ociostock): nunca dos lecturas de OcioStock a la vez, ni dos sesiones en su web. Solo se llega
+    #    aqui cuando `abrir` no ha visto ninguna lectura en marcha, asi que casi nunca se espera (ni se queda pendiente).
+    concurrency:
+      group: escaner2-ociostock
+      cancel-in-progress: false
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install --quiet supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13 requests==2.34.2
+      # 🔑 LA LECTURA, EN SU PASO (separable: llevarla a otra maquina es moverla a su job, con `needs`, sin tocar el
+      #    barrido, que solo lee la base y lo que este paso deja en GITHUB_OUTPUT).
+      - name: La lectura de OcioStock en directo
+        id: leer
+        # El tope en el PASO, no solo en el job: si se agota, lo de despues y los rescates tienen tiempo.
+        timeout-minutes: 12
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          MODO_BARRIDO:         ${{ inputs.modo }}
+          MARCAS_ELEGIDAS:      ${{ inputs.marcas }}
+          OFERTAS_ELEGIDAS:     ${{ inputs.ofertas }}
+          OCIOSTOCK_FEED_URL:   ${{ secrets.OCIOSTOCK_FEED_URL }}
+          INTENTO:              '1'
+          ESCANER2_PASADA:      ${{ needs.abrir.outputs.pasada }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_ociostock_barrido.py --leer
+
+      - name: De la lectura, la pasada y la lista
+        if: steps.leer.outputs.camino == 'foto'
+        timeout-minutes: 10
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          MODO_BARRIDO:         ${{ inputs.modo }}
+          MARCAS_ELEGIDAS:      ${{ inputs.marcas }}
+          OFERTAS_ELEGIDAS:     ${{ inputs.ofertas }}
+          ESCANER2_PASADA:      ${{ needs.abrir.outputs.pasada }}
+          FOTO:                 ${{ steps.leer.outputs.foto }}
+          FOTO_COMO:            ${{ steps.leer.outputs.como }}
+          FOTO_HACE:            ${{ steps.leer.outputs.hace }}
+          FOTO_COMPROBADA:      ${{ steps.leer.outputs.comprobada }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_ociostock_barrido.py
+
+      # 🔑 LO DE DESPUES DE APLICAR (las novedades), EN SU PASO, AUNQUE EL BARRIDO FALLE O MUERA: ninguna pasada aplicada por
+      #    este run se queda sin ello (y un vaciado que se quedo sin pasar a «fallida», pasa ahora).
+      - name: Lo de después de la lectura (novedades), aunque el barrido falle
+        if: always()
+        timeout-minutes: 10
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}
+          TELEGRAM_TOKEN:       ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_pro_en_directo.py --despues OCIOSTOCK
+
+      # 🔴 SI EL RUN MUERE A MEDIAS, NADA SE QUEDA COLGADO: ni la lectura de este run en 'leyendo' ni la pasada del
+      #    barrido en 'descargando' (las dos quedan 'fallida'; solo las de ESTE run).
+      - name: Rescate · la lectura de este run, si se ha quedado leyendo
+        if: failure() || cancelled()
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_ociostock_disponibilidad.py --rescate
+
+      - name: Rescate · la pasada de este run, si se ha quedado descargando
+        if: failure() || cancelled()
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_rescate.py pasada
+
+  # 🔴 EL ULTIMO RESCATE: si un job no llega a correr sus pasos (cancelado mientras esperaba su turno, o muerto), ni la
+  #    pasada del barrido se queda 'descargando' ni la lectura de este run 'leyendo' (que haria fallar todo PRO 1 h).
+  rescate:
+    needs: [abrir, barrer_ya, barrer]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install --quiet supabase==2.31.0
+      - name: Rescate · la pasada de este run, si se ha quedado descargando
+        if: always()
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_rescate.py pasada
+
+      - name: Rescate · la lectura de este run, si se ha quedado leyendo
+        if: always()
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_ociostock_disponibilidad.py --rescate

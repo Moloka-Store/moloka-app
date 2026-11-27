@@ -338,6 +338,7 @@ def escribir_excel(foto, resultados, apartados, M, info):
     elif modo == 'marcas':
         filas_res += [['Marcas del director', ', '.join(info.get('marcas') or []) or '(ninguna)']]
     filas_res += [['Foto de OcioStock (pasada de disponibilidad)', info.get('foto') or '—'],
+                  ['Lectura de OcioStock (encargo PD: en directo)', info.get('lectura') or '—'],
                   ['Precio de compra (PA)', 'el más barato: el escalón más bajo × 0,99 (transferencia), por figura; '
                                             '«Uds. escalón» dice cuántas pedir para ese precio'],
                   ['Umbral de caídas (30 días)', '%s (> %d)' % (e2.texto_corte(p['umbral']), p['umbral'])],
