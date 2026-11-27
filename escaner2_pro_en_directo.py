@@ -217,10 +217,11 @@ def decidir(sb, proveedor, pid):
 
 
 # ── Los cuatro lectores: la pasada de cada proveedor, con la guarda del PRO ─────────────────────────────────────
-def _leer_tcg(sb, env, run_id, intento, guarda):
+def _leer_tcg(sb, env, run_id, intento, guarda, sesion=None, dormir=None):
+    """`sesion` y `dormir`: los de mentira del banco (como `principal` de la pasada); en el workflow, los de verdad."""
     import escaner2_tcg_disponibilidad as d
     from escaner2_tcg_web import Web, sesion_de_verdad
-    web = Web(sesion_de_verdad())
+    web = Web(sesion if sesion is not None else sesion_de_verdad(), **({'dormir': dormir} if dormir else {}))
     _c, estado, _cat, _g, pid, _p = d.pasada(sb, web, run_id, env['TCG_USER'], env['TCG_PASS'], d._ahora(),
                                              fichas_funko=d.FICHAS_FUNKO_PRO, intento=intento, guarda=guarda)
     if estado == 'pared':

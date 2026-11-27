@@ -698,6 +698,67 @@ with tempfile.TemporaryDirectory() as carpeta:
         rotos = comprobar(ruta, lambda *_a: None)
         eq('(H) con el mutante %s el banco se pone ROJO en «%s»' % (nombre, vigila), vigila in rotos, True)
 
+# ── (PD) 🆕 (Encargo PD, 27-nov-2026) LA LECTURA DEL ESCANEO PRO: la MISMA pasada, con la guarda del PRO ─────────────
+#    escaner2_pro_en_directo._leer_osma (lo que corre el barrido antes de la foto): la pasada aplica igual; lo de despues de
+#    aplicar (la copia del Excel y las fechas de vuelta) solo con `despues()`, al final del barrido; si la guarda dice que no, no se aplica; y el
+#    vaciado del PRO no cuenta para el freno.
+import escaner2_pro_en_directo as epd  # noqa: E402
+
+
+class GuardaDeMentira:
+    def __init__(self, no=None):
+        self.no, self.vistas = no, []
+
+    def sin_freno(self, estado, motivo):
+        return epd.GuardaPro.sin_freno(self, estado, motivo)
+
+    def antes_de_aplicar(self, filas):
+        self.vistas.append(len(filas))
+        return self.no
+
+    def tras_aplicar(self, pid, fila):
+        return fila
+
+
+def lector_pro(base, guarda=None, **web_k):
+    """El lector del PRO, en este proceso, con requests de mentira. Devuelve (lectura, registro, las sesiones)."""
+    _guardado = sys.modules.get('requests')
+    _extra = []
+    sys.modules['requests'] = _modulo_requests(Web(**web_k), _extra)
+    salida = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(salida), contextlib.redirect_stderr(salida):
+            r = epd._leer_osma(base, {'OSMA_USER': USUARIO, 'OSMA_PASS': CLAVE}, '4242', 1, guarda or GuardaDeMentira())
+    finally:
+        if _guardado is None:
+            sys.modules.pop('requests', None)
+        else:
+            sys.modules['requests'] = _guardado
+    return r, salida.getvalue(), _extra
+
+
+g = GuardaDeMentira()
+base = Base()
+r, reg, _x = lector_pro(base, g)
+pp = list(base.pasadas.values())[0]
+eq('PD1 la lectura del PRO: la pasada de la horaria, APLICADA, con su id en la lectura; la guarda vio la lectura entera',
+   (pp['estado'], r.pid == pp['id'], r.pared, len(g.vistas)), ('aplicada', True, False, 1))
+eq('PD2 🔴 lo de después de aplicar NO antes de tiempo: solo disp_aplicar_pasada', ([n for n, _p in base.rpcs], base.subidas), (['disp_aplicar_pasada'], []))
+_ok = r.despues()
+eq('PD3 …y con `despues()` (al final del barrido), lo de la horaria tras aplicar, de ESA pasada', [(s[0], s[1]) for s in base.subidas], [('escaner2', 'osma/ultimo/osma_articles.xlsx')])
+eq('PD4 el registro no suelta datos', [x for x in (USUARIO, CLAVE, ID_FICHERO) if x in reg], [])
+base = Base()
+r, reg, _x = lector_pro(base, GuardaDeMentira(no='tan seguidas no cuentan'))
+pp = list(base.pasadas.values())[0]
+eq('PD5 🔴 si la guarda del PRO dice que no: la pasada «fallida» con su motivo, sin subir nada ni llamar a la función, y '
+   'sin lo de después', (pp['estado'], pp['motivo'], base.lotes, [n for n, _p in base.rpcs], r.despues),
+   ('fallida', 'tan seguidas no cuentan', [], [], None))
+base = Base(minimo=50000)
+r, reg, _x = lector_pro(base, epd.GuardaPro(base, 'OSMA'))
+pp = list(base.pasadas.values())[0]
+eq('PD6 🔴 un vaciado leído por el PRO queda «fallida» (no «rechazada_vaciado»): no suma rechazos al freno',
+   (pp['estado'], pp['motivo'].startswith(epd.PREFIJO_VACIADO + 'vaciado: ')), ('fallida', True))
+
 print()
 if fallos:
     print('ROJO: %d fallo(s): %s' % (len(fallos), '; '.join(fallos)))

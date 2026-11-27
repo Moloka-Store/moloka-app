@@ -1153,6 +1153,219 @@ eq('(K) (CJ4) en oferta = trae precio tachado, y sube su tachado: R1 sí (12,5),
 eq('(K) (CJ4) …y la descarga lo dice en su log con su nombre nuevo',
    ('En oferta (precio tachado de HEO, DESVÍO CJ4): 1' in _texto, 'campana/descuento' in _texto), (True, False))
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# (PD) 🆕 ENCARGO PD, 27-nov-2026 · escaner2_pro_en_directo POR DENTRO: la lectura en directo del Escaneo PRO
+#      (la guarda del PRO, el freno, el turno, la decision y el motivo). Los barridos de punta a punta, en los bancos
+#      *_pro (B6); los cuatro lectores reales, en los bancos de cada lectura.
+# ═══════════════════════════════════════════════════════════════════════════════
+print('\n(PD) la lectura en directo del Escaneo PRO, por dentro')
+import types as _types  # noqa: E402
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz  # noqa: E402
+import escaner2_pro_en_directo as epd  # noqa: E402
+
+
+class _BasePD:
+    """Una base de mentira minima: tablas en memoria; select/eq/order/limit/range/update."""
+
+    def __init__(self, **tablas):
+        self.t = {k: [dict(f) for f in v] for k, v in tablas.items()}
+        self.updates = []
+
+    def table(self, nombre):
+        base = self
+
+        class _Q:
+            def __init__(self):
+                self.f, self.op, self.datos, self.orden, self.tope, self.rango = [], 'select', None, None, None, None
+
+            def select(self, *_a, **_k):
+                return self
+
+            def update(self, d):
+                self.op, self.datos = 'update', d
+                return self
+
+            def eq(self, k, v):
+                self.f.append((k, v))
+                return self
+
+            def order(self, col, desc=False):
+                self.orden = (col, desc)
+                return self
+
+            def limit(self, n):
+                self.tope = n
+                return self
+
+            def range(self, a, b):
+                self.rango = (a, b)
+                return self
+
+            def execute(self):
+                filas = [x for x in base.t.setdefault(nombre, []) if all(x.get(k) == v for k, v in self.f)]
+                if self.op == 'update':
+                    base.updates.append((nombre, dict(self.f), self.datos))
+                    for x in filas:
+                        x.update(self.datos)
+                    return _types.SimpleNamespace(data=filas)
+                if self.orden:
+                    filas = sorted(filas, key=lambda x: str(x.get(self.orden[0])), reverse=self.orden[1])
+                if self.rango:
+                    filas = filas[self.rango[0]:self.rango[1] + 1]
+                if self.tope is not None:
+                    filas = filas[:self.tope]
+                return _types.SimpleNamespace(data=[dict(x) for x in filas])
+        return _Q()
+
+
+_AHORA = _dt(2026, 11, 27, 10, 30, tzinfo=_tz.utc)
+
+
+def _iso(min_antes):
+    return (_AHORA - _td(minutes=min_antes)).isoformat()
+
+
+_PAR = {'proveedor': 'TCG', 'rechazos_para_aceptar': 3, 'ausencias_para_salir': 2, 'sin_dato_para_agotar': 3}
+
+
+def _base_pd(aplicada_hace=5, estado=(), extra=()):
+    return _BasePD(disp_parametros=[_PAR],
+                   disp_pasada=[{'id': 'A', 'proveedor': 'TCG', 'estado': 'aplicada', 'creada_en': _iso(aplicada_hace),
+                                 'terminada_en': _iso(aplicada_hace - 1)}] + list(extra),
+                   disp_estado=list(estado))
+
+
+_EST = [{'proveedor': 'TCG', 'producto_prov': 'P1', 'en_catalogo': True, 'ausencias': 0, 'disponible': True,
+         'pasadas_sin_dato': 0},
+        {'proveedor': 'TCG', 'producto_prov': 'P2', 'en_catalogo': True, 'ausencias': 1, 'disponible': True,
+         'pasadas_sin_dato': 0},
+        {'proveedor': 'TCG', 'producto_prov': 'P3', 'en_catalogo': True, 'ausencias': 0, 'disponible': True,
+         'pasadas_sin_dato': 2},
+        {'proveedor': 'OTRO', 'producto_prov': 'P9', 'en_catalogo': True, 'ausencias': 1, 'disponible': True,
+         'pasadas_sin_dato': 0}]
+_LEIDAS = [{'producto_prov': 'P1'}, {'producto_prov': 'P3'}]
+# P2 falta (con 1 ausencia: la 2.ª lo sacaria); P3 llega sin dato (con 2: la 3.ª lo agotaria)
+g = epd.GuardaPro(_base_pd(5, _EST), 'TCG', _AHORA)
+_no = g.antes_de_aplicar(_LEIDAS)
+eq('(PD) 🔴 la guarda: con la última aplicada de hace 5 min, otra ausencia de P2 lo sacaría: no se aplica, y lo dice',
+   (_no is not None, 'sacaría del catálogo 1 producto(s) por 2 ausencias' in (_no or ''), 'hace 5 min' in (_no or '')),
+   (True, True, True))
+_no = g.antes_de_aplicar([{'producto_prov': 'P1'}, {'producto_prov': 'P2'}, {'producto_prov': 'P3',
+                                                                              'sin_dato_disponibilidad': True}])
+eq('(PD) 🔴 la guarda: P3 sin dato por 3.ª vez lo agotaría: no se aplica', 'agotaría 1 por 3 lecturas sin dato' in (_no or ''),
+   True)
+eq('(PD) la guarda calla: nadie sale ni se agota (P2 vuelve, P3 trae dato)',
+   g.antes_de_aplicar([{'producto_prov': 'P1'}, {'producto_prov': 'P2'}, {'producto_prov': 'P3'}]), None)
+eq('(PD) la guarda calla: la última aplicada es de hace 20 min (más que el piso de 15): la lectura cuenta como otra',
+   epd.GuardaPro(_base_pd(20, _EST), 'TCG', _AHORA).antes_de_aplicar(_LEIDAS), None)
+eq('(PD) la guarda calla: sin ninguna aplicada (la primera)',
+   epd.GuardaPro(_BasePD(disp_parametros=[_PAR], disp_pasada=[], disp_estado=_EST), 'TCG', _AHORA)
+   .antes_de_aplicar(_LEIDAS), None)
+eq('(PD) la guarda: sin los parámetros de la base, no se aplica (no se inventa el tope)',
+   'no da ausencias_para_salir' in (epd.GuardaPro(_BasePD(disp_parametros=[], disp_pasada=_base_pd(5).t['disp_pasada'],
+                                                          disp_estado=_EST), 'TCG', _AHORA).antes_de_aplicar(_LEIDAS) or ''),
+   True)
+# El vaciado del PRO no suma rechazos: ni el del programa ni el de la funcion
+eq('(PD) 🔴 sin_freno: un vaciado del programa queda «fallida», con su motivo; lo demás, tal cual',
+   (g.sin_freno('rechazada_vaciado', 'vaciado: x'), g.sin_freno('rechazada', 'al día: y'), g.sin_freno('fallida', 'z')),
+   (('fallida', epd.PREFIJO_VACIADO + 'vaciado: x'), ('rechazada', 'al día: y'), ('fallida', 'z')))
+_b = _base_pd(5, extra=[{'id': 'V', 'proveedor': 'TCG', 'estado': 'rechazada_vaciado', 'motivo': 'vaciado: w'},
+                        {'id': 'W', 'proveedor': 'TCG', 'estado': 'rechazada_vaciado', 'motivo': 'vaciado: q'}])
+_f = epd.GuardaPro(_b, 'TCG', _AHORA).tras_aplicar('V', {'id': 'V', 'estado': 'rechazada_vaciado', 'motivo': 'vaciado: w'})
+eq('(PD) 🔴 tras_aplicar: el vaciado que deja la función pasa a «fallida» (solo ESA pasada); la aplicada, intacta',
+   (_f['estado'], [p['estado'] for p in _b.t['disp_pasada'] if p['id'] in ('V', 'W')],
+    epd.GuardaPro(_b, 'TCG', _AHORA).tras_aplicar('A', {'id': 'A', 'estado': 'aplicada'})['estado']),
+   ('fallida', ['fallida', 'rechazada_vaciado'], 'aplicada'))
+# Antes de leer: el turno y el freno
+eq('(PD) antes de leer: nada en marcha y sin rechazos, se lee', epd.antes_de_leer(_base_pd(90), 'TCG', _AHORA), None)
+eq('(PD) 🔴 antes de leer: una «leyendo» de hace 10 min es otra lectura viva: no se lee a la vez',
+   'en marcha desde el 27-11-2026 a las 11:20' in (epd.antes_de_leer(_base_pd(90, extra=[
+       {'id': 'L', 'proveedor': 'TCG', 'estado': 'leyendo', 'creada_en': _iso(10)}]), 'TCG', _AHORA) or ''), True)
+eq('(PD) antes de leer: una «leyendo» de hace 2 h ya es huérfana (la función la cerrará): se lee',
+   epd.antes_de_leer(_base_pd(150, extra=[{'id': 'L', 'proveedor': 'TCG', 'estado': 'leyendo', 'creada_en': _iso(120)}]),
+                     'TCG', _AHORA), None)
+_rech = [{'id': 'R%d' % i, 'proveedor': 'TCG', 'estado': 'rechazada_vaciado', 'creada_en': _iso(60 - i)} for i in (1, 2, 3)]
+eq('(PD) 🔴 antes de leer: con 3 vaciados desde la última aplicada, esta podría aceptar la caída: no lee',
+   'lleva 3 lecturas rechazadas' in (epd.antes_de_leer(_base_pd(90, extra=_rech), 'TCG', _AHORA) or ''), True)
+eq('(PD) antes de leer: con 2, sí lee (la función solo acepta con 3 anteriores)',
+   epd.antes_de_leer(_base_pd(90, extra=_rech[:2]), 'TCG', _AHORA), None)
+eq('(PD) antes de leer: los vaciados de ANTES de la última aplicada no cuentan',
+   epd.antes_de_leer(_base_pd(30, extra=_rech), 'TCG', _AHORA), None)
+# Decidir
+_bd = _base_pd(90, extra=[
+    {'id': 'R', 'proveedor': 'TCG', 'estado': 'aplicada', 'creada_en': _iso(1), 'motivo': None},
+    {'id': 'D', 'proveedor': 'TCG', 'estado': 'rechazada', 'creada_en': _iso(0), 'motivo': 'al día: … pasada aplicada R; nada'},
+    {'id': 'X', 'proveedor': 'TCG', 'estado': 'rechazada', 'creada_en': _iso(0), 'motivo': 'descarga cortada: …'},
+    {'id': 'F', 'proveedor': 'TCG', 'estado': 'fallida', 'creada_en': _iso(0), 'motivo': 'la web no deja'},
+    {'id': 'H', 'proveedor': 'HEO', 'estado': 'aplicada', 'creada_en': _iso(0)}])
+eq('(PD) decidir: aplicada y la última → su foto; «al día» que nombra la última → esa; lo demás, no, con su porqué',
+   [epd.decidir(_bd, 'TCG', p) for p in ('R', 'D', 'X', 'F', 'A', 'H', None)],
+   [('R', None), ('R', None), (None, 'rechazada: descarga cortada: …'), (None, 'fallida: la web no deja'),
+    (None, 'la lectura se aplicó, pero después se ha aplicado otra'), (None, 'la pasada de la lectura no está en la base'),
+    (None, 'la lectura no llegó a abrir su pasada')])
+_bd.t['disp_pasada'].append({'id': 'D2', 'proveedor': 'TCG', 'estado': 'rechazada', 'creada_en': _iso(2),
+                             'motivo': 'al día: … pasada aplicada R; nada'})
+eq('(PD) 🔴 decidir: un «al día» ANTERIOR a la última aplicada no la confirma',
+   epd.decidir(_bd, 'TCG', 'D2'), (None, 'la lectura dice «al día», pero hay una aplicada posterior'))
+eq('(PD) el motivo para la pantalla: qué, por qué y con qué lectura NO se valora (hora de Madrid)',
+   epd.motivo_de_fallo(_base_pd(90), 'TCG', 'la web no deja'),
+   'no he podido leer a TCG ahora (la web no deja); no se valora con la lectura del 27-11-2026 a las 10:01')
+eq('(PD) …y sin ninguna lectura aplicada, lo dice',
+   epd.motivo_de_fallo(_BasePD(disp_pasada=[]), 'OSMA', 'x'),
+   'no he podido leer a OSMA ahora (x); y no hay ninguna lectura anterior aplicada')
+# leer_en_directo: nunca lanza
+
+
+def _revienta(*_a):
+    raise RuntimeError('fila con un EAN 4999999000001 y una URL https://x.invalid')
+
+
+_r = epd.leer_en_directo(_base_pd(90), 'TCG', {'TCG_USER': 'u', 'TCG_PASS': 'p'}, '1', 1, {'TCG': _revienta}, _AHORA)
+eq('(PD) 🔴 un lector que revienta: sin foto, el motivo dice solo el TIPO (ni el EAN ni la URL)',
+   (_r.foto, 'se ha caído (RuntimeError)' in _r.motivo, '4999' in _r.motivo or 'invalid' in _r.motivo), (None, True, False))
+_r = epd.leer_en_directo(_base_pd(90), 'OCIOSTOCK', {}, '1', 1, {'OCIOSTOCK': _revienta}, _AHORA)
+eq('(PD) sin el secreto del proveedor, ni se llama al lector', (_r.foto, 'OCIOSTOCK_FEED_URL' in _r.motivo), (None, True))
+_vistos = []
+_r = epd.leer_en_directo(_bd, 'TCG', {'TCG_USER': 'u', 'TCG_PASS': 'p'}, '7', 2,
+                         {'TCG': lambda sb, env, run, intento, guarda: (_vistos.append((run, intento, type(guarda).__name__))
+                                                                       or epd.Lectura(pid='R'))}, _AHORA)
+eq('(PD) el lector recibe el run, el intento y la guarda del PRO; con su pasada aplicada, sale su foto',
+   (_vistos, _r.foto, _r.motivo), ([('7', 2, 'GuardaPro')], 'R', None))
+eq('(PD) los cuatro proveedores tienen lector y secretos (los de su workflow horario)',
+   (sorted(epd.LECTORES), sorted(epd.PROVEEDORES), epd.PROVEEDORES['TCG'][1], epd.PROVEEDORES['OSMA'][1]),
+   (['DBLINE', 'OCIOSTOCK', 'OSMA', 'TCG'], ['DBLINE', 'OCIOSTOCK', 'OSMA', 'TCG'], ('TCG_USER', 'TCG_PASS'),
+    ('OSMA_USER', 'OSMA_PASS')))
+
+# Los cuatro workflows del barrido: el grupo de la horaria en la lectura, sus secretos y sus dependencias
+import yaml as _yaml  # noqa: E402
+for _p, _sec in (('tcg', ('TCG_USER', 'TCG_PASS')), ('dbline', ('DBLINE_USER', 'DBLINE_PASS')),
+                 ('ociostock', ('OCIOSTOCK_FEED_URL',)), ('osma', ('OSMA_USER', 'OSMA_PASS'))):
+    _raiz = os.path.dirname(os.path.abspath(__file__))
+    _wb = _yaml.safe_load(open(os.path.join(_raiz, '.github', 'workflows', 'escaner2-%s-barrido.yml' % _p), encoding='utf-8'))
+    _wh = _yaml.safe_load(open(os.path.join(_raiz, '.github', 'workflows', 'escaner2-%s-disponibilidad.yml' % _p),
+                               encoding='utf-8'))
+    _grupo_h = _wh['concurrency']['group']
+    _lect = [j for n, j in _wb['jobs'].items() if n.startswith('barrer')]
+    _pasos = [s for j in _lect for s in j['steps'] if 'barrido.py' in str(s.get('run', '')) and '--abrir' not in s['run']]
+    _pip_h = {x for s in _wh['jobs']['leer']['steps'] for x in str(s.get('run', '')).split() if '==' in x}
+    _pip_b = [{x for s in j['steps'] for x in str(s.get('run', '')).split() if '==' in x} for j in _lect]
+    _env_h = {k for s in _wh['jobs']['leer']['steps'] if 'disponibilidad.py' in str(s.get('run', ''))
+              and '--rescate' not in str(s.get('run')) for k in (s.get('env') or {})}
+    eq('(PD) workflow %s: abrir → lectura(s) en el grupo de la horaria (%s) → rescate final; el barrido, en su grupo PRO'
+       % (_p, _grupo_h),
+       (list(_wb['jobs'])[0], list(_wb['jobs'])[-1], {j['concurrency']['group'] for j in _lect},
+        _wb['concurrency']['group'], 'always()' in _wb['jobs']['rescate']['if']),
+       ('abrir', 'rescate', {_grupo_h}, _grupo_h + '-pro', True))
+    eq('(PD) workflow %s: el paso de la lectura lleva los secretos y las claves del paso horario (menos sus inputs: FICHAS_MAX, LISTADO, el MODO de OSMA), y '
+       'las dependencias de la horaria' % _p,
+       (all(set(_sec) <= set(s['env']) for s in _pasos),
+        sorted((_env_h - {'FICHAS_MAX', 'LISTADO', 'INTENTO', 'MODO'}) - set(_pasos[0]['env'])),
+        all(_pip_h <= b for b in _pip_b), len(_pasos)), (True, [], True, 3 if _p == 'tcg' else 1))
+    eq('(PD) workflow %s: los secretos del proveedor SOLO en el paso de la lectura (ni en abrir ni en los rescates)' % _p,
+       sorted({n for n, j in _wb['jobs'].items() for s in j['steps'] for k in (s.get('env') or {})
+               if k in _sec and s not in _pasos}), [])
+
 print()
 if fallos:
     print('ROJO: %d fallo(s): %s' % (len(fallos), '; '.join(fallos)))
