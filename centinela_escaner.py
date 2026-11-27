@@ -1,467 +1,481 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # ============================================================
-# MOLOKA - CENTINELA DEL PROVEEDOR MUDO
+# MOLOKA - EL VIGILANTE DEL ESCANER 2
 # ------------------------------------------------------------
-# QUE VIGILA: la ULTIMA escritura de cada proveedor. Si uno lleva mas horas que su
-# umbral sin escribir, avisa por Telegram y el run sale en ROJO. Desde el 14-oct-2026
-# (encargo T5c) los cinco se vigilan en `disp_pasada`; la fuente 'escaner_memoria' (el
-# MAXIMO de `fecha` del escaner viejo) sigue en el codigo, pero ya no la usa ninguno.
-#   - HEO y OSMA (escaner 2, desde el 03-oct-2026): la ultima pasada 'aplicada'
-#     de `disp_pasada` (`terminada_en`). El director viejo de HEO se apago a
-#     proposito el 01-oct y `escaner_memoria` ya no se mueve para HEO ni para OSMA:
-#     mirarla daria MUDO para siempre, y mirarla es mirar el sitio equivocado.
-#     Cada fila de HORARIOS dice su `fuente`.
-#   - OCIOSTOCK (escaner 2, encargo OC5, 07-oct-2026): tambien `disp_pasada`, la
-#     foto del catalogo entero. Su director viejo sigue en .github/workflows hasta
-#     que se apague, pero lo que leen Reponer y el Trackeador al pulsar el
-#     interruptor es la foto: el centinela vigila lo que se lee.
-#   - DBLINE (escaner 2, encargo DB6, 10-oct-2026): tambien `disp_pasada`, la foto
-#     del catalogo general, el dia que se pulsa su interruptor y se apaga su
-#     director viejo (`reglas_director` DBLINE inactivo): su `escaner_memoria` deja
-#     de moverse, y mirarla daria MUDO a las 26 h.
-#   - TCG (escaner 2, encargo T5c, 14-oct-2026): tambien `disp_pasada`, la foto
-#     horaria del Excel. Su director viejo se apago con el T5 (`reglas_director` TCG
-#     inactivo, 14-oct 15:28 Madrid) y su `escaner_memoria` dejo de moverse a las
-#     12:02 UTC: mirarla daria MUDO a las 22 h. 🔑 A TCG, y solo a el, una pasada
-#     «al dia» del SABADO o del DOMINGO le cuenta como señal de vida (`al_dia_cuenta`):
-#     el porque, mas abajo.
+# QUE VIGILA: que cada proveedor con horario en `disp_parametros` (hoy TCG, HEO, DBLine,
+# OcioStock y OSMA; BEMS no tiene, lo sube Fernando a mano) siga LEYENDO. Si pierde
+# las dos ultimas lecturas previstas de su horario -- o una, si ademas lleva mas de 26 h sin
+# lectura buena --, avisa por Telegram.
 #
-# CUANDO MIRA: 06:00, 10:00, 14:00 y 18:00 UTC. Cuatro pasadas, ninguna de noche
-# -- el porque, y por que el hueco nocturno no retrasa nada, esta en el cron de
-# `.github/workflows/centinela-escaner.yml`.
+# POR QUE (27-nov-2026). Del 26-nov a las 13:20 al 27-nov a las 08:54 (Madrid) fallaron
+# TODAS las lecturas horarias de TCG y a Fernando no le llego nada: se entero al ver
+# ofertas en la web de TCG. La regla de antes era «mas de 26 h sin escribir», mirada
+# cuatro veces al dia por el `schedule:` de GitHub (que en esta cuenta llega horas
+# tarde o no llega): no habria avisado hasta pasadas las 14:23 del 27-nov. Con esta,
+# a las 14:55 del 26-nov. (La de antes nacio del apagon del 9-sep-2026, cuando DBLine y
+# OcioStock se callaron dos dias sin que nadie lo supiera; el porque sigue en pie.)
 #
-# EL AVISO, UNO POR PROVEEDOR Y DIA (10-sep-2026): un mudo lo es durante horas,
-# asi que sin freno el movil suena en cada pasada por el mismo silencio. El run
-# sigue saliendo ROJO en las cuatro: lo que se silencia es el movil, nunca el
-# registro. Y el freno FALLA EN ABIERTO -- ver la marca, mas abajo.
+# LA REGLA ES LA DE REPONER, Y LOS HORARIOS VIVEN EN UN SOLO SITIO. `disp_parametros`
+# dice el horario de cada proveedor (`horario_laborables`, `horario_finde`,
+# `horario_minuto`, `horario_margen_min`, `pasadas_para_avisar`) y aqui NO se copia
+# ninguna hora: se lee en cada vuelta. La cuenta es la de `disp_frescura_en` (migracion
+# 20260930160000 de la v2), paso por paso: las horas previstas de 15 dias atras a 8
+# adelante en hora de Madrid; una prevista esta VENCIDA cuando su hora + el margen ya
+# paso; el plazo es la N-esima vencida hacia atras (N = `pasadas_para_avisar`, hoy 2);
+# CADUCADO = sin ninguna lectura buena, o la ultima buena es anterior al plazo.
+# 🔴 LA REGLA DEL VIGILANTE ES LA DE REPONER *MAS UN SUELO DE 26 H*, NO LA MISMA. Tambien
+#    esta caducado el que ha perdido AL MENOS UNA lectura prevista y lleva mas de SUELO_H
+#    (26) horas sin lectura buena (quien dirige, revision del #403, 27-nov-2026). Por que: con
+#    dos lecturas perdidas, un proveedor de UNA lectura al dia avisaria MAS TARDE que el
+#    vigilante viejo de 26 h (OcioStock, unas 48 h; OSMA, el martes por un lunes perdido; TCG
+#    el domingo por un sabado perdido), y eso no puede empeorar. Con el suelo, nadie avisa mas
+#    tarde que antes, y los de cada hora siguen saltando a la segunda perdida. Lo de «al menos
+#    una perdida» es lo que evita la falsa alarma del fin de semana: sin lectura prevista no
+#    hay nada que perder (OSMA del viernes al lunes son 72 h, y no avisa hasta que se pierde
+#    la del lunes). Reponer no lleva el suelo: su franja sigue siendo la de la base.
+#    🔑 El suelo salta tambien con un INTENTO FALLIDO (una pasada 'fallida' o
+#    'rechazada_vaciado'; una 'rechazada' a secas, como la de OSMA «no ha regenerado», no)
+#    aunque no haya ninguna prevista perdida: el proveedor que pasa fuera de su horario de
+#    la base y falla tambien cuenta. Es el sabado de DBLine: lee de 07 a 21, pero
+#    `horario_finde` vale para el sabado y el domingo a la vez y lo tiene vacio. Muerto el
+#    viernes por la noche y con las del sabado fallando, avisa el domingo a las 07:55, como el
+#    viejo. Si el sabado ni arrancan, el lunes a las 07:55: eso es de la migracion del
+#    horario del sabado, no de aqui.
+# 🔑 Por que no se llama a la funcion de la base y ya: cuenta SOLO las 'aplicada' y no
+#    devuelve el plazo, asi que no hay forma de sumarle las «al dia» (abajo). Cambiarla es
+#    una migracion con Fernando delante; esta copia de la cuenta la clava el banco con los
+#    casos de la propia migracion (su guarda (g)) y con el caso real de TCG del 26-nov.
+#    Si un dia se toca una, se toca la otra.
 #
-# POR QUE EXISTE. El 9-sep-2026 por la manana los cuatro directores se quedaron
-# sin poder leer `productos` y empezaron a morir en el arranque. DBLine dejo de
-# escribir el 9-sep a las 10:31 UTC y OcioStock a las 15:01; no se supo hasta el
-# 10-sep por la tarde. DOS DIAS. Nadie avisa cuando un proveedor se calla: el run
-# sale rojo en Actions, si, pero un rojo en Actions no llega a donde esta
-# Fernando, y "Que reponer" y el trackeador siguen ensenando el catalogo de
-# anteayer con toda la cara de estar al dia.
+# 🔑 «AL DIA» ES UNA LECTURA BUENA. Una pasada 'rechazada' cuyo contenido es el de la
+#    ultima 'aplicada' (el proveedor contesto, con lo mismo) dice que la foto esta al dia.
+#    Se reconoce POR ESTRUCTURA, no por el texto del motivo: la misma `huella_contenido`
+#    (TCG, DBLine) o el mismo `fichero_md5` (OcioStock) que esa aplicada. Medido el
+#    27-nov-2026 en `disp_pasada`: las 141 'rechazada' con motivo «al dia» de TCG, DBLine
+#    y OcioStock casan asi, todas. La de OSMA no lleva ni huella ni md5 (es un relanzamiento
+#    del mismo dia, despues de su aplicada: no adelanta nada), y su otra 'rechazada' («OSMA
+#    no ha regenerado el fichero») NO es una lectura buena: no casa, bien. Una
+#    'rechazada_vaciado' o una 'fallida', nunca.
+# 🔴 PERO CON TOPE: una «al dia» vale como buena solo mientras la ultima 'aplicada' tenga
+#    menos de TOPE_AL_DIA_H (96) horas (quien dirige, revision del #403, 27-nov-2026). Un
+#    fichero que el proveedor deja de rehacer es un dato viejo aunque conteste: pasadas las
+#    96 h sin ninguna aplicada, sale caducado con su propio texto («contesta, pero con el
+#    mismo contenido desde…»), distinto del de «no lee».
 #
-# 🔴 SE MIRA LA TABLA, NO EL COLOR DEL RUN. Un run verde que no ha escrito nada
-#    es exactamente el fallo que se viene a cazar: la unica cifra que no opina es
-#    la fecha que hay en la tabla (hoy, `terminada_en` en `disp_pasada`).
+# LOS TRES AVISOS, por Telegram (en UN mensaje por vuelta, si hay varios):
+#   🔴 CADUCADO: desde cuando no hay lectura buena, cuantas lecturas previstas se han
+#      perdido desde entonces, cuantos intentos fallaron, el motivo del ultimo fallo
+#      (`disp_pasada.motivo`) y que el Escaneo PRO y Reponer estan con datos de esa hora.
+#   ⏰ RECORDATORIO, mientras siga caducado: uno cada RECORDATORIO_H horas como mucho, no
+#      cada hora (el que suena cada hora se aprende a ignorar).
+#   ✅ VUELTA: «<proveedor> vuelve a leer, tras N h».
+#   Y si contesta «al dia» pero sin ninguna aplicada en 96 h: «<proveedor> contesta, pero con
+#   el mismo contenido desde el <fecha de la ultima aplicada>», con su recordatorio.
+#   Y si la base no se puede leer, un aviso propio (el vigilante ciego no calla).
+#
+# LA MARCA, en Storage (`informes/centinela/ultimo_aviso.json`): por proveedor, desde que
+# lectura buena esta caducado y cuando se aviso. Es lo que separa el primer aviso del
+# recordatorio y lo que permite el de vuelta.
+# 🔴 FALLA EN ABIERTO, Y ESTO NO SE NEGOCIA (condicion de Fernando, 10-sep-2026). Si la
+#    marca no se puede leer, se avisa IGUAL de todo lo caducado, como si fuera la primera
+#    vez. Si no se puede escribir, el aviso se repetira en la vuelta siguiente: se prefiere
+#    repetir a callar. Lo unico que se pierde sin marca es el aviso de VUELTA (no se sabe
+#    que se aviso): asimetria a proposito, porque perder un «ya funciona» no cuesta nada.
+#    Y si Telegram no confirma el envio, la marca no se toca.
+#
+# EL RELOJ: cron-job.org, como las pasadas (el `schedule:` de GitHub llega horas tarde
+# en esta cuenta). Cada hora a las :55, de 07 a 21 (Madrid), todos los dias: RELOJ, abajo,
+# y el banco comprueba que con los horarios de hoy cada lectura vencida se mira en menos
+# de una hora. El `schedule:` del workflow se queda de RESPALDO: si el trabajo de
+# cron-job.org se para (lo desactiva solo tras varios fallos, o caduca su llave, y entonces
+# se paran tambien las pasadas), algo sigue mirando; con la marca, una vuelta de mas no
+# repite ningun aviso.
+# 🔕 DE NOCHE NO SUENA: fuera de HORAS_DE_AVISAR (07:00-22:59 de Madrid) la vuelta mira y
+#    escribe su informe, pero no manda nada ni toca la marca: lo pendiente sale en la
+#    primera vuelta de la mañana. Por el respaldo: el de GitHub ha llegado a las 02:15.
+#    De noche ningun horario tiene lecturas previstas, asi que no se retrasa nada.
+#
+# 🔴 REPO PUBLICO: el registro del run lo ve cualquiera. Aqui solo se imprimen estados,
+#    horas y recuentos. El motivo de una pasada y el texto de un error van SOLO al
+#    Telegram; al registro, como mucho, el TIPO del error.
+#
+# ENSAYO: con CENTINELA_ENSAYO=si (input `ensayo` del workflow) lee la base y escribe el
+# informe, pero ni manda Telegram ni toca la marca.
+#
+# El run sale en ROJO mientras haya algo caducado o la base no se pueda leer: lo que se
+# dosifica es el movil, no el registro.
 #
 # Variables de entorno: SUPABASE_URL, SUPABASE_SERVICE_KEY, TELEGRAM_TOKEN,
-# TELEGRAM_CHAT_ID.
+# TELEGRAM_CHAT_ID y, opcional, CENTINELA_ENSAYO.
 # ============================================================
 
+import html
 import json
 import os
 import sys
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
-# ============================================================
-# LOS HORARIOS, MEDIDOS -- no supuestos
-# ------------------------------------------------------------
-# Medido el 10-sep-2026 en produccion sobre `escaner_resultados` (28 dias,
-# 11-ago a 7-sep, antes del apagon), que es la PELICULA: una fila por pasada.
-# 🔴 NO se mide la cadencia en `escaner_memoria`: es un MAESTRO y se sobrescribe
-#    fila a fila, asi que las pasadas viejas desaparecen y salen 49 donde hubo
-#    93. Para lo que SI vale `escaner_memoria` es para el MAXIMO, que es lo que
-#    este centinela mira: la ultima vez que ese proveedor toco la tabla.
-#
-# LO QUE SALIO. Los tres proveedores de fichero NO trabajan los domingos (cero
-# pasadas en cuatro domingos seguidos); TCG si. De ahi que el hueco normal mas
-# largo de DBLine sean 44 h -- el sabado por la manana al lunes por la manana --
-# sin que pase nada raro.
-#
-#   proveedor  | franja diaria (UTC)  | pasadas | hueco mayor | descontando | X
-#              |                      |  al dia |   (bruto)   |  el domingo |
-#   -----------+----------------------+---------+-------------+-------------+----
-#   TCG        | 06-16, todos los dias|   ~6    |   18,00 h   |   18,00 h   | 22
-#   DBLINE     | 06-11, L a S         |   ~4    |   44,00 h   |   23,00 h   | 26
-#   OCIOSTOCK  | 07-15, L a S         |   ~5    |   40,00 h   |   18,00 h   | 22
-#   (HEO, OSMA y, desde el 07-oct-2026, OCIOSTOCK, desde el 10-oct-2026, DBLINE y,
-#   desde el 14-oct-2026, TCG: tabla propia, mas abajo; ya no salen de
-#   `escaner_memoria`. Las tres filas de aqui son las del escaner viejo.)
-#
-# Con esas X, en los 28 dias medidos NO habria saltado ni un aviso falso:
-# ningun hueco descontado llego a la X de su proveedor (DBLine tuvo 2 por encima
-# de 22 h y ninguno de 24; OcioStock y TCG, ninguno de mas de 18).
-#
-# 🆕 HEO Y OSMA EN EL ESCANER 2 (03-oct-2026). Medido el 03-oct a las 13:3x (Madrid)
-#    en `disp_pasada`, estado 'aplicada' -- la PELICULA del escaner 2, una fila por
-#    pasada --, y contrastado con `disp_parametros` (el horario que usa la base).
-#    🔴 LA PELICULA ES CORTA y hay que decirlo: HEO solo tiene 4,5 dias (desde el
-#    29-sep) y OSMA 2 (desde el 01-oct). No son las cuatro semanas del 10-sep: donde
-#    el dato no llega, la cifra sale del horario de `disp_parametros` y esta marcada.
-#
-#    HEO  · 55 'aplicadas' del 29-sep 09:03 UTC al 03-oct 07:05 UTC. Una por hora, a
-#           los :05-:06 (terminada_en), de 06:06 a 19:06 UTC (08-21 h Madrid en
-#           verano), de lunes a viernes: huecos medidos de 1 h y, de noche (19:06 a
-#           06:06), de 10,99 a 11,02 h en cuatro noches. Sabado 03-oct: 06:06 y 07:06
-#           UTC (08 y 09 h Madrid), como dice `disp_parametros.horario_finde`.
-#           LO QUE NO ESTA MEDIDO: las noches del sabado y del domingo (el primer
-#           domingo es el 04-oct). Salen del horario: ultima pasada del fin de
-#           semana a las 09:06 Madrid, primera del dia siguiente a las 08:06 = 23 h.
-#           HEO SI trabaja el domingo (a diferencia del escaner viejo, que lo
-#           descansaba): NO se descuenta ningun dia, y la X es la del hueco de fin de
-#           semana (23 h) + 3 h = 26 h. Repasar con la pelicula del primer fin de
-#           semana (lunes 05-oct).
-#    OSMA · UNA pasada al dia, 07:15 Madrid (05:15 UTC en verano), de lunes a viernes.
-#           Medido: 2 'aplicadas' (01-oct 12:01 UTC, una prueba con Fernando delante,
-#           y 02-oct 05:15 UTC) y una 'rechazada' del 01-oct (fichero ya aplicado).
-#           Con dos pasadas no hay cadencia que medir: el hueco normal es de 24 h
-#           (un dia habil al siguiente; el viernes al lunes salen 72 h de reloj y
-#           24 h sin sabado ni domingo) y viene de `horario_laborables=[7]`,
-#           `horario_minuto=15`, `horario_finde=[]` y `horario_margen_min=30`. X = 24 +
-#           2 h de margen = 26 h: la pasada de las 06:00 UTC (45 min despues de la
-#           esperada) no avisa, y la de las 10:00 UTC si, si no ha habido pasada ese
-#           dia (28,7 h).
-#
-#      proveedor | fuente           | franja (UTC)       | hueco mayor | descontando | X
-#      ----------+------------------+--------------------+-------------+-------------+----
-#      HEO       | disp_pasada      | 06-19, todos       |  23,00 h *  |  (ninguno)  | 26
-#      OSMA      | disp_pasada      | 05, L a V          |  24,00 h *  |  sab y dom  | 26
-#      OCIOSTOCK | disp_pasada      | 07, todos          |  24,00 h *  |  (ninguno)  | 26
-#      DBLINE    | disp_pasada      | 05-19, L a S       |  24,00 h *  |  domingo    | 26
-#      TCG       | disp_pasada (+)  | 07-17 L a V; 10 S-D|  24,00 h *  |  (ninguno)  | 26
-#      (* derivado del horario, no medido en la pelicula: ver arriba y abajo.
-#       + con las «al dia» del sabado y el domingo: ver TCG, abajo.)
-#
-# 🆕 TCG EN EL ESCANER 2 (14-oct-2026, encargo T5c). Medido el 14-oct a las 13:3x UTC
-#    (15:3x Madrid) con el conector de lectura.
-#    · EL RELOJ: cron-job.org, segun `disp_parametros` de TCG: de lunes a viernes cada
-#      hora a las :20 de 09 a 19 Madrid (07:20-17:20 UTC en verano) y sabado y domingo
-#      UNA, a las 12:20 Madrid (10:20 UTC). Huecos del horario: la noche, 17:20 a 07:20
-#      UTC = 14 h; del viernes al sabado 17 h; del sabado al domingo 24 h; del domingo
-#      al lunes 21 h. El mayor, 24 h (de ahi los 24,00 h, derivados). X = 24 + 2 = 26 h,
-#      como los otros cuatro.
-#    🔴 SIN PELICULA: 7 pasadas en `disp_pasada`, todas del 14-oct (06:38 y 08:43 UTC,
-#      a mano; y de 09:21 a 13:22 UTC una por hora), las 7 'aplicada' y con contenido
-#      nuevo cada una (siete huellas distintas): CERO «al dia» todavia, y cero del 13-oct.
-#    · «AL DIA» ES 'rechazada' Y NO CUENTA COMO ESCRITURA: si la huella del contenido es
-#      la de la ultima aplicada, la pasada se cierra 'rechazada' «al dia» (y deja SU
-#      `huella_contenido`, la misma que la de esa aplicada; escaner2_tcg_disponibilidad).
-#      Entre semana, con una pasada por hora, un Excel que no cambia en 26 h es algo que
-#      hay que saber (el Excel de TCG es la foto de Reponer). Pero el FIN DE SEMANA hay
-#      UNA pasada al dia, y una sola «al dia» basta para el aviso falso: con el viernes
-#      17:21 UTC aplicado y el sabado «al dia», el domingo a las 06:00 UTC van 36,6 h; y si
-#      el domingo tambien sale «al dia», el hueco entre aplicadas va del viernes 17:21 al
-#      lunes 07:21 UTC = 62 h.
-#    · ¿PASA? Medido en la pelicula del escaner viejo (`escaner_resultados`, 389 pasadas
-#      de TCG del 01-ago al 14-oct, cada 2 h los siete dias), sumando altas, bajas,
-#      vueltas y cambios: en 10 fines de semana (07-ago a 11-oct), la ventana viernes
-#      19:20 -> sabado 12:20 salio a CERO una vez (25/26-sep) y la del sabado al domingo,
-#      ninguna; dos «al dia» seguidas en un fin de semana, ninguna. Pasa poco, pero pasa,
-#      y la huella nueva no es la misma cuenta (lleva precios y cocientes, y la web de
-#      Funko encima cada hora), asi que la vieja solo da una idea.
-#    🔑 LA DECISION: a TCG, una pasada «al dia» TERMINADA en sabado o domingo (UTC) cuenta
-#       como señal de vida. Por que no rompe nada:
-#         - el Excel de TCG se genera en cada descarga (los bytes cambian siempre: parte
-#           T1, 1.3): una «al dia» es TCG contestando AHORA con el mismo contenido, o sea
-#           que la foto esta al dia, no que alguien se haya callado;
-#         - se reconoce POR ESTRUCTURA, no por el texto del motivo: estado 'rechazada' Y
-#           la misma `huella_contenido` que la ultima 'aplicada' (`ultima_viva`). Una
-#           'rechazada' con otra huella (el freno del 90 %) no cuenta, ni una 'fallida';
-#         - entre semana NO cuenta: ahi una tarde entera de «al dia» seguidas sigue
-#           acabando en aviso a las 26 h.
-#       Por que no se descuenta el fin de semana, como el domingo de DBLINE: TCG SI pasa
-#       el sabado y el domingo, y descontarlos seria dejar de vigilarle dos dias de cada
-#       siete (un apagon del viernes por la tarde no se veria hasta el martes). Asi, con
-#       el viernes 17:21 UTC como ultima señal, el aviso sale el domingo a las 06:00 UTC.
-#    · Con el cambio de hora del 25-oct la franja se corre una hora (08-18 UTC entre
-#      semana, 11 UTC el fin de semana); los huecos no cambian.
-#
-# 🆕 DBLINE EN EL ESCANER 2 (10-oct-2026, encargo DB6). Medido el 10-oct a las
-#    14:46 UTC en `disp_pasada`: 7 'aplicadas' en total (9-oct 17:37 y 17:39 UTC, a
-#    mano; y desde el 10-oct 10:06 UTC una por hora, a los :06, todas con cambios,
-#    ninguna «al dia» todavia). 🔴 SIN PELICULA: el reloj es cron-job.org (tarea
-#    8613521), a las :05 de 07 a 21 h Madrid (05-19 UTC en verano), de lunes a
-#    sabado; el domingo no hay pasadas.
-#    Si el catalogo cambia cada hora, como hoy, el hueco normal es la noche: 19:06 a
-#    05:06 UTC = 10 h (y el sabado al lunes, 34 h menos el domingo = 10 h). Pero una
-#    pasada «al dia» (mismo contenido) no cuenta como escritura, y no se sabe aun
-#    cuantas seguidas puede dar DBLine: el peor caso que se admite sin aviso es un
-#    dia entero sin cambio de contenido, 24 h de una aplicada a la del dia
-#    siguiente (de ahi los 24,00 h, derivados). X = 26 h, como HEO, OSMA y
-#    OcioStock; bajarla cuando haya pelicula de «al dia».
-#    Escribe 14 h seguidas, como HEO: lleva `ventana_ancha` (ver abajo). El domingo
-#    SE DESCUENTA (DBLine no pasa el domingo) y el sabado NO (si pasa). Con el cambio
-#    de hora del 25-oct la franja se corre a 06-20 UTC.
-#
-# 🆕 OCIOSTOCK EN EL ESCANER 2 (07-oct-2026, encargo OC5). Medido el 07-oct a las
-#    15:02 UTC en `disp_pasada`: UNA sola 'aplicada' (10:50:59 UTC, la primera,
-#    lanzada a mano). 🔴 SIN PELICULA: la cifra sale del reloj, como OSMA el 03-oct.
-#    El reloj es cron-job.org (tarea 8598562, `12 9,13,17 * * *` Europe/Madrid,
-#    los siete dias). OcioStock rehace su fichero UNA vez por noche (38 dias del
-#    director viejo, parte OC1): la de las 09:12 Madrid (07:12 UTC en verano) se
-#    APLICA, y las de 13:12 y 17:12 encuentran el mismo fichero y se cierran
-#    'rechazada' «al dia», que aqui NO cuentan como escritura (no han escrito).
-#    Hueco normal: de una 09:12 a la del dia siguiente = 24 h, todos los dias
-#    (tambien sabado y domingo: el fichero se rehace las siete noches). X = 24 + 2
-#    = 26 h, como OSMA. Avisa, por tanto, si una mañana no se aplica fichero
-#    nuevo y la del dia siguiente tampoco ha llegado a las 09:12 + 2 h: que
-#    OcioStock no rehaga el fichero una noche no ha pasado en 38 dias, y si pasa
-#    es justo lo que hay que saber (Reponer veria el catalogo de ayer).
-#
-#    Por que no se pone la X mas baja para HEO (11 h medidas + margen): porque el
-#    fin de semana HEO calla 23 h de por si y una X de 14 daria un aviso falso cada
-#    sabado y cada domingo. Se paga con una deteccion lenta de entre semana (26 h);
-#    el aviso rapido (dos pasadas horarias falladas) ya lo calcula la base en
-#    `v_disp_frescura.avisar`, que hoy solo lee Reponer y no manda Telegram.
-#
-# 🔬 Y DE AQUI SALE EL RELOJ DEL CENTINELA (06/10/14/18 UTC). La franja en la que
-#    cada uno escribe, mas su X, da la ventana en la que su plazo puede vencerse.
-#    Las cuatro ventanas caen dentro de 04:00-15:00 UTC, asi que mirar cuatro
-#    veces entre las 06:00 y las 18:00 basta, y el hueco de noche no retrasa nada:
-#
-#      proveedor  | escribe (UTC) |  X   | su plazo vence entre | demora | detectado en
-#      -----------+---------------+------+----------------------+--------+-------------
-#      OCIOSTOCK  | 07 (una)      | 26 h |   09:00 y 09:00      |  ≤ 1 h |   ≤ 27 h
-#      OSMA       | 05 (una)      | 26 h |   07:00 y 07:00      |  ≤ 3 h |   ≤ 29 h
-#      HEO        | 06-19         | 26 h |   08:00 y 21:00      | ≤ 12 h |   ≤ 38 h  <- ver abajo
-#      DBLINE     | 05-19         | 26 h |   07:00 y 21:00      | ≤ 12 h |   ≤ 38 h  <- como HEO (DB6)
-#      TCG        | 07-17         | 26 h |   09:00 y 19:00      | ≤ 12 h |   ≤ 38 h  <- como HEO (T5c)
-#      (Hasta el 10-oct-2026, DBLINE en escaner_memoria: 06-11 UTC, vencia 08:00-13:00.
-#       Hasta el 14-oct-2026, TCG en escaner_memoria: 06-16 UTC, X 22 h, vencia 04:00-14:00.)
-#
-#    🔴 HEO ES LA EXCEPCION y se dice: escribe 13 h seguidas (06-19 UTC), asi que su
-#       plazo puede vencerse en CUALQUIER hora entre las 08:00 y las 21:00 UTC, una
-#       ventana de 13 h que no cabe en las 11 h (04:00-15:00) de las otras. Los
-#       vencimientos de 08:00 a 18:00 se avisan en 4 h como siempre; los de 18:00 a
-#       21:00 caen en el hueco de noche del cron y esperan a la pasada de las 06:00
-#       UTC (hasta 12 h): a proposito, porque un Telegram a las 22:00 UTC (00:00 en
-#       Madrid) no lo puede atender nadie y es justo el "aviso a deshora" que el
-#       cron esta hecho para no dar. Si Cowork prefiere una quinta pasada a las 22:00
-#       UTC, es una linea en el cron y el banco lo comprueba. En invierno (UTC+1) la
-#       franja de HEO y de OSMA se corre 1 h hacia delante, y la demora no empeora.
-#       El banco marca a HEO con `ventana_ancha` y le exige <= 12 h (y <= 4 h en la
-#       parte diurna), no le quita la comprobacion. DBLINE (desde el 10-oct-2026, DB6)
-#       lleva la misma marca y por lo mismo: escribe 05-19 UTC y su plazo vence entre
-#       las 07:00 y las 21:00. Y como descansa el domingo, el banco le exige lo mismo
-#       en la ventana del lunes. TCG (desde el 14-oct-2026, T5c) tambien: escribe 07-17
-#       UTC entre semana y vence entre las 09:00 y las 19:00; lo de 18:00 a 19:00 espera
-#       a las 06:00. Su pasada del fin de semana (10 UTC) cae dentro de esa franja.
-#
-#    Con un domingo por medio la ventana se corre al lunes (el reloj descontado
-#    esta parado el domingo entero) y cae entre las 05:00 y las 15:00 UTC del
-#    lunes: la misma franja, asi que la demora tampoco cambia.
-#    🔒 Esto NO se queda en un comentario: el banco saca la ventana de estas
-#       cifras, la cruza con el cron de verdad y exige que la demora no pase de
-#       4 h. Si manana se toca una franja, una X o el cron, se pone rojo.
-#
-# 🔑 POR ESO SE DESCUENTA EL DOMINGO, y no es un adorno. Con el hueco BRUTO, el
-#    umbral de DBLine tendria que ser 50 h para no dar un falso aviso cada lunes
-#    -- o sea, exactamente los dos dias de silencio que costo el apagon del
-#    9-sep, que es lo que se viene a evitar. Descontando las horas de domingo, el
-#    mismo sabado-a-lunes son 23 h y la X puede bajar a 26.
-#
-# X = hueco mayor medido (descontando domingo) + un margen de 3-4 h. El margen no
-# es "por si acaso": es para que un retraso del cron de GitHub -- que puede irse
-# 15-20 min -- o una pasada que empiece tarde no disparen el aviso.
-#
-# 🔬 LO QUE ESTO HABRIA HECHO CON EL APAGON DEL 9-sep. DBLine escribio por ultima
-#    vez el 9 a las 10:31 UTC (miercoles, sin domingo por medio): pasa de 26 h el
-#    10 a las 12:31, y la pasada del centinela de las 14:00 UTC lo habria contado
-#    y avisado. Se supo por la tarde del dia 10. No es inmediato -- ni puede
-#    serlo: DBLine se calla 23 h de por si entre el sabado y el lunes --, pero
-#    son horas en vez de dos dias.
-# `primera_h`/`ultima_h` son la franja en la que ese proveedor ESCRIBE, en horas
-# UTC, y no son adorno: de ellas sale la ventana en la que su plazo puede
-# vencerse, y de esa ventana sale a que horas tiene sentido que el centinela
-# mire. El banco lo comprueba contra el cron del workflow.
-# `fuente` dice DE DONDE sale la fecha: 'escaner_memoria' (el MAXIMO de `fecha`) o
-# 'disp_pasada' (la ultima pasada 'aplicada'). `descansa_sabado` descuenta ademas
-# los sabados (OSMA: de lunes a viernes). `ventana_ancha` (HEO, DBLINE y TCG): ver
-# arriba. `al_dia_cuenta` (solo TCG): los dias de la semana (UTC, weekday(): sabado 5,
-# domingo 6) en los que una pasada «al dia» cuenta como señal de vida; ver TCG, arriba.
-HORARIOS = {
-    'TCG':       {'fuente': 'disp_pasada', 'umbral_h': 26, 'descansa_domingo': False,
-                  'descansa_sabado': False, 'medido_h': 24.00, 'ventana_ancha': True,
-                  'al_dia_cuenta': (5, 6),
-                  'primera_h': 7, 'ultima_h': 17,
-                  'dias': 'L a V cada hora (:20 de 09 a 19 Madrid); sábado y domingo una (12:20)'},
-    'DBLINE':    {'fuente': 'disp_pasada', 'umbral_h': 26, 'descansa_domingo': True,
-                  'descansa_sabado': False, 'medido_h': 24.00, 'ventana_ancha': True,
-                  'primera_h': 5, 'ultima_h': 19, 'dias': 'L a S (cada hora, :05 de 07 a 21 Madrid)'},
-    'HEO':       {'fuente': 'disp_pasada', 'umbral_h': 26, 'descansa_domingo': False,
-                  'descansa_sabado': False, 'medido_h': 23.00, 'ventana_ancha': True,
-                  'primera_h': 6, 'ultima_h': 19, 'dias': 'todos los dias'},
-    'OCIOSTOCK': {'fuente': 'disp_pasada', 'umbral_h': 26, 'descansa_domingo': False,
-                  'descansa_sabado': False, 'medido_h': 24.00,
-                  'primera_h': 7, 'ultima_h': 7, 'dias': 'todos los dias (una aplicada, 09:12 Madrid)'},
-    'OSMA':      {'fuente': 'disp_pasada', 'umbral_h': 26, 'descansa_domingo': True,
-                  'descansa_sabado': True, 'medido_h': 24.00,
-                  'primera_h': 5, 'ultima_h': 5, 'dias': 'L a V (una pasada, 07:15 Madrid)'},
-}
+MADRID = ZoneInfo('Europe/Madrid')
 
-# ============================================================
-# LA MARCA: UN AVISO POR PROVEEDOR Y DIA
-# ------------------------------------------------------------
-# El centinela arranca 4 veces al dia. Un proveedor mudo de verdad lo esta
-# durante horas, asi que sin freno el movil sonaria en las cuatro por el mismo
-# silencio -- y un aviso que suena cuatro veces al dia se aprende a ignorar en
-# quince dias, que es la manera mas cara de perder un centinela.
-#
-# La marca es un JSON en Storage, {proveedor: 'AAAA-MM-DD' del ultimo aviso}. En
-# el bucket `informes`, que es donde el escaner ya escribe: ni tabla nueva, ni
-# migracion, ni un secreto mas.
-#
-# 🔴 FALLA EN ABIERTO, Y ESTO NO SE NEGOCIA (condicion de Fernando, 10-sep-2026).
-#    Si la marca no se puede leer, se avisa IGUAL. Si no se puede escribir, el
-#    aviso puede repetirse hoy, y se prefiere repetir. Un mecanismo hecho para
-#    hablar MENOS no puede convertirse en uno que se CALLA cuando algo va mal:
-#    esa es exactamente la clase de silencio que costo dos dias el 9-sep
-#    (`productos` devolviendo cero filas sin error).
-#
-# El dia es el UTC. Con el centinela corriendo de 06:00 a 18:00 UTC, ese dia y el
-# de Espana son siempre el mismo (06:00 UTC son las 07:00/08:00; 18:00 UTC, las
-# 19:00/20:00), asi que no hay que elegir entre dos calendarios.
+# Los de `disp_frescura_en`: las horas previstas se generan de 15 dias atras a 8 adelante.
+DIAS_ATRAS = 15
+DIAS_ADELANTE = 8
+
+# Mientras un proveedor sigue caducado, un recordatorio cada 6 h como mucho: con el reloj
+# de 07:55 a 21:55, un fallo de la mañana da el aviso, uno por la tarde y otro a primera
+# hora del dia siguiente (el de la noche espera a las 07:55).
+# El suelo: con una lectura prevista perdida, mas de estas horas sin lectura buena es
+# caducado aunque la regla del horario aun no lo diga (ver la cabecera).
+SUELO_H = 26
+
+# El tope de las «al dia»: con la ultima aplicada de TOPE_AL_DIA_H horas o mas, una «al dia»
+# deja de valer como lectura buena. 96 h cubre sin falsas alarmas los fines de semana
+# normales: el de TCG (del viernes 19:20 al lunes 09:20, 62 h, con «al dia» el sabado y el
+# domingo) y el de OSMA (del viernes al lunes, 72 h). Y un fichero que lleva cuatro dias sin
+# cambiar es lo que hay que saber.
+TOPE_AL_DIA_H = 96
+
+RECORDATORIO_H = 6
+# 🔑 Con holgura: la marca apunta la hora REAL de la vuelta, que se corre unos segundos o
+#    minutos de una a otra (el dispatch no arranca al segundo). Sin ella, el recordatorio de
+#    las 21:55 de un aviso de las 15:55 podria caer en 5 h 59 y saltar a las 07:55 del dia
+#    siguiente.
+HOLGURA_RECORDATORIO_MIN = 15
+
+# Horas de Madrid en las que se manda Telegram: de las 07:00 a las 22:59.
+HORAS_DE_AVISAR = (7, 23)
+
+# El reloj que se da de alta en cron-job.org (Europe/Madrid, todos los dias). Aqui no lo
+# usa nadie en marcha: esta para que el banco lo cruce con los horarios.
+RELOJ = {'minuto': 55, 'desde_h': 7, 'hasta_h': 21}
+
 MARCA_BUCKET = 'informes'
 MARCA_RUTA = 'centinela/ultimo_aviso.json'
 
+# La clave de la marca para «no se pudo leer la base» (no es un proveedor).
+LECTURA = '_LECTURA'
+
+MESES = ('ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic')
+
 
 # ============================================================
-# LAS DECISIONES, COMO FUNCIONES PURAS
+# LA REGLA, COMO FUNCIONES PURAS
 # ------------------------------------------------------------
-# No tocan red, ni reloj, ni globales: se les pasa todo. Tienen banco --
-# test_centinela_mudo.py las saca de ESTE fichero con `ast` (por estructura, no
-# por texto) y las EJECUTA con las fechas del apagon de verdad.
+# No tocan red ni reloj: se les pasa todo. test_centinela_mudo.py las saca de ESTE
+# fichero con `ast` y las ejecuta con la historia real de TCG del 26-nov-2026.
+# Una pasada es {'estado', 't' (terminada_en, UTC), 'huella', 'md5', 'motivo'}.
 # ============================================================
 
-def horas_en_dia(desde, hasta, dia_semana):
-    """Cuantas de las horas del intervalo [desde, hasta) caen en ese dia de la
-    semana (UTC; weekday(): lunes 0 ... sabado 5, domingo 6).
-
-    Se recorre tramo a tramo por dias, no hora a hora: asi un hueco de tres
-    semanas se cuenta igual de bien y sin dar vueltas."""
-    if hasta <= desde:
-        return 0.0
-    total = 0.0
-    tramo_ini = desde
-    while tramo_ini < hasta:
-        siguiente_dia = (tramo_ini + timedelta(days=1)).replace(
-            hour=0, minute=0, second=0, microsecond=0)
-        tramo_fin = min(siguiente_dia, hasta)
-        if tramo_ini.weekday() == dia_semana:
-            total += (tramo_fin - tramo_ini).total_seconds() / 3600.0
-        tramo_ini = tramo_fin
-    return total
+def previstas(par, ahora):
+    """Las horas de pasada del horario de `par` (una fila de disp_parametros), en UTC,
+    de DIAS_ATRAS dias atras a DIAS_ADELANTE adelante del dia de Madrid de `ahora`.
+    De lunes a viernes, `horario_laborables`; sabado y domingo, `horario_finde`. La hora
+    es de Madrid: el desfase de ESE dia lo pone zoneinfo, como Postgres en la base."""
+    hoy = ahora.astimezone(MADRID).date()
+    horas = set()
+    for n in range(-DIAS_ATRAS, DIAS_ADELANTE + 1):
+        dia = hoy + timedelta(days=n)
+        lista = par['horario_laborables'] if dia.isoweekday() <= 5 else par['horario_finde']
+        for h in (lista or []):
+            local = datetime(dia.year, dia.month, dia.day, h, par['horario_minuto'], tzinfo=MADRID)
+            horas.add(local.astimezone(timezone.utc))
+    return sorted(horas)
 
 
-def horas_en_domingo(desde, hasta):
-    """Cuantas de las horas del intervalo [desde, hasta) caen en domingo (UTC)."""
-    return horas_en_dia(desde, hasta, 6)                # 6 = domingo
+def plazo(par, ahora):
+    """{'vencidas': [...] de la mas nueva a la mas vieja, 'ultima_prevista',
+    'siguiente_prevista', 'umbral'}. Vencida = su hora + `horario_margen_min` ya paso;
+    `umbral` es la vencida numero `pasadas_para_avisar` hacia atras (None si no hay
+    tantas), como en `disp_frescura_en`."""
+    margen = timedelta(minutes=par['horario_margen_min'])
+    todas = previstas(par, ahora)
+    vencidas = sorted((t for t in todas if t + margen <= ahora), reverse=True)
+    n = par['pasadas_para_avisar']
+    futuras = [t for t in todas if t > ahora]
+    return {'vencidas': vencidas,
+            'ultima_prevista': vencidas[0] if vencidas else None,
+            'siguiente_prevista': futuras[0] if futuras else None,
+            'umbral': vencidas[n - 1] if len(vencidas) >= n else None}
 
 
-def horas_de_silencio(ultima, ahora, descansa_domingo, descansa_sabado=False):
-    """Horas que lleva callado un proveedor, en SU calendario.
-
-    Al que no trabaja los domingos no se le cuentan las horas del domingo: si se
-    le contaran, el umbral tendria que subir a 50 h para aguantar el
-    sabado-a-lunes, y con 50 h de margen un apagon de verdad se pasa dos dias sin
-    que nadie lo note. Que es lo que paso. Al que tampoco trabaja los sabados
-    (OSMA: de lunes a viernes) se le descuentan tambien: su viernes-a-lunes son
-    72 h de reloj y 24 h de las suyas."""
-    if ahora <= ultima:
-        return 0.0
-    brutas = (ahora - ultima).total_seconds() / 3600.0
-    descuento = 0.0
-    if descansa_domingo:
-        descuento += horas_en_domingo(ultima, ahora)
-    if descansa_sabado:
-        descuento += horas_en_dia(ultima, ahora, 5)     # 5 = sabado
-    return max(brutas - descuento, 0.0)
-
-
-def esta_mudo(horas, umbral_h):
-    """Un proveedor del que no se sabe NADA (`horas` a None: nunca ha escrito, o
-    no se ha podido leer) cuenta como mudo. No saber no es estar bien."""
-    if horas is None:
+def esta_caducado(ultima_buena, umbral):
+    """Sin ninguna lectura buena, caducado: no saber no es estar bien. Con ella, caducado
+    si es anterior al plazo (las N ultimas previstas vencidas, sin ninguna buena)."""
+    if ultima_buena is None:
         return True
-    return horas > umbral_h
+    return umbral is not None and ultima_buena < umbral
 
 
-def franja_de(cfg):
-    """El horario del proveedor, en texto, para el aviso: '06-11 UTC, L a S'.
-
-    Sale de las MISMAS cifras que usa el banco para comprobar el cron. Si se
-    escribiera a mano en un campo aparte, un dia diria una cosa y el calculo
-    otra, y el aviso mentiria sobre el horario justo del que se queja."""
-    if cfg['primera_h'] == cfg['ultima_h']:             # una sola pasada al dia
-        return '%02d UTC, %s' % (cfg['primera_h'], cfg['dias'])
-    return '%02d-%02d UTC, %s' % (cfg['primera_h'], cfg['ultima_h'], cfg['dias'])
+INTENTOS_FALLIDOS = ('fallida', 'rechazada_vaciado')
 
 
-def avisos_de_hoy(marca, hoy, mudos):
-    """Reparte los mudos en (los que TOCA avisar, los que ya se avisaron hoy).
-
-    `marca` es {proveedor: 'AAAA-MM-DD' del ultimo aviso} y `mudos`, una lista de
-    nombres. Es por PROVEEDOR: que hoy ya se avisara de DBLine no calla a HEO si
-    se cae dentro de un rato.
-
-    🔴 FALLA EN ABIERTO: si la marca no se pudo leer, quien llama pasa {} y aqui
-    salen TODOS a avisar. Nunca al reves."""
-    a_avisar, ya_avisados = [], []
-    for proveedor in mudos:
-        if marca.get(proveedor) == hoy:
-            ya_avisados.append(proveedor)
-        else:
-            a_avisar.append(proveedor)
-    return a_avisar, ya_avisados
+def suelo_vencido(ultima_buena, perdidas, fallidos, ahora):
+    """El suelo de 26 h: AL MENOS una lectura prevista perdida O un intento fallido
+    (INTENTOS_FALLIDOS) desde la ultima buena, y mas de SUELO_H horas desde ella. Sin ninguna
+    de las dos cosas (un fin de semana sin horario y sin pasadas) no salta, lleve las horas que
+    lleve."""
+    if ultima_buena is None:
+        return False
+    if not (perdidas or fallidos):
+        return False
+    return (ahora - ultima_buena).total_seconds() / 3600.0 > SUELO_H
 
 
-def linea_de_aviso(fila):
-    """La linea que llega al movil. Empieza por CUANTO lleva callado, no por el
-    nombre del estado: con un aviso al dia, saber si acaba de empezar o si lleva
-    dos dias es la mitad de la informacion (Fernando, 10-sep-2026).
-
-    Las horas BRUTAS son las que se ven en un reloj y las que uno espera leer.
-    Las descontadas son las que se comparan con el plazo, y solo se nombran
-    cuando difieren -- si no, la frase seria ruido en el 95% de los avisos y una
-    contradiccion aparente en el resto ("lleva 34 h y su plazo son 26, ¿por que
-    avisa ahora?")."""
-    if fila['ultima'] is None:
-        return ('• <b>%s</b> — sin dato (%s). Su plazo son %d h.'
-                % (fila['proveedor'], fila['motivo'], fila['umbral']))
-    cabeza = ('• <b>%s</b> — lleva %.0f h sin escribir (última: %s UTC). '
-              % (fila['proveedor'], fila['brutas'],
-                 fila['ultima'].strftime('%Y-%m-%d %H:%M')))
-    if fila['brutas'] - fila['horas'] > 0.05:
-        plazo = ('%.0f h sin contar %s, que es lo que se compara con su plazo '
-                 'de %d h. ' % (fila['horas'], fila.get('descontado', 'los domingos'),
-                                fila['umbral']))
-    else:
-        plazo = 'Su plazo son %d h. ' % fila['umbral']
-    return cabeza + plazo + 'Horario: %s.' % fila['franja']
+def es_al_dia(pasada, aplicada):
+    """Una 'rechazada' con el mismo contenido que la ultima aplicada: por la huella o por el
+    md5 del fichero, nunca por el texto. Un valor vacio no casa con otro vacio."""
+    if aplicada is None or pasada['estado'] != 'rechazada':
+        return False
+    for campo in ('huella', 'md5'):
+        if pasada.get(campo) and pasada.get(campo) == aplicada.get(campo):
+            return True
+    return False
 
 
-def ultima_viva(aplicadas, rechazadas, al_dia_cuenta):
-    """La ultima señal de vida de un proveedor del escaner 2, o None si no tiene ni una
-    pasada aplicada. `aplicadas` y `rechazadas` son listas de (terminada_en, huella).
+def al_dia_vale(ultima_aplicada, ahora):
+    """Si una «al dia» vale todavia como lectura buena: solo mientras la ultima aplicada
+    tenga menos de TOPE_AL_DIA_H horas."""
+    return ahora - ultima_aplicada < timedelta(hours=TOPE_AL_DIA_H)
 
-    Sin `al_dia_cuenta`, es la ultima 'aplicada'. Con el (TCG: sabado y domingo), una
-    'rechazada' posterior cuenta tambien si es «al dia» Y termino en uno de esos dias.
-    🔴 «Al dia» se reconoce POR ESTRUCTURA: su huella es la de la ultima aplicada (es
-       justo como el escaner decide que esta al dia). Una 'rechazada' sin huella, o con
-       otra (el freno del 90 %), no es una «al dia»: no cuenta."""
+
+def lectura_buena(pasadas, ahora):
+    """(ultima lectura buena, ultima aplicada, [horas de las «al dia» posteriores a ella]).
+    La buena es la ultima 'aplicada' terminada hasta `ahora`, o la ultima «al dia» posterior
+    si todavia vale (`al_dia_vale`). (None, None, []) sin ninguna aplicada."""
+    hechas = [p for p in pasadas if p['t'] is not None and p['t'] <= ahora]
+    aplicadas = [p for p in hechas if p['estado'] == 'aplicada']
     if not aplicadas:
-        return None
-    ultima, huella = max(aplicadas, key=lambda x: x[0])
-    vivas = [t for (t, h) in rechazadas
-             if t > ultima and h and h == huella and t.weekday() in al_dia_cuenta]
-    return max([ultima] + vivas)
+        return None, None, []
+    aplicada = max(aplicadas, key=lambda p: p['t'])
+    al_dias = sorted(p['t'] for p in hechas if p['t'] > aplicada['t'] and es_al_dia(p, aplicada))
+    if al_dias and al_dia_vale(aplicada['t'], ahora):
+        return al_dias[-1], aplicada['t'], al_dias
+    return aplicada['t'], aplicada['t'], al_dias
+
+
+def diagnostico(par, pasadas, ahora):
+    """Todo lo que hace falta para decidir y para contarlo: si esta caducado, desde que
+    lectura buena, las previstas perdidas desde entonces y los intentos que fallaron."""
+    ultima_buena, ultima_aplicada, al_dias = lectura_buena(pasadas, ahora)
+    p = plazo(par, ahora)
+    # El tope: hay «al dia» despues de la ultima aplicada, pero ya no valen (96 h o mas).
+    mismo_contenido = bool(al_dias) and not al_dia_vale(ultima_aplicada, ahora)
+    fallos = sorted((x for x in pasadas if x['t'] is not None and x['t'] <= ahora
+                     and (ultima_buena is None or x['t'] > ultima_buena) and x['t'] not in al_dias),
+                    key=lambda x: x['t'])
+    perdidas = sorted(t for t in p['vencidas'] if ultima_buena is None or t > ultima_buena)
+    fallidos = [x for x in fallos if x['estado'] in INTENTOS_FALLIDOS]
+    return {'caducado': (mismo_contenido or esta_caducado(ultima_buena, p['umbral'])
+                         or suelo_vencido(ultima_buena, perdidas, fallidos, ahora)),
+            'mismo_contenido': mismo_contenido, 'al_dias': al_dias,
+            'ultima_buena': ultima_buena, 'ultima_aplicada': ultima_aplicada,
+            'ultima_prevista': p['ultima_prevista'], 'siguiente_prevista': p['siguiente_prevista'],
+            'umbral': p['umbral'], 'perdidas': perdidas, 'fallos': fallos}
+
+
+def _iso(t):
+    return None if t is None else t.astimezone(timezone.utc).isoformat()
+
+
+def eventos(estados, marca, ahora, recordatorio_h):
+    """[(tipo, proveedor)] de lo que toca contar en esta vuelta: 'caducado' (nuevo, o con
+    otra lectura buena de partida que la avisada), 'recordatorio' (sigue igual y el ultimo
+    aviso tiene `recordatorio_h` horas o mas, menos la holgura) o 'vuelta' (ya no lo esta y se habia avisado).
+
+    🔴 FALLA EN ABIERTO: con la marca vacia (no se pudo leer) todo lo caducado sale como
+    'caducado'. Una entrada de la marca que no se entienda (el formato de antes del
+    27-nov-2026, {proveedor: 'AAAA-MM-DD'}) cuenta como no avisada."""
+    salida = []
+    for prov in sorted(estados):
+        d = estados[prov]
+        st = marca.get(prov)
+        if not (isinstance(st, dict) and st.get('avisado_en')):
+            st = None
+        if d['caducado']:
+            if st is None or st.get('desde') != _iso(d['ultima_buena']):
+                salida.append(('caducado', prov))
+            else:
+                try:
+                    avisado = datetime.fromisoformat(st['avisado_en'])
+                except (TypeError, ValueError):
+                    avisado = None
+                if avisado is None or ahora - avisado >= (timedelta(hours=recordatorio_h)
+                                                          - timedelta(minutes=HOLGURA_RECORDATORIO_MIN)):
+                    salida.append(('recordatorio', prov))
+        elif st is not None:
+            salida.append(('vuelta', prov))
+    return salida
+
+
+def marca_tras(marca, enviados, estados, ahora):
+    """La marca despues de un envio confirmado: lo avisado se apunta (desde que lectura
+    buena y cuando), lo que ha vuelto se borra, y el resto se queda como estaba. Las
+    entradas del formato viejo se tiran."""
+    nueva = {k: v for k, v in marca.items() if isinstance(v, dict)}
+    for tipo, prov in enviados:
+        if tipo == 'vuelta':
+            nueva.pop(prov, None)
+        else:
+            nueva[prov] = {'desde': _iso(estados[prov]['ultima_buena']),
+                           'avisado_en': ahora.isoformat()}
+    return nueva
+
+
+def hora_de_avisar(ahora):
+    """Si a esta hora de Madrid se manda Telegram (HORAS_DE_AVISAR)."""
+    return HORAS_DE_AVISAR[0] <= ahora.astimezone(MADRID).hour < HORAS_DE_AVISAR[1]
+
+
+def fecha_madrid(t):
+    """'26-nov 12:23', en hora de Madrid."""
+    m = t.astimezone(MADRID)
+    return '%d-%s %02d:%02d' % (m.day, MESES[m.month - 1], m.hour, m.minute)
+
+
+def hora_madrid(t):
+    m = t.astimezone(MADRID)
+    return '%02d:%02d' % (m.hour, m.minute)
+
+
+def _motivo(texto):
+    """El motivo de una pasada para el Telegram: escapado (va en HTML) y corto."""
+    if not texto:
+        return 'sin motivo escrito'
+    texto = ' '.join(str(texto).split())
+    if len(texto) > 200:
+        texto = texto[:199] + '…'
+    return html.escape(texto)
+
+
+def _detalle(prov, d):
+    """Las lineas que explican un caducado (en el aviso y en el recordatorio)."""
+    perdidas = d['perdidas']
+    if perdidas:
+        horas = ', '.join(hora_madrid(t) for t in perdidas[-6:])
+        lineas = ['Desde entonces, %d lectura(s) prevista(s) sin ninguna buena (%s%s) y %d intento(s) '
+                  'fallido(s).' % (len(perdidas), '… ' if len(perdidas) > 6 else '', horas,
+                                   len(d['fallos']))]
+    else:
+        lineas = ['%d intento(s) fallido(s).' % len(d['fallos'])]
+    if d['fallos']:
+        ultimo = d['fallos'][-1]
+        lineas.append('Último fallo (%s, %s): «%s»'
+                      % (fecha_madrid(ultimo['t']), html.escape(ultimo['estado']), _motivo(ultimo['motivo'])))
+    else:
+        lineas.append('Ninguna pasada registrada desde entonces: no han llegado a arrancar '
+                      '(mira el trabajo de cron-job.org y Actions).')
+    if d['ultima_buena'] is not None:
+        lineas.append('El Escaneo PRO y Reponer de %s están con los datos del %s.'
+                      % (prov, fecha_madrid(d['ultima_buena'])))
+    else:
+        lineas.append('El Escaneo PRO y Reponer de %s no tienen ninguna lectura buena suya.' % prov)
+    return lineas
+
+
+def texto_de(tipo, prov, d, st, ahora):
+    """El trozo de Telegram de un evento. `st` es lo que decia la marca (para la vuelta)."""
+    if prov == LECTURA:
+        if tipo == 'vuelta':
+            return '✅ <b>El vigilante del escáner vuelve a leer la base.</b>'
+        cabeza = ('🔴 <b>El vigilante del escáner no puede leer la base</b>' if tipo == 'caducado'
+                  else '⏰ <b>El vigilante del escáner sigue sin poder leer la base</b>')
+        return (cabeza + ': %s\nSin leerla no sabe si los proveedores leen: míralo en Actions.'
+                % _motivo(d.get('error')))
+    if tipo == 'vuelta':
+        desde = None
+        try:
+            desde = datetime.fromisoformat(st['desde']) if st and st.get('desde') else None
+        except (TypeError, ValueError):
+            desde = None
+        if desde is not None and d['ultima_buena'] is not None:
+            return ('✅ <b>%s vuelve a leer, tras %.0f h</b> (la última buena antes del corte, %s; '
+                    'la de ahora, %s).' % (prov, (d['ultima_buena'] - desde).total_seconds() / 3600.0,
+                                           fecha_madrid(desde), fecha_madrid(d['ultima_buena'])))
+        return '✅ <b>%s vuelve a leer</b> (lectura buena del %s).' % (prov, fecha_madrid(d['ultima_buena']))
+    if d.get('mismo_contenido'):
+        desde = fecha_madrid(d['ultima_aplicada'])
+        if tipo == 'caducado':
+            cabeza = '🔴 <b>%s contesta, pero con el mismo contenido desde el %s</b>' % (prov, desde)
+        else:
+            cabeza = ('⏰ <b>%s sigue contestando con el mismo contenido</b>, desde el %s (%.0f h)'
+                      % (prov, desde, (ahora - d['ultima_aplicada']).total_seconds() / 3600.0))
+        return '\n'.join([
+            cabeza,
+            'Desde entonces, %d lectura(s) «al día» (la última, el %s) y %d intento(s) fallido(s), sin '
+            'ninguna aplicada en %d h: un fichero que el proveedor no rehace es un dato viejo aunque '
+            'conteste.' % (len(d['al_dias']), fecha_madrid(d['al_dias'][-1]), len(d['fallos']), TOPE_AL_DIA_H),
+            'El Escaneo PRO y Reponer de %s están con los datos del %s.' % (prov, desde)])
+    if d['ultima_buena'] is None:
+        cabeza = '<b>%s no tiene ninguna lectura buena</b>' % prov
+    elif tipo == 'caducado':
+        cabeza = '<b>%s no lee desde el %s</b>' % (prov, fecha_madrid(d['ultima_buena']))
+    else:
+        cabeza = ('<b>%s sigue sin leer</b>, desde el %s (%.0f h)'
+                  % (prov, fecha_madrid(d['ultima_buena']),
+                     (ahora - d['ultima_buena']).total_seconds() / 3600.0))
+    return '\n'.join([('🔴 ' if tipo == 'caducado' else '⏰ ') + cabeza] + _detalle(prov, d))
 
 
 # ============================================================
-# LA MARCA EN STORAGE (lo unico de aqui que toca la red aparte de la consulta)
+# LA BASE Y STORAGE (lo unico que toca la red, ademas de Telegram)
 # ============================================================
+COLUMNAS_HORARIO = ('horario_laborables', 'horario_finde', 'horario_minuto',
+                    'horario_margen_min', 'pasadas_para_avisar')
+
+
+def leer_parametros(sb):
+    """{proveedor: fila de disp_parametros} de los que tienen horario (algun laborable o
+    algun dia de finde). Sin ninguno, LANZA: un vigilante que no vigila a nadie no es un
+    vigilante en verde."""
+    res = (sb.table('disp_parametros')
+             .select('proveedor,' + ','.join(COLUMNAS_HORARIO))
+             .execute())
+    salida = {}
+    for r in (res.data or []):
+        if not (r.get('horario_laborables') or r.get('horario_finde')):
+            continue
+        for c in ('horario_minuto', 'horario_margen_min', 'pasadas_para_avisar'):
+            if not isinstance(r.get(c), int):
+                raise ValueError('disp_parametros de %s sin %s' % (r.get('proveedor'), c))
+        salida[r['proveedor']] = r
+    if not salida:
+        raise ValueError('ningún proveedor con horario en disp_parametros')
+    return salida
+
+
+def _fecha(valor):
+    return datetime.fromisoformat(str(valor).replace('Z', '+00:00'))
+
+
+def _pasada(r):
+    return {'estado': r.get('estado'), 't': _fecha(r['terminada_en']) if r.get('terminada_en') else None,
+            'huella': r.get('huella_contenido'), 'md5': r.get('fichero_md5'), 'motivo': r.get('motivo')}
+
+
+COLUMNAS_PASADA = 'estado,terminada_en,huella_contenido,fichero_md5,motivo'
+
+
+def leer_pasadas(sb, proveedor):
+    """Las ultimas aplicadas y TODO lo que vino despues de la ultima (hasta 500 filas): las
+    «al dia» que adelantan la lectura buena y los intentos que fallaron."""
+    res = (sb.table('disp_pasada').select(COLUMNAS_PASADA)
+             .eq('proveedor', proveedor).eq('estado', 'aplicada')
+             .order('terminada_en', desc=True).limit(10).execute())
+    aplicadas = [_pasada(r) for r in (res.data or []) if r.get('terminada_en')]
+    q = sb.table('disp_pasada').select(COLUMNAS_PASADA).eq('proveedor', proveedor)
+    if aplicadas:
+        ultima = max(p['t'] for p in aplicadas).astimezone(timezone.utc)
+        q = q.gt('terminada_en', ultima.strftime('%Y-%m-%dT%H:%M:%S.%fZ'))
+    res = q.order('terminada_en', desc=True).limit(500).execute()
+    return aplicadas + [_pasada(r) for r in (res.data or [])]
+
 
 def leer_marca(sb):
-    """Devuelve ({proveedor: 'AAAA-MM-DD'}, se_pudo_leer).
-
-    🔴 FALLA EN ABIERTO: cualquier tropiezo -- que el fichero no exista todavia,
-    que Storage no responda, que el JSON este roto -- devuelve marca vacia, y con
-    marca vacia se avisa de todos. El coste de equivocarse por este lado es un
-    Telegram de mas; por el otro, dos dias de silencio."""
+    """({...}, se_pudo_leer). 🔴 FALLA EN ABIERTO: cualquier tropiezo -- que no exista
+    todavia, que Storage no responda, que el JSON este roto -- devuelve marca vacia, y con
+    marca vacia se avisa de todo lo caducado."""
     try:
         crudo = sb.storage.from_(MARCA_BUCKET).download(MARCA_RUTA)
         marca = json.loads(crudo.decode('utf-8'))
@@ -469,163 +483,116 @@ def leer_marca(sb):
             raise ValueError('el JSON de la marca no es un objeto')
         return marca, True
     except Exception as ex:
-        print('  AVISO: la marca de avisos no se pudo leer (no existe todavia, o: %s).' % ex)
-        print('         Se avisa IGUAL. Callar por un fallo de la marca seria el silencio')
-        print('         que este centinela viene a cerrar.')
+        print('  AVISO: la marca de avisos no se pudo leer (%s). Se avisa IGUAL de lo caducado;'
+              ' lo que no se puede avisar sin ella es una vuelta.' % type(ex).__name__)
         return {}, False
 
 
 def escribir_marca(sb, marca):
-    """Guarda la marca. Si falla, el aviso podra repetirse hoy: se prefiere
-    repetir a callar, asi que no cambia el resultado del run."""
+    """Si falla, el aviso se repetira en la vuelta siguiente: se prefiere repetir a callar."""
     try:
         sb.storage.from_(MARCA_BUCKET).upload(
             MARCA_RUTA, json.dumps(marca, indent=1, sort_keys=True).encode('utf-8'),
             {'upsert': 'true', 'content-type': 'application/json'})
         return True
     except Exception as ex:
-        print('  AVISO: no se pudo guardar la marca (%s). Consecuencia: hoy puede volver a'
-              ' avisar de lo mismo. Se prefiere repetir a callar.' % ex)
+        print('  AVISO: no se pudo guardar la marca (%s). Consecuencia: el aviso se repetira en'
+              ' la vuelta siguiente. Se prefiere repetir a callar.' % type(ex).__name__)
         return False
 
 
-# ============================================================
-# DE DONDE SALE LA FECHA: UNA FUENTE POR PROVEEDOR
-# ============================================================
-def _fecha(valor):
-    return datetime.fromisoformat(str(valor).replace('Z', '+00:00'))
+def enviar_telegram(token, chat, texto):
+    """True solo si Telegram confirma el envio (HTTP 200 y ok). Un 400 (un HTML que no
+    entiende, por ejemplo) es un aviso que no ha llegado."""
+    import requests
+    r = requests.post('https://api.telegram.org/bot%s/sendMessage' % token,
+                      data={'chat_id': chat, 'text': texto, 'parse_mode': 'HTML',
+                            'disable_web_page_preview': 'true'}, timeout=20)
+    if r.status_code != 200:
+        return False, 'HTTP %s' % r.status_code
+    try:
+        ok = bool(r.json().get('ok'))
+    except Exception:
+        ok = False
+    return ok, 'HTTP 200' + ('' if ok else ' sin ok')
 
 
-def _pasadas(sb, proveedor, estado):
-    """[(terminada_en, huella)] de las ultimas pasadas de ese estado. Se piden unas
-    filas y se coge el maximo despues, no `limit(1)`: ordenado en descendente Postgres
-    pone los NULL primero, y un `terminada_en` vacio no es una fecha."""
-    res = (sb.table('disp_pasada')
-             .select('terminada_en,huella_contenido')
-             .eq('proveedor', proveedor)
-             .eq('estado', estado)
-             .order('terminada_en', desc=True)
-             .limit(20).execute())
-    return [(_fecha(r['terminada_en']), r.get('huella_contenido')) for r in (res.data or [])
-            if r.get('terminada_en')]
-
-
-def ultima_escritura(sb, proveedor, fuente, al_dia_cuenta=()):
-    """Devuelve (ultima, motivo): la fecha UTC de la ultima escritura de ese
-    proveedor segun su `fuente`, o (None, por_que_no_hay). Si no se puede leer,
-    LANZA: quien llama lo apunta como fallo de lectura (no saber no es estar bien).
-
-    'escaner_memoria': el MAXIMO de `fecha` (el escaner viejo).
-    'disp_pasada': la ultima pasada 'aplicada' del escaner 2 (`terminada_en`).
-       🔴 SOLO 'aplicada': una pasada 'rechazada' o 'fallida' es el escaner 2
-       hablando pero SIN haber escrito, que es justo el silencio que se vigila.
-       La unica excepcion es `al_dia_cuenta` (TCG, el fin de semana): ver
-       `ultima_viva` y la cabecera."""
-    if fuente == 'disp_pasada':
-        aplicadas = _pasadas(sb, proveedor, 'aplicada')
-        if not aplicadas:
-            return None, 'ni una pasada aplicada en disp_pasada'
-        rechazadas = _pasadas(sb, proveedor, 'rechazada') if al_dia_cuenta else []
-        return ultima_viva(aplicadas, rechazadas, al_dia_cuenta), None
-    res = (sb.table('escaner_memoria')
-             .select('fecha')
-             .eq('proveedor', proveedor)
-             .order('fecha', desc=True)
-             .limit(1).execute())
-    if res.data:
-        return _fecha(res.data[0]['fecha']), None
-    return None, 'ni una fila en escaner_memoria'
+def _linea(prov, d):
+    """La linea del registro: estados, horas UTC y recuentos. NUNCA el motivo."""
+    def h(t):
+        return '-' if t is None else t.strftime('%Y-%m-%d %H:%M')
+    return ('  %-10s ultima buena %s UTC | plazo %s UTC | %d prevista(s) perdida(s), %d intento(s) '
+            'fallido(s), %d al dia%s -> %s'
+            % (prov, h(d['ultima_buena']), h(d['umbral']), len(d['perdidas']), len(d['fallos']),
+               len(d['al_dias']), ' | MISMO CONTENIDO desde %s UTC' % h(d['ultima_aplicada'])
+               if d['mismo_contenido'] else '', 'CADUCADO' if d['caducado'] else 'al dia'))
 
 
 # ============================================================
-# EL CENTINELA
+# EL VIGILANTE
 # ============================================================
 def main():
-    # 🔒 La misma regla que el escaner desde el 10-sep-2026: la llave de
-    #    servicio, o no se corre. Un centinela que lee con la anonima puede
-    #    recibir 200 con cero filas y declarar mudos a los cuatro -- o, peor, no
-    #    ver la tabla y callarse.
+    # 🔒 La llave de servicio, o no se corre: con la anonima se pueden recibir cero filas
+    #    sin error y declarar caducados a todos -- o no ver nada y callarse.
     llave = os.environ.get('SUPABASE_SERVICE_KEY')
     if not llave:
         print('CENTINELA_NO_EJECUTADO: sin llave de servicio')
         return 1
+    ensayo = os.environ.get('CENTINELA_ENSAYO', '').strip().lower() == 'si'
 
     from supabase import create_client
     sb = create_client(os.environ['SUPABASE_URL'], llave)
 
     ahora = datetime.now(timezone.utc)
-    print('CENTINELA escaner | %s UTC' % ahora.strftime('%Y-%m-%d %H:%M'))
+    print('CENTINELA escaner | %s UTC | %s Madrid%s'
+          % (ahora.strftime('%Y-%m-%d %H:%M'), ahora.astimezone(MADRID).strftime('%H:%M'),
+             ' | ENSAYO' if ensayo else ''))
 
-    filas, fallo_lectura = [], False
-    for proveedor in sorted(HORARIOS):
-        cfg = HORARIOS[proveedor]
-        ultima, motivo = None, None
+    estados, error = {}, None
+    try:
+        parametros = leer_parametros(sb)
+    except Exception as ex:
+        parametros, error = {}, ex
+        print('  NO SE PUDO LEER disp_parametros (%s)' % type(ex).__name__)
+    for prov in sorted(parametros):
         try:
-            ultima, motivo = ultima_escritura(sb, proveedor, cfg['fuente'],
-                                              cfg.get('al_dia_cuenta', ()))
+            pasadas = leer_pasadas(sb, prov)
         except Exception as ex:
-            motivo = 'no se pudo leer: %s' % ex
-            fallo_lectura = True
+            error = error or ex
+            print('  %-10s NO SE PUDO LEER disp_pasada (%s)' % (prov, type(ex).__name__))
+            continue
+        estados[prov] = diagnostico(parametros[prov], pasadas, ahora)
+        # 🔴 TODOS al registro, hablen o callen: el dia que calla tiene que distinguirse
+        #    «estan todos al dia» de «no llego a mirar».
+        print(_linea(prov, estados[prov]))
+    estados[LECTURA] = {'caducado': error is not None, 'ultima_buena': None,
+                        'error': None if error is None else '%s: %s' % (type(error).__name__, error)}
 
-        horas = None if ultima is None else horas_de_silencio(
-            ultima, ahora, cfg['descansa_domingo'], cfg['descansa_sabado'])
-        brutas = None if ultima is None else (ahora - ultima).total_seconds() / 3600.0
-        filas.append({'proveedor': proveedor, 'ultima': ultima, 'horas': horas,
-                      'brutas': brutas, 'umbral': cfg['umbral_h'], 'motivo': motivo,
-                      'mudo': esta_mudo(horas, cfg['umbral_h']), 'franja': franja_de(cfg),
-                      'fuente': cfg['fuente'],
-                      'descontado': ('los sábados y domingos' if cfg['descansa_sabado']
-                                     else 'los domingos')})
+    caducados = sorted(p for p, d in estados.items() if d['caducado'])
+    codigo = 1 if caducados else 0
+    print('CENTINELA_CADUCADO: ' + ', '.join(caducados) if caducados
+          else 'CENTINELA OK: los %d proveedores con horario leen dentro de su plazo.'
+               % (len(estados) - 1))
 
-    # 🔴 LOS CUATRO SIEMPRE AL LOG, hablen o callen. Misma disciplina que el
-    #    blindaje anti-vaciado del escaner: un centinela que solo escribe cuando
-    #    salta no se puede auditar -- el dia que calla no se distingue "estan
-    #    todos al dia" de "no llego a mirar".
-    for f in filas:
-        if f['ultima'] is None:
-            print('  %-10s SIN DATO (%s) | umbral %d h -> MUDO | fuente %s'
-                  % (f['proveedor'], f['motivo'], f['umbral'], f['fuente']))
-        else:
-            print('  %-10s ultima %s UTC | silencio %5.1f h (bruto %5.1f) | umbral %d h -> %s'
-                  ' | fuente %s'
-                  % (f['proveedor'], f['ultima'].strftime('%Y-%m-%d %H:%M'),
-                     f['horas'], f['brutas'], f['umbral'],
-                     'MUDO' if f['mudo'] else 'al dia', f['fuente']))
-
-    mudos = [f for f in filas if f['mudo']]
-    if not mudos:
-        print('CENTINELA OK: los %d directores han escrito dentro de su plazo.' % len(filas))
-        return 1 if fallo_lectura else 0
-
-    print('CENTINELA_MUDO: ' + ', '.join(f['proveedor'] for f in mudos))
-
-    # 🔴 EL RUN SALE EN ROJO EN LAS CUATRO, avise o no. Lo que se silencia es el
-    #    movil, nunca el registro: un proveedor mudo que se viera VERDE en
-    #    Actions el resto del dia seria el mismo silencio con otra cara.
-    hoy = ahora.strftime('%Y-%m-%d')
     marca, marca_leida = leer_marca(sb)
-    a_avisar, ya_avisados = avisos_de_hoy(marca if marca_leida else {}, hoy,
-                                          [f['proveedor'] for f in mudos])
-    if ya_avisados:
-        print('  ya avisados hoy (no se repite el Telegram): ' + ', '.join(ya_avisados))
-    if not a_avisar:
-        print('CENTINELA: nada que enviar, de los %d mudos ya se avisó hoy.' % len(mudos))
-        return 1
+    evs = eventos(estados, marca, ahora, RECORDATORIO_H)
+    for p in caducados:
+        if not any(prov == p for _t, prov in evs):
+            print('  %s: ya avisado hace menos de %d h (no se repite el Telegram)' % (p, RECORDATORIO_H))
+    if not evs:
+        print('CENTINELA: nada que enviar.')
+        return codigo
+    print('CENTINELA_AVISOS: ' + ', '.join('%s %s' % (t, p) for t, p in evs))
+    if not hora_de_avisar(ahora):
+        print('CENTINELA: fuera de hora (%s Madrid): los avisos esperan a la primera vuelta desde'
+              ' las %02d:00; la marca no se toca.' % (ahora.astimezone(MADRID).strftime('%H:%M'),
+                                                      HORAS_DE_AVISAR[0]))
+        return codigo
 
-    lineas = ['🔴 <b>Escaner: %d proveedor(es) callado(s)</b>' % len(a_avisar)]
-    lineas += [linea_de_aviso(f) for f in mudos if f['proveedor'] in a_avisar]
-    lineas.append('Mira el run del director en Actions: si sale verde y la fecha no se '
-                  'mueve, es que escribe en el vacío.')
-    del_escaner2 = [f['proveedor'] for f in mudos
-                    if f['proveedor'] in a_avisar and f['fuente'] == 'disp_pasada']
-    if del_escaner2:
-        con_al_dia = [p for p in del_escaner2 if HORARIOS[p].get('al_dia_cuenta')]
-        lineas.append('%s es del escáner 2: la fecha es la de la última pasada aplicada '
-                      '(disp_pasada)%s, y el reloj es cron-job.org, no GitHub.'
-                      % (', '.join(del_escaner2),
-                         '; a %s, el fin de semana, también vale una «al día»'
-                         % ', '.join(con_al_dia) if con_al_dia else ''))
-    texto = '\n'.join(lineas)
+    texto = '\n\n'.join(texto_de(t, p, estados[p], marca.get(p), ahora) for t, p in evs)
+    if ensayo:
+        print('CENTINELA ENSAYO: no se envia el Telegram (%d caracteres) ni se toca la marca.' % len(texto))
+        return codigo
 
     tg_token = os.environ.get('TELEGRAM_TOKEN')
     tg_chat = os.environ.get('TELEGRAM_CHAT_ID')
@@ -633,21 +600,16 @@ def main():
         print('>>> Telegram: sin claves en este paso -> no se envia (y la marca no se toca).')
         return 1
     try:
-        import requests
-        requests.post('https://api.telegram.org/bot%s/sendMessage' % tg_token,
-                      data={'chat_id': tg_chat, 'text': texto, 'parse_mode': 'HTML',
-                            'disable_web_page_preview': 'true'}, timeout=20)
-        print('>>> Telegram enviado: ' + ', '.join(a_avisar))
+        ok, como = enviar_telegram(tg_token, tg_chat, texto)
     except Exception as ex:
-        # 🔒 La marca NO se toca: si el envio fallo, el aviso no ha llegado, y
-        #    apuntarlo como enviado seria callarse el resto del dia.
-        print('AVISO Telegram (no se envio, la marca queda intacta):', ex)
+        ok, como = False, type(ex).__name__
+    if not ok:
+        # 🔒 La marca NO se toca: el aviso no ha llegado, y apuntarlo como enviado seria callar.
+        print('AVISO Telegram (no se envio: %s); la marca queda intacta.' % como)
         return 1
-
-    for proveedor in a_avisar:
-        marca[proveedor] = hoy
-    escribir_marca(sb, marca)
-    return 1
+    print('>>> Telegram enviado: ' + ', '.join('%s %s' % (t, p) for t, p in evs))
+    escribir_marca(sb, marca_tras(marca, evs, estados, ahora))
+    return codigo
 
 
 if __name__ == '__main__':

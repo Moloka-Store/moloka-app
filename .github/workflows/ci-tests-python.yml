@@ -243,13 +243,12 @@ jobs:
       - name: 22 quater bis) test_escaner_mis_compras_asin.py
         run: python -u test_escaner_mis_compras_asin.py
 
-      # El banco del centinela del proveedor mudo. Saca con `ast` las tres
-      # funciones puras de centinela_escaner.py y las corre con las fechas del
-      # apagon del 9-sep-2026 y con un sabado-a-lunes de verdad (los tres
-      # proveedores de fichero no trabajan los domingos: sin descontar esas horas,
-      # el umbral tendria que ser de 50 h y el aviso llegaria dos dias tarde). Y
-      # corre el centinela entero tres veces con dobles de supabase y requests.
-      # Sin red, sin secretos, sin tocar produccion.
+      # El banco del vigilante del escaner (27-nov-2026): la regla del horario de
+      # disp_parametros (dos lecturas previstas perdidas, la de Reponer), sacada de
+      # centinela_escaner.py con `ast` y corrida con la historia real de TCG del 26-nov;
+      # y el vigilante entero, caso a caso, con dobles de supabase y requests: «al dia»,
+      # fines de semana, aviso, recordatorio, vuelta, la marca que falla en abierto y
+      # roturas de la regla. Sin red, sin secretos, sin tocar produccion.
       - name: 22 quinquies) test_centinela_mudo.py
         run: python -u test_centinela_mudo.py
 
