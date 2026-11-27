@@ -20,6 +20,13 @@
 # 🆕 A MANO, LAS NOVEDADES DE UNA PASADA: con la entrada `pasada` (el id de una pasada aplicada de TCG), en vez de las
 #    cuentas, la seleccion y la valoracion de esa pasada (lo mismo que hace la foto tras aplicar). Vacia, las cuentas de
 #    siempre.
+#
+# 🆕 (Encargo TO, 27-nov-2026) LA RED CON RELOJ DE LA VALORACION: la lectura de laborables sale del ordenador de la oficina,
+#    que selecciona las novedades y encarga su valoracion a escaner2-tcg-valorar.yml. Si ese encargo no llega o falla,
+#    ESTE workflow, que ya corre cada hora (cron-job.org: a y 45 en laborables, a las 13:45 en fin de semana), valora antes
+#    de sus cuentas todo lo pendiente de TCG (escaner2_tcg_valorar.py: la selección hecha y la valoración sin cerrar, y las
+#    fallidas del último día; las avalanchas, cerradas antes de tocar Keepa). En el mismo job, así que valoración y
+#    cuentas nunca van a la vez. Solo en las cuentas sueltas (sin la entrada `pasada`).
 # ============================================================
 name: Moloka - Escaner 2 · Novedades TCG · cuentas
 
@@ -44,7 +51,8 @@ jobs:
     # Solo leer el repo: lo demas lo hace con la llave de servicio de Supabase.
     permissions:
       contents: read
-    timeout-minutes: 10
+    # 30: la valoración (hasta ~4 min medidos) y las cuentas (8) caben con holgura.
+    timeout-minutes: 30
     steps:
       - name: Descargar el repo
         uses: actions/checkout@v7
@@ -59,7 +67,24 @@ jobs:
         # Telegram · openpyxl: el Excel).
         run: pip install supabase==2.31.0 requests==2.34.2 openpyxl==3.1.5
 
+      # 🆕 (Encargo TO) Antes de las cuentas, lo que la lectura de la oficina dejó seleccionado y sin valorar. Si falla, el run
+      #    sale en ROJO, pero las cuentas corren igual (always): son otra cosa.
+      - name: Valorar lo pendiente de TCG (la red de la lectura de la oficina)
+        id: valorar
+        if: inputs.pasada == ''
+        timeout-minutes: 15
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}
+          TELEGRAM_TOKEN:       ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+          AVISO:                'valorar'
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_tcg_valorar.py
+
       - name: Contar las novedades listas, dejar su Excel y avisar
+        if: ${{ !cancelled() }}
         timeout-minutes: 8
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}

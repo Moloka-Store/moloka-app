@@ -6,11 +6,22 @@
 # PRIVADO de la v2 (escaner2-tcg-oficina.yml), con ESTE codigo y MAQUINA=oficina, y alli no estan las llaves de Keepa ni de
 # Telegram. La lectura deja hecha la SELECCION de novedades (en el acto: solo vale para la ultima pasada aplicada) y
 # lanza este workflow, con su token de disparo, para lo que necesita esas llaves (escaner2_tcg_valorar.py):
-#   aviso=valorar · valora las pasadas de TCG con la seleccion hecha y la valoracion sin cerrar (la encargada y cualquiera
-#                   que se quedara atras: ninguna se queda sin valorar en silencio);
-#   aviso=parada  · ademas, el Telegram de la pasada que se ha parado porque la web no deja (el motivo, de la base);
-#   aviso=tramos  · ademas, el Telegram del lector de tramos parado.
-# A mano (sin pasada) vale para recoger cualquier valoracion pendiente.
+#   aviso=valorar · solo el job `valorar`: valora lo pendiente de TCG (la encargada, cualquiera que se quedara atras y las
+#                   fallidas del ultimo dia), con las avalanchas cerradas antes de tocar Keepa;
+#   aviso=parada  · ademas, el job `aviso`: el Telegram de la pasada que se ha parado porque la web no deja;
+#   aviso=tramos  · ademas, el job `aviso`: el Telegram del lector de tramos parado.
+# A mano (sin pasada) vale para recoger cualquier valoracion pendiente. La RED CON RELOJ es escaner2-tcg-novedades-
+# cuentas.yml, que valora lo pendiente antes de sus cuentas (cron-job.org, a y 45).
+#
+# 🔒 DOS JOBS, DOS REGLAS DE CONCURRENCIA:
+#    · `aviso`, SIN grupo: no toca Keepa ni escribe en la base, solo manda un Telegram. Sin grupo no espera ni lo cancela
+#      otra corrida que llegue detras: ningun aviso se pierde.
+#    · `valorar`, en el grupo `escaner2-tcg` (el de la lectura horaria de GitHub, la lectura del PRO de TCG y las cuentas),
+#      sin cancelar el que corre: valoracion y cuentas nunca a la vez (las dos cuentan las «lista»), ni dos valoraciones de
+#      TCG a la vez. Si una corrida de este job esperando la sustituye otra (GitHub deja una sola esperando por grupo), no se
+#      pierde nada: cada corrida valora TODO lo pendiente, y la red de las cuentas lo recoge a la hora siguiente.
+#      ⚠️ Y al reves: un job de este grupo que esperaba (la horaria del fin de semana relanzada, la lectura de un PRO)
+#      puede quedar sustituido por este; pasa igual hoy con las cuentas. La lectura del PRO lo diria en la pantalla.
 #
 # 🔴 LOS INPUTS VIAJAN POR `env:`, NUNCA DENTRO DE `run:`: el programa los valida (aviso de la lista, pasada un uuid).
 # 🔴 REPO PUBLICO: este registro lo ve cualquiera. El programa SOLO imprime estados y recuentos. No sube artefactos.
@@ -35,16 +46,42 @@ on:
 permissions:
   contents: read
 
-# 🔒 GRUPO PROPIO, sin cancelar la que corre: dos valoraciones de TCG no se pisan. Una que espera la sustituye la
-#    siguiente, y no se pierde nada: cada corrida valora TODO lo pendiente.
-concurrency:
-  group: escaner2-tcg-valorar
-  cancel-in-progress: false
-
 jobs:
+  aviso:
+    if: inputs.aviso != 'valorar'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        # supabase: la base (el motivo de la pasada parada) · requests: Telegram.
+        run: pip install --quiet supabase==2.31.0 requests==2.34.2
+
+      - name: Mandar el aviso encargado
+        timeout-minutes: 5
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          TELEGRAM_TOKEN:       ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+          AVISO:                ${{ inputs.aviso }}
+          PASADA:               ${{ inputs.pasada }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_tcg_valorar.py
+
   valorar:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    concurrency:
+      group: escaner2-tcg
+      cancel-in-progress: false
     steps:
       - name: Descargar el repo
         uses: actions/checkout@v7
@@ -58,7 +95,7 @@ jobs:
         # supabase: la base · openpyxl: el Excel de novedades · requests: Keepa y Telegram.
         run: pip install --quiet supabase==2.31.0 openpyxl==3.1.5 requests==2.34.2
 
-      - name: Valorar lo pendiente de TCG y mandar el aviso encargado
+      - name: Valorar lo pendiente de TCG
         timeout-minutes: 25
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
@@ -66,7 +103,7 @@ jobs:
           KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}
           TELEGRAM_TOKEN:       ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
-          AVISO:                ${{ inputs.aviso }}
+          AVISO:                'valorar'
           PASADA:               ${{ inputs.pasada }}
           PYTHONIOENCODING:     utf-8
         run: python -u escaner2_tcg_valorar.py

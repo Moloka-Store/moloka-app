@@ -40,7 +40,9 @@ QUE PRUEBA:
       de EDAD_MAXIMA_MIN no lee (justo por debajo, sí; sin saber la edad, sí); sin token de disparo, ROJO sin pasada; con
       otra lectura de TCG viva espera hasta ESPERA_TURNO_S (si acaba, lee; si no, no lee; una muerta o de otro proveedor no
       frena); la página anti-robots, ROJO sin relanzar y el aviso encargado; el lector parado, su aviso encargado; el
-      rescate, sin token; sin MAQUINA, todo como siempre; y el registro sin tokens ni la URL de la API.
+      rescate, sin token; el vigía de la marca no impide encargar la valoración; la horaria de GitHub también espera a otra
+      lectura viva; un fallo de la base al mirar el turno, ROJO sin pasada; GITHUB_API_URL; sin MAQUINA, todo lo demás como
+      siempre; y el registro sin tokens ni la URL de la API.
 """
 import contextlib
 import io
@@ -1351,6 +1353,59 @@ with contextlib.redirect_stdout(salida):
 eq('TO26 el rescate desde la oficina: solo la pasada de ESTE run pasa a fallida, sin preguntar ni encargar nada',
    (codigo, [(p['id'], p['estado']) for p in base.pasadas()], gh.gets, gh.encargos),
    (0, [('PASADA-OTRA', 'fallida'), ('PASADA-AJENA', 'leyendo')], [], []))
+
+# TO27 · 🔴 el vigía de la marca parecida en la oficina: ROJO, pero la valoración se encarga igual (la selección está hecha).
+base, gh = Base(), GitHub()
+base.marca_parecida = 1
+codigo, reg = correr_oficina(base, Web(catalogo(), FICHAS), gh)
+eq('TO27 🔴 con el vigía de la marca parecida: ROJO por el vigía, y la valoración SE ENCARGA igual (la selección está hecha)',
+   (codigo, [e['cuerpo']['inputs']['aviso'] for e in gh.encargos], 'MARCA_PARECIDA' in reg,
+    'TCG_VALORACION_NO_ENCARGADA' in reg), (1, ['valorar'], True, False))
+base, gh = Base(), GitHub()
+base.falla_novedades = True
+codigo, reg = correr_oficina(base, Web(catalogo(), FICHAS), gh)
+eq('TO28 si la SELECCIÓN falla (nada seleccionado): ROJO y no se encarga valorar nada', (codigo, gh.encargos), (1, []))
+
+# TO29-TO31 · la horaria de GitHub (sin MAQUINA) también espera a otra lectura de TCG viva (una de la oficina, a mano).
+base, web = Base(), Web(catalogo(), FICHAS)
+base.t['disp_pasada'] = [leyendo_hace(3)]
+esperas = []
+salida = io.StringIO()
+with contextlib.redirect_stdout(salida):
+    codigo = prog.principal([], env=dict(ENV), sb=base, sesion=web, dormir=lambda s: esperas.append(s))
+eq('TO29 🔴 la horaria de GitHub con una lectura de la oficina viva: espera 10 min y sale VERDE sin abrir pasada ni tocar '
+   'la web', (codigo, len(base.pasadas()), web.pedidas, 'TCG_OTRA_EN_MARCHA' in salida.getvalue(),
+              sum(s for s in esperas if s == prog.ESPERA_TURNO_CADA_S)), (0, 1, [], True, prog.ESPERA_TURNO_S))
+
+
+class BaseQueFallaAlMirar(Base):
+    """La base no contesta cuando se mira si hay otra lectura en marcha (con un texto que lleva datos)."""
+
+    def table(self, n):
+        q = super().table(n)
+        if n == 'disp_pasada':
+            q.execute = lambda: (_ for _ in ()).throw(RuntimeError('Failing row contains (%s, 8000000000017)' % CLAVE))
+        return q
+
+
+for nombre, extra in (('la de la oficina', ENV_OFICINA), ('la de GitHub', {})):
+    base, web, gh = BaseQueFallaAlMirar(), Web(catalogo(), FICHAS), GitHub()
+    salida = io.StringIO()
+    with contextlib.redirect_stdout(salida):
+        try:
+            codigo = prog.principal([], env={**ENV, **extra}, sb=base, sesion=web, dormir=lambda s: None, pedir=gh.pedir,
+                                    post=gh.post)
+        except SystemExit as ex:
+            codigo = ex.code
+    eq('TO30 🔴 %s: si la base no contesta al mirar el turno, ROJO sin abrir pasada ni tocar la web' % nombre,
+       (codigo, base.t.get('disp_pasada', []), web.pedidas, 'TCG_NO_EJECUTADA' in salida.getvalue()), (1, [], [], True))
+    limpio('TO31 (%s)' % nombre, salida.getvalue())
+
+# TO32 · la API de GitHub de la corrida, la que diga GITHUB_API_URL (GitHub Enterprise o la de siempre).
+gh = GitHub()
+codigo, reg = correr_oficina(Base(), Web(catalogo(), FICHAS), gh, env={'GITHUB_API_URL': 'https://github.ejemplo.invalid/api/v3/'})
+eq('TO32 la edad se pregunta a GITHUB_API_URL (sin la barra del final)', [u for u, _a in gh.gets],
+   ['https://github.ejemplo.invalid/api/v3/repos/Moloka-Store/moloka-app-v2/actions/runs/45999000001'])
 
 print()
 print('TODO OK' if not fallos else 'FALLOS: %d (%s)' % (len(fallos), ', '.join(fallos)))

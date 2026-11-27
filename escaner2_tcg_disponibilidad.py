@@ -122,7 +122,8 @@ HORA_LISTADO = 9  # Madrid, de lunes a viernes: la pasada de las 09:00
 # (escaner2-tcg-oficina.yml) que baja ESTE codigo y lo corre con MAQUINA=oficina. Lo que cambia con MAQUINA=oficina:
 #   · una corrida vieja (el equipo estaba apagado y GitHub la tenia en cola) sale sin leer (EDAD_MAXIMA_MIN);
 #   · con otra lectura de TCG en marcha (una 'leyendo' de menos de 1 h), espera a que acabe (ESPERA_TURNO_S); si no acaba,
-#     no lee (los grupos de `concurrency` son por repo: el de la v1 no ve el job de la v2);
+#     no lee (los grupos de `concurrency` son por repo: el de la v1 no ve el job de la v2). Esto lo hace TAMBIEN la horaria
+#     de GitHub, sin MAQUINA: una lanzada a mano no se cruza con la de la oficina;
 #   · la pagina anti-robots NO se reintenta en otra maquina (no hay otra): ROJO, como cualquier bloqueo;
 #   · las novedades: la SELECCION en el acto (nov_seleccionar_pasada solo vale para la ULTIMA pasada aplicada de TCG, que
 #     va por precio_pa), y la VALORACION (Keepa, Excel, Telegram) y los avisos de una parada, en la v1
@@ -389,6 +390,13 @@ def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX
 def novedades(sb, pid, run_id, valorar=True):
     """(Encargo T4) Las novedades de Funko de la pasada aplicada `pid` (como DBLine y OcioStock). NUNCA LANZA. Devuelve
     True si todo fue bien (sin el vigia de la marca). 🔴 Repo publico: el registro, discreto (solo estados y recuentos)."""
+    return _novedades(sb, pid, run_id, valorar)[0]
+
+
+def _novedades(sb, pid, run_id, valorar=True):
+    """`novedades`, devolviendo ademas si la SELECCION quedo hecha (en la base): (ok, seleccionada). (Encargo TO) La lectura
+    de la oficina encarga la valoracion siempre que la seleccion este hecha, aunque el vigia de la marca ponga el run en
+    rojo: si no, esas novedades se quedarian seleccionadas y sin valorar en cada pasada mientras dure el aviso."""
     try:
         import escaner2_novedades as nv
         ok, seleccion = nv.novedades_tras_la_pasada(sb, pid, PROVEEDOR, keepa_llave=os.environ.get('KEEPA_API_KEY'),
@@ -397,7 +405,7 @@ def novedades(sb, pid, run_id, valorar=True):
     except Exception as ex:
         print(f"TCG_NOVEDADES_NO_HECHAS: la pasada {pid} sigue aplicada; las novedades han fallado antes de poder "
               f"apuntarse ({type(ex).__name__})", flush=True)
-        return False
+        return False, False
     marca_parecida = (seleccion or {}).get('marca_parecida') or 0
     if marca_parecida:
         print(f"MARCA_PARECIDA: {marca_parecida} producto(s) de TCG tienen una marca que se parece a {MARCA_NOVEDADES} y no "
@@ -406,7 +414,7 @@ def novedades(sb, pid, run_id, valorar=True):
     if not ok:
         print(f"TCG_NOVEDADES_EN_ROJO: la pasada {pid} sigue aplicada; las novedades no han salido bien (el detalle, en "
               f"nov_pasada de esa pasada).", flush=True)
-    return ok and not marca_parecida
+    return ok and not marca_parecida, seleccion is not None
 
 
 # ── El lector de tramos ───────────────────────────────────────────────────────────────────
@@ -698,14 +706,21 @@ def _principal(argv, env, sb, sesion, dormir, pedir, post):
         except Exception as ex:
             abortar(f'el rescate ha fallado ({type(ex).__name__})')
         return 0
-    if oficina:
+    # (Encargo TO) Las dos lecturas horarias, la de la oficina y la de GitHub, esperan a otra lectura de TCG viva: los grupos
+    # de concurrency son por repo y no se ven. Mirar e insertar no es atomico: dos que miran en el mismo segundo pueden
+    # abrir las dos (queda dicho en el parte).
+    try:
         libre, esperado = esperar_turno(sb, dormir=dormir or time.sleep)
-        if not libre:
-            print(f"TCG_OTRA_EN_MARCHA: otra lectura de TCG sigue en marcha tras esperar {esperado} s; esta no lee (no "
-                  f"se lee a la vez).", flush=True)
-            return 0
-        if esperado:
-            print(f">>> OFICINA: había otra lectura de TCG en marcha; ha acabado tras {esperado} s.", flush=True)
+    except Exception as ex:  # noqa: BLE001 — 🔴 solo el tipo: el texto puede llevar la respuesta de la base
+        print(f"TCG_NO_EJECUTADA: no se ha podido mirar si hay otra lectura de TCG en marcha ({type(ex).__name__}); no se "
+              f"abre ninguna pasada.", flush=True)
+        return 1
+    if not libre:
+        print(f"TCG_OTRA_EN_MARCHA: otra lectura de TCG sigue en marcha tras esperar {esperado} s; esta no lee (no "
+              f"se lee a la vez).", flush=True)
+        return 0
+    if esperado:
+        print(f">>> TURNO: había otra lectura de TCG en marcha; ha acabado tras {esperado} s.", flush=True)
 
     from escaner2_tcg_web import Web, sesion_de_verdad
     web = Web(sesion if sesion is not None else sesion_de_verdad(), **({'dormir': dormir} if dormir else {}))
@@ -726,9 +741,10 @@ def _principal(argv, env, sb, sesion, dormir, pedir, post):
         return codigo or 1
     # 5 bis · (encargo T4) las novedades de Funko, con la pasada aplicada y antes del lector (no esperan a sus fichas).
     if estado == 'aplicada':
-        if not novedades(sb, pid, run_id, valorar=not oficina):
+        ok_nov, seleccionada = _novedades(sb, pid, run_id, valorar=not oficina)
+        if not ok_nov:
             codigo = 1
-        elif oficina and not _ENCARGAR('valorar', pid):
+        if oficina and seleccionada and not _ENCARGAR('valorar', pid):
             # La seleccion ya esta en la base; la valoracion la recoge la siguiente corrida de escaner2-tcg-valorar.yml.
             print(f"TCG_VALORACION_NO_ENCARGADA: la pasada {pid} queda con sus novedades seleccionadas y SIN valorar "
                   f"(nov_pasada.valoracion_estado vacío); las valorará la siguiente corrida de {WORKFLOW_VALORAR}.",
