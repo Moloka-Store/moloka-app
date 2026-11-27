@@ -732,6 +732,11 @@ def valorar_pasada(sb, pasada, keepa_llave=None, http=None, dormir=time.sleep, a
                 avisos.append('las novedades de la avalancha no se pudieron cerrar: %s: %s' % (type(ex).__name__, str(ex)[:300]))
             aviso_telegram([], avalancha, [], imprimir, env, post, proveedor)
         else:
+            # 🔑 (Encargo TO, 27-nov-2026) Antes de que Keepa recorra la cola (que es de TODO el proveedor), las novedades de
+            #    cualquier pasada suya con avalancha quedan cerradas: la de la oficina que se selecciono y aun no se ha
+            #    valorado no pasa por Keepa en la valoracion de otra pasada, la haga quien la haga.
+            if proveedor in CERRAR_AVALANCHAS_ANTES:
+                cerrar_avalanchas_pendientes(sb, proveedor, ahora)
             valoradas, incompletos = [], []
             _valorar(sb, pasada, par, datos, avisos, keepa_llave, http, dormir, ahora, imprimir, valoradas, incompletos,
                      proveedor)
@@ -771,6 +776,30 @@ _FLUJO_SIN_VALORAR['keepa_reserva_cruzada'] = False
 
 # (Encargo NV) Como empieza el motivo de una novedad cerrada por avalancha: es lo que la distingue de las demás «caducada».
 MOTIVO_AVALANCHA = 'avalancha'
+
+
+# (Encargo TO, 27-nov-2026) Los proveedores cuya SELECCION y VALORACION pueden ir en corridas distintas: TCG (la lectura de la
+# oficina selecciona; la valora escaner2_tcg_valorar.py por reloj). Antes de que Keepa recorra la cola de uno de ellos, se cierran
+# las novedades «pendiente» de toda pasada suya con avalancha de los ultimos MIRAR_AVALANCHAS_D dias (cerrar_avalanchas_pendientes).
+CERRAR_AVALANCHAS_ANTES = ('TCG',)
+MIRAR_AVALANCHAS_D = 7
+
+
+def cerrar_avalanchas_pendientes(sb, proveedor=PROVEEDOR, ahora=_ahora, dias=MIRAR_AVALANCHAS_D):
+    """(Encargo TO) Cierra (cerrar_por_avalancha: sus «pendiente» pasan a «caducada»; idempotente, sin Telegram) las novedades
+    de TODA pasada del proveedor con la seleccion hecha y avalancha (novedades menos subidas fuera, mas de AVALANCHA) de los
+    ultimos `dias`, este cerrada o no su valoracion. Devuelve (pasadas con avalancha, novedades cerradas ahora). LANZA si la base
+    falla: sin cerrarlas, no se puede valorar."""
+    desde = (ahora() - timedelta(days=dias)).isoformat()
+    filas = (sb.table('nov_pasada').select('pasada_id,n_novedades,n_subidas_fuera').eq('proveedor', proveedor)
+               .eq('estado', 'hecha').gte('creada_en', desde).execute().data or [])
+    pasadas = cerradas = 0
+    for f in filas:
+        n = max(int(f.get('n_novedades') or 0) - int(f.get('n_subidas_fuera') or 0), 0)
+        if n > AVALANCHA:
+            pasadas += 1
+            cerradas += cerrar_por_avalancha(sb, f['pasada_id'], n, ahora, proveedor)
+    return pasadas, cerradas
 
 
 def cerrar_por_avalancha(sb, pasada, avalancha, ahora=_ahora, proveedor=PROVEEDOR):

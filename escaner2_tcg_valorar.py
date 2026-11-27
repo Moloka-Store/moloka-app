@@ -9,16 +9,20 @@ ULTIMA pasada aplicada de TCG (va por precio_pa: nov_seleccionar_pasada lanza PA
 seleccion es UNA llamada a la base (una transaccion): la fila de nov_pasada y sus novedades aparecen juntas, nunca «a
 medias». La VALORACION la hace este programa, y tiene que ser correcta por si sola. Cada corrida, EN ESTE ORDEN:
 
-  1. LAS AVALANCHAS, ANTES DE TOCAR KEEPA. Regla de Fernando (encargo NV): mas de AVALANCHA cambios en una pasada no se
+  1. LAS AVALANCHAS, ANTES DE TOCAR KEEPA, AL EMPEZAR Y JUSTO ANTES DE CADA VALORACION
+     (escaner2_novedades.cerrar_avalanchas_pendientes, que tambien llama valorar_pasada para TCG, la haga quien la haga: la
+     horaria del sabado o el PRO tampoco pasan por Keepa una avalancha de la oficina aun sin cerrar). Regla de Fernando (encargo NV): mas de AVALANCHA cambios en una pasada no se
      valoran; se cierran, se avisa una vez y el pasa un Escaneo PRO. Cada valoracion recorre TODA la cola de TCG (nov_cola
      solo se filtra por proveedor), asi que la primera cosa es cerrar (`cerrar_por_avalancha`: sus «pendiente» pasan a
      «caducada»; idempotente y sin Telegram) las novedades de TODA pasada de TCG con avalancha de los ultimos
      MIRAR_AVALANCHAS_D dias, tenga la edad que tenga y este cerrada o no su valoracion: una recien seleccionada que aun no
-     toca recoger tampoco pasa por Keepa. El aviso «⚠️ Avalancha» sale UNA vez por pasada: al cerrar su valoracion
-     (valorar_pasada), y solo se cierra una pasada sin cerrar; una que cerro (o fallo) no se vuelve a valorar.
-  2. LO VIEJO SE CIERRA SIN VALORAR. Una pasada seleccionada hace mas de TOPE_PENDIENTE_H y aun sin valorar: sus «pendiente»
-     pasan a «caducada» con el motivo, y su valoracion se cierra como 'fallida' con ese motivo (a la vista en la base). Sin
-     Keepa ni Telegram: no se avisa de algo pasado.
+     toca recoger tampoco pasa por Keepa. El aviso «⚠️ Avalancha» sale UNA vez por pasada pase lo que pase: primero se
+     cierra su valoracion y solo si el cierre entra se manda el aviso (`cerrar_avalancha_y_avisar`); una que cerro (o
+     fallo) no se vuelve a valorar.
+  2. LO VIEJO SE CIERRA SIN VALORAR. Una pasada seleccionada hace mas de TOPE_PENDIENTE_H (y menos de MIRAR_AVALANCHAS_D
+     dias: lo de antes se deja a la vista, sin reintentarlo cada hora) y aun sin valorar: sus «pendiente» pasan a «caducada»
+     con el motivo, y su valoracion se cierra como 'fallida' con ese motivo. Sin Keepa ni Telegram (no se avisa de algo
+     pasado), salvo que fuera una avalancha: esa nunca se aviso, y se avisa ahora con la fecha de la pasada.
   3. LA VALORACION (Keepa, el Excel «TCG · Funko» y el Telegram de novedades: escaner2_novedades.valorar_pasada, la misma
      de la horaria) de lo pendiente, de la mas vieja a la mas nueva, las avalanchas primero:
        · la seleccion hecha y la valoracion SIN CERRAR, con mas de PENDIENTE_MIN_S (la horaria del fin de semana y el PRO
@@ -91,33 +95,37 @@ def _antes_de(f, t):
 
 
 def plan(sb, pasada, ahora, avalancha):
-    """Lo que hace esta corrida (ver la cabecera): {'avalanchas': [...] (paso 1, se cierran sus novedades),
-    'viejas': [...] (paso 2), 'valorar': [...] (paso 3, en orden)}."""
+    """Lo que hace esta corrida (ver la cabecera): {'viejas': [...] (paso 2), 'valorar': [...] (paso 3, en orden: las
+    avalanchas primero)}. Las avalanchas del paso 1 las cierra escaner2_novedades.cerrar_avalanchas_pendientes."""
     sin_cerrar = (sb.table('nov_pasada').select(_COLUMNAS).eq('proveedor', PROVEEDOR).eq('estado', 'hecha')
                     .is_('valoracion_estado', 'null').order('creada_en').execute().data or [])
     recientes = (sb.table('nov_pasada').select(_COLUMNAS).eq('proveedor', PROVEEDOR).eq('estado', 'hecha')
                    .gte('creada_en', (ahora - timedelta(days=MIRAR_AVALANCHAS_D)).isoformat()).order('creada_en')
                    .execute().data or [])
     tope, limite = ahora - timedelta(hours=TOPE_PENDIENTE_H), ahora - timedelta(seconds=PENDIENTE_MIN_S)
-    fallidas_desde = ahora - timedelta(hours=RECOGER_FALLIDAS_H)
-    vistos, avalanchas = set(), []
-    for f in recientes + sin_cerrar:
-        if _novedades(f) > avalancha and f['pasada_id'] not in vistos:
-            vistos.add(f['pasada_id'])
-            avalanchas.append(f)
-    viejas = [f for f in sin_cerrar if _antes_de(f, tope) and f['pasada_id'] != pasada]
-    viejo = {f['pasada_id'] for f in viejas}
-    cola = [f for f in sin_cerrar if f['pasada_id'] not in viejo and (f['pasada_id'] == pasada or _antes_de(f, limite))]
+    fallidas_desde, semana = ahora - timedelta(hours=RECOGER_FALLIDAS_H), ahora - timedelta(days=MIRAR_AVALANCHAS_D)
+    # Lo viejo, solo de la ultima semana: lo de antes se deja (sigue a la vista, sin cerrar) y no se reintenta cada hora.
+    viejas = [f for f in sin_cerrar if _antes_de(f, tope) and not _antes_de(f, semana) and f['pasada_id'] != pasada]
+    fuera = {f['pasada_id'] for f in sin_cerrar if _antes_de(f, tope) and f['pasada_id'] != pasada}
+    cola = [f for f in sin_cerrar if f['pasada_id'] not in fuera and (f['pasada_id'] == pasada or _antes_de(f, limite))]
     cola += [f for f in recientes if f.get('valoracion_estado') == 'fallida' and not _antes_de(f, fallidas_desde)
              and _novedades(f) <= avalancha]
     cola.sort(key=lambda f: str(f.get('creada_en') or ''))
-    return {'avalanchas': avalanchas, 'viejas': viejas,
+    return {'viejas': viejas,
             'valorar': [f for f in cola if _novedades(f) > avalancha] + [f for f in cola if _novedades(f) <= avalancha]}
 
 
-def cerrar_vieja(sb, f, ahora):
+def _madrid(v):
+    from zoneinfo import ZoneInfo
+    t = _fecha(v)
+    return t.astimezone(ZoneInfo('Europe/Madrid')).strftime('%d-%m-%Y a las %H:%M') if t else '¿?'
+
+
+def cerrar_vieja(sb, f, ahora, avalancha, env=None, post=None):
     """Paso 2: las «pendiente» de una pasada seleccionada hace mas de TOPE_PENDIENTE_H pasan a «caducada» con el motivo, y su
-    valoracion se cierra 'fallida' con ese motivo. Sin Keepa ni Telegram. Devuelve cuantas novedades caducan."""
+    valoracion se cierra 'fallida' con ese motivo. Sin Keepa. Sin Telegram, salvo si era una avalancha: esa nunca se aviso
+    (una avalancha sin cerrar es una que nadie ha avisado: el aviso sale al cerrarla, paso 3), y se avisa ahora, con su fecha.
+    Devuelve cuantas novedades caducan."""
     pid = f['pasada_id']
     motivo = (f'sin valorar a tiempo: la pasada {pid} de TCG se seleccionó hace más de {TOPE_PENDIENTE_H} h y nadie la '
               f'valoró; no se valora algo pasado')
@@ -125,7 +133,36 @@ def cerrar_vieja(sb, f, ahora):
                .eq('pasada_id', pid).eq('proveedor', PROVEEDOR).eq('estado', 'pendiente').execute().data or [])
     sb.rpc('nov_cerrar_valoracion', {'p_pasada': pid, 'p_datos': {
         'estado': 'fallida', 'motivo': f'{motivo} ({len(filas)} novedad(es) caducadas)'}}).execute()
+    n = _novedades(f)
+    if n > avalancha:
+        import escaner2_novedades as nv
+        nv.enviar_telegram(f'⚠️ Avalancha con retraso: la pasada de TCG del {_madrid(f.get("creada_en"))} tuvo {n} cambios en '
+                           f'Funko (más de {avalancha}) y no se llegó a avisar a tiempo; no se ha valorado ninguna. Si sigue '
+                           f'interesando, lanza un Escaneo PRO.', env=env, post=post, imprimir=lambda *a, **k: None)
     return len(filas)
+
+
+def cerrar_avalancha_y_avisar(sb, f, ahora, env, post, hacer):
+    """Paso 3 con una avalancha: PRIMERO se cierra su valoracion (nov_cerrar_valoracion, como la de valorar_pasada: nada pasa
+    por Keepa ni por la cuenta) y SOLO SI EL CIERRE ENTRA se manda el aviso «⚠️ Avalancha». Asi sale UNA vez por pasada pase lo
+    que pase: si el cierre falla, no hay aviso y la corrida siguiente lo vuelve a intentar; si falla el Telegram, la pasada ya
+    esta cerrada y no se repite (ROJO y dicho). Con el interruptor apagado (nov_parametros.valorar), la de siempre
+    (valorar_pasada cierra «apagada», sin aviso). Devuelve (ok, res)."""
+    import escaner2_novedades as nv
+    pid, n = f['pasada_id'], _novedades(f)
+    par = nv.leer_parametros(sb, PROVEEDOR)
+    if par.get('valorar') is not True:
+        return hacer(sb, pid, keepa_llave=env.get('KEEPA_API_KEY'), imprimir=_discreto, run_id=env.get('GITHUB_RUN_ID') or None,
+                     novedades_pasada=n, env=env, post=post, proveedor=PROVEEDOR)
+    nv.cerrar_por_avalancha(sb, pid, n, lambda: ahora, PROVEEDOR)
+    datos = dict(nv._FLUJO_SIN_VALORAR, estado='hecha', keepa_reserva=int(par['keepa_reserva']),
+                 motivo=f'avalancha: {n} cambios en la pasada, más de {nv.AVALANCHA}; cerradas sin valorar (Escaneo PRO a mano)')
+    res = sb.rpc('nov_cerrar_valoracion', {'p_pasada': pid, 'p_datos': datos}).execute().data or {}
+    avisado = nv.aviso_telegram([], n, [], _discreto, env, post, PROVEEDOR)
+    if not avisado:
+        print(f">>> AVALANCHA de la pasada {pid}: cerrada, pero el aviso NO ha salido (no se repite: la pasada ya está "
+              f"cerrada).", flush=True)
+    return (isinstance(res, dict) and res.get('estado') == 'hecha' and bool(avisado)), res
 
 
 def _discreto(*a, **k):
@@ -141,31 +178,39 @@ _CIFRAS = ('novedades', 'nuestras', 'pendientes', 'espera_keepa', 'espera_amazon
            'caducadas')
 
 
-def valorar(sb, pasada, env, ahora=None, valorar_pasada=None, post=None, cerrar_avalancha=None):
+def valorar(sb, pasada, env, ahora=None, valorar_pasada=None, post=None, cerrar_avalanchas=None):
     """Los tres pasos de la cabecera. Devuelve (codigo, recuentos). 🔴 Solo estados y recuentos al registro."""
     import escaner2_novedades as nv
     ahora = ahora or datetime.now(timezone.utc)
     hacer = valorar_pasada or nv.valorar_pasada
-    cerrar = cerrar_avalancha or (lambda sb_, pid, n: nv.cerrar_por_avalancha(sb_, pid, n, proveedor=PROVEEDOR))
+    cerrar = cerrar_avalanchas or (lambda sb_, t: nv.cerrar_avalanchas_pendientes(sb_, PROVEEDOR, lambda: t))
     p = plan(sb, pasada, ahora, nv.AVALANCHA)
-    mal = 0
-    # 1 · Las avalanchas, antes de tocar Keepa.
-    cerradas = 0
-    for f in p['avalanchas']:
+    vacio = {'avalanchas': 0, 'viejas': 0, 'pendientes': 0, 'bien': 0, 'mal': 1, 'suya': False}
+
+    def cerrar_ya(cuando):
+        """Las avalanchas, antes de tocar Keepa: al empezar y justo antes de CADA valoracion (una avalancha que la oficina
+        seleccione mientras esta corrida valora otra pasada tampoco pasa por Keepa). None si no se pudo."""
         try:
-            cerradas += int(cerrar(sb, f['pasada_id'], _novedades(f)) or 0)
-        except Exception as ex:  # noqa: BLE001 — sin cerrarlas, la cola las llevaria a Keepa: no se valora nada. 🔴 Solo el tipo.
-            print(f"TCG_AVALANCHA_SIN_CERRAR: no se han podido cerrar las novedades de una avalancha ({type(ex).__name__}); "
-                  f"no se valora nada en esta corrida.", flush=True)
-            return 1, {'avalanchas': len(p['avalanchas']), 'viejas': 0, 'pendientes': 0, 'bien': 0, 'mal': 1, 'suya': False}
-    print(f">>> AVALANCHAS DE TCG (últimos {MIRAR_AVALANCHAS_D} días): {len(p['avalanchas'])} · novedades cerradas sin valorar "
-          f"ahora {cerradas}.", flush=True)
+            return cerrar(sb, ahora)
+        except Exception as ex:  # noqa: BLE001 — sin cerrarlas, la cola las llevaria a Keepa: no se valora. 🔴 Solo el tipo.
+            print(f"TCG_AVALANCHA_SIN_CERRAR: no se han podido cerrar las novedades de las avalanchas ({cuando}, "
+                  f"{type(ex).__name__}); no se valora nada más en esta corrida.", flush=True)
+            return None
+
+    # 1 · Las avalanchas, antes de tocar Keepa.
+    hecho = cerrar_ya('al empezar')
+    if hecho is None:
+        return 1, vacio
+    print(f">>> AVALANCHAS DE TCG (últimos {MIRAR_AVALANCHAS_D} días): {hecho[0]} · novedades cerradas sin valorar ahora "
+          f"{hecho[1]}.", flush=True)
+    mal = 0
     # 2 · Lo viejo, cerrado sin valorar.
     for f in p['viejas']:
         try:
-            n = cerrar_vieja(sb, f, ahora)
-            print(f">>> SIN VALORAR A TIEMPO: la pasada {f['pasada_id']} (seleccionada hace más de {TOPE_PENDIENTE_H} h) se "
-                  f"cierra sin valorar · {n} novedad(es) caducadas · sin aviso.", flush=True)
+            n = cerrar_vieja(sb, f, ahora, nv.AVALANCHA, env=env, post=post)
+            print(f">>> SIN VALORAR A TIEMPO: la pasada {f['pasada_id']} (seleccionada hace más de {TOPE_PENDIENTE_H} h"
+                  f"{', avalancha: avisada con retraso' if _novedades(f) > nv.AVALANCHA else ''}) se cierra sin valorar · {n} "
+                  f"novedad(es) caducadas.", flush=True)
         except Exception as ex:  # noqa: BLE001 — 🔴 solo el tipo
             print(f">>> SIN VALORAR A TIEMPO: la pasada {f['pasada_id']} no se ha podido cerrar ({type(ex).__name__}).",
                   flush=True)
@@ -174,11 +219,16 @@ def valorar(sb, pasada, env, ahora=None, valorar_pasada=None, post=None, cerrar_
     bien = 0
     for f in p['valorar']:
         n = _novedades(f)
+        if cerrar_ya('antes de valorar una pasada') is None:
+            return 1, dict(vacio, viejas=len(p['viejas']), pendientes=len(p['valorar']), bien=bien, mal=mal + 1)
         try:
-            ok, res = hacer(sb, f['pasada_id'], keepa_llave=env.get('KEEPA_API_KEY'), imprimir=_discreto,
-                            run_id=env.get('GITHUB_RUN_ID') or None, novedades_pasada=n, env=env, post=post,
-                            proveedor=PROVEEDOR)
-        except Exception as ex:  # noqa: BLE001 — valorar_pasada no lanza; esto es por si acaso. 🔴 Solo el tipo.
+            if n > nv.AVALANCHA:
+                ok, res = cerrar_avalancha_y_avisar(sb, f, ahora, env, post, hacer)
+            else:
+                ok, res = hacer(sb, f['pasada_id'], keepa_llave=env.get('KEEPA_API_KEY'), imprimir=_discreto,
+                                run_id=env.get('GITHUB_RUN_ID') or None, novedades_pasada=n, env=env, post=post,
+                                proveedor=PROVEEDOR)
+        except Exception as ex:  # noqa: BLE001 — valorar_pasada no lanza; el cierre de una avalancha si. 🔴 Solo el tipo.
             ok, res = False, {'estado': f'sin cerrar ({type(ex).__name__})'}
         res = res if isinstance(res, dict) else {}
         cifras = ' · '.join(f'{k} {res[k]}' for k in _CIFRAS if res.get(k) is not None)
@@ -191,11 +241,11 @@ def valorar(sb, pasada, env, ahora=None, valorar_pasada=None, post=None, cerrar_
     print(f">>> VALORAR TCG: pendientes {len(p['valorar'])}"
           f"{'' if not pasada else ' (la pedida ' + ('sí' if suya else 'no: ya valorada, vieja, sin selección hecha o no es de TCG') + ')'}"
           f" · cerradas por viejas {len(p['viejas'])} · bien {bien} · en ROJO {mal}.", flush=True)
-    return (1 if mal else 0), {'avalanchas': len(p['avalanchas']), 'viejas': len(p['viejas']),
-                               'pendientes': len(p['valorar']), 'bien': bien, 'mal': mal, 'suya': suya}
+    return (1 if mal else 0), {'avalanchas': hecho[0], 'viejas': len(p['viejas']), 'pendientes': len(p['valorar']),
+                               'bien': bien, 'mal': mal, 'suya': suya}
 
 
-def principal(env=None, sb=None, valorar_pasada=None, post=None, ahora=None, cerrar_avalancha=None):
+def principal(env=None, sb=None, valorar_pasada=None, post=None, ahora=None, cerrar_avalanchas=None):
     env = os.environ if env is None else env
     pasada = (env.get('PASADA') or '').strip().lower()
     if pasada and not _RE_UUID.match(pasada):
@@ -208,7 +258,7 @@ def principal(env=None, sb=None, valorar_pasada=None, post=None, ahora=None, cer
         from escaner2_base import cliente
         sb = cliente(env['SUPABASE_URL'], env['SUPABASE_SERVICE_KEY'])
     return valorar(sb, pasada, env, ahora=ahora, valorar_pasada=valorar_pasada, post=post,
-                   cerrar_avalancha=cerrar_avalancha)[0]
+                   cerrar_avalanchas=cerrar_avalanchas)[0]
 
 
 if __name__ == '__main__':

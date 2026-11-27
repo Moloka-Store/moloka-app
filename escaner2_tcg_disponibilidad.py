@@ -689,8 +689,11 @@ def principal(argv, env=None, sb=None, sesion=None, dormir=None, pedir=None):
                   f"hasta que se ponga en hora.", flush=True)
             return 1
         if edad is None:
-            print(">>> OFICINA: no se ha podido saber cuándo se pidió esta corrida; se lee.", flush=True)
-        elif edad > EDAD_MAXIMA_MIN:
+            # Sin la edad ni la hora de GitHub no se puede saber si es una corrida atrasada ni si el reloj va bien.
+            print("TCG_SIN_EDAD: no se ha podido preguntar a GitHub cuándo se pidió esta corrida (ni su hora); no se lee.",
+                  flush=True)
+            return 1
+        if edad > EDAD_MAXIMA_MIN:
             print(f"TCG_CORRIDA_VIEJA: esta corrida se pidió hace {int(edad)} min según la hora de GitHub (más de "
                   f"{EDAD_MAXIMA_MIN}: el equipo estaba apagado o la máquina ocupada; el reloj del equipo va "
                   f"{'¿?' if desfase is None else f'{desfase:+.1f} min'} respecto a GitHub); no se lee. La base ya la cuenta "
@@ -715,9 +718,10 @@ def principal(argv, env=None, sb=None, sesion=None, dormir=None, pedir=None):
               f"abre ninguna pasada.", flush=True)
         return 1
     if not libre:
+        # ROJO: esta lectura prevista no se hace (en fin de semana, la unica del dia); el vigilante la cuenta como perdida.
         print(f"TCG_OTRA_EN_MARCHA: otra lectura de TCG sigue en marcha tras esperar {esperado} s; esta no lee (no "
-              f"se lee a la vez).", flush=True)
-        return 0
+              f"se lee a la vez) y sale en ROJO.", flush=True)
+        return 1
     if esperado:
         print(f">>> TURNO: había otra lectura de TCG en marcha; ha acabado tras {esperado} s.", flush=True)
 

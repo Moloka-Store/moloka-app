@@ -1240,8 +1240,8 @@ eq('TO11 pedida hace 45 min y en cola desde entonces (run_started_at = created_a
 for nombre, g, extra in (('la API da 500', GitHub(codigo_run=500), {}), ('sin token del run', GitHub(), {'GITHUB_TOKEN': ''})):
     base, web = Base(), Web(catalogo(), FICHAS)
     codigo, reg = correr_oficina(base, web, g, env=extra)
-    eq('TO12 sin poder saber la edad (%s): se lee y se dice' % nombre,
-       (codigo, [p['estado'] for p in base.pasadas()], 'no se ha podido saber cuándo se pidió' in reg), (0, ['aplicada'], True))
+    eq('TO12 🔴 sin poder saber la edad ni la hora de GitHub (%s): ROJO sin leer, y se dice' % nombre,
+       (codigo, base.pasadas(), web.pedidas, 'TCG_SIN_EDAD' in reg), (1, [], [], True))
 gh = GitHub()
 codigo, reg = correr_oficina(Base(), Web(catalogo(), FICHAS), gh, env={'GITHUB_API_URL': 'https://github.ejemplo.invalid/api/v3/'})
 eq('TO13 la edad se pregunta a GITHUB_API_URL (sin la barra del final)', [u for u, _a in gh.gets],
@@ -1262,9 +1262,9 @@ base, web = Base(), Web(catalogo(), FICHAS)
 base.t['disp_pasada'] = [leyendo_hace(3)]
 esperas = []
 codigo, reg = correr_oficina(base, web, GitHub(), dormir=lambda s: esperas.append(s))
-eq('TO15 otra lectura viva que no acaba: espera 10 min mirando cada 15 s y sale VERDE sin abrir pasada ni tocar la web',
+eq('TO15 🔴 otra lectura viva que no acaba: espera 10 min mirando cada 15 s y sale en ROJO sin abrir pasada ni tocar la web',
    (codigo, len(base.pasadas()), web.pedidas, sum(s for s in esperas if s == prog.ESPERA_TURNO_CADA_S),
-    'TCG_OTRA_EN_MARCHA' in reg), (0, 1, [], prog.ESPERA_TURNO_S, True))
+    'TCG_OTRA_EN_MARCHA' in reg), (1, 1, [], prog.ESPERA_TURNO_S, True))
 base, web = Base(), Web(catalogo(), FICHAS)
 base.t['disp_pasada'] = [leyendo_hace(3)]
 vueltas = []
@@ -1297,9 +1297,9 @@ esperas = []
 salida = io.StringIO()
 with contextlib.redirect_stdout(salida):
     codigo = prog.principal([], env=dict(ENV), sb=base, sesion=web, dormir=lambda s: esperas.append(s))
-eq('TO19 🔴 la horaria de GitHub con una lectura de la oficina viva: espera 10 min y sale VERDE sin abrir pasada ni tocar '
-   'la web', (codigo, len(base.pasadas()), web.pedidas, 'TCG_OTRA_EN_MARCHA' in salida.getvalue(),
-              sum(s for s in esperas if s == prog.ESPERA_TURNO_CADA_S)), (0, 1, [], True, prog.ESPERA_TURNO_S))
+eq('TO19 🔴 la horaria de GitHub con una lectura de la oficina viva: espera 10 min y sale en ROJO (en fin de semana es la '
+   'única del día) sin abrir pasada ni tocar la web', (codigo, len(base.pasadas()), web.pedidas, 'TCG_OTRA_EN_MARCHA' in salida.getvalue(),
+              sum(s for s in esperas if s == prog.ESPERA_TURNO_CADA_S)), (1, 1, [], True, prog.ESPERA_TURNO_S))
 
 
 class BaseQueFallaAlMirar(Base):

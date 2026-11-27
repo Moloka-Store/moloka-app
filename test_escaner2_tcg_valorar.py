@@ -12,13 +12,17 @@ QUE PRUEBA:
   (A) valora lo pendiente de TCG: la pedida siempre, las demas sin cerrar si llevan mas de PENDIENTE_MIN_S, de la mas
       vieja a la mas nueva; ni las ya valoradas, ni las de seleccion fallida, ni las de otro proveedor; con su cifra para la
       avalancha y la llave de Keepa;
-  (B) 🔴 LAS AVALANCHAS ANTES DE TOCAR KEEPA, tengan la edad que tengan: una avalancha recien seleccionada y aun no recogida
-      cierra sus novedades antes de que otra corrida valore nada; su aviso sale UNA vez por pasada, encadenando corridas;
-      una avalancha fallida no se reintenta (ni otro aviso); sin poder cerrar una avalancha, no se valora nada;
+  (B) 🔴 LAS AVALANCHAS ANTES DE TOCAR KEEPA, tengan la edad que tengan, al empezar y antes de CADA valoracion: una
+      recien seleccionada y aun no recogida, o una que la oficina selecciona mientras la corrida valora otra, cierra sus
+      novedades antes de que Keepa recorra la cola; valorar_pasada de TCG (el sabado, el PRO) tambien las cierra antes; su
+      aviso sale UNA vez por pasada pase lo que pase con el cierre (primero el cierre, luego el aviso; un cierre que falla,
+      sin aviso y para la siguiente), encadenando corridas; una avalancha fallida no se reintenta; sin poder cerrarlas, no
+      se valora nada;
   (C) 🔴 LAS FALLIDAS: a la vista (fallida en la base, ROJO y nombrada) y reintentadas solo mientras su SELECCION tenga
       menos de RECOGER_FALLIDAS_H, aunque cada cierre renueve valoracion_en (corridas encadenadas);
   (V) 🔴 LO VIEJO: seleccionado hace mas de TOPE_PENDIENTE_H y sin valorar se cierra sin valorar, sus «pendiente» caducan con
-      su motivo, y ni Keepa ni Telegram;
+      su motivo, y ni Keepa ni Telegram, salvo una avalancha nunca avisada (se avisa una vez, con su fecha); lo de hace mas de
+      una semana se deja, sin reintentarlo cada hora;
   (D) guardas: PASADA un uuid o nada; sin la base o sin Keepa, ROJO sin valorar nada;
   (E) 🔴 el registro no suelta el motivo de la base, ni un token, ni un EAN;
   (F) por estructura, el workflow: solo por dispatch (el reloj es cron-job.org); un job, en el grupo `escaner2-tcg` (el de
@@ -106,9 +110,11 @@ class _Q:
 
 
 class Base:
-    def __init__(self, nov=(), novedades=()):
-        self.t = {'nov_pasada': [dict(f) for f in nov], 'nov_novedad': [dict(f) for f in novedades]}
-        self.eventos, self.rota = [], None
+    def __init__(self, nov=(), novedades=(), valorar=True):
+        self.t = {'nov_pasada': [dict(f) for f in nov], 'nov_novedad': [dict(f) for f in novedades],
+                  'nov_parametros': [{'proveedor': 'TCG', 'valorar': valorar, 'keepa_reserva': 20}]}
+        # `falla_cierre`: las pasadas cuyo nov_cerrar_valoracion lanza (la base no contesta).
+        self.eventos, self.rota, self.falla_cierre = [], None, set()
 
     def table(self, n):
         return _Q(self, n)
@@ -119,6 +125,8 @@ class Base:
         class _L:
             def execute(self):
                 assert nombre == 'nov_cerrar_valoracion', nombre
+                if params['p_pasada'] in base.falla_cierre:
+                    raise RuntimeError('canceling statement due to statement timeout (8000000000017)')
                 base.eventos.append(('cerrar_valoracion', params['p_pasada'], params['p_datos']['estado']))
                 for f in base.t['nov_pasada']:
                     if f['pasada_id'] == params['p_pasada']:
@@ -175,9 +183,10 @@ class Valoracion:
 
 
 def cerrar_de_mentira(base):
-    def cerrar(sb, pid, n):
-        base.eventos.append(('cerrar_avalancha', pid))
-        return nv.cerrar_por_avalancha(sb, pid, n, proveedor='TCG')
+    """La de verdad (escaner2_novedades.cerrar_avalanchas_pendientes), apuntando cuando se llama."""
+    def cerrar(sb, t):
+        base.eventos.append(('cerrar_avalanchas',))
+        return nv.cerrar_avalanchas_pendientes(sb, 'TCG', lambda: t)
     return cerrar
 
 
@@ -190,7 +199,7 @@ def correr(base, env=None, fallan=(), post=post_tg, ahora=None, val=None):
     with contextlib.redirect_stdout(salida):
         try:
             codigo = prog.principal(env=dict(ENV, **(env or {})), sb=base, valorar_pasada=val, post=post, ahora=AHORA,
-                                    cerrar_avalancha=cerrar_de_mentira(base))
+                                    cerrar_avalanchas=cerrar_de_mentira(base))
         except SystemExit as ex:
             codigo = ex.code
     return codigo, salida.getvalue(), val
@@ -235,42 +244,100 @@ eq('A7 la pedida ya valorada (un relanzamiento): no se repite, VERDE y lo dice',
    (codigo, val.llamadas, 'la pedida no: ya valorada' in reg), (0, [], True))
 
 # ── (B) Las avalanchas, antes de tocar Keepa, y su aviso una vez ──────────────────────────
+def cerradas_avalancha(base):
+    return sorted(f['id'] for f in base.t['nov_novedad'] if f['estado'] == 'caducada' and str(f.get('motivo_estado', '')).startswith('avalancha'))
+
+
 AHORA = T0
 base = Base(nov=[nov(P[1], 3600, novedades=3), nov(P[2], 30, novedades=AV + 51, subidas=1)],
             novedades=[novedad(P[2], i) for i in range(3)] + [novedad(P[1], 9)])
 telegramas.clear()
 codigo, reg, val = correr(base)
-ev = [e for e in base.eventos if e[0] in ('cerrar_avalancha', 'keepa')]
-eq('B1 🔴 una avalancha RECIÉN seleccionada (30 s, aún no toca recogerla) y una vieja normal: las novedades de la avalancha se '
-   'cierran ANTES de que Keepa recorra la cola', ev, [('cerrar_avalancha', P[2]), ('keepa', P[1])])
+ev = [e[0] if e[0] != 'keepa' else e for e in base.eventos if e[0] in ('cerrar_avalanchas', 'keepa')]
+eq('B1 🔴 una avalancha RECIÉN seleccionada (30 s, aún no toca recogerla) y una vieja normal: las avalanchas se cierran al '
+   'empezar Y justo antes de valorar, siempre antes de que Keepa recorra la cola', ev, ['cerrar_avalanchas', 'cerrar_avalanchas', ('keepa', P[1])])
 eq('B2 …sus «pendiente» quedan «caducada» por avalancha (cerrar_por_avalancha de verdad), las de la otra no',
    ({f['id']: f['estado'] for f in base.t['nov_novedad']}),
    {'00000002-0': 'caducada', '00000002-1': 'caducada', '00000002-2': 'caducada', '00000001-9': 'pendiente'})
-eq('B3 …la avalancha recién seleccionada no se valora aún (su cierre y su aviso, en la corrida siguiente): ni aviso',
-   ([c[0] for c in val.llamadas], len(telegramas)), ([P[1]], 0))
+eq('B3 …la avalancha recién seleccionada no se cierra aún (su cierre y su aviso, en la corrida siguiente): ni aviso',
+   ([c[0] for c in val.llamadas], len(telegramas), estados(base)[P[2]]), ([P[1]], 0, None))
 codigo, reg, val = correr(base, ahora=T0 + timedelta(minutes=10))
-eq('B4 🔴 la corrida siguiente (10 min después) cierra la valoración de la avalancha y manda su aviso, UNA vez',
-   ([c[0] for c in val.llamadas], len(telegramas), estados(base)[P[2]]), ([P[2]], 1, 'hecha'))
+eq('B4 🔴 la corrida siguiente (10 min después) cierra su valoración (sin pasar por la valoración normal) y manda su aviso, '
+   'UNA vez', ([c[0] for c in val.llamadas], len(telegramas), estados(base)[P[2]], 'Avalancha' in ''.join(telegramas),
+               ('cerrar_valoracion', P[2], 'hecha') in base.eventos), ([], 1, 'hecha', True, True))
 codigo, reg, val = correr(base, ahora=T0 + timedelta(minutes=70))
-eq('B5 🔴 y la otra (1 h después): ni la vuelve a valorar ni otro aviso', (val.llamadas, len(telegramas)), ([], 1))
+eq('B5 🔴 y la otra (1 h después): ni la vuelve a cerrar ni otro aviso', (val.llamadas, len(telegramas), codigo), ([], 1, 0))
 AHORA = T0
 base = Base(nov=[nov(P[1], 7200, novedades=AV + 1, subidas=0), nov(P[2], 3600, novedades=AV + 1, subidas=1),
                  nov(P[3], 600, novedades=4)])
 codigo, reg, val = correr(base)
-eq('B6 el límite es «más de» AVALANCHA (novedades − subidas): 101 lo es, 100 no; las avalanchas, primero',
-   ([c[0] for c in val.llamadas], [e[1] for e in base.eventos if e[0] == 'cerrar_avalancha']), ([P[1], P[2], P[3]], [P[1]]))
+eq('B6 el límite es «más de» AVALANCHA (novedades − subidas): 101 lo es (se cierra con su aviso), 100 no (se valora)',
+   ([c[0] for c in val.llamadas], [e[1] for e in base.eventos if e[0] == 'cerrar_valoracion']), ([P[2], P[3]], [P[1]]))
 AHORA = T0
-base = Base(nov=[nov(P[2], 600, novedades=AV + 30, subidas=0, valoracion='fallida', valorada_hace_s=300)])
+base = Base(nov=[nov(P[2], 600, novedades=AV + 30, subidas=0, valoracion='fallida', valorada_hace_s=300)],
+            novedades=[novedad(P[2], 1)])
 telegramas.clear()
 codigo, reg, val = correr(base)
 eq('B7 🔴 una avalancha que cerró «fallida»: sus novedades se cierran igual, pero ni se reintenta ni otro aviso',
-   ([e for e in base.eventos if e[0] == 'cerrar_avalancha'], val.llamadas, len(telegramas)), ([('cerrar_avalancha', P[2])], [], 0))
+   (cerradas_avalancha(base), val.llamadas, len(telegramas)), (['00000002-1'], [], 0))
 base = Base(nov=[nov(P[1], 3600), nov(P[2], 30, novedades=AV + 10, subidas=0)])
 base.rota = 'nov_novedad'
 codigo, reg, val = correr(base)
-eq('B8 🔴 si no se pueden cerrar las novedades de una avalancha, no se valora nada (Keepa las cogería): ROJO y dicho',
+eq('B8 🔴 si no se pueden cerrar las novedades de las avalanchas, no se valora nada (Keepa las cogería): ROJO y dicho',
    (codigo, val.llamadas, 'TCG_AVALANCHA_SIN_CERRAR' in reg), (1, [], True))
 limpio('B9', reg)
+# 🔴 El aviso, una vez pase lo que pase con el cierre: primero se cierra, y solo si el cierre entra, se avisa.
+AHORA = T0
+base = Base(nov=[nov(P[2], 600, novedades=AV + 20, subidas=0)])
+base.falla_cierre = {P[2]}
+telegramas.clear()
+codigo, reg, val = correr(base)
+eq('B10 🔴 una avalancha cuyo cierre falla (la base no contesta): ROJO, SIN aviso, y sigue sin cerrar para la siguiente',
+   (codigo, len(telegramas), estados(base)[P[2]], 'sin cerrar (RuntimeError)' in reg), (1, 0, None, True))
+base.falla_cierre = set()
+codigo, reg, val = correr(base, ahora=T0 + timedelta(hours=1))
+eq('B11 …la corrida siguiente la cierra y avisa UNA vez', (codigo, len(telegramas), estados(base)[P[2]]), (0, 1, 'hecha'))
+codigo, reg, val = correr(base, ahora=T0 + timedelta(hours=2))
+eq('B12 …y la otra, ningún aviso más', len(telegramas), 1)
+limpio('B13', reg)
+
+
+class ValoracionQueSelecciona(Valoracion):
+    """Mientras valora la primera pasada, la oficina selecciona una avalancha (aparece en la base con sus «pendiente»)."""
+
+    def __call__(self, sb, pasada, **k):
+        if pasada == P[1]:
+            self.base.t['nov_pasada'].append(nov(P[5], 1, novedades=AV + 40, subidas=0))
+            self.base.t['nov_novedad'].append(novedad(P[5], 1))
+        return super().__call__(sb, pasada, **k)
+
+
+AHORA = T0
+base = Base(nov=[nov(P[1], 3600), nov(P[3], 1800)])
+codigo, reg, val = correr(base, val=ValoracionQueSelecciona(base))
+orden = [e[0] if e[0] != 'keepa' else e for e in base.eventos if e[0] in ('cerrar_avalanchas', 'keepa')]
+eq('B14 🔴 una avalancha que la oficina selecciona MIENTRAS esta corrida valora otra: se cierra antes de la valoración '
+   'siguiente (Keepa no recorre sus «pendiente»)',
+   (orden, cerradas_avalancha(base)), (['cerrar_avalanchas', 'cerrar_avalanchas', ('keepa', P[1]), 'cerrar_avalanchas', ('keepa', P[3])],
+                                       ['00000005-1']))
+
+# 🔴 La valoración de TCG la haga quien la haga (la horaria del sábado, el PRO): valorar_pasada cierra antes las avalanchas.
+AHORA = T0
+base = Base(nov=[nov(P[1], 60), nov(P[6], 30, novedades=AV + 5, subidas=0)], novedades=[novedad(P[6], 1), novedad(P[1], 2)])
+llamadas = []
+_originales = (nv._valorar, nv.excel_de_novedades, nv.aviso_telegram)
+nv._valorar = lambda sb, pasada, *a, **k: llamadas.append(('keepa', pasada, cerradas_avalancha(base)))
+nv.excel_de_novedades = lambda *a, **k: None
+nv.aviso_telegram = lambda *a, **k: False
+try:
+    with contextlib.redirect_stdout(io.StringIO()):
+        nv.valorar_pasada(base, P[1], keepa_llave='LLAVE-KEEPA-SECRETA', proveedor='TCG', ahora=lambda: AHORA,
+                          novedades_pasada=1, imprimir=lambda *a, **k: None)
+finally:
+    nv._valorar, nv.excel_de_novedades, nv.aviso_telegram = _originales
+eq('B15 🔴 valorar_pasada de TCG (la del sábado o la del PRO) cierra las avalanchas pendientes ANTES de recorrer la cola',
+   llamadas, [('keepa', P[1], ['00000006-1'])])
+eq('B16 …solo para TCG (los demás proveedores, como siempre)', nv.CERRAR_AVALANCHAS_ANTES, ('TCG',))
 
 # ── (C) Las fallidas: a la vista y reintentadas un día desde la selección ─────────────────
 AHORA = T0
@@ -324,6 +391,21 @@ eq('V4 …el registro lo dice, sin motivo de la base', ('>>> SIN VALORAR A TIEMP
 codigo, reg, val = correr(base, ahora=T0 + timedelta(hours=1))
 eq('V5 y no se reintenta (cerró hace más de 24 h de su selección)', P[1] in [c[0] for c in val.llamadas], False)
 eq('V6 el tope, un día', prog.TOPE_PENDIENTE_H, 24)
+AHORA = T0
+base = Base(nov=[nov(P[3], prog.TOPE_PENDIENTE_H * 3600 + 600, novedades=AV + 7, subidas=0)])
+telegramas.clear()
+codigo, reg, val = correr(base)
+eq('V7 🔴 una AVALANCHA seleccionada hace más de 24 h y nunca cerrada: se cierra y se avisa UNA vez, con la fecha de la pasada',
+   (estados(base)[P[3]], len(telegramas), 'Avalancha con retraso: la pasada de TCG del 26-11-2026' in ''.join(telegramas)),
+   ('fallida', 1, True))
+codigo, reg, val = correr(base, ahora=T0 + timedelta(hours=1))
+eq('V8 …y no vuelve a avisar', len(telegramas), 1)
+AHORA = T0
+base = Base(nov=[nov(P[4], prog.MIRAR_AVALANCHAS_D * 86400 + 600)])
+base.falla_cierre = {P[4]}
+codigo, reg, val = correr(base)
+eq('V9 lo de hace más de una semana sin valorar se deja (a la vista): ni se intenta cerrar cada hora ni pone el run en ROJO',
+   (codigo, estados(base)[P[4]], val.llamadas), (0, None, []))
 
 # ── (D) Guardas ───────────────────────────────────────────────────────────────────────────
 AHORA = T0
