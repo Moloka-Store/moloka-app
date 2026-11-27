@@ -168,7 +168,7 @@ class _Cliente:
 
 def lectura_de_mentira(bd, proveedor):
     """(Encargo PD) La lectura en directo de mentira, en el hijo: `bd['lector']` dice que hace el lector del proveedor
-    (la pasada de disponibilidad de ESTE run es la fila de disp_pasada con su run_id; `pared` hasta el intento N), y
+    (la pasada de disponibilidad de ESTE run es la fila de disp_pasada con su run_id), y
     `bd['foto_forzada']` sustituye a toda la lectura (la foto que dice, sin mirar nada: para probar el chequeo del
     barrido). Se apunta cada llamada en bd['lecturas'] y lo de despues en bd['despues']."""
     if bd.get('mutante_modulo'):
@@ -186,8 +186,6 @@ def lectura_de_mentira(bd, proveedor):
     if lec is not None:
         def _lector(sb, env, run_id, intento, guarda):
             bd.setdefault('lecturas', []).append({'intento': intento, 'guarda': type(guarda).__name__, 'run_id': run_id})
-            if intento < int(lec.get('pared_hasta') or 0):
-                return epd.Lectura(pared=True, siguiente=intento + 1)
             pid = next((p['id'] for p in bd['tablas']['disp_pasada'] if str(p.get('run_id')) == run_id), None)
             if lec.get('confirma') or lec.get('por_que'):
                 return epd.Lectura(pid=pid, confirma=lec.get('confirma'), por_que=lec.get('por_que'))

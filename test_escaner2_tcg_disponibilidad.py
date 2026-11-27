@@ -1076,7 +1076,7 @@ eq('H15 los jobs son leer y otra_maquina, nada más', sorted(wf['jobs']), ['leer
 # ── (PD) 🆕 (Encargo PD, 27-nov-2026) LA LECTURA DEL ESCANEO PRO: la MISMA pasada, con la guarda del PRO ─────────────
 #    escaner2_pro_en_directo._leer_tcg (lo que corre el barrido antes de la foto): los Funko de la web ANTES de la foto,
 #    con el tope del PRO; NUNCA el lector de tramos; las novedades solo con `despues()` (al final del barrido); la pagina
-#    anti-robots, otro intento; el vaciado del PRO no cuenta para el freno; y si la guarda dice que no, no se aplica.
+#    anti-robots, UN intento y sin Telegram; el vaciado del PRO no cuenta para el freno.
 import escaner2_pro_en_directo as epd  # noqa: E402
 
 
@@ -1107,7 +1107,7 @@ r, reg = lector_pro(base, web, guarda=g)
 prog.FICHAS_FUNKO_PRO = _tope
 pp = base.pasadas()[0]
 eq('PD1 la lectura del PRO: la pasada de la horaria, APLICADA, y su id en la lectura',
-   (pp['estado'], r.pid == pp['id'], r.pared), ('aplicada', True, False))
+   (pp['estado'], r.pid == pp['id'], r.motivo_entero), ('aplicada', True, None))
 eq('PD2 🔴 los Funko antes de la foto, con el tope del PRO (1 aquí; 3 tocaban), y NI UNA ficha del lector de tramos (X)',
    (web.fichas_pedidas(), 'pendientes 3, pedidas 1 (máximo 1)' in reg, '>>> TRAMOS' in reg), ([UJ['FB']], True, False))
 eq('PD3 🔴 las novedades NO antes de tiempo: solo disp_aplicar_pasada', [n for n, _p in base.rpcs], ['disp_aplicar_pasada'])
@@ -1126,13 +1126,13 @@ base = Base()
 r, reg = lector_pro(base, WebPared(catalogo(), FICHAS), guarda=epd.GuardaPro(base, 'TCG'))
 eq('PD8 🔴 (quien dirige) la página anti-robots: UN intento, sin otro ni Telegram; la pasada de la lectura, fallida, y el '
    'motivo, claro, con la última lectura buena (aquí, ninguna)',
-   (r.pared, r.siguiente, base.pasadas()[0]['estado'], telegramas, r.motivo_entero, 'no reintenta' in reg),
-   (False, None, 'fallida', [], 'la web de TCG no deja entrar ahora a las máquinas de lectura; no hay ninguna lectura '
+   (r.foto, base.pasadas()[0]['estado'], telegramas, r.motivo_entero, 'no reintenta' in reg),
+   (None, 'fallida', [], 'la web de TCG no deja entrar ahora a las máquinas de lectura; no hay ninguna lectura '
                                 'buena; vuelve a barrer', True))
 base = Base()
 r, reg = lector_pro(base, Web(catalogo(), FICHAS, login=403), guarda=epd.GuardaPro(base, 'TCG'))
 eq('PD9 🔴 otro bloqueo (un 403): fallida con su motivo de siempre (no el de la página), y SIN Telegram (el PRO lo ve en la '
-   'pantalla)', (r.pared, r.motivo_entero, base.pasadas()[0]['estado'], telegramas), (False, None, 'fallida', []))
+   'pantalla)', (r.motivo_entero, base.pasadas()[0]['estado'], telegramas), (None, 'fallida', []))
 base = Base()
 correr(base, Web(catalogo(), FICHAS, login=403))
 eq('PD10 …y la horaria, con el mismo 403, sí manda su Telegram (no cambia)', len(telegramas), 1)

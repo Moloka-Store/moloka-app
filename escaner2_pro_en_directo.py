@@ -86,16 +86,15 @@ REGENERADO_OSMA = 'OSMA no ha regenerado'
 
 class Lectura:
     """Lo que devuelve `leer_en_directo` (y cada lector): `foto` es la pasada de disp_pasada de la que sale el barrido
-    (None si no se sigue), con `motivo` el porque; `pared`, la web de TCG ha enseñado su pagina anti-robots y queda
-    otro intento en otra maquina (`siguiente`); `despues`, lo que la horaria hace tras aplicar (devuelve True si fue
+    (None si no se sigue), con `motivo` el porque; `despues`, lo que la horaria hace tras aplicar (devuelve True si fue
     bien; el barrido no la llama: va en su paso, `tras_la_lectura`); `nota`, lo que el barrido deja escrito de la
     lectura de la que sale (`nota_de`). Del lector: `confirma`, la aplicada que su lectura confirma sin decir «al día» (OSMA), o `por_que`, el
-    motivo de no seguir que el lector ya sabe, o `motivo_entero`, el motivo de la pantalla tal cual (TCG sin intentos)."""
+    motivo de no seguir que el lector ya sabe, o `motivo_entero`, el motivo de la pantalla tal cual (TCG, su pagina
+    anti-robots)."""
 
-    def __init__(self, pid=None, foto=None, motivo=None, pared=False, siguiente=None, despues=None, confirma=None,
-                 por_que=None, nota=None, motivo_entero=None):
-        self.pid, self.foto, self.motivo = pid, foto, motivo
-        self.pared, self.siguiente, self.despues = pared, siguiente, despues
+    def __init__(self, pid=None, foto=None, motivo=None, despues=None, confirma=None, por_que=None, nota=None,
+                 motivo_entero=None):
+        self.pid, self.foto, self.motivo, self.despues = pid, foto, motivo, despues
         self.confirma, self.por_que, self.nota = confirma, por_que, nota
         self.motivo_entero = motivo_entero
 
@@ -441,8 +440,7 @@ def nota_de(sb, foto, como, ahora, hace=None):
 
 def leer_en_directo(sb, proveedor, env=None, run_id='', intento=1, lectores=None, ahora=None):
     """La lectura del proveedor AHORA, para el barrido (ver la cabecera). Devuelve una `Lectura`: con `foto` se sigue
-    (y `nota` dice de que lectura sale); sin ella, `motivo` es el de la pantalla (o `pared`, otro intento en otra
-    maquina). NUNCA LANZA."""
+    (y `nota` dice de que lectura sale); sin ella, `motivo` es el de la pantalla. NUNCA LANZA."""
     env = os.environ if env is None else env
     nombre, secretos = PROVEEDORES[proveedor]
     ahora = ahora or datetime.now(timezone.utc)
@@ -471,10 +469,6 @@ def leer_en_directo(sb, proveedor, env=None, run_id='', intento=1, lectores=None
     except (Exception, SystemExit) as ex:  # noqa: BLE001 — 🔴 solo el tipo al registro
         print(f">>> LECTURA EN DIRECTO de {nombre}: se ha caído ({type(ex).__name__}).", flush=True)
         return Lectura(motivo=motivo_de_fallo(sb, proveedor, f'la lectura se ha caído ({type(ex).__name__})'))
-    if r.pared:
-        r.motivo = motivo_de_fallo(sb, proveedor, f'la web ha enseñado su página anti-robots a esta máquina; va el '
-                                                  f'intento {r.siguiente} en otra')
-        return r
     if r.motivo_entero:
         r.foto, r.motivo = None, r.motivo_entero
         print(f">>> LECTURA EN DIRECTO de {nombre}: NO se sigue.", flush=True)
@@ -592,9 +586,7 @@ def correr_barrido(sb, proveedor, fila, barrer, fallos, abortar, listo, env=None
       · sin argumentos: retoma esa pasada (ESCANER2_PASADA; sin ella, abre una). Con FOTO (la que ha decidido `abrir` o
         el paso `--leer`, con FOTO_COMO, FOTO_HACE y FOTO_COMPROBADA), barre desde esa foto SIN leer (la reciente de
         `abrir`, volviendo a medir que lo sigue siendo); si no, lee al proveedor en directo y, si la lectura deja, barre
-        (lo de los bancos y una corrida a mano). UN intento: la pagina anti-robots de TCG, 'fallida' al momento. Si la
-        web de TCG enseña su pagina anti-robots y queda intento, la pasada SIGUE 'descargando' y GITHUB_OUTPUT dice
-        `pared=1`, `siguiente` y `pasada`: la retoma el job siguiente, en otra maquina, en el MISMO run.
+        (lo de los bancos y una corrida a mano). UN intento: la pagina anti-robots de TCG, 'fallida' al momento.
     Lo de despues de aplicar NO va aqui: es el paso `--despues` de este modulo, que corre aunque el barrido falle."""
     env = os.environ if env is None else env
     argv = [] if argv is None else list(argv)

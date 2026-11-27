@@ -738,7 +738,7 @@ base = Base()
 r, reg, _x = lector_pro(base, g)
 pp = list(base.pasadas.values())[0]
 eq('PD1 la lectura del PRO: la pasada de la horaria, APLICADA, con su id en la lectura',
-   (pp['estado'], r.pid == pp['id'], r.pared), ('aplicada', True, False))
+   (pp['estado'], r.pid == pp['id'], r.motivo_entero), ('aplicada', True, None))
 eq('PD2 🔴 la copia del Excel, YA (justo tras aplicar: la necesita la confirmación de sábado a lunes); las fechas de '
    'vuelta, no todavía', ([n for n, _p in base.rpcs], [(x[0], x[1]) for x in base.subidas]),
    (['disp_aplicar_pasada'], [('escaner2', 'osma/ultimo/osma_articles.xlsx')]))
