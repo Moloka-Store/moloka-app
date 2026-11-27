@@ -1236,46 +1236,111 @@ def _base_pd(aplicada_hace=5, estado=(), extra=()):
                    disp_estado=list(estado))
 
 
-_EST = [{'proveedor': 'TCG', 'producto_prov': 'P1', 'en_catalogo': True, 'ausencias': 0, 'disponible': True,
-         'pasadas_sin_dato': 0},
-        {'proveedor': 'TCG', 'producto_prov': 'P2', 'en_catalogo': True, 'ausencias': 1, 'disponible': True,
-         'pasadas_sin_dato': 0},
-        {'proveedor': 'TCG', 'producto_prov': 'P3', 'en_catalogo': True, 'ausencias': 0, 'disponible': True,
-         'pasadas_sin_dato': 2},
-        {'proveedor': 'OTRO', 'producto_prov': 'P9', 'en_catalogo': True, 'ausencias': 1, 'disponible': True,
-         'pasadas_sin_dato': 0}]
-_LEIDAS = [{'producto_prov': 'P1'}, {'producto_prov': 'P3'}]
-# P2 falta (con 1 ausencia: la 2.ª lo sacaria); P3 llega sin dato (con 2: la 3.ª lo agotaria)
-g = epd.GuardaPro(_base_pd(5, _EST), 'TCG', _AHORA)
-_no = g.antes_de_aplicar(_LEIDAS)
-eq('(PD) 🔴 la guarda: con la última aplicada de hace 5 min, otra ausencia de P2 lo sacaría: no se aplica, y lo dice',
-   (_no is not None, 'sacaría del catálogo 1 producto(s) por 2 ausencias' in (_no or ''), 'hace 5 min' in (_no or '')),
-   (True, True, True))
-_no = g.antes_de_aplicar([{'producto_prov': 'P1'}, {'producto_prov': 'P2'}, {'producto_prov': 'P3',
-                                                                              'sin_dato_disponibilidad': True}])
-eq('(PD) 🔴 la guarda: P3 sin dato por 3.ª vez lo agotaría: no se aplica', 'agotaría 1 por 3 lecturas sin dato' in (_no or ''),
-   True)
-eq('(PD) la guarda calla: nadie sale ni se agota (P2 vuelve, P3 trae dato)',
-   g.antes_de_aplicar([{'producto_prov': 'P1'}, {'producto_prov': 'P2'}, {'producto_prov': 'P3'}]), None)
-eq('(PD) la guarda calla: la última aplicada es de hace 20 min (más que el piso de 15): la lectura cuenta como otra',
-   epd.GuardaPro(_base_pd(20, _EST), 'TCG', _AHORA).antes_de_aplicar(_LEIDAS), None)
-eq('(PD) la guarda calla: sin ninguna aplicada (la primera)',
-   epd.GuardaPro(_BasePD(disp_parametros=[_PAR], disp_pasada=[], disp_estado=_EST), 'TCG', _AHORA)
-   .antes_de_aplicar(_LEIDAS), None)
-eq('(PD) la guarda: sin los parámetros de la base, no se aplica (no se inventa el tope)',
-   'no da ausencias_para_salir' in (epd.GuardaPro(_BasePD(disp_parametros=[], disp_pasada=_base_pd(5).t['disp_pasada'],
-                                                          disp_estado=_EST), 'TCG', _AHORA).antes_de_aplicar(_LEIDAS) or ''),
-   True)
+g = epd.GuardaPro(_base_pd(5), 'TCG')
+# 🔑 La lectura buena de hace menos de 15 min: se usa esa, sin volver a leer (quien dirige, 27-nov-2026)
+eq('(PD) reciente: la aplicada TERMINADA hace 4 min es la foto, y se dice cuánto hace',
+   epd.lectura_reciente(_base_pd(5), 'TCG', _AHORA), ('A', 4))
+eq('(PD) reciente: terminada hace 15 min o más, ya no (se lee)', epd.lectura_reciente(_base_pd(16), 'TCG', _AHORA), None)
+_bd2 = _base_pd(90, extra=[{'id': 'D', 'proveedor': 'TCG', 'estado': 'rechazada', 'creada_en': _iso(6),
+                            'terminada_en': _iso(5), 'motivo': 'al día: … pasada aplicada A; nada nuevo'}])
+eq('(PD) reciente: un «al día» de hace 5 min que confirma la última aplicada (de hace hora y media) vale: su foto',
+   epd.lectura_reciente(_bd2, 'TCG', _AHORA), ('A', 5))
+_bd3 = _base_pd(90, extra=[
+    {'id': 'F', 'proveedor': 'TCG', 'estado': 'fallida', 'creada_en': _iso(3), 'terminada_en': _iso(2), 'motivo': 'x'},
+    {'id': 'V', 'proveedor': 'TCG', 'estado': 'rechazada_vaciado', 'creada_en': _iso(4), 'terminada_en': _iso(3)},
+    {'id': 'C', 'proveedor': 'TCG', 'estado': 'rechazada', 'creada_en': _iso(4), 'terminada_en': _iso(3),
+     'motivo': 'descarga cortada: …'},
+    {'id': 'X', 'proveedor': 'TCG', 'estado': 'rechazada', 'creada_en': _iso(4), 'terminada_en': _iso(3),
+     'motivo': 'al día: … pasada aplicada Z9; nada'},
+    {'id': 'L', 'proveedor': 'TCG', 'estado': 'leyendo', 'creada_en': _iso(2)},
+    {'id': 'H', 'proveedor': 'HEO', 'estado': 'aplicada', 'creada_en': _iso(2), 'terminada_en': _iso(1)}])
+eq('(PD) 🔴 reciente: ni una fallida, ni un vaciado, ni otra rechazada, ni un «al día» de otra, ni una «leyendo», ni la '
+   'de otro proveedor', epd.lectura_reciente(_bd3, 'TCG', _AHORA), None)
+_bd4 = _base_pd(5, extra=[{'id': 'B', 'proveedor': 'TCG', 'estado': 'aplicada', 'creada_en': _iso(3),
+                           'terminada_en': _iso(70)}])
+eq('(PD) reciente: si después se ha aplicado otra (B), la de hace 4 min ya no es la buena; B tampoco (hace 70 min)',
+   epd.lectura_reciente(_bd4, 'TCG', _AHORA), None)
+
+
+# 🔑 OSMA: el fichero de ahora confirma la ultima aplicada si es EL MISMO y no ha vencido ninguna lectura prevista
+class _BaseOsma(_BasePD):
+    def __init__(self, copia, frescura, **tablas):
+        super().__init__(**tablas)
+        self.copia, self.frescura, self.rpcs = copia, frescura, []
+        base = self
+
+        class _Cubo:
+            def __init__(self, nombre):
+                self.nombre = nombre
+
+            def download(self, ruta):
+                base.rpcs.append(('download', self.nombre, ruta))
+                if base.copia is None:
+                    raise RuntimeError('404 Object not found')
+                return base.copia
+        self.storage = _types.SimpleNamespace(from_=_Cubo)
+
+    def rpc(self, nombre, params):
+        self.rpcs.append((nombre, params))
+        return _types.SimpleNamespace(execute=lambda: _types.SimpleNamespace(data=self.frescura))
+
+
+_VIERNES = _dt(2026, 11, 27, 6, 16, tzinfo=_tz.utc)        # la lectura aplicada del viernes, 07:16 de Madrid
+_APL_OSMA = [{'id': 'OV', 'proveedor': 'OSMA', 'estado': 'aplicada', 'creada_en': _VIERNES.isoformat(),
+              'terminada_en': _VIERNES.isoformat()}]
+
+
+def _fresc(prevista):
+    return [{'proveedor': 'TCG', 'ultima_aplicada': None, 'ultima_prevista': None},
+            {'proveedor': 'OSMA', 'ultima_aplicada': _VIERNES.isoformat(), 'ultima_prevista': prevista.isoformat()}]
+
+
+_FICHERO = b'PK\x03\x04 el xlsx del viernes'
+_DOMINGO = _dt(2026, 11, 29, 17, 0, tzinfo=_tz.utc)
+_CREADO = _dt(2026, 11, 27, 2, 33, tzinfo=_tz.utc)
+_b = _BaseOsma(_FICHERO, _fresc(_dt(2026, 11, 27, 6, 15, tzinfo=_tz.utc)), disp_pasada=_APL_OSMA)
+eq('(PD) 🔑 OSMA el domingo: el fichero es EL MISMO que la copia del viernes y no ha vencido ninguna prevista desde '
+   'ella → confirma la aplicada del viernes', (epd.confirmar_osma(_b, _FICHERO, _DOMINGO, 'osma/ultimo/x.xlsx', 'escaner2',
+                                                                  _CREADO),
+                                              [r[0] for r in _b.rpcs], _b.rpcs[0][2], _b.rpcs[1][1]),
+   (('OV', None), ['download', 'disp_frescura_en'], 'osma/ultimo/x.xlsx', {'p_ahora': _DOMINGO.isoformat()}))
+_b = _BaseOsma(_FICHERO, _fresc(_dt(2026, 11, 30, 6, 15, tzinfo=_tz.utc)), disp_pasada=_APL_OSMA)
+eq('(PD) 🔴 OSMA el lunes a las 10:00, con la lectura prevista del lunes vencida y sin aplicar: no confirma, y dice de '
+   'cuándo es el último fichero', epd.confirmar_osma(_b, _FICHERO, _dt(2026, 11, 30, 9, 0, tzinfo=_tz.utc),
+                                                    'osma/ultimo/x.xlsx', 'escaner2', _CREADO),
+   (None, 'OSMA no ha publicado fichero nuevo hoy; el último es del 27-11-2026 a las 03:33'))
+_b = _BaseOsma(b'PK\x03\x04 otro', _fresc(_dt(2026, 11, 27, 6, 15, tzinfo=_tz.utc)), disp_pasada=_APL_OSMA)
+eq('(PD) 🔴 OSMA: un fichero que no es el de la copia (no es más nuevo ni el mismo) no confirma, y ni mira el horario',
+   (epd.confirmar_osma(_b, _FICHERO, _DOMINGO, 'r', 'escaner2')[0], [r[0] for r in _b.rpcs]), (None, ['download']))
+_b = _BaseOsma(None, _fresc(_dt(2026, 11, 27, 6, 15, tzinfo=_tz.utc)), disp_pasada=_APL_OSMA)
+eq('(PD) 🔴 OSMA: sin la copia para comparar, no confirma', 'no se ha podido leer la copia' in
+   (epd.confirmar_osma(_b, _FICHERO, _DOMINGO, 'r', 'escaner2')[1] or ''), True)
+_b = _BaseOsma(_FICHERO, [], disp_pasada=_APL_OSMA)
+eq('(PD) 🔴 OSMA: sin su fila en disp_frescura_en, no confirma', 'disp_frescura_en' in
+   (epd.confirmar_osma(_b, _FICHERO, _DOMINGO, 'r', 'escaner2')[1] or ''), True)
+_r = epd.leer_en_directo(_base_pd(90), 'TCG', {'TCG_USER': 'u', 'TCG_PASS': 'p'}, '1', 1,
+                         {'TCG': lambda *a: epd.Lectura(pid='P', confirma='A')}, _AHORA)
+eq('(PD) una lectura que confirma la última aplicada: su foto', (_r.foto, _r.motivo), ('A', None))
+_r = epd.leer_en_directo(_base_pd(90), 'TCG', {'TCG_USER': 'u', 'TCG_PASS': 'p'}, '1', 1,
+                         {'TCG': lambda *a: epd.Lectura(pid='P', confirma='OTRA')}, _AHORA)
+eq('(PD) 🔴 …una que confirma otra que ya no es la última: no', 'ya no es la última' in (_r.motivo or ''), True)
+_r = epd.leer_en_directo(_base_pd(90), 'TCG', {'TCG_USER': 'u', 'TCG_PASS': 'p'}, '1', 1,
+                         {'TCG': lambda *a: epd.Lectura(pid='P', por_que='OSMA no ha publicado')}, _AHORA)
+eq('(PD) …y el porqué del lector va al motivo', (_r.foto, '(OSMA no ha publicado)' in _r.motivo), (None, True))
+_llamado = []
+_r = epd.leer_en_directo(_base_pd(5), 'TCG', {'TCG_USER': 'u', 'TCG_PASS': 'p'}, '1', 1,
+                         {'TCG': lambda *a: _llamado.append(1)}, _AHORA)
+eq('(PD) 🔴 con una lectura buena de hace 4 min, el PRO NO vuelve a leer: sale de esa', (_r.foto, _llamado), ('A', []))
 # El vaciado del PRO no suma rechazos: ni el del programa ni el de la funcion
 eq('(PD) 🔴 sin_freno: un vaciado del programa queda «fallida», con su motivo; lo demás, tal cual',
    (g.sin_freno('rechazada_vaciado', 'vaciado: x'), g.sin_freno('rechazada', 'al día: y'), g.sin_freno('fallida', 'z')),
    (('fallida', epd.PREFIJO_VACIADO + 'vaciado: x'), ('rechazada', 'al día: y'), ('fallida', 'z')))
 _b = _base_pd(5, extra=[{'id': 'V', 'proveedor': 'TCG', 'estado': 'rechazada_vaciado', 'motivo': 'vaciado: w'},
                         {'id': 'W', 'proveedor': 'TCG', 'estado': 'rechazada_vaciado', 'motivo': 'vaciado: q'}])
-_f = epd.GuardaPro(_b, 'TCG', _AHORA).tras_aplicar('V', {'id': 'V', 'estado': 'rechazada_vaciado', 'motivo': 'vaciado: w'})
+_f = epd.GuardaPro(_b, 'TCG').tras_aplicar('V', {'id': 'V', 'estado': 'rechazada_vaciado', 'motivo': 'vaciado: w'})
 eq('(PD) 🔴 tras_aplicar: el vaciado que deja la función pasa a «fallida» (solo ESA pasada); la aplicada, intacta',
    (_f['estado'], [p['estado'] for p in _b.t['disp_pasada'] if p['id'] in ('V', 'W')],
-    epd.GuardaPro(_b, 'TCG', _AHORA).tras_aplicar('A', {'id': 'A', 'estado': 'aplicada'})['estado']),
+    epd.GuardaPro(_b, 'TCG').tras_aplicar('A', {'id': 'A', 'estado': 'aplicada'})['estado']),
    ('fallida', ['fallida', 'rechazada_vaciado'], 'aplicada'))
 # Antes de leer: el turno y el freno
 eq('(PD) antes de leer: nada en marcha y sin rechazos, se lee', epd.antes_de_leer(_base_pd(90), 'TCG', _AHORA), None)
@@ -1308,6 +1373,10 @@ _bd.t['disp_pasada'].append({'id': 'D2', 'proveedor': 'TCG', 'estado': 'rechazad
                              'motivo': 'al día: … pasada aplicada R; nada'})
 eq('(PD) 🔴 decidir: un «al día» ANTERIOR a la última aplicada no la confirma',
    epd.decidir(_bd, 'TCG', 'D2'), (None, 'la lectura dice «al día», pero hay una aplicada posterior'))
+_bd.t['disp_pasada'].append({'id': 'D3', 'proveedor': 'TCG', 'estado': 'rechazada', 'creada_en': _iso(0),
+                             'motivo': 'al día: … pasada aplicada A; nada'})
+eq('(PD) 🔴 decidir: un «al día» que nombra OTRA aplicada (no la última) no la confirma',
+   epd.decidir(_bd, 'TCG', 'D3'), (None, 'la lectura dice «al día», pero la última aplicada no es la que nombra'))
 eq('(PD) el motivo para la pantalla: qué, por qué y con qué lectura NO se valora (hora de Madrid)',
    epd.motivo_de_fallo(_base_pd(90), 'TCG', 'la web no deja'),
    'no he podido leer a TCG ahora (la web no deja); no se valora con la lectura del 27-11-2026 a las 10:01')

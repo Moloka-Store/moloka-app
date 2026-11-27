@@ -287,9 +287,6 @@ def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX
         if ult[0].get('huella_contenido') == c['huella_contenido']:
             raise AlDia(ult[0].get('id'))
         print(">>> Contenido nuevo (la huella no es la de la última pasada aplicada): se sube.", flush=True)
-        no = guarda.antes_de_aplicar(lectura) if guarda else None
-        if no:
-            raise Rechazo('fallida', no)
 
         sb.table('disp_pasada').update(rec).eq('id', pid).execute()
         for i in range(0, len(lectura), LOTE):

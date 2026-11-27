@@ -176,6 +176,8 @@ def lectura_de_mentira(bd, proveedor):
             if intento < int(lec.get('pared_hasta') or 0):
                 return epd.Lectura(pared=True, siguiente=intento + 1)
             pid = next((p['id'] for p in bd['tablas']['disp_pasada'] if str(p.get('run_id')) == run_id), None)
+            if lec.get('confirma') or lec.get('por_que'):
+                return epd.Lectura(pid=pid, confirma=lec.get('confirma'), por_que=lec.get('por_que'))
             aplicada = any(p['id'] == pid and p.get('estado') == 'aplicada' for p in bd['tablas']['disp_pasada'])
             return epd.Lectura(pid=pid, despues=(lambda: bd.setdefault('despues', []).append(pid) is None)
                                if aplicada else None)
@@ -747,7 +749,7 @@ _PD_COLA = 'no se valora con la lectura del 14-10-2026 a las 09:21'
 
 
 def caso_pd(fila_run=None, lector=None, env=None, args=(), quitar_run=True, extra=(), secretos=True, ruta=None,
-            mutante_modulo=None, mutante_programa=None, foto_forzada=None):
+            mutante_modulo=None, mutante_programa=None, foto_forzada=None, reciente=False):
     """Un barrido con la lectura de mentira. `fila_run`: la pasada de disponibilidad de ESTE run (DISP deja de serlo
     con `quitar_run`); `extra`: mas filas de disp_pasada. Con `ruta`, sigue sobre ese estado (otro job del run)."""
     if ruta is None:
@@ -762,6 +764,12 @@ def caso_pd(fila_run=None, lector=None, env=None, args=(), quitar_run=True, extr
             ini['tablas']['disp_pasada'].append(dict({'proveedor': _PD_PROV}, **f))
         if lector is not None:
             ini['lector'] = lector
+        if reciente:
+            # La lectura aplicada de siempre (DISP), TERMINADA hace 5 min.
+            for p in ini['tablas']['disp_pasada']:
+                if p['id'] == _PD_DISP:
+                    p.update(creada_en=(_dt.now(_tz.utc) - _td(minutes=6)).isoformat(),
+                             terminada_en=(_dt.now(_tz.utc) - _td(minutes=5)).isoformat())
     else:
         ini = json.load(open(ruta, encoding='utf-8'))
         ini.pop('programa', None)
@@ -871,6 +879,21 @@ eq('B6 · [pared] intento 2, en otra máquina: retoma la MISMA pasada y sale de 
    (0, [(_abierta, 'esperando_csv')], [1, 2], None))
 cod, log, bd, _sal, _p, _r = caso_pd(quitar_run=False, lector={}, env={'INTENTO': '4'})
 eq('B6 · INTENTO fuera de 1 a 3: ROJO y sin abrir nada', (cod, _p), (1, []))
+
+# 🆕 (Decisiones de quien dirige, 27-nov-2026) La lectura buena de hace menos de 15 min: el PRO no vuelve a leer.
+cod, log, bd, _sal, _p, _r = caso_pd(lector={}, reciente=True)
+eq('B6 · 🔑 [reciente] una lectura buena terminada hace 5 min: VERDE desde ella, SIN volver a leer, y lo dice',
+   (cod, _p[0]['estado'], bd.get('lecturas'), 'leída hace' in log, sin_foto(bd)), (0, 'esperando_csv', None, True, False))
+cod, log, bd, _sal, _p, _r = caso_pd(lector={}, reciente=True, mutante_modulo=('    if reciente:\n', '    if False:\n'))
+eq('B6 · 🔴 mutante «sin la lectura reciente»: el ancla es única y el barrido vuelve a leer (y aquí, sin lectura de este '
+   'run, falla): el banco lo ve', ('ANCLA_NO_UNICA' in log, cod, len(bd.get('lecturas', []))), (False, 1, 1))
+# Una lectura que CONFIRMA la última aplicada sin decir «al día» (OSMA de sábado a lunes), y el porqué que da el lector
+cod, log, bd, _sal, _p, _r = caso_pd(lector={'confirma': _PD_DISP})
+eq('B6 · [confirma] la lectura confirma la última aplicada: VERDE desde ella', (cod, _p[0]['estado']), (0, 'esperando_csv'))
+cod, log, bd, _sal, _p, _r = caso_pd(lector={'por_que': 'OSMA no ha publicado fichero nuevo hoy; el último es del X'})
+eq('B6 · 🔴 [por qué del lector] ROJO, fallida con ese porqué, y SIN foto',
+   (cod, _p[0]['estado'], 'ahora (OSMA no ha publicado fichero nuevo hoy' in (_p[0].get('motivo_fallo') or ''), sin_foto(bd)),
+   (1, 'fallida', True, True))
 
 # 🔴 LA MITAD ROJA: quitar la comprobacion (volver a «la ultima aplicada») tiene que poner el banco en ROJO.
 _MUTANTES = [

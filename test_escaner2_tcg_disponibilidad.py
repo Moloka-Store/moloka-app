@@ -1087,10 +1087,6 @@ class GuardaDeMentira:
     def sin_freno(self, estado, motivo):
         return epd.GuardaPro.sin_freno(self, estado, motivo)
 
-    def antes_de_aplicar(self, filas):
-        self.vistas.append(len(filas))
-        return self.no
-
     def tras_aplicar(self, pid, fila):
         return fila
 
@@ -1110,8 +1106,8 @@ g = GuardaDeMentira()
 r, reg = lector_pro(base, web, guarda=g)
 prog.FICHAS_FUNKO_PRO = _tope
 pp = base.pasadas()[0]
-eq('PD1 la lectura del PRO: la pasada de la horaria, APLICADA, y su id en la lectura; la guarda vio la lectura entera',
-   (pp['estado'], r.pid == pp['id'], r.pared, g.vistas), ('aplicada', True, False, [6]))
+eq('PD1 la lectura del PRO: la pasada de la horaria, APLICADA, y su id en la lectura',
+   (pp['estado'], r.pid == pp['id'], r.pared), ('aplicada', True, False))
 eq('PD2 🔴 los Funko antes de la foto, con el tope del PRO (1 aquí; 3 tocaban), y NI UNA ficha del lector de tramos (X)',
    (web.fichas_pedidas(), 'pendientes 3, pedidas 1 (máximo 1)' in reg, '>>> TRAMOS' in reg), ([UJ['FB']], True, False))
 eq('PD3 🔴 las novedades NO antes de tiempo: solo disp_aplicar_pasada', [n for n, _p in base.rpcs], ['disp_aplicar_pasada'])
@@ -1120,22 +1116,17 @@ eq('PD4 …y con `despues()` (al final del barrido), las de ESA pasada, como la 
    (True, ['nov_seleccionar_pasada', 'nov_cerrar_valoracion'], {'p_pasada': pp['id']}))
 eq('PD5 el tope del PRO es 30 fichas (y el de la horaria, 300)', (prog.FICHAS_FUNKO_PRO, prog.FICHAS_FUNKO_MAX), (30, 300))
 limpio('PD6', reg)
-base = base_j()
-r, reg = lector_pro(base, Web(cat_j(), FICHAS_J, funko=LISTADO_J), guarda=GuardaDeMentira(no='tan seguidas no cuentan'))
-eq('PD7 🔴 si la guarda del PRO dice que no: la pasada «fallida» con su motivo, sin subir nada ni llamar a la función, y '
-   'sin novedades', (base.pasadas()[0]['estado'], base.pasadas()[0]['motivo'], base.lotes, base.rpcs, r.despues),
-   ('fallida', 'tan seguidas no cuentan', [], [], None))
 base = Base(crudo_minimo=100)
 r, reg = lector_pro(base, Web(catalogo(), FICHAS), guarda=epd.GuardaPro(base, 'TCG'))
-eq('PD8 🔴 un vaciado leído por el PRO queda «fallida» (no «rechazada_vaciado»): no suma rechazos al freno',
+eq('PD7 🔴 un vaciado leído por el PRO queda «fallida» (no «rechazada_vaciado»): no suma rechazos al freno',
    (base.pasadas()[0]['estado'], base.pasadas()[0]['motivo'].startswith(epd.PREFIJO_VACIADO + 'vaciado: 6 filas')),
    ('fallida', True))
 base = Base()
 r, reg = lector_pro(base, WebPared(catalogo(), FICHAS), intento=1)
-eq('PD9 la página anti-robots en el intento 1: otro intento (el 2), sin Telegram; la pasada de la lectura, fallida',
+eq('PD8 la página anti-robots en el intento 1: otro intento (el 2), sin Telegram; la pasada de la lectura, fallida',
    (r.pared, r.siguiente, base.pasadas()[0]['estado'], 'Telegram' in reg), (True, 2, 'fallida', False))
 r, reg = lector_pro(Base(), WebPared(catalogo(), FICHAS), intento=prog.INTENTOS)
-eq('PD10 …en el último intento, ya no: fallida, sin más intentos', (r.pared, r.pid is not None), (False, True))
+eq('PD9 …en el último intento, ya no: fallida, sin más intentos', (r.pared, r.pid is not None), (False, True))
 
 print()
 print('TODO OK' if not fallos else 'FALLOS: %d (%s)' % (len(fallos), ', '.join(fallos)))

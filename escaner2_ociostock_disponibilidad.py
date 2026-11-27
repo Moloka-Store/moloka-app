@@ -186,9 +186,6 @@ def aplicar(sb, sesion, url, run_id, guarda=None):
               f"chase sueltos {c['n_chase_suelto']} (disponibles {c['n_chase_suelto_disponibles']}) · EAN de forma rara "
               f"{c['n_ean_forma_rara']} · GTIN-14 {c['n_gtin14']} · el escalón gana en {c['n_escalon_gana']} · fichero "
               f"modificado hasta {c['fecha_max']}", flush=True)
-        no = guarda.antes_de_aplicar(lectura) if guarda else None
-        if no:
-            raise Rechazo('fallida', no)
         sb.table('disp_pasada').update(rec).eq('id', pid).execute()
         for i in range(0, len(lectura), LOTE):
             sb.table('disp_lectura').insert([dict(f, pasada_id=pid) for f in lectura[i:i + LOTE]]).execute()

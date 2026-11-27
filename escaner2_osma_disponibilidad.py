@@ -601,9 +601,6 @@ def aplicar(sb, sesion, usuario, clave, run_id, ahora=None, guarda=None):
               f"más de 10.000 {cuentas['mas_de_10000']}) · sin precio {cuentas['n_sin_dato_precio']} · sin EAN "
               f"{cuentas['sin_ean']} · EAN de forma rara {cuentas['ean_forma_rara']} · sin marca {cuentas['sin_marca']}",
               flush=True)
-        no = guarda.antes_de_aplicar(filas) if guarda else None
-        if no:
-            raise Rechazo('fallida', no)
         sb.table('disp_pasada').update(rec).eq('id', pid).execute()
         for i in range(0, len(filas), LOTE):
             sb.table('disp_lectura').insert([dict(f, pasada_id=pid) for f in filas[i:i + LOTE]]).execute()

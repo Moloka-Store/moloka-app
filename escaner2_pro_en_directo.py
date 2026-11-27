@@ -11,27 +11,38 @@ Esa funcion corre LA MISMA PASADA que la lectura horaria (escaner2_<proveedor>_d
 `disp_aplicar_pasada`), dentro del mismo run, y solo deja seguir al barrido si la pasada de ESTE run:
   · quedo 'aplicada' (la foto de la que sale el barrido es ESA pasada), o
   · quedo 'rechazada' con motivo «al día…», porque el contenido es el de la ultima aplicada. Esa foto queda
-    confirmada como la de ahora: el motivo nombra la pasada aplicada y no puede haber otra aplicada despues.
+    confirmada como la de ahora: el motivo nombra la pasada aplicada y no puede haber otra aplicada despues, o
+  · (solo OSMA) quedo 'rechazada' «OSMA no ha regenerado…», pero el fichero de ahora es EXACTAMENTE el de la ultima
+    aplicada (el md5 de su copia en el almacen) y desde ella no ha vencido ninguna lectura prevista de su horario
+    (`disp_frescura_en`: ultima_aplicada >= ultima_prevista). Es el fin de semana y el lunes antes de las 07:15: OSMA
+    no publica y ese fichero ES lo que tiene. Si ha vencido una prevista sin aplicar: «OSMA no ha publicado fichero
+    nuevo hoy; el último es del <fecha>».
 En cualquier otro caso (fallida, rechazada_vaciado, otra rechazada, la web no deja, no se pudo lanzar) devuelve el
 motivo, para que Fernando lo lea en la pantalla de la v2:
 «no he podido leer a TCG ahora (<por que>); no se valora con la lectura del <dia y hora de Madrid>».
 NUNCA se cae a la ultima lectura guardada.
 
-LO QUE LA PASADA DEL PRO HACE DISTINTO DE LA HORARIA (todo por `GuardaPro`, que la pasada recibe como parametro
-`guarda`; sin ella, la pasada horaria es la de siempre):
-  1. EL FRENO DEL 90 % (`rechazos_para_aceptar` de disp_parametros) cuenta las 'rechazada_vaciado' desde la ultima
-     aplicada. Una lectura del PRO que sale vaciada queda 'fallida', con el motivo «vaciado en la lectura del
-     Escaneo PRO (no cuenta para el freno): …», y no suma rechazos. Y si ya hay tantos rechazos como para aceptar la
-     caida, el PRO NO LEE (`antes_de_leer`): una caida del catalogo la acepta la lectura horaria, nunca un boton.
-  2. LAS AUSENCIAS Y LA FALTA DE DATO (`ausencias_para_salir`, `sin_dato_para_agotar`) cuentan pasadas aplicadas, no
-     horas. Si la ultima aplicada es de hace menos de PISO_MIN minutos y aplicar la lectura del PRO sacaria a alguien
-     del catalogo o lo agotaria por falta de dato, el PRO no la aplica (`antes_de_aplicar`): queda 'fallida' con el
-     motivo, y no suma nada. Asi, dos PRO seguidos en un minuto no sacan a nadie por «2 ausencias».
+🔑 LA LECTURA DE HACE MENOS DE RECIENTE_MIN MINUTOS (quien dirige, 27-nov-2026): si el proveedor tiene una lectura buena
+   (aplicada, o «al día» de la ultima aplicada) TERMINADA hace menos de 15 min, el PRO no vuelve a leer: barre desde
+   esa y lo dice («leída hace N min»). A todos los efectos es «en directo», y quita el doble recuento de dos PRO
+   seguidos, una entrada mas en la web de TCG (su pagina anti-robots) y hace barato el reintento.
+
+LOS CONTADORES POR PASADA (disp_aplicar_pasada no tiene reloj: cuenta pasadas, no horas):
+  1. EL FRENO DEL 90 % (`rechazos_para_aceptar`) cuenta las 'rechazada_vaciado' desde la ultima aplicada. Una lectura
+     del PRO que sale vaciada queda 'fallida', con el motivo «vaciado en la lectura del Escaneo PRO (no cuenta para el
+     freno): …», y no suma (`GuardaPro`, que la pasada recibe como `guarda`; sin ella, la horaria de siempre). Y si ya
+     hay tantos rechazos como para aceptar la caida, el PRO NO LEE (`antes_de_leer`): una caida la acepta la lectura
+     horaria, nunca un boton.
+  2. LAS AUSENCIAS Y LA FALTA DE DATO (`ausencias_para_salir`, `sin_dato_para_agotar`): una lectura del PRO cuenta como
+     cualquier otra (quien dirige, 27-nov-2026). Lo peor: un producto que el proveedor ha quitado de su fichero sale del
+     catalogo unos minutos antes, y vuelve cuando reaparece. El doble recuento de dos PRO seguidos lo quita la regla de
+     los RECIENTE_MIN minutos. Contarlas por tiempo es una migracion de la v2: el siguiente paso, no este.
   3. «Al día» y 'fallida' no mueven ningun contador: la funcion de la base ni las ve.
+OTRAS:
   4. TCG lee como mucho FICHAS_FUNKO_PRO fichas de Funko antes de la foto, y nunca el lector de tramos de despues.
-  5. Lo que la horaria hace tras aplicar (las novedades; en OSMA, la copia del Excel y las fechas de vuelta) se hace
-     igual, porque si no se perderia: la seleccion de novedades lee los cambios de ESA pasada. Pero se hace DESPUES de
-     cerrar la pasada del barrido (`Lectura.despues`), para que la pantalla no espere.
+  5. Lo que la horaria hace tras aplicar (las novedades, con su aviso de avalancha; en OSMA, la copia del Excel y las
+     fechas de vuelta) se hace igual, porque si no se perderia: la seleccion de novedades lee los cambios de ESA pasada.
+     Pero DESPUES de cerrar la pasada del barrido (`Lectura.despues`), para que la pantalla no espere.
   6. ¿Otra lectura en marcha? El workflow del barrido comparte el grupo de `concurrency` de la lectura horaria.
      Ademas, por si acaso, el PRO no lee si hay una pasada 'leyendo' del proveedor de hace menos de 1 h
      (`antes_de_leer`).
@@ -40,8 +51,9 @@ LO QUE LA PASADA DEL PRO HACE DISTINTO DE LA HORARIA (todo por `GuardaPro`, que 
    `escaner2_pasada.motivo_fallo`, que es privada.
 🔒 No escribe nada suyo. Lo que se escribe lo escriben la pasada (disp_*) y el barrido (escaner2_*). La unica
    escritura propia es poner en 'fallida' una pasada de ESTE run que la funcion ha dejado 'rechazada_vaciado'
-   (punto 1).
+   (punto 1). Lee, ademas, `disp_frescura_en` y la copia del ultimo Excel de OSMA (solo OSMA).
 """
+import hashlib
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -53,25 +65,32 @@ PROVEEDORES = {
     'OSMA': ('OSMA', ('OSMA_USER', 'OSMA_PASS')),
 }
 TURNO = timedelta(hours=1)   # una 'leyendo' de menos de 1 h es una lectura viva (disp_aplicar_pasada da por muerta la de mas)
-PISO_MIN = 15                # minutos: por debajo, el PRO no saca a nadie del catalogo ni lo agota por falta de dato
-PAGINA = 1000
+# 🔑 15 min: lo que tarda en cambiar algo que importe para comprar (la horaria de TCG y DBLine es cada hora; OcioStock y
+#    OSMA, un fichero al dia) y lo que cubre dos clics seguidos y el reintento de la pagina anti-robots de TCG.
+RECIENTE_MIN = 15
 PREFIJO_VACIADO = 'vaciado en la lectura del Escaneo PRO (no cuenta para el freno): '
+REGENERADO_OSMA = 'OSMA no ha regenerado'
 
 
 class Lectura:
     """Lo que devuelve `leer_en_directo` (y cada lector): `foto` es la pasada de disp_pasada de la que sale el barrido
     (None si no se sigue), con `motivo` el porque; `pared`, la web de TCG ha enseñado su pagina anti-robots y queda
     otro intento en otra maquina (`siguiente`); `despues`, lo que la horaria hace tras aplicar (devuelve True si fue
-    bien)."""
+    bien). Del lector: `confirma`, la aplicada que su lectura confirma sin decir «al día» (OSMA), o `por_que`, el
+    motivo de no seguir que el lector ya sabe."""
 
-    def __init__(self, pid=None, foto=None, motivo=None, pared=False, siguiente=None, despues=None):
+    def __init__(self, pid=None, foto=None, motivo=None, pared=False, siguiente=None, despues=None, confirma=None,
+                 por_que=None):
         self.pid, self.foto, self.motivo = pid, foto, motivo
         self.pared, self.siguiente, self.despues = pared, siguiente, despues
+        self.confirma, self.por_que = confirma, por_que
 
 
 def _fecha(v):
     if not v:
         return None
+    if isinstance(v, datetime):
+        return v if v.tzinfo else v.replace(tzinfo=timezone.utc)
     t = datetime.fromisoformat(str(v).replace('Z', '+00:00'))
     return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
 
@@ -99,11 +118,6 @@ def motivo_de_fallo(sb, proveedor, por_que):
     return f'no he podido leer a {nombre} ahora ({por_que}); {cola}'
 
 
-def _parametros(sb, proveedor):
-    return (sb.table('disp_parametros').select('rechazos_para_aceptar,ausencias_para_salir,sin_dato_para_agotar')
-            .eq('proveedor', proveedor).limit(1).execute().data or [{}])[0]
-
-
 def antes_de_leer(sb, proveedor, ahora):
     """El porque de NO abrir la lectura, o None. (a) Otra lectura del proveedor en marcha (una 'leyendo' de menos de
     TURNO). (b) El freno: tantas 'rechazada_vaciado' desde la ultima aplicada como para que esta aceptase la caida."""
@@ -115,7 +129,8 @@ def antes_de_leer(sb, proveedor, ahora):
         desde = min(_fecha(p['creada_en']) for p in vivas)
         return (f'otra lectura de {nombre} está en marcha desde el {_madrid(desde)}; no se lee a la vez: vuelve a '
                 f'barrer cuando acabe')
-    par = _parametros(sb, proveedor)
+    par = (sb.table('disp_parametros').select('rechazos_para_aceptar').eq('proveedor', proveedor).limit(1).execute()
+           .data or [{}])[0]
     k = par.get('rechazos_para_aceptar')
     if not isinstance(k, int) or isinstance(k, bool) or k <= 0:
         return 'disp_parametros no da un rechazos_para_aceptar válido; sin él no se sabe si la lectura aceptaría una caída'
@@ -131,12 +146,11 @@ def antes_de_leer(sb, proveedor, ahora):
 
 
 class GuardaPro:
-    """Lo que la pasada de disponibilidad hace distinto cuando la lanza el Escaneo PRO (ver la cabecera, puntos 1 y 2).
-    La pasada la recibe como `guarda` y la llama en tres sitios; sin ella (la horaria), no cambia nada."""
+    """Lo que la pasada de disponibilidad hace distinto cuando la lanza el Escaneo PRO (cabecera, punto 1: el vaciado del
+    PRO no cuenta para el freno). La pasada la recibe como `guarda`; sin ella (la horaria), no cambia nada."""
 
-    def __init__(self, sb, proveedor, ahora=None, piso_min=PISO_MIN):
-        self.sb, self.proveedor, self.piso = sb, proveedor, timedelta(minutes=piso_min)
-        self.ahora = ahora or datetime.now(timezone.utc)
+    def __init__(self, sb, proveedor):
+        self.sb, self.proveedor = sb, proveedor
 
     def sin_freno(self, estado, motivo):
         """(estado, motivo) con que se cierra una pasada que el programa rechaza: el vaciado del PRO, 'fallida'."""
@@ -154,45 +168,9 @@ class GuardaPro:
          .eq('estado', 'rechazada_vaciado').execute())
         return dict(fila, estado='fallida', motivo=motivo[:1000])
 
-    def antes_de_aplicar(self, filas):
-        """El porque de NO llamar a disp_aplicar_pasada con `filas` (las de disp_lectura de la pasada), o None: con la
-        ultima aplicada de hace menos de `piso`, que esta lectura sacase a alguien del catalogo (otra ausencia) o lo
-        agotase por falta de dato. 🔑 La MISMA regla que la funcion (`ausencias + 1 >= ausencias_para_salir`,
-        `pasadas_sin_dato + 1 >= sin_dato_para_agotar`), leida, no inventada."""
-        ult = _ultima_aplicada(self.sb, self.proveedor)
-        t = _fecha(ult.get('creada_en')) if ult else None
-        if t is None or self.ahora - t >= self.piso:
-            return None
-        par = _parametros(self.sb, self.proveedor)
-        a, s = par.get('ausencias_para_salir'), par.get('sin_dato_para_agotar')
-        if not all(isinstance(x, int) and not isinstance(x, bool) and x > 0 for x in (a, s)):
-            return 'disp_parametros no da ausencias_para_salir y sin_dato_para_agotar válidos'
-        leidas = {f['producto_prov']: f for f in filas}
-        salen = agotan = desde = 0
-        while True:
-            pag = (self.sb.table('disp_estado').select('producto_prov,ausencias,disponible,pasadas_sin_dato')
-                   .eq('proveedor', self.proveedor).eq('en_catalogo', True).order('producto_prov')
-                   .range(desde, desde + PAGINA - 1).execute().data or [])
-            for e in pag:
-                f = leidas.get(e['producto_prov'])
-                if f is None:
-                    salen += int(e.get('ausencias') or 0) + 1 >= a
-                elif f.get('sin_dato_disponibilidad') and e.get('disponible'):
-                    agotan += int(e.get('pasadas_sin_dato') or 0) + 1 >= s
-            if len(pag) < PAGINA:
-                break
-            desde += PAGINA
-        if not (salen or agotan):
-            return None
-        minutos = int((self.ahora - t).total_seconds() // 60)
-        partes = ([f'sacaría del catálogo {salen} producto(s) por {a} ausencias'] if salen else []) + \
-                 ([f'agotaría {agotan} por {s} lecturas sin dato'] if agotan else [])
-        return (f'la última lectura aplicada es de hace {minutos} min y esta {" y ".join(partes)}: tan seguidas no '
-                f'cuentan como lecturas distintas; vuelve a barrer pasados {int(self.piso.total_seconds() // 60)} min')
-
 
 def decidir(sb, proveedor, pid):
-    """(foto, None) si el barrido puede salir de la pasada `pid` de ESTE run, o (None, por_que)."""
+    """(foto, None) si el barrido puede salir de la pasada `pid`, o (None, por_que)."""
     if not pid:
         return None, 'la lectura no llegó a abrir su pasada'
     fila = (sb.table('disp_pasada').select('id,proveedor,estado,motivo,creada_en').eq('id', pid).limit(1).execute()
@@ -214,6 +192,47 @@ def decidir(sb, proveedor, pid):
             return None, 'la lectura dice «al día», pero hay una aplicada posterior'
         return ult['id'], None
     return None, f'{estado}: {motivo}' if motivo else str(estado)
+
+
+def lectura_reciente(sb, proveedor, ahora, minutos=RECIENTE_MIN):
+    """(foto, hace_min) de la lectura buena del proveedor (aplicada, o «al día» de la ultima aplicada) TERMINADA hace
+    menos de `minutos`, o None. La buena es la que `decidir` daria por buena hoy (si despues se ha aplicado otra, no)."""
+    filas = (sb.table('disp_pasada').select('id,estado,motivo,terminada_en').eq('proveedor', proveedor)
+             .order('terminada_en', desc=True).limit(20).execute().data or [])
+    for f in filas:
+        t = _fecha(f.get('terminada_en'))
+        if t is None or not (timedelta(0) <= ahora - t < timedelta(minutes=minutos)):
+            continue
+        if f.get('estado') == 'aplicada' or (f.get('estado') == 'rechazada'
+                                             and str(f.get('motivo') or '').startswith('al día')):
+            foto, _por_que = decidir(sb, proveedor, f['id'])
+            if foto:
+                return foto, int((ahora - t).total_seconds() // 60)
+    return None
+
+
+def confirmar_osma(sb, contenido, ahora, ruta_copia, bucket='escaner2', creado=None):
+    """(aplicada, None) si el fichero de OSMA de ahora confirma la ultima aplicada (cabecera: el mismo fichero, y sin
+    ninguna lectura prevista vencida desde ella), o (None, por_que). NUNCA LANZA."""
+    ult = _ultima_aplicada(sb, 'OSMA')
+    if not ult:
+        return None, 'OSMA no ha regenerado su fichero y no hay ninguna lectura aplicada que confirmar'
+    try:
+        copia = sb.storage.from_(bucket).download(ruta_copia)
+    except Exception as ex:  # noqa: BLE001
+        return None, f'no se ha podido leer la copia del último fichero aplicado para compararlo ({type(ex).__name__})'
+    if not contenido or hashlib.md5(copia).hexdigest() != hashlib.md5(contenido).hexdigest():
+        return None, 'OSMA da un fichero que no es más nuevo que la última lectura aplicada ni es el mismo'
+    try:
+        filas = sb.rpc('disp_frescura_en', {'p_ahora': ahora.isoformat()}).execute().data or []
+        f = next(x for x in filas if x.get('proveedor') == 'OSMA')
+    except Exception as ex:  # noqa: BLE001
+        return None, f'no se ha podido mirar el horario de OSMA (disp_frescura_en: {type(ex).__name__})'
+    u, p = _fecha(f.get('ultima_aplicada')), _fecha(f.get('ultima_prevista'))
+    if u is None or (p is not None and u < p):
+        del_fichero = f'del {_madrid(creado)}' if creado else 'de antes de la última lectura prevista'
+        return None, f'OSMA no ha publicado fichero nuevo hoy; el último es {del_fichero}'
+    return ult['id'], None
 
 
 # ── Los cuatro lectores: la pasada de cada proveedor, con la guarda del PRO ─────────────────────────────────────
@@ -246,14 +265,26 @@ def _leer_ociostock(sb, env, run_id, intento, guarda):
     return Lectura(pid=pid, despues=(lambda: d.tras_aplicar(sb, pid, fila, run_id) == 0) if aplicada else None)
 
 
-def _leer_osma(sb, env, run_id, intento, guarda):
+def _leer_osma(sb, env, run_id, intento, guarda, ahora=None):
     import requests
     import escaner2_osma_disponibilidad as d
     sesion = requests.Session()
     sesion.headers['User-Agent'] = d.AGENTE
-    _c, pid, fila, contenido = d.aplicar(sb, sesion, env['OSMA_USER'], env['OSMA_PASS'], run_id, guarda=guarda)
-    aplicada = (fila or {}).get('estado') == 'aplicada'
-    return Lectura(pid=pid, despues=(lambda: d.tras_aplicar(sb, sesion, pid, fila, contenido) == 0) if aplicada else None)
+    _c, pid, fila, contenido = d.aplicar(sb, sesion, env['OSMA_USER'], env['OSMA_PASS'], run_id, ahora, guarda=guarda)
+    if (fila or {}).get('estado') == 'aplicada':
+        return Lectura(pid=pid, despues=lambda: d.tras_aplicar(sb, sesion, pid, fila, contenido, ahora) == 0)
+    p = (sb.table('disp_pasada').select('estado,motivo').eq('id', pid).limit(1).execute().data or [{}])[0] if pid else {}
+    if p.get('estado') == 'rechazada' and str(p.get('motivo') or '').startswith(REGENERADO_OSMA) and contenido:
+        try:
+            creado = d.fecha_de_creacion(contenido)
+        except Exception:  # noqa: BLE001
+            creado = None
+        conf, por_que = confirmar_osma(sb, contenido, ahora or datetime.now(timezone.utc), d.RUTA_COPIA, d.BUCKET,
+                                       creado)
+        print(f">>> OSMA: el fichero de ahora {'CONFIRMA la última lectura aplicada (el mismo, sin lectura prevista vencida)' if conf else 'NO confirma la última lectura aplicada'}.",
+              flush=True)
+        return Lectura(pid=pid, confirma=conf, por_que=por_que)
+    return Lectura(pid=pid)
 
 
 LECTORES = {'TCG': _leer_tcg, 'DBLINE': _leer_dbline, 'OCIOSTOCK': _leer_ociostock, 'OSMA': _leer_osma}
@@ -269,6 +300,16 @@ def leer_en_directo(sb, proveedor, env=None, run_id='', intento=1, lectores=None
     if falta:
         return Lectura(motivo=motivo_de_fallo(sb, proveedor, f'faltan los secretos {"/".join(falta)} en el workflow'))
     try:
+        reciente = lectura_reciente(sb, proveedor, ahora)
+    except Exception as ex:  # noqa: BLE001 — sin saberlo, se lee
+        print(f">>> LECTURA EN DIRECTO de {nombre}: no se ha podido mirar la última lectura ({type(ex).__name__}).",
+              flush=True)
+        reciente = None
+    if reciente:
+        print(f">>> LECTURA EN DIRECTO de {nombre}: leída hace {reciente[1]} min (menos de {RECIENTE_MIN}): no se vuelve a "
+              f"leer; sale de esa lectura.", flush=True)
+        return Lectura(foto=reciente[0])
+    try:
         no = antes_de_leer(sb, proveedor, ahora)
     except Exception as ex:  # noqa: BLE001
         no = f'no se ha podido mirar si se puede leer ({type(ex).__name__})'
@@ -276,7 +317,7 @@ def leer_en_directo(sb, proveedor, env=None, run_id='', intento=1, lectores=None
         return Lectura(motivo=motivo_de_fallo(sb, proveedor, no))
     print(f">>> LECTURA EN DIRECTO de {nombre} (intento {intento}): la misma pasada que la horaria.", flush=True)
     try:
-        r = (lectores or LECTORES)[proveedor](sb, env, str(run_id or ''), intento, GuardaPro(sb, proveedor, ahora))
+        r = (lectores or LECTORES)[proveedor](sb, env, str(run_id or ''), intento, GuardaPro(sb, proveedor))
     except (Exception, SystemExit) as ex:  # noqa: BLE001 — 🔴 solo el tipo al registro
         print(f">>> LECTURA EN DIRECTO de {nombre}: se ha caído ({type(ex).__name__}).", flush=True)
         return Lectura(motivo=motivo_de_fallo(sb, proveedor, f'la lectura se ha caído ({type(ex).__name__})'))
@@ -285,7 +326,14 @@ def leer_en_directo(sb, proveedor, env=None, run_id='', intento=1, lectores=None
                                                   f'intento {r.siguiente} en otra')
         return r
     try:
-        r.foto, por_que = decidir(sb, proveedor, r.pid)
+        if r.confirma:
+            ult = _ultima_aplicada(sb, proveedor)
+            r.foto, por_que = ((r.confirma, None) if ult and ult.get('id') == r.confirma else
+                               (None, 'la lectura confirma una aplicada que ya no es la última'))
+        elif r.por_que:
+            r.foto, por_que = None, r.por_que
+        else:
+            r.foto, por_que = decidir(sb, proveedor, r.pid)
     except Exception as ex:  # noqa: BLE001
         r.foto, por_que = None, f'no se ha podido comprobar la lectura ({type(ex).__name__})'
     if r.foto is None:

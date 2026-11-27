@@ -209,9 +209,6 @@ def aplicar(sb, run_id, hoy, guarda=None):
         if ult[0].get('huella_contenido') == c['huella_contenido']:
             raise AlDia(ult[0].get('id'))
         print(">>> Contenido nuevo (la huella no es la de la última pasada aplicada): se sube.", flush=True)
-        no = guarda.antes_de_aplicar(lectura) if guarda else None
-        if no:
-            raise Rechazo('fallida', no)
 
         sb.table('disp_pasada').update(rec).eq('id', pid).execute()
         # `fecha_salida` no tiene columna en disp_lectura (no la pide nadie): fuera antes de subir.

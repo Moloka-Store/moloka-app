@@ -712,10 +712,6 @@ class GuardaDeMentira:
     def sin_freno(self, estado, motivo):
         return epd.GuardaPro.sin_freno(self, estado, motivo)
 
-    def antes_de_aplicar(self, filas):
-        self.vistas.append(len(filas))
-        return self.no
-
     def tras_aplicar(self, pid, fila):
         return fila
 
@@ -741,23 +737,82 @@ g = GuardaDeMentira()
 base = Base()
 r, reg, _x = lector_pro(base, g)
 pp = list(base.pasadas.values())[0]
-eq('PD1 la lectura del PRO: la pasada de la horaria, APLICADA, con su id en la lectura; la guarda vio la lectura entera',
-   (pp['estado'], r.pid == pp['id'], r.pared, len(g.vistas)), ('aplicada', True, False, 1))
+eq('PD1 la lectura del PRO: la pasada de la horaria, APLICADA, con su id en la lectura',
+   (pp['estado'], r.pid == pp['id'], r.pared), ('aplicada', True, False))
 eq('PD2 🔴 lo de después de aplicar NO antes de tiempo: solo disp_aplicar_pasada', ([n for n, _p in base.rpcs], base.subidas), (['disp_aplicar_pasada'], []))
 _ok = r.despues()
 eq('PD3 …y con `despues()` (al final del barrido), lo de la horaria tras aplicar, de ESA pasada', [(s[0], s[1]) for s in base.subidas], [('escaner2', 'osma/ultimo/osma_articles.xlsx')])
 eq('PD4 el registro no suelta datos', [x for x in (USUARIO, CLAVE, ID_FICHERO) if x in reg], [])
-base = Base()
-r, reg, _x = lector_pro(base, GuardaDeMentira(no='tan seguidas no cuentan'))
-pp = list(base.pasadas.values())[0]
-eq('PD5 🔴 si la guarda del PRO dice que no: la pasada «fallida» con su motivo, sin subir nada ni llamar a la función, y '
-   'sin lo de después', (pp['estado'], pp['motivo'], base.lotes, [n for n, _p in base.rpcs], r.despues),
-   ('fallida', 'tan seguidas no cuentan', [], [], None))
 base = Base(minimo=50000)
 r, reg, _x = lector_pro(base, epd.GuardaPro(base, 'OSMA'))
 pp = list(base.pasadas.values())[0]
-eq('PD6 🔴 un vaciado leído por el PRO queda «fallida» (no «rechazada_vaciado»): no suma rechazos al freno',
+eq('PD5 🔴 un vaciado leído por el PRO queda «fallida» (no «rechazada_vaciado»): no suma rechazos al freno',
    (pp['estado'], pp['motivo'].startswith(epd.PREFIJO_VACIADO + 'vaciado: ')), ('fallida', True))
+
+# (PD) 🔑 OSMA DE SÁBADO A LUNES (quien dirige, 27-nov-2026): el fichero de ahora, IDÉNTICO al de la última aplicada (su
+#      copia en el almacén) y sin ninguna lectura prevista vencida desde ella (disp_frescura_en), CONFIRMA esa foto; con
+#      la prevista vencida y sin aplicar, no, y lo dice con la fecha del fichero.
+class BaseConf(Base):
+    def __init__(self, copia, frescura, **k):
+        super().__init__(**k)
+        self.copia, self.frescura, self.descargas = copia, frescura, []
+        base = self
+
+        class _Cubo:
+            def __init__(self, nombre):
+                self.nombre = nombre
+
+            def upload(self, ruta, datos, opciones):
+                base.subidas.append((self.nombre, ruta, datos, opciones))
+
+            def download(self, ruta):
+                base.descargas.append((self.nombre, ruta))
+                return base.copia
+        self.storage = types.SimpleNamespace(from_=_Cubo)
+
+    def rpc(self, nombre, params):
+        if nombre == 'disp_frescura_en':
+            self.rpcs.append((nombre, params))
+            return types.SimpleNamespace(execute=lambda: types.SimpleNamespace(data=self.frescura))
+        return super().rpc(nombre, params)
+
+
+def conf_osma(ahora_utc, ultima_utc, creado_utc, prevista_utc, misma=True):
+    fichero = xlsx(creado=datetime.fromisoformat(creado_utc + '+00:00'))
+    b = BaseConf(fichero if misma else fichero + b'otro', [{'proveedor': 'OSMA', 'ultima_aplicada': ultima_utc + '+00:00',
+                                                            'ultima_prevista': prevista_utc + '+00:00'}],
+                 ultima_aplicada=datetime.fromisoformat(ultima_utc + '+00:00'), ultima_id='P-ANTES')
+    _g = sys.modules.get('requests')
+    sys.modules['requests'] = _modulo_requests(Web(fichero=fichero), [])
+    salida = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(salida):
+            r = epd._leer_osma(b, {'OSMA_USER': USUARIO, 'OSMA_PASS': CLAVE}, '4242', 1, GuardaDeMentira(),
+                               ahora=datetime.fromisoformat(ahora_utc + '+00:00'))
+    finally:
+        if _g is None:
+            sys.modules.pop('requests', None)
+        else:
+            sys.modules['requests'] = _g
+    return r, b, salida.getvalue()
+
+
+# El domingo 11-oct a las 19:00 de Madrid: la última aplicada, la del viernes 07:17; el fichero, del viernes 03:33 UTC; la
+# última lectura prevista vencida, la del viernes a las 07:15 (sábado y domingo no hay).
+r, b, out = conf_osma('2026-10-11T17:00:00', '2026-10-09T05:17:00', '2026-10-09T03:33:00', '2026-10-09T05:15:00')
+eq('PD6 🔑 OSMA el domingo, con el fichero del viernes: la pasada queda «rechazada» (no cuenta) y CONFIRMA la aplicada '
+   'del viernes, tras comparar con su copia y mirar el horario',
+   (list(b.pasadas.values())[0]['estado'], r.confirma, r.por_que, b.descargas, [n for n, _p in b.rpcs]),
+   ('rechazada', 'P-ANTES', None, [('escaner2', 'osma/ultimo/osma_articles.xlsx')], ['disp_frescura_en']))
+r, b, out = conf_osma('2026-10-12T08:00:00', '2026-10-09T05:17:00', '2026-10-09T03:33:00', '2026-10-12T05:15:00')
+eq('PD7 🔴 OSMA el lunes a las 10:00, con la lectura prevista del lunes vencida y sin aplicar: NO confirma, y dice de '
+   'cuándo es el último fichero (hora de Madrid)',
+   (r.confirma, r.por_que), (None, 'OSMA no ha publicado fichero nuevo hoy; el último es del 09-10-2026 a las 05:33'))
+r, b, out = conf_osma('2026-10-11T17:00:00', '2026-10-09T05:17:00', '2026-10-09T03:33:00', '2026-10-09T05:15:00',
+                      misma=False)
+eq('PD8 🔴 OSMA: un fichero que no es el de la copia no confirma', (r.confirma, 'ni es el mismo' in (r.por_que or '')),
+   (None, True))
+eq('PD9 el registro no suelta datos', [x for x in (USUARIO, CLAVE, ID_FICHERO) if x in out], [])
 
 print()
 if fallos:
