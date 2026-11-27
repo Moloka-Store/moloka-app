@@ -1,0 +1,70 @@
+# ============================================================
+# Moloka - Escaner 2 · VALORACION DE LAS NOVEDADES DE TCG DE LA LECTURA DESDE LA OFICINA (encargo TO, 27-nov-2026)
+#
+# La lectura horaria de TCG de lunes a viernes sale del ordenador de la oficina (Fernando, 27-nov-2026: la web de TCG le
+# enseña su pagina anti-robots a las maquinas de GitHub y no a ese ordenador). Corre en una maquina propia del repo
+# PRIVADO de la v2 (escaner2-tcg-oficina.yml), con ESTE codigo y MAQUINA=oficina; alli no estan las llaves de Keepa ni de
+# Telegram y no se lanza nada en GitHub. La lectura deja hecha la SELECCION de novedades (en el acto: solo vale para la
+# ultima pasada aplicada) y ESTE workflow hace la valoracion (escaner2_tcg_valorar.py): todo lo pendiente de TCG (la
+# seleccion hecha y la valoracion sin cerrar, y las fallidas del ultimo dia), con las avalanchas cerradas antes de tocar
+# Keepa. A mano, con `pasada`, valora esa aunque sea de hace un momento.
+#
+# >>> SIN RELOJ AQUI, A PROPOSITO <<<  El reloj es cron-job.org (POST a la API de dispatches con {"ref":"main"}, sin
+#     inputs): de LUNES A VIERNES a y 35 de 9 a 17 (15 min despues de cada lectura de la oficina, que empieza a y 20 y
+#     selecciona hacia y 22-y 25). Si llega antes de que la lectura acabe, no hay nada pendiente y sale VERDE sin hacer
+#     nada. La RED es escaner2-tcg-novedades-cuentas.yml, que valora lo pendiente antes de sus cuentas (a y 45).
+#
+# 🔒 EL GRUPO `escaner2-tcg` (el de la lectura horaria de GitHub, la lectura del PRO de TCG y las cuentas), sin cancelar el
+#    que corre: valoracion y cuentas nunca a la vez (las dos cuentan las «lista»), ni dos valoraciones de TCG a la vez. Si
+#    una corrida esperando la sustituye otra (GitHub deja una sola esperando por grupo), no se pierde nada: cada corrida
+#    valora TODO lo pendiente. ⚠️ Y al reves: un job de este grupo que esperaba (la horaria del fin de semana relanzada, la
+#    lectura de un PRO) puede quedar sustituido por este; pasa igual hoy con las cuentas. La lectura del PRO lo diria.
+#
+# 🔴 LOS INPUTS VIAJAN POR `env:`, NUNCA DENTRO DE `run:`: el programa los valida (la pasada, un uuid).
+# 🔴 REPO PUBLICO: este registro lo ve cualquiera. El programa SOLO imprime estados y recuentos. No sube artefactos.
+# 🔒 SOLO TOCA lo que toca la valoracion de siempre (nov_*, el Excel de novedades en el almacen, Keepa).
+# ============================================================
+name: Moloka - Escaner 2 · Valorar TCG (lectura de la oficina)
+
+on:
+  workflow_dispatch:
+    inputs:
+      pasada:
+        description: 'A mano: el id de una pasada de disp_pasada para valorarla ya (vacío: todo lo pendiente)'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  valorar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: escaner2-tcg
+      cancel-in-progress: false
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        # supabase: la base · openpyxl: el Excel de novedades · requests: Keepa y Telegram.
+        run: pip install --quiet supabase==2.31.0 openpyxl==3.1.5 requests==2.34.2
+
+      - name: Valorar lo pendiente de TCG
+        timeout-minutes: 25
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}
+          TELEGRAM_TOKEN:       ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+          PASADA:               ${{ inputs.pasada }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_tcg_valorar.py

@@ -332,7 +332,8 @@ chk('todo bien: ni una espera ni una línea de reintento', r.esperas == [] and l
 
 # ═════════════════════════════════════════ (C) LOS PROGRAMAS ════════════════════════════════════════════════════════
 # Los 26 programas del escáner 2 que hablan con la base (20-oct-2026), y desde el encargo PD (27-nov-2026) 27: el paso
-# de después de la lectura del Escaneo PRO (escaner2_pro_en_directo.py --despues). Un programa nuevo que hable con la base usa
+# de después de la lectura del Escaneo PRO (escaner2_pro_en_directo.py --despues), y desde el encargo TO (27-nov-2026) 28: la
+# valoración de las novedades de TCG de la lectura desde la oficina (escaner2_tcg_valorar.py). Un programa nuevo que hable con la base usa
 # escaner2_base.cliente; el censo de abajo lo vigila sin tener que añadirlo aquí.
 VEINTISEIS = sorted('''
 escaner2_bems_barrido escaner2_bems_cruce escaner2_bems_disponibilidad escaner2_dbline_barrido escaner2_dbline_cruce
@@ -341,10 +342,10 @@ escaner2_heo_cruce escaner2_heo_disponibilidad escaner2_heo_novedades_cuentas es
 escaner2_ociostock_cruce escaner2_ociostock_disponibilidad escaner2_ociostock_novedades_cuentas escaner2_osma_barrido
 escaner2_osma_cruce escaner2_osma_disponibilidad escaner2_rescate escaner2_tcg_barrido escaner2_tcg_cruce
 escaner2_tcg_disponibilidad escaner2_tcg_novedades_cuentas escaner2_zentrada_barrido escaner2_zentrada_cruce
-escaner2_pro_en_directo'''.split())
+escaner2_pro_en_directo escaner2_tcg_valorar'''.split())
 DENTRO_DE_PRINCIPAL = ('escaner2_bems_disponibilidad', 'escaner2_dbline_disponibilidad', 'escaner2_ociostock_disponibilidad',
                        'escaner2_osma_disponibilidad', 'escaner2_tcg_disponibilidad')
-chk('son 27', len(VEINTISEIS) == 27 and len(set(VEINTISEIS)) == 27)
+chk('son 28', len(VEINTISEIS) == 28 and len(set(VEINTISEIS)) == 28)
 
 
 def _usos(arbol):
@@ -376,7 +377,7 @@ for nombre in todos:
         usan.append(nombre)
         chk(f'{nombre}: importa cliente de escaner2_base y lo llama una vez', imp == 1 and ll == 1, (imp, ll))
 chk('CENSO: ningún escaner2_*.py llama a create_client de supabase directo (solo escaner2_base)', directos == [], directos)
-chk('los 27 usan escaner2_base.cliente, y nadie más (hoy)', usan == VEINTISEIS, sorted(set(usan) ^ set(VEINTISEIS)))
+chk('los 28 usan escaner2_base.cliente, y nadie más (hoy)', usan == VEINTISEIS, sorted(set(usan) ^ set(VEINTISEIS)))
 with open(os.path.join(AQUI, 'escaner2_base.py'), encoding='utf-8') as f:
     chk('escaner2_base no importa supabase al cargar (los bancos lo cambian por un doble después)',
         not any(isinstance(n, (ast.Import, ast.ImportFrom)) for n in ast.parse(f.read()).body
@@ -447,6 +448,12 @@ for nombre in VEINTISEIS:
         chk('arranca: escaner2_pro_en_directo.py --despues TCG (cliente de verdad con reintento, mira las pasadas de este '
             'run en la base de mentira)', rc == 0 and 'ARRANCA supabase._sync.client True salida 0' in salida
             and any(x[0] == 'GET' and '/rest/v1/disp_pasada' in x[1] for x in llegadas), salida[-600:])
+    elif nombre == 'escaner2_tcg_valorar':
+        # (Encargo TO) Valora lo pendiente de TCG: con cliente de verdad y reintento, mira nov_pasada (vacía: nada que valorar).
+        rc, salida, llegadas = arrancar(SONDA_RESCATE, nombre)
+        chk('arranca: escaner2_tcg_valorar.py (cliente de verdad con reintento, mira lo pendiente en la base de mentira)',
+            rc == 0 and 'ARRANCA supabase._sync.client True salida 0' in salida
+            and any(x[0] == 'GET' and '/rest/v1/nov_pasada' in x[1] for x in llegadas), salida[-600:])
     elif nombre == 'escaner2_rescate':
         for que, tabla in (('pasada', 'escaner2_pasada'), ('cruce', 'escaner2_cruce')):
             rc, salida, llegadas = arrancar(SONDA_RESCATE, nombre, que)

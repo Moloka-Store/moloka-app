@@ -75,12 +75,14 @@ QUE HACE, EN ORDEN:
 
 Uso:  python escaner2_tcg_disponibilidad.py            (la pasada; FICHAS_MAX y LISTADO por el entorno)
       python escaner2_tcg_disponibilidad.py --rescate  (ultimo paso del workflow si el run fallo)
+      MAQUINA=oficina python escaner2_tcg_disponibilidad.py   (encargo TO: la lectura desde el ordenador de la oficina,
+                                                               con GITHUB_TOKEN; ver MAQUINA_OFICINA)
 """
 import os
 import re
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -114,6 +116,51 @@ SIN_FICHA_SEGUIDAS = 5  # tantas fichas seguidas sin producto (404 o a otra pagi
 DATO_IMPOSIBLE_MIN = 20
 DATO_IMPOSIBLE_PROPORCION = 0.20
 HORA_LISTADO = 9  # Madrid, de lunes a viernes: la pasada de las 09:00
+# 🆕 (Encargo TO, 27-nov-2026; Fernando: la lectura de TCG sale del ordenador de la oficina) LA MAQUINA DE LA OFICINA. La
+# web de TCG enseña su pagina anti-robots a las maquinas de GitHub (11 de 13 lecturas del 27-nov) y no al ordenador de la
+# oficina, asi que la lectura horaria de laborables corre alli: una maquina propia del repo PRIVADO de la v2
+# (escaner2-tcg-oficina.yml) que baja ESTE codigo y lo corre con MAQUINA=oficina. Lo que cambia con MAQUINA=oficina:
+#   · una corrida vieja (el equipo estaba apagado y GitHub la tenia en cola) sale sin leer (EDAD_MAXIMA_MIN);
+#   · con otra lectura de TCG en marcha (una 'leyendo' de menos de 1 h), espera a que acabe (ESPERA_TURNO_S); si no acaba,
+#     no lee (los grupos de `concurrency` son por repo: el de la v1 no ve el job de la v2). Esto lo hace TAMBIEN la horaria
+#     de GitHub, sin MAQUINA: una lanzada a mano no se cruza con la de la oficina;
+#   · la pagina anti-robots NO se reintenta en otra maquina (no hay otra): ROJO, como cualquier bloqueo;
+#   · si la lectura ya lleva mas de APLICAR_MAX_MIN cuando va a aplicar (o a dar la foto por «al día»), NO aplica: el equipo
+#     se ha suspendido a medias y lo leido es de antes;
+#   · las novedades: la SELECCION en el acto (nov_seleccionar_pasada solo vale para la ULTIMA pasada aplicada de TCG, que
+#     va por precio_pa). La VALORACION (Keepa, Excel, Telegram) la hace la v1 con sus llaves (escaner2-tcg-valorar.yml, que
+#     lanza un reloj de cron-job.org, y la red de escaner2-tcg-novedades-cuentas.yml a y 45): busca en nov_pasada las
+#     pasadas con la seleccion hecha y la valoracion sin cerrar. La maquina de la oficina NO lanza nada en GitHub ni tiene
+#     llaves de Keepa ni de Telegram (quien dirige, 27-nov-2026): el aviso de una parada lo da el vigilante del escaner
+#     (las lecturas perdidas), y el Telegram de la pasada dice «NO enviado (sin claves)» en el registro.
+#   · una pasada que se queda «leyendo» porque el equipo se apaga a media lectura (el rescate es un paso del mismo job y no
+#     llega a correr) la cierra la base: disp_aplicar_pasada pasa a 'fallida' toda 'leyendo' de TCG de mas de 1 h al aplicar
+#     la siguiente (leido el 27-nov-2026), y nadie toma por viva una 'leyendo' de mas de 1 h (esperar_turno, el PRO).
+MAQUINA_OFICINA = 'oficina'
+# 🔑 La version del modo «oficina» que entiende este programa. El workflow de la v2 la comprueba antes de leer y, si la
+#    v1 que baja no la tiene (el PR de la v2 fusionado antes que el de la v1, o una vuelta atras), sale sin leer.
+OFICINA_VERSION = 2
+# 30 min = disp_parametros.horario_margen_min de TCG: la base da cada lectura prevista por vencida 30 min despues de su hora
+# (disp_frescura_en). Una corrida que arranca mas tarde ya no es la de su hora, y la siguiente prevista esta a menos de 30 min
+# (son cada hora a las y 20): leer ahora solo sumaria otra entrada en la web. Saltarla no hace saltar el aviso, que pide DOS
+# previstas vencidas sin ninguna pasada aplicada desde entonces. Asi, al encender el equipo con corridas en cola de la tarde
+# anterior, no se lee nada atrasado. La edad se cuenta desde que se pidio la corrida, cola incluida: medido el 27-nov-2026 en
+# una corrida que espero 450 s en cola, run_started_at = created_at (en un relanzamiento, run_started_at es el del relanzamiento).
+EDAD_MAXIMA_MIN = 30
+# 5 min: lo que se le consiente al reloj del ordenador de la oficina frente a la hora de GitHub. Con mas, las horas que la pasada
+# deja en la base serian falsas (y una lectura reciente pareceria vieja o al reves): ROJO sin leer, y se dice cuanto.
+DESFASE_MAX_MIN = 5
+# 10 min: la pasada de TCG (de abrirse a quedar terminada) tarda 92 s de mediana y 513 s el p90 (aplicadas y «al día» de los
+# ultimos 30 dias, medido el 27-nov-2026). Se mira la base cada 15 s.
+ESPERA_TURNO_S = 600
+ESPERA_TURNO_CADA_S = 15
+TURNO = timedelta(hours=1)   # una 'leyendo' de menos de 1 h es una lectura viva (disp_aplicar_pasada da por muerta la de mas)
+# 60 min = TURNO: una pasada que lleva mas de 1 h abierta la base ya la da por muerta (la cierra la siguiente que se aplique),
+# y una lectura normal de la oficina llega a aplicar en minutos (la mas larga medida en GitHub, con 300 fichas de Funko antes
+# de la foto, ~35 min de job entero). Si al ir a aplicar ya ha pasado mas, el equipo se suspendio a media lectura (se apaga a
+# las 18:00): lo leido es de antes y no se aplica.
+APLICAR_MAX_MIN = 60
+WORKFLOW_VALORAR = 'escaner2-tcg-valorar.yml'
 _RE_HEX = re.compile(r'[0-9a-fA-F]{24,}')
 _RE_URL = re.compile(r'https?://\S+')
 
@@ -183,7 +230,8 @@ def cocientes(guardados):
 
 def avisar(texto, env=None, post=None):
     """El Telegram de una parada, como el del resto del escaner (escaner2_novedades.enviar_telegram). NUNCA LANZA y no
-    imprime nada suyo: el registro solo dice si se ha mandado."""
+    imprime nada suyo: el registro solo dice si se ha mandado. (Encargo TO) En la oficina no hay llave de Telegram: dice
+    «NO enviado» y el aviso lo da el vigilante (las lecturas perdidas)."""
     try:
         import escaner2_novedades as nv
         import contextlib
@@ -205,13 +253,14 @@ def _minimos(c, minimo, min_disp):
         raise Rechazo('rechazada_vaciado', f"vaciado: {c['n_disponibles']} disponibles, por debajo del mínimo {min_disp}")
 
 
-def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX, intento=1, guarda=None):
+def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX, intento=1, guarda=None, oficina=False):
     """La pasada de la foto. Devuelve (codigo, estado, catalogo, guardados, pid, previos): `estado` 'aplicada',
     'al_dia', 'pared' (choco en el login con la pagina anti-robots y queda otro intento en otra maquina: sin Telegram y
     codigo 0) u otro; `previos`, (fichas de Funko con dato imposible, fichas de Funko leidas) (encargos DI y DT: cuentan
     para el tope del lector);
     `catalogo` y `guardados` para el lector de tramos (None si la pasada no ha llegado a entender el Excel).
-    (Encargo PD) `guarda`: la del Escaneo PRO (escaner2_pro_en_directo.GuardaPro), o None en la horaria."""
+    (Encargo PD) `guarda`: la del Escaneo PRO (escaner2_pro_en_directo.GuardaPro), o None en la horaria.
+    (Encargo TO) `oficina`: la lectura desde la maquina de la oficina: la pagina anti-robots no se reintenta (ROJO)."""
     import escaner2_tcg as tcg
     import escaner2_tcg_tramos as tr
     from escaner2_tcg_web import Bloqueo, Pared
@@ -237,7 +286,8 @@ def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX
             web.entrar(usuario, clave)
             contenido = web.excel()
         except Pared as ex:
-            raise Rechazo('fallida', f'la web de TCG no deja: {ex} · intento {intento} de {INTENTOS}', bloqueo=True,
+            donde = 'desde la máquina de la oficina' if oficina else f'intento {intento} de {INTENTOS}'
+            raise Rechazo('fallida', f'la web de TCG no deja: {ex} · {donde}', bloqueo=True,
                           pared=True) from None
         except Bloqueo as ex:
             raise Rechazo('fallida', f'la web de TCG no deja: {ex}', bloqueo=True) from None
@@ -284,6 +334,14 @@ def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX
               f"a agotado {c['n_web_a_agotado']}, en la web y aún no en el Excel {c['n_web_sin_excel']}", flush=True)
         _minimos(c, minimo, min_disp)
         catalogo = catalogo_leido
+        if oficina:
+            # (Encargo TO) Justo antes de aplicar (o de confirmar la foto como «al día»): si el equipo se suspendio a media
+            # lectura, lo leido es de antes y no se aplica.
+            lleva = (_ahora() - ahora).total_seconds() / 60
+            if lleva > APLICAR_MAX_MIN:
+                raise Rechazo('fallida', f'lectura de la oficina interrumpida: al ir a aplicar llevaba {int(lleva)} min '
+                                         f'(más de {APLICAR_MAX_MIN}; el equipo se suspendió a media lectura); lo leído es '
+                                         f'de antes y no se aplica')
         if ult[0].get('huella_contenido') == c['huella_contenido']:
             raise AlDia(ult[0].get('id'))
         print(">>> Contenido nuevo (la huella no es la de la última pasada aplicada): se sube.", flush=True)
@@ -309,13 +367,13 @@ def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX
             print("TCG_PARED: la web ha enseñado su página anti-robots a esta máquina; el Escaneo PRO no reintenta.",
                   flush=True)
             return 0, 'pared', None, None, pid, previos
-        if ex.pared and intento < INTENTOS:
+        if ex.pared and intento < INTENTOS and not oficina:
             # (19-nov-2026) Sin Telegram ni rojo: la pasada se repite en otra maquina (el workflow la relanza).
             print(f"TCG_PARED_REINTENTO: la web ha enseñado su página anti-robots a esta máquina; intento {intento} de "
                   f"{INTENTOS}: se lanza el {intento + 1}.º en otra máquina.", flush=True)
             return 0, 'pared', None, None, pid, previos
         if ex.bloqueo and not getattr(guarda, 'sin_telegram', False):   # (encargo PD) el PRO: lo ve en la pantalla
-            tras = f' Ya van {INTENTOS} intentos, cada uno en otra máquina.' if ex.pared else ''
+            tras = f' Ya van {INTENTOS} intentos, cada uno en otra máquina.' if ex.pared and not oficina else ''
             avisar(f'⚠️ Escáner 2 · TCG: la pasada de la foto se ha parado porque la web de TCG no deja ({ex.motivo}).'
                    f'{tras} Nada inventado; el escáner viejo sigue como siempre.')
         return 1, ex.estado, None, None, pid, previos
@@ -349,13 +407,14 @@ def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX
     return codigo, 'aplicada', catalogo, guardados, pid, previos
 
 
-def novedades(sb, pid, run_id):
+def novedades(sb, pid, run_id, valorar=True):
     """(Encargo T4) Las novedades de Funko de la pasada aplicada `pid` (como DBLine y OcioStock). NUNCA LANZA. Devuelve
     True si todo fue bien (sin el vigia de la marca). 🔴 Repo publico: el registro, discreto (solo estados y recuentos)."""
     try:
         import escaner2_novedades as nv
         ok, seleccion = nv.novedades_tras_la_pasada(sb, pid, PROVEEDOR, keepa_llave=os.environ.get('KEEPA_API_KEY'),
-                                                    imprimir=nv.imprimir_discreto, run_id=run_id or None)
+                                                    imprimir=nv.imprimir_discreto, run_id=run_id or None,
+                                                    valorar=valorar)
     except Exception as ex:
         print(f"TCG_NOVEDADES_NO_HECHAS: la pasada {pid} sigue aplicada; las novedades han fallado antes de poder "
               f"apuntarse ({type(ex).__name__})", flush=True)
@@ -533,7 +592,70 @@ def leer_tramos_web(sb, web, catalogo, guardados, run_id, fichas_max, hacer_list
     return r
 
 
-def principal(argv, env=None, sb=None, sesion=None, dormir=None):
+# ── (Encargo TO, 27-nov-2026) La maquina de la oficina ─────────────────────────────────────────────────────────────
+def _fecha_iso(v):
+    if not v:
+        return None
+    t = datetime.fromisoformat(str(v).replace('Z', '+00:00'))
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def edad_de_la_corrida(env, pedir=None, ahora=_ahora):
+    """(edad, desfase): los minutos desde que GitHub creo (o relanzo) ESTA corrida, medidos con la HORA DEL SERVIDOR de
+    GitHub (la cabecera Date de su respuesta), y cuantos minutos va adelantado (+) o atrasado (-) el reloj de este equipo
+    respecto a ella. (None, None) si no se puede saber, TAMBIEN si la respuesta no trae su hora: nunca se mide con el reloj
+    del ordenador sin poder comprobarlo (quien llama sale en ROJO sin leer). Asi un reloj desfasado no hace «viejas» todas
+    las corridas ni deja pasar una vieja. Lee la API del repo de la corrida con su token (permiso
+    actions: read). NUNCA LANZA. 🔴 No imprime nada: ni la URL ni la respuesta."""
+    run, repo, token = (env.get('GITHUB_RUN_ID') or ''), (env.get('GITHUB_REPOSITORY') or ''), (env.get('GITHUB_TOKEN') or '')
+    if not (run.isdigit() and repo and token):
+        return None, None
+    api = (env.get('GITHUB_API_URL') or 'https://api.github.com').rstrip('/')
+    try:
+        if pedir is None:
+            import requests
+            pedir = requests.get
+        r = pedir(f'{api}/repos/{repo}/actions/runs/{run}', timeout=20,
+                  headers={'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json',
+                           'X-GitHub-Api-Version': '2022-11-28'})
+        if getattr(r, 'status_code', 0) != 200:
+            return None, None
+        d = r.json()
+        # created_at: cuando se pidio; run_started_at: cuando arranco el intento (un relanzamiento a mano es nuevo).
+        momentos = [m for m in (_fecha_iso(d.get('created_at')), _fecha_iso(d.get('run_started_at'))) if m]
+        if not momentos:
+            return None, None
+        local = ahora()
+        from email.utils import parsedate_to_datetime
+        fecha = (getattr(r, 'headers', None) or {}).get('Date')
+        if not fecha:
+            return None, None
+        servidor = parsedate_to_datetime(fecha)   # una fecha que no se entiende lanza: (None, None), abajo
+        return (servidor - max(momentos)).total_seconds() / 60, (local - servidor).total_seconds() / 60
+    except Exception:  # noqa: BLE001 — sin saberlo, quien llama (principal) sale en ROJO sin leer: TCG_SIN_EDAD
+        return None, None
+
+
+def esperar_turno(sb, ahora=_ahora, dormir=time.sleep, espera_s=ESPERA_TURNO_S):
+    """(True, segundos esperados) si no hay ninguna otra lectura de TCG en marcha (una 'leyendo' de menos de TURNO), o
+    tras esperar a que acabe; (False, segundos) si sigue en marcha pasado `espera_s`."""
+    esperado = 0
+    while True:
+        t = ahora()
+        leyendo = (sb.table('disp_pasada').select('id, creada_en').eq('proveedor', PROVEEDOR).eq('estado', 'leyendo')
+                     .execute().data or [])
+        vivas = [p for p in leyendo if _fecha_iso(p.get('creada_en')) and t - _fecha_iso(p['creada_en']) < TURNO]
+        if not vivas:
+            return True, esperado
+        if esperado >= espera_s:
+            return False, esperado
+        dormir(ESPERA_TURNO_CADA_S)
+        esperado += ESPERA_TURNO_CADA_S
+
+
+def principal(argv, env=None, sb=None, sesion=None, dormir=None, pedir=None):
+    """`pedir`: el de mentira del banco para la API de GitHub (la edad de la corrida, en la oficina); en el workflow, el de
+    verdad."""
     env = os.environ if env is None else env
     rescate = argv == ['--rescate']
     if argv not in ([], ['--rescate']):
@@ -551,6 +673,29 @@ def principal(argv, env=None, sb=None, sesion=None, dormir=None):
         abortar(f'INTENTO tiene que ser un número de 1 a {INTENTOS}')
     intento = int(intento_txt)
     run_id = env.get('GITHUB_RUN_ID') or ''
+    maquina = (env.get('MAQUINA') or '').strip()
+    if maquina not in ('', MAQUINA_OFICINA):
+        abortar(f'MAQUINA tiene que estar vacía o ser {MAQUINA_OFICINA}')
+    oficina = maquina == MAQUINA_OFICINA and not rescate
+    if oficina:
+        edad, desfase = edad_de_la_corrida(env, pedir)
+        if desfase is not None and abs(desfase) > DESFASE_MAX_MIN:
+            # Con el reloj del equipo mal, las horas que la pasada deja en la base (terminada_en) serian falsas: no se lee.
+            print(f"TCG_RELOJ_DESFASADO: el reloj de este equipo va {abs(desfase):.0f} min "
+                  f"{'adelantado' if desfase > 0 else 'atrasado'} respecto a GitHub (más de {DESFASE_MAX_MIN}); no se lee "
+                  f"hasta que se ponga en hora.", flush=True)
+            return 1
+        if edad is None:
+            # Sin la edad ni la hora de GitHub no se puede saber si es una corrida atrasada ni si el reloj va bien.
+            print("TCG_SIN_EDAD: no se ha podido preguntar a GitHub cuándo se pidió esta corrida (ni su hora); no se lee.",
+                  flush=True)
+            return 1
+        if edad > EDAD_MAXIMA_MIN:
+            print(f"TCG_CORRIDA_VIEJA: esta corrida se pidió hace {int(edad)} min según la hora de GitHub (más de "
+                  f"{EDAD_MAXIMA_MIN}: el equipo estaba apagado o la máquina ocupada; el reloj del equipo va "
+                  f"{'¿?' if desfase is None else f'{desfase:+.1f} min'} respecto a GitHub); no se lee. La base ya la cuenta "
+                  f"como perdida y la siguiente prevista está cerca.", flush=True)
+            return 0
     if sb is None:
         from escaner2_base import cliente
         sb = cliente(env['SUPABASE_URL'], env['SUPABASE_SERVICE_KEY'])
@@ -560,12 +705,28 @@ def principal(argv, env=None, sb=None, sesion=None, dormir=None):
         except Exception as ex:
             abortar(f'el rescate ha fallado ({type(ex).__name__})')
         return 0
+    # (Encargo TO) Las dos lecturas horarias, la de la oficina y la de GitHub, esperan a otra lectura de TCG viva: los grupos
+    # de concurrency son por repo y no se ven. Mirar e insertar no es atomico: dos que miran en el mismo segundo pueden
+    # abrir las dos (queda dicho en el parte).
+    try:
+        libre, esperado = esperar_turno(sb, dormir=dormir or time.sleep)
+    except Exception as ex:  # noqa: BLE001 — 🔴 solo el tipo: el texto puede llevar la respuesta de la base
+        print(f"TCG_NO_EJECUTADA: no se ha podido mirar si hay otra lectura de TCG en marcha ({type(ex).__name__}); no se "
+              f"abre ninguna pasada.", flush=True)
+        return 1
+    if not libre:
+        # ROJO: esta lectura prevista no se hace (en fin de semana, la unica del dia); el vigilante la cuenta como perdida.
+        print(f"TCG_OTRA_EN_MARCHA: otra lectura de TCG sigue en marcha tras esperar {esperado} s; esta no lee (no "
+              f"se lee a la vez) y sale en ROJO.", flush=True)
+        return 1
+    if esperado:
+        print(f">>> TURNO: había otra lectura de TCG en marcha; ha acabado tras {esperado} s.", flush=True)
 
     from escaner2_tcg_web import Web, sesion_de_verdad
     web = Web(sesion if sesion is not None else sesion_de_verdad(), **({'dormir': dormir} if dormir else {}))
     ahora = _ahora()
     codigo, estado, catalogo, guardados, pid, previos = pasada(sb, web, run_id, env['TCG_USER'], env['TCG_PASS'], ahora,
-                                                               intento=intento)
+                                                               intento=intento, oficina=oficina)
     if estado == 'pared':
         # (19-nov-2026) El workflow lee esto y lanza la pasada otra vez, en una ejecucion nueva (otra maquina).
         salida = env.get('GITHUB_OUTPUT')
@@ -579,8 +740,12 @@ def principal(argv, env=None, sb=None, sesion=None, dormir=None):
         print(">>> TRAMOS: no se leen (la pasada no ha entendido el Excel o la web no deja).", flush=True)
         return codigo or 1
     # 5 bis · (encargo T4) las novedades de Funko, con la pasada aplicada y antes del lector (no esperan a sus fichas).
-    if estado == 'aplicada' and not novedades(sb, pid, run_id):
-        codigo = 1
+    if estado == 'aplicada':
+        if not novedades(sb, pid, run_id, valorar=not oficina):
+            codigo = 1
+        elif oficina:
+            print(f">>> NOVEDADES: seleccionadas en la base, sin valorar aquí; las valora {WORKFLOW_VALORAR} (reloj) o las "
+                  f"cuentas de novedades de TCG (a y 45).", flush=True)
 
     hacer_listado = toca_listado(listado, ahora.astimezone(ZoneInfo('Europe/Madrid')))
     try:

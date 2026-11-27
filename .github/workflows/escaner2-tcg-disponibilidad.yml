@@ -38,6 +38,11 @@
 #     minuto 20, para no entrar a la vez que el director viejo, que lo hace a las horas en punto). Tiene que coincidir
 #     con disp_parametros.horario_* de TCG.
 #     A MANO: la PRIMERA LECTURA de todas las fichas disponibles (~1.640, ~100 min) con fichas_max = 2000.
+#     🆕 (Encargo TO, 27-nov-2026) DE LUNES A VIERNES LA LECTURA YA NO SALE DE AQUI: sale del ordenador de la oficina (una
+#     maquina propia del repo privado de la v2, escaner2-tcg-oficina.yml, que corre ESTE mismo programa con
+#     MAQUINA=oficina; la web de TCG le enseña su pagina anti-robots a las maquinas de GitHub y no a ese ordenador). Este
+#     workflow se queda con SABADO Y DOMINGO a las 12:20, sin cambios. La valoracion de las novedades de esas lecturas va
+#     en escaner2-tcg-valorar.yml.
 #
 # 🆕 OTRA MAQUINA (19-nov-2026, Fernando: «Monta el reintento»): a ALGUNAS maquinas de GitHub la web de TCG les ensena
 #    en el login una pagina anti-robots («One moment, please...», servidor openresty) en vez del formulario; depende de
