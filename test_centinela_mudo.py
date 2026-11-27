@@ -532,9 +532,9 @@ eq('(G) 🔴 se lanza con workflow_dispatch (cron-job.org), con el ensayo APAGAD
     _disp.get('inputs', {}).get('ensayo', {}).get('options')), ('no', ['no', 'si']))
 eq('(G) y el schedule: de GitHub se queda de respaldo, UNO', len(_on.get('schedule') or []), 1)
 _paso = [s for s in _doc['jobs']['centinela']['steps'] if 'centinela_escaner.py' in str(s.get('run'))]
-eq('(G) 🔴 el paso que lanza el vigilante le pasa el ensayo y la llave de servicio',
+eq('(G) 🔴 el paso que lanza el vigilante le pasa la llave de servicio y el ensayo, FORZADO fuera de main',
    (len(_paso), _paso[0]['env'].get('CENTINELA_ENSAYO'), 'SUPABASE_SERVICE_KEY' in _paso[0]['env']),
-   (1, '${{ inputs.ensayo }}', True))
+   (1, "${{ github.ref != 'refs/heads/main' && 'si' || inputs.ensayo }}", True))
 
 # ---------------------------------------------------------------------------
 # (C) De punta a punta, cada caso en su proceso

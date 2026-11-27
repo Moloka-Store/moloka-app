@@ -22,7 +22,7 @@
 #   fuera de 07:00-22:59 de Madrid y lo deja para la mañana).
 #
 # ENSAYO (a mano): `ensayo: si` lee la base y escribe el informe, sin Telegram y sin tocar
-#   la marca. Es lo que se puede lanzar desde una rama sin avisar a nadie.
+#   la marca. Desde una rama que no sea main va SIEMPRE en ensayo (el paso lo fuerza).
 #
 # BLINDAJE:
 #   - concurrency: dos vueltas no se pisan (cancel-in-progress: false).
@@ -72,5 +72,7 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           TELEGRAM_TOKEN:       ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
-          CENTINELA_ENSAYO:     ${{ inputs.ensayo }}
+          # 🔒 Fuera de main, SIEMPRE ensayo: una vuelta lanzada desde una rama lee la base pero
+          #    ni avisa ni toca la marca, se le pase lo que se le pase.
+          CENTINELA_ENSAYO:     ${{ github.ref != 'refs/heads/main' && 'si' || inputs.ensayo }}
         run: python -u centinela_escaner.py
