@@ -87,13 +87,14 @@ class Lectura:
     otro intento en otra maquina (`siguiente`); `despues`, lo que la horaria hace tras aplicar (devuelve True si fue
     bien; el barrido no la llama: va en su paso, `tras_la_lectura`); `nota`, lo que el barrido deja escrito de la
     lectura de la que sale (`nota_de`). Del lector: `confirma`, la aplicada que su lectura confirma sin decir «al día» (OSMA), o `por_que`, el
-    motivo de no seguir que el lector ya sabe."""
+    motivo de no seguir que el lector ya sabe, o `motivo_entero`, el motivo de la pantalla tal cual (TCG sin intentos)."""
 
     def __init__(self, pid=None, foto=None, motivo=None, pared=False, siguiente=None, despues=None, confirma=None,
-                 por_que=None, nota=None):
+                 por_que=None, nota=None, motivo_entero=None):
         self.pid, self.foto, self.motivo = pid, foto, motivo
         self.pared, self.siguiente, self.despues = pared, siguiente, despues
         self.confirma, self.por_que, self.nota = confirma, por_que, nota
+        self.motivo_entero = motivo_entero
 
 
 def _fecha(v):
@@ -329,7 +330,21 @@ def _leer_tcg(sb, env, run_id, intento, guarda, sesion=None, dormir=None):
                                              fichas_funko=d.FICHAS_FUNKO_PRO, intento=intento, guarda=guarda)
     if estado == 'pared':
         return Lectura(pid=pid, pared=True, siguiente=intento + 1)
+    if estado == 'fallida' and intento >= d.INTENTOS and pid:
+        m = str(((sb.table('disp_pasada').select('motivo').eq('id', pid).limit(1).execute().data or [{}])[0]).get('motivo')
+                 or '')
+        if m.endswith(f'intento {d.INTENTOS} de {d.INTENTOS}'):   # la pagina anti-robots, por ultima vez
+            return Lectura(pid=pid, motivo_entero=motivo_sin_intentos(sb, d.INTENTOS))
     return Lectura(pid=pid, despues=(lambda: _despues_tcg(sb, env, run_id, pid, None)) if estado == 'aplicada' else None)
+
+
+def motivo_sin_intentos(sb, intentos):
+    """(Quien dirige, 27-nov-2026) TCG ha enseñado su pagina anti-robots a las `intentos` maquinas de lectura: dicho
+    claro, con la ultima lectura buena. No se reintenta mas ni mas deprisa."""
+    ult = _ultima_aplicada(sb, 'TCG')
+    t = _fecha(ult.get('terminada_en') or ult.get('creada_en')) if ult else None
+    cola = f'la última lectura buena es del {_madrid(t)}' if t else 'y no hay ninguna lectura buena'
+    return f'la web de TCG no deja entrar ahora a las máquinas de lectura ({intentos} intentos); {cola}'
 
 
 def _leer_dbline(sb, env, run_id, intento, guarda):
@@ -393,7 +408,8 @@ def nota_de(sb, foto, como, ahora, hace=None):
         texto = f'leída hace {hace} min (la lectura del {de}); no se ha vuelto a leer'
     else:
         texto = f'confirmada hoy a las {_madrid(ahora)[-5:]}; el contenido es el de la lectura del {de}'
-    return {'texto': texto, 'como': como, 'comprobada_en': ahora.isoformat(), 'contenido_de': t.isoformat() if t else None}
+    return {'texto': texto, 'como': como, 'comprobada_en': ahora.isoformat(), 'contenido_de': t.isoformat() if t else None,
+            'hace': hace}
 
 
 def leer_en_directo(sb, proveedor, env=None, run_id='', intento=1, lectores=None, ahora=None):
@@ -431,6 +447,10 @@ def leer_en_directo(sb, proveedor, env=None, run_id='', intento=1, lectores=None
     if r.pared:
         r.motivo = motivo_de_fallo(sb, proveedor, f'la web ha enseñado su página anti-robots a esta máquina; va el '
                                                   f'intento {r.siguiente} en otra')
+        return r
+    if r.motivo_entero:
+        r.foto, r.motivo = None, r.motivo_entero
+        print(f">>> LECTURA EN DIRECTO de {nombre}: NO se sigue.", flush=True)
         return r
     try:
         if r.confirma:
@@ -539,8 +559,12 @@ def correr_barrido(sb, proveedor, fila, barrer, fallos, abortar, listo, env=None
       · `--abrir` (el job `abrir` del workflow, SIN el grupo de la horaria): abre la pasada, decide (`previo`) y deja en
         GITHUB_OUTPUT `pasada`, `camino` ('reciente' con `foto` y `hace`, o 'leer') para los jobs siguientes; si una
         lectura horaria a medias no acaba en ESPERA_MAX_S, la pasada queda 'fallida' con el motivo;
-      · sin argumentos: retoma esa pasada (ESCANER2_PASADA; sin ella, abre una). Con FOTO_RECIENTE (el job del camino
-        'reciente'), barre desde esa foto SIN leer; si no, lee al proveedor en directo y, si la lectura deja, barre. Si la
+      · `--leer` (el paso de la lectura, SEPARABLE: se puede llevar a otro job u otra maquina sin tocar el barrido):
+        retoma la pasada, lee al proveedor en directo y, si la lectura deja, NO barre: deja en GITHUB_OUTPUT `camino=foto`,
+        `foto`, `como`, `comprobada` y `hace` para el paso del barrido; si no deja, la pasada queda 'fallida';
+      · sin argumentos: retoma esa pasada (ESCANER2_PASADA; sin ella, abre una). Con FOTO (la que ha decidido `abrir` o
+        el paso `--leer`, con FOTO_COMO, FOTO_HACE y FOTO_COMPROBADA), barre desde esa foto SIN leer; si no, lee al
+        proveedor en directo y, si la lectura deja, barre (lo de los bancos y una corrida a mano). Si la
         web de TCG enseña su pagina anti-robots y queda intento, la pasada SIGUE 'descargando' y GITHUB_OUTPUT dice
         `pared=1`, `siguiente` y `pasada`: la retoma el job siguiente, en otra maquina, en el MISMO run.
     Lo de despues de aplicar NO va aqui: es el paso `--despues` de este modulo, que corre aunque el barrido falle."""
@@ -566,8 +590,9 @@ def correr_barrido(sb, proveedor, fila, barrer, fallos, abortar, listo, env=None
         print(f">>> {'Hay una lectura buena de hace ' + str(hace) + ' min: se barre desde ella, sin volver a leer' if camino == 'reciente' else 'Se lee a ' + nombre + ' en directo'}, en el job siguiente.",
               flush=True)
         return
-    if argv:
-        abortar('uso: <barrido>.py [--abrir]')
+    solo_leer = argv == ['--leer']
+    if argv and not solo_leer:
+        abortar('uso: <barrido>.py [--abrir | --leer]')
     try:
         intento = intento_de(env, maximo_intentos)
         pasada = abrir_o_retomar(sb, fila, env)
@@ -575,13 +600,14 @@ def correr_barrido(sb, proveedor, fila, barrer, fallos, abortar, listo, env=None
         abortar(str(ex))
     print(f">>> Pasada {pasada} (descargando) · {nombre} · modo {fila.get('modo')} · intento {intento}.", flush=True)
     try:
-        reciente = (env.get('FOTO_RECIENTE') or '').strip()
-        if reciente:
-            hace = (env.get('LEIDA_HACE') or '').strip()
-            print(f">>> Sale de la lectura buena de hace {hace or '?'} min que ha visto el job abrir: sin volver a leer.",
-                  flush=True)
-            lectura = Lectura(foto=reciente, nota=nota_de(sb, reciente, 'reciente', datetime.now(timezone.utc),
-                                                          hace or '?'))
+        foto = (env.get('FOTO') or '').strip()
+        if foto:
+            # La foto que ya ha decidido otro paso o job de ESTE run (`abrir`, o la lectura con --leer): sin leer.
+            como = (env.get('FOTO_COMO') or 'reciente').strip()
+            hace = (env.get('FOTO_HACE') or '').strip() or None
+            cuando = _fecha((env.get('FOTO_COMPROBADA') or '').strip() or None) or datetime.now(timezone.utc)
+            print(f">>> Sale de la foto que ha decidido la lectura de este run ({como}): sin volver a leer.", flush=True)
+            lectura = Lectura(foto=foto, nota=nota_de(sb, foto, como, cuando, hace or ('?' if como == 'reciente' else None)))
         else:
             lectura = leer_en_directo(sb, proveedor, env, env.get('GITHUB_RUN_ID') or '', intento, lectores)
         if lectura.pared:
@@ -593,6 +619,14 @@ def correr_barrido(sb, proveedor, fila, barrer, fallos, abortar, listo, env=None
             raise FalloLectura(lectura.motivo + '; y sin GITHUB_OUTPUT no se puede pedir el siguiente intento')
         if lectura.foto is None:
             raise FalloLectura(lectura.motivo)
+        if solo_leer:
+            n = lectura.nota or {}
+            if not salida_github(env, camino='foto', foto=lectura.foto, como=n.get('como') or '',
+                                 comprobada=n.get('comprobada_en') or '', hace='' if n.get('hace') is None else n['hace']):
+                raise FalloLectura('sin GITHUB_OUTPUT no se puede pasar la foto al paso del barrido')
+            print(f">>> LECTURA LISTA: la foto de {nombre} sale de esta lectura ({n.get('como')}); la barre el paso siguiente.",
+                  flush=True)
+            return
         cierre, extra = barrer(pasada, lectura.foto, lectura.nota)
         # 🔒 El cierre DENTRO del try: si la base lo rechaza (el check del cuadre), la pasada queda 'fallida'.
         sb.table('escaner2_pasada').update(cierre).eq('id', pasada).execute()

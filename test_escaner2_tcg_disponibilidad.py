@@ -1127,6 +1127,18 @@ eq('PD8 la página anti-robots en el intento 1: otro intento (el 2), sin Telegra
    (r.pared, r.siguiente, base.pasadas()[0]['estado'], 'Telegram' in reg), (True, 2, 'fallida', False))
 r, reg = lector_pro(Base(), WebPared(catalogo(), FICHAS), intento=prog.INTENTOS)
 eq('PD9 …en el último intento, ya no: fallida, sin más intentos', (r.pared, r.pid is not None), (False, True))
+eq('PD10 🔴 (quien dirige) …y el motivo lo dice claro: la web no deja entrar a las máquinas de lectura, con los intentos y '
+   'la última lectura buena (aquí, ninguna); y ni uno más (3, como la horaria)',
+   (r.motivo_entero, prog.INTENTOS),
+   ('la web de TCG no deja entrar ahora a las máquinas de lectura (3 intentos); y no hay ninguna lectura buena', 3))
+base = Base()
+r, reg = lector_pro(base, WebPared(catalogo(), FICHAS), intento=2)
+eq('PD11 en el intento 2 (no el último), la página anti-robots pide otro intento, sin motivo de «sin intentos»',
+   (r.pared, r.siguiente, r.motivo_entero), (True, 3, None))
+base = Base()
+r, reg = lector_pro(base, Web(catalogo(), FICHAS, login=403), intento=prog.INTENTOS)
+eq('PD12 en el último intento, otro bloqueo (un 403, no la página anti-robots): el motivo de siempre, no el de «sin '
+   'intentos»', (r.pared, r.motivo_entero, base.pasadas()[0]['estado']), (False, None, 'fallida'))
 
 print()
 print('TODO OK' if not fallos else 'FALLOS: %d (%s)' % (len(fallos), ', '.join(fallos)))

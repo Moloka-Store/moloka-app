@@ -91,7 +91,6 @@ jobs:
 
       - name: Instalar dependencias
         run: pip install --quiet supabase==2.31.0
-
       - name: Abrir la pasada del barrido y decidir de qué lectura sale
         id: abrir
         timeout-minutes: 6
@@ -129,7 +128,6 @@ jobs:
 
       - name: Instalar dependencias
         run: pip install --quiet supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13
-
       - name: De la lectura de hace menos de 15 min, la pasada y la lista
         timeout-minutes: 15
         env:
@@ -139,8 +137,9 @@ jobs:
           MARCAS_ELEGIDAS:      ${{ inputs.marcas }}
           OFERTAS_ELEGIDAS:     ${{ inputs.ofertas }}
           ESCANER2_PASADA:      ${{ needs.abrir.outputs.pasada }}
-          FOTO_RECIENTE:        ${{ needs.abrir.outputs.foto }}
-          LEIDA_HACE:           ${{ needs.abrir.outputs.hace }}
+          FOTO:                 ${{ needs.abrir.outputs.foto }}
+          FOTO_COMO:            'reciente'
+          FOTO_HACE:            ${{ needs.abrir.outputs.hace }}
           PYTHONIOENCODING:     utf-8
         run: python -u escaner2_tcg_barrido.py
 
@@ -163,8 +162,8 @@ jobs:
       group: escaner2-tcg
       cancel-in-progress: false
     outputs:
-      pared:     ${{ steps.barrer.outputs.pared }}
-      pasada:    ${{ steps.barrer.outputs.pasada }}
+      pared:     ${{ steps.leer.outputs.pared }}
+      pasada:    ${{ steps.leer.outputs.pasada }}
     steps:
       - name: Descargar el repo
         uses: actions/checkout@v7
@@ -176,11 +175,12 @@ jobs:
 
       - name: Instalar dependencias
         run: pip install --quiet supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13 curl_cffi==0.15.0 requests==2.34.2
-
-      - name: La lectura de TCG en directo, y de ella la pasada y la lista
-        id: barrer
-        # El tope en el PASO (15 min), no solo en el job: si se agota, lo de despues y los rescates tienen tiempo.
-        timeout-minutes: 15
+      # 🔑 LA LECTURA, EN SU PASO (separable: llevarla a otra maquina es moverla a su job, con `needs`, sin tocar el
+      #    barrido, que solo lee la base y lo que este paso deja en GITHUB_OUTPUT).
+      - name: La lectura de TCG en directo
+        id: leer
+        # El tope en el PASO, no solo en el job: si se agota, lo de despues y los rescates tienen tiempo.
+        timeout-minutes: 12
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
@@ -194,6 +194,23 @@ jobs:
           TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
           INTENTO:              '1'
           ESCANER2_PASADA:      ${{ needs.abrir.outputs.pasada }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_tcg_barrido.py --leer
+
+      - name: De la lectura, la pasada y la lista
+        if: steps.leer.outputs.camino == 'foto'
+        timeout-minutes: 10
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          MODO_BARRIDO:         ${{ inputs.modo }}
+          MARCAS_ELEGIDAS:      ${{ inputs.marcas }}
+          OFERTAS_ELEGIDAS:     ${{ inputs.ofertas }}
+          ESCANER2_PASADA:      ${{ needs.abrir.outputs.pasada }}
+          FOTO:                 ${{ steps.leer.outputs.foto }}
+          FOTO_COMO:            ${{ steps.leer.outputs.como }}
+          FOTO_HACE:            ${{ steps.leer.outputs.hace }}
+          FOTO_COMPROBADA:      ${{ steps.leer.outputs.comprobada }}
           PYTHONIOENCODING:     utf-8
         run: python -u escaner2_tcg_barrido.py
 
@@ -242,8 +259,8 @@ jobs:
       group: escaner2-tcg
       cancel-in-progress: false
     outputs:
-      pared:     ${{ steps.barrer.outputs.pared }}
-      pasada:    ${{ steps.barrer.outputs.pasada }}
+      pared:     ${{ steps.leer.outputs.pared }}
+      pasada:    ${{ steps.leer.outputs.pasada }}
     steps:
       - name: Descargar el repo
         uses: actions/checkout@v7
@@ -255,11 +272,12 @@ jobs:
 
       - name: Instalar dependencias
         run: pip install --quiet supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13 curl_cffi==0.15.0 requests==2.34.2
-
-      - name: Intento 2 en otra máquina · la lectura de TCG y de ella la pasada
-        id: barrer
-        # El tope en el PASO (15 min), no solo en el job: si se agota, lo de despues y los rescates tienen tiempo.
-        timeout-minutes: 15
+      # 🔑 LA LECTURA, EN SU PASO (separable: llevarla a otra maquina es moverla a su job, con `needs`, sin tocar el
+      #    barrido, que solo lee la base y lo que este paso deja en GITHUB_OUTPUT).
+      - name: Intento 2 en otra máquina · la lectura de TCG en directo
+        id: leer
+        # El tope en el PASO, no solo en el job: si se agota, lo de despues y los rescates tienen tiempo.
+        timeout-minutes: 12
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
@@ -273,6 +291,23 @@ jobs:
           TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
           INTENTO:              '2'
           ESCANER2_PASADA:      ${{ needs.barrer.outputs.pasada }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_tcg_barrido.py --leer
+
+      - name: De la lectura, la pasada y la lista
+        if: steps.leer.outputs.camino == 'foto'
+        timeout-minutes: 10
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          MODO_BARRIDO:         ${{ inputs.modo }}
+          MARCAS_ELEGIDAS:      ${{ inputs.marcas }}
+          OFERTAS_ELEGIDAS:     ${{ inputs.ofertas }}
+          ESCANER2_PASADA:      ${{ needs.barrer.outputs.pasada }}
+          FOTO:                 ${{ steps.leer.outputs.foto }}
+          FOTO_COMO:            ${{ steps.leer.outputs.como }}
+          FOTO_HACE:            ${{ steps.leer.outputs.hace }}
+          FOTO_COMPROBADA:      ${{ steps.leer.outputs.comprobada }}
           PYTHONIOENCODING:     utf-8
         run: python -u escaner2_tcg_barrido.py
 
@@ -331,11 +366,12 @@ jobs:
 
       - name: Instalar dependencias
         run: pip install --quiet supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13 curl_cffi==0.15.0 requests==2.34.2
-
-      - name: Intento 3 en otra máquina · la lectura de TCG y de ella la pasada
-        id: barrer
-        # El tope en el PASO (15 min), no solo en el job: si se agota, lo de despues y los rescates tienen tiempo.
-        timeout-minutes: 15
+      # 🔑 LA LECTURA, EN SU PASO (separable: llevarla a otra maquina es moverla a su job, con `needs`, sin tocar el
+      #    barrido, que solo lee la base y lo que este paso deja en GITHUB_OUTPUT).
+      - name: Intento 3 en otra máquina · la lectura de TCG en directo
+        id: leer
+        # El tope en el PASO, no solo en el job: si se agota, lo de despues y los rescates tienen tiempo.
+        timeout-minutes: 12
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
@@ -349,6 +385,23 @@ jobs:
           TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
           INTENTO:              '3'
           ESCANER2_PASADA:      ${{ needs.barrer_2.outputs.pasada }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_tcg_barrido.py --leer
+
+      - name: De la lectura, la pasada y la lista
+        if: steps.leer.outputs.camino == 'foto'
+        timeout-minutes: 10
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          MODO_BARRIDO:         ${{ inputs.modo }}
+          MARCAS_ELEGIDAS:      ${{ inputs.marcas }}
+          OFERTAS_ELEGIDAS:     ${{ inputs.ofertas }}
+          ESCANER2_PASADA:      ${{ needs.barrer_2.outputs.pasada }}
+          FOTO:                 ${{ steps.leer.outputs.foto }}
+          FOTO_COMO:            ${{ steps.leer.outputs.como }}
+          FOTO_HACE:            ${{ steps.leer.outputs.hace }}
+          FOTO_COMPROBADA:      ${{ steps.leer.outputs.comprobada }}
           PYTHONIOENCODING:     utf-8
         run: python -u escaner2_tcg_barrido.py
 
@@ -404,7 +457,6 @@ jobs:
 
       - name: Instalar dependencias
         run: pip install --quiet supabase==2.31.0
-
       - name: Rescate · la pasada de este run, si se ha quedado descargando
         if: always()
         env:

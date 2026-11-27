@@ -59,7 +59,6 @@ jobs:
 
       - name: Instalar dependencias
         run: pip install --quiet supabase==2.31.0
-
       - name: Abrir la pasada del barrido y decidir de qué lectura sale
         id: abrir
         timeout-minutes: 6
@@ -94,15 +93,15 @@ jobs:
 
       - name: Instalar dependencias
         run: pip install --quiet supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13
-
       - name: De la lectura de hace menos de 15 min, la pasada y la lista
         timeout-minutes: 15
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           ESCANER2_PASADA:      ${{ needs.abrir.outputs.pasada }}
-          FOTO_RECIENTE:        ${{ needs.abrir.outputs.foto }}
-          LEIDA_HACE:           ${{ needs.abrir.outputs.hace }}
+          FOTO:                 ${{ needs.abrir.outputs.foto }}
+          FOTO_COMO:            'reciente'
+          FOTO_HACE:            ${{ needs.abrir.outputs.hace }}
           PYTHONIOENCODING:     utf-8
         run: python -u escaner2_osma_barrido.py
 
@@ -135,11 +134,12 @@ jobs:
 
       - name: Instalar dependencias
         run: pip install --quiet supabase==2.31.0 openpyxl==3.1.5 pandas==3.0.0 numpy==2.4.6 psycopg2-binary==2.9.13 requests==2.34.2
-
-      - name: La lectura de OSMA en directo, y de ella la pasada y la lista
-        id: barrer
-        # El tope en el PASO (15 min), no solo en el job: si se agota, lo de despues y los rescates tienen tiempo.
-        timeout-minutes: 15
+      # 🔑 LA LECTURA, EN SU PASO (separable: llevarla a otra maquina es moverla a su job, con `needs`, sin tocar el
+      #    barrido, que solo lee la base y lo que este paso deja en GITHUB_OUTPUT).
+      - name: La lectura de OSMA en directo
+        id: leer
+        # El tope en el PASO, no solo en el job: si se agota, lo de despues y los rescates tienen tiempo.
+        timeout-minutes: 12
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
@@ -147,6 +147,20 @@ jobs:
           OSMA_PASS:            ${{ secrets.OSMA_PASS }}
           INTENTO:              '1'
           ESCANER2_PASADA:      ${{ needs.abrir.outputs.pasada }}
+          PYTHONIOENCODING:     utf-8
+        run: python -u escaner2_osma_barrido.py --leer
+
+      - name: De la lectura, la pasada y la lista
+        if: steps.leer.outputs.camino == 'foto'
+        timeout-minutes: 10
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          ESCANER2_PASADA:      ${{ needs.abrir.outputs.pasada }}
+          FOTO:                 ${{ steps.leer.outputs.foto }}
+          FOTO_COMO:            ${{ steps.leer.outputs.como }}
+          FOTO_HACE:            ${{ steps.leer.outputs.hace }}
+          FOTO_COMPROBADA:      ${{ steps.leer.outputs.comprobada }}
           PYTHONIOENCODING:     utf-8
         run: python -u escaner2_osma_barrido.py
 
@@ -199,7 +213,6 @@ jobs:
 
       - name: Instalar dependencias
         run: pip install --quiet supabase==2.31.0
-
       - name: Rescate · la pasada de este run, si se ha quedado descargando
         if: always()
         env:

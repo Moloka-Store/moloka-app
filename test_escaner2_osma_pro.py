@@ -1243,7 +1243,8 @@ eq('B6 · 🔑 [abrir, reciente] una lectura buena de hace 5 min: camino «recie
     bd.get('lecturas')), (0, ['descargando'], 'reciente', _PD_DISP, True, None))
 _abierta = _p[0]['id']
 cod, log, bd, _sal, _p, _r = caso_pd(ruta=_r, secretos=False,
-                                     env={'ESCANER2_PASADA': _abierta, 'FOTO_RECIENTE': _PD_DISP, 'LEIDA_HACE': '5'})
+                                     env={'ESCANER2_PASADA': _abierta, 'FOTO': _PD_DISP, 'FOTO_COMO': 'reciente',
+                                          'FOTO_HACE': '5'})
 _side = json.loads(base64.b64decode(bd['storage']['escaner2'][[k for k in bd['storage']['escaner2']
                                                                 if k.endswith('barrido.json')][0]]).decode('utf-8'))
 eq('B6 · 🔑 [barrer_ya] el job sin grupo barre desde ESA foto, sin secretos del proveedor y sin leer, y barrido.json '
@@ -1257,6 +1258,27 @@ eq('B6 · 🔴 [abrir, en marcha] una lectura del proveedor a medias que no acab
    '«… se está leyendo ahora …», sin leer y sin camino',
    (cod, [x['estado'] for x in _p], 'se está leyendo ahora' in (_p[0].get('motivo_fallo') or ''), bd.get('lecturas'),
     _sal.get('camino')), (1, ['fallida'], True, None, None))
+
+# 🆕 (Quien dirige) La lectura, en SU paso (--leer), separable del barrido: deja la foto en GITHUB_OUTPUT y no barre
+cod, log, bd, _sal, _p, _r = caso_pd(quitar_run=False, lector={}, args=['--leer'])
+eq('B6 · 🔑 [--leer] la lectura de ahora, aplicada: VERDE, la pasada SIGUE descargando, SIN foto, y GITHUB_OUTPUT da la '
+   'foto y cómo («ahora») para el paso del barrido',
+   (cod, [x['estado'] for x in _p], sin_foto(bd), _sal.get('camino'), _sal.get('foto'), _sal.get('como'),
+    bool(_sal.get('comprobada'))), (0, ['descargando'], True, 'foto', _PD_DISP, 'ahora', True))
+_abierta, _leida = _p[0]['id'], dict(_sal)
+cod, log, bd, _sal, _p, _r = caso_pd(ruta=_r, secretos=False, env={
+    'ESCANER2_PASADA': _abierta, 'FOTO': _leida['foto'], 'FOTO_COMO': _leida['como'], 'FOTO_HACE': _leida.get('hace', ''),
+    'FOTO_COMPROBADA': _leida['comprobada']})
+_side = json.loads(base64.b64decode(bd['storage']['escaner2'][[k for k in bd['storage']['escaner2']
+                                                                if k.endswith('barrido.json')][0]]).decode('utf-8'))
+eq('B6 · 🔑 [barrido tras --leer] el paso del barrido, sin secretos ni lectura, barre esa foto y dice «leída ahora»',
+   (cod, [(x['id'], x['estado']) for x in _p], len(bd.get('lecturas', [])),
+    (_side.get('lectura') or {}).get('texto', '').startswith('leída ahora (')),
+   (0, [(_abierta, 'esperando_csv')], 1, True))
+cod, log, bd, _sal, _p, _r = caso_pd(args=['--leer'], **_ESCENAS['fallida'])
+eq('B6 · 🔴 [--leer, fallida] la lectura no deja: ROJO, la pasada fallida con su motivo, sin foto y sin camino',
+   (cod, _p[0]['estado'], 'no he podido leer' in (_p[0].get('motivo_fallo') or ''), sin_foto(bd), _sal.get('camino')),
+   (1, 'fallida', True, True, None))
 
 # 🆕 (Decisiones de quien dirige, 27-nov-2026) La lectura buena de hace menos de 15 min: el PRO no vuelve a leer.
 cod, log, bd, _sal, _p, _r = caso_pd(lector={}, reciente=True)

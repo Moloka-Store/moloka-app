@@ -1401,6 +1401,13 @@ _r = epd.leer_en_directo(_bd, 'TCG', {'TCG_USER': 'u', 'TCG_PASS': 'p'}, '7', 2,
                                                                        or epd.Lectura(pid='R'))}, _AHORA)
 eq('(PD) el lector recibe el run, el intento y la guarda del PRO; con su pasada aplicada, sale su foto',
    (_vistos, _r.foto, _r.motivo), ([('7', 2, 'GuardaPro')], 'R', None))
+eq('(PD) 🔴 TCG sin intentos (la página anti-robots a las 3 máquinas): el motivo, claro, con la última lectura buena',
+   epd.motivo_sin_intentos(_base_pd(90), 3),
+   'la web de TCG no deja entrar ahora a las máquinas de lectura (3 intentos); la última lectura buena es del 27-11-2026 '
+   'a las 10:01')
+_r = epd.leer_en_directo(_base_pd(90), 'TCG', {'TCG_USER': 'u', 'TCG_PASS': 'p'}, '1', 3,
+                         {'TCG': lambda *a: epd.Lectura(pid='P', motivo_entero='la web de TCG no deja entrar ahora …')}, _AHORA)
+eq('(PD) …y ese motivo va tal cual a la pantalla, sin foto', (_r.foto, _r.motivo), (None, 'la web de TCG no deja entrar ahora …'))
 eq('(PD) los cuatro proveedores tienen lector y secretos (los de su workflow horario)',
    (sorted(epd.LECTORES), sorted(epd.PROVEEDORES), epd.PROVEEDORES['TCG'][1], epd.PROVEEDORES['OSMA'][1]),
    (['DBLINE', 'OCIOSTOCK', 'OSMA', 'TCG'], ['DBLINE', 'OCIOSTOCK', 'OSMA', 'TCG'], ('TCG_USER', 'TCG_PASS'),
@@ -1449,7 +1456,7 @@ eq('(PD) la nota: leída ahora / confirmada hoy / leída hace N min, en hora de 
     'leída hace 7 min (la lectura del 27-11-2026 a las 10:01); no se ha vuelto a leer'])
 eq('(PD) …y con las dos fechas (la de la comprobación y la del contenido)',
    {k: v for k, v in epd.nota_de(_bn, 'A', 'confirmada', _AHORA).items() if k != 'texto'},
-   {'como': 'confirmada', 'comprobada_en': _AHORA.isoformat(), 'contenido_de': _iso(89)})
+   {'como': 'confirmada', 'comprobada_en': _AHORA.isoformat(), 'contenido_de': _iso(89), 'hace': None})
 
 # 🔑 EL PASO DE DESPUÉS DE LA LECTURA: lo de después de aplicar, aunque el barrido falle, y el vaciado que se quedó a medias
 _bt = _BasePD(disp_pasada=[
@@ -1565,7 +1572,8 @@ for _p, _sec in (('tcg', ('TCG_USER', 'TCG_PASS')), ('dbline', ('DBLINE_USER', '
                                encoding='utf-8'))
     _grupo_h = _wh['concurrency']['group']
     _lect = [j for n, j in _wb['jobs'].items() if n.startswith('barrer') and n != 'barrer_ya']
-    _pasos = [s for j in _lect for s in j['steps'] if 'barrido.py' in str(s.get('run', '')) and '--abrir' not in s['run']]
+    _pasos = [s for j in _lect for s in j['steps'] if 'barrido.py --leer' in str(s.get('run', ''))]
+    _barr = [s for j in _lect for s in j['steps'] if str(s.get('run', '')).strip().endswith('_barrido.py')]
     _desp = [s for j in _lect for s in j['steps'] if '--despues' in str(s.get('run', ''))]
     _pip_h = {x for s in _wh['jobs']['leer']['steps'] for x in str(s.get('run', '')).split() if '==' in x}
     _pip_b = [{x for s in j['steps'] for x in str(s.get('run', '')).split() if '==' in x} for j in _lect]
@@ -1584,10 +1592,15 @@ for _p, _sec in (('tcg', ('TCG_USER', 'TCG_PASS')), ('dbline', ('DBLINE_USER', '
        (sorted(_ab['outputs']), [s['if'] for s in _ab['steps'] if 'rescate' in str(s.get('run', ''))],
         ['--abrir' in str(s.get('run', '')) for s in _ab['steps']].count(True)),
        (['camino', 'foto', 'hace', 'pasada'], ['failure() || cancelled()'], 1))
-    eq('(PD) workflow %s: barrer_ya sale de la foto que dice abrir (FOTO_RECIENTE), sin secretos del proveedor' % _p,
-       [(s['env'].get('FOTO_RECIENTE'), s['env'].get('ESCANER2_PASADA'), bool(set(_sec) & set(s['env'])))
+    eq('(PD) workflow %s: barrer_ya sale de la foto que dice abrir (FOTO, «reciente»), sin secretos del proveedor' % _p,
+       [(s['env'].get('FOTO'), s['env'].get('FOTO_COMO'), s['env'].get('ESCANER2_PASADA'), bool(set(_sec) & set(s['env'])))
         for s in _J['barrer_ya']['steps'] if 'barrido.py' in str(s.get('run', ''))],
-       [('${{ needs.abrir.outputs.foto }}', '${{ needs.abrir.outputs.pasada }}', False)])
+       [('${{ needs.abrir.outputs.foto }}', 'reciente', '${{ needs.abrir.outputs.pasada }}', False)])
+    eq('(PD) workflow %s: 🔑 la lectura, en SU paso (--leer, separable), y el barrido en otro, detrás, solo si la lectura '
+       'da foto, con la foto de ese paso y SIN secretos del proveedor' % _p,
+       [(s.get('if'), s['env'].get('FOTO'), s['env'].get('FOTO_COMO'), bool(set(_sec) & set(s['env']))) for s in _barr],
+       [("steps.leer.outputs.camino == 'foto'", '${{ steps.leer.outputs.foto }}', '${{ steps.leer.outputs.como }}', False)]
+       * len(_lect))
     eq('(PD) workflow %s: el paso de la lectura lleva los secretos y las claves del paso horario (menos sus inputs: '
        'FICHAS_MAX, LISTADO, el MODO de OSMA), y las dependencias de la horaria' % _p,
        (all(set(_sec) <= set(s['env']) for s in _pasos),
@@ -1605,6 +1618,10 @@ for _p, _sec in (('tcg', ('TCG_USER', 'TCG_PASS')), ('dbline', ('DBLINE_USER', '
        'en barrer_ya, ni en los rescates)' % _p,
        sorted({n for n, j in _wb['jobs'].items() for s in j['steps'] for k in (s.get('env') or {})
                if k in _sec and s not in _pasos and s not in _desp}), [])
+    eq('(PD) workflow %s: las salidas de cada lectura (pared, pasada) salen del paso de la lectura' % _p,
+       {n: j.get('outputs') for n, j in _J.items() if n.startswith('barrer_') is False and n.startswith('barrer')
+        and j.get('outputs')}, {'barrer': {'pared': '${{ steps.leer.outputs.pared }}',
+                                           'pasada': '${{ steps.leer.outputs.pasada }}'}} if _p == 'tcg' else {})
 
 print()
 if fallos:
