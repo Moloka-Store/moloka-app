@@ -1,107 +1,37 @@
 # -*- coding: utf-8 -*-
-"""Banco: el centinela avisa cuando un director lleva horas sin escribir.
+"""Banco: el vigilante del escaner avisa en cuanto un proveedor pierde dos lecturas de su horario.
 
-EL FALLO QUE CIERRA (9 y 10-sep-2026). Los cuatro directores se quedaron sin
-poder leer `productos` y empezaron a morir en el arranque. DBLine dejo de
-escribir el 9-sep a las 10:31 UTC y OcioStock a las 15:01; no se supo hasta el
-10-sep por la tarde. DOS DIAS con «Que reponer» y el trackeador ensenando el
-catalogo de anteayer con toda la cara de estar al dia. El run de cada director
-salia rojo en Actions, pero un rojo en Actions no llega a donde esta Fernando.
+EL FALLO QUE CIERRA (26 y 27-nov-2026). Del 26-nov a las 13:20 al 27-nov a las 08:54 (Madrid)
+fallaron TODAS las lecturas horarias de TCG (la ultima aplicada, 26-nov 12:23) y a Fernando no le
+llego nada. El vigilante de antes avisaba con «mas de 26 h sin escribir»: no habria dicho nada
+hasta pasadas las 14:23 del 27-nov. El de ahora sigue el horario de cada proveedor, el de
+`disp_parametros`, con la regla de Reponer (`disp_frescura_en`): caducado = las dos ultimas
+lecturas previstas y vencidas sin ninguna buena. Con la historia real de TCG, a las 14:50 del 26.
 
-LA TRAMPA DE ESTE CONTROL, Y COMO SE ESQUIVA. Los tres proveedores de fichero NO
-trabajan los domingos (medido: cero pasadas en cuatro domingos seguidos), asi que
-su hueco normal mas largo es el del sabado al lunes: 44 h en DBLine. Un umbral en
-horas BRUTAS tendria que ser de 50 h para no dar un aviso falso cada lunes -- o
-sea, justo los dos dias de silencio que se vienen a evitar. Descontando las horas
-de domingo, ese mismo hueco son 23 h y la X puede bajar a 26.
-
-LA SEGUNDA TRAMPA: EL RUIDO (10-sep-2026). El centinela arranca 8 veces al dia y
-un mudo lo es durante horas, asi que sin freno el movil suena 8 veces por el
-mismo silencio -- y un aviso que suena ocho veces se aprende a ignorar en quince
-dias. El freno es una marca en Storage, un aviso por proveedor y dia. Y el freno
-tiene DOS condiciones que este banco exige:
-  🔴 FALLA EN ABIERTO. Si la marca no se puede leer o no se puede escribir, se
-     avisa IGUAL. Un mecanismo hecho para hablar menos no puede convertirse en
-     uno que se calla cuando algo va mal: esa es exactamente la clase de silencio
-     que costo dos dias (`productos` devolviendo cero filas sin error).
-  🔴 EL AVISO DICE DESDE CUANDO. No «DBLine mudo», sino «DBLine lleva 27 h sin
-     escribir (ultima: 2026-09-09 10:31 UTC)». Con un aviso al dia, saber si
-     acaba de empezar o si lleva dos dias es la mitad de la informacion.
-
-QUE SE PRUEBA, Y COMO:
-  (A) LAS FUNCIONES REALES, sacadas de `centinela_escaner.py` con `ast` (POR
-      ESTRUCTURA, no con un grep) y EJECUTADAS con las fechas del apagon de
-      verdad y con un sabado-a-lunes de verdad.
-  (B) POR ESTRUCTURA: que la tabla de horarios cubra EXACTAMENTE los directores
-      que existen en `.github/workflows`. Un director nuevo que naciera sin su
-      linea aqui seria un proveedor sin centinela, y el centinela saldria verde
-      sin mirarlo -- que es la forma que tiene esta clase de control de mentir.
-      Y que la X de cada uno este POR ENCIMA del hueco mayor medido: una X por
-      debajo es un aviso falso cada semana, y un aviso falso semanal se aprende a
-      ignorar en quince dias.
-  (C) DE PUNTA A PUNTA, ocho veces, cada una en su PROCESO, con `supabase` y
-      `requests` sustituidos por dobles en memoria (sin red, sin secretos).
-      Los tres primeros son el centinela de siempre; los cinco ultimos, el freno:
-        1. [al_dia]              -> exit 0, CERO Telegram.
-        2. [mudo]                -> exit 1, UN Telegram, y la marca queda escrita.
-        3. [ilegible]            -> exit 1: no saber no es estar bien.
-        4. [ya_avisado]          -> exit 1 y CERO Telegram: ya sono hoy.
-        5. [ayer]                -> exit 1 y UN Telegram: la marca es de AYER.
-        6. [marca_ilegible]      -> exit 1 y UN Telegram: FALLA EN ABIERTO.
-        7. [marca_no_escribible] -> exit 1, UN Telegram y aviso en el log.
-        8. [telegram_falla]      -> exit 1 y la marca INTACTA: si no sono, no se
-                                    apunta como sonado.
-      Y en TODOS, las cuatro lineas del informe. Un centinela que solo escribe
-      cuando salta no se puede auditar: el dia que calla no se distingue "estan
-      todos al dia" de "no llego a mirar".
-  (D) LAS DOS DIRECCIONES del descuento del domingo: el MISMO sabado-a-lunes sale
-      "al dia" para quien descansa el domingo y MUDO para quien no. Sin ese
-      contraste, (A) saldria verde tambien con un descuento que no descontara
-      nada.
-  (E) EL REPARTO del freno, como funcion pura, incluida la marca vacia.
-  (F) LA LINEA DEL AVISO, como funcion pura: que empiece por las horas, que lleve
-      la fecha de la ultima escritura, y que solo nombre el descuento del domingo
-      cuando de verdad cambia el numero.
-  (G) EL RELOJ. El cron se lee del .yml de VERDAD y la ventana en la que el plazo
-      de cada proveedor puede vencerse sale de las cifras de HORARIOS (su franja
-      de escritura + su X). Se exige que las cuatro pasadas cubran esa ventana con
-      4 h de demora como mucho, y que ninguna ventana caiga de noche -- que es lo
-      que permite no mirar entre las 18:00 y las 06:00 sin retrasar nada. Sin
-      esto, «no hay pasadas de noche porque ningun plazo vence de noche» seria una
-      frase bonita en un comentario; asi, si manana se mueve una franja, una X o
-      una hora del cron, el banco se pone rojo solo.
-
-  (H) 🆕 HEO Y OSMA EN EL ESCANER 2 (03-oct-2026). Dejan de vigilarse en
-      `escaner_memoria` (el director viejo de HEO se apago a proposito el 01-oct) y
-      pasan a la ultima pasada 'aplicada' de `disp_pasada`. Seis escenarios de punta
-      a punta con el RELOJ FIJO (el banco no cambia segun el dia en que se corra) y
-      señuelos en los dos almacenes: [foto_hoy] con la foto de produccion del
-      03-oct, todo al dia; [heo_30h_martes], [osma_miercoles_10], [osma_sabado],
-      [osma_lunes_06h] y [osma_lunes_10h].
-  (I) 🆕 DBLINE EN EL ESCANER 2 (encargo DB6, 10-oct-2026). Deja `escaner_memoria`
-      (su director viejo se apaga) y pasa a `disp_pasada`: 26 h, descansa el domingo,
-      `ventana_ancha` como HEO. [foto_hoy] pasa a la foto de produccion del 10-oct;
-      [dbline_martes_10h] (mudo, con su memoria fresca de señuelo) y
-      [dbline_lunes_10h] (del sabado al lunes, verde por el domingo); y sus dos
-      roturas en (R).
-  (J) 🆕 TCG EN EL ESCANER 2 (encargo T5c, 14-oct-2026). Deja `escaner_memoria` (su
-      director viejo se apago con el T5) y pasa a `disp_pasada`: 26 h, ningun dia
-      descontado, `ventana_ancha`, y una «al dia» del sabado o del domingo cuenta como
-      señal de vida (`al_dia_cuenta`, reconocida por su huella). `ultima_viva` como
-      funcion pura; [foto_hoy] pasa a la foto de produccion del 14-oct; [tcg_noche]
-      (el hueco normal, verde), [tcg_miercoles_14h] (mudo entre semana: ni sus «al dia»
-      del dia ni su memoria fresca lo salvan), [tcg_finde_al_dia_lunes] y
-      [tcg_finde_al_dia_domingo] (dos «al dia» el fin de semana: verde),
-      [tcg_finde_muerto] (sin nada desde el viernes: rojo el domingo a las 06:00) y
-      [tcg_finde_otra_huella] (una 'rechazada' que no es «al dia» no cuenta); y sus
-      tres roturas en (R).
-  (R) ROTURAS A MANO, dentro del banco: se estropea una copia del centinela por
-      estructura (HEO mirado otra vez en escaner_memoria, OSMA igual, OSMA sin el
-      descuento del sabado) y se exige que la foto de hoy se ponga ROJA; mas la copia
-      sin estropear como control. Un banco que no sabe ponerse rojo no prueba nada.
-
-Las horas del caso [mudo] son 200 a proposito (mas de ocho dias) y no 40: con 40,
-este banco cambiaria de resultado segun el dia de la semana en que se corriera.
+QUE SE PRUEBA:
+  (A) LA REGLA, con las funciones REALES sacadas de `centinela_escaner.py` con `ast` (por
+      estructura) y ejecutadas: las tres horas que clava la propia migracion de la v2 (su guarda
+      (g), con el horario de HEO de entonces: un sabado, el cambio de hora de octubre y el de
+      marzo); y el caso real de TCG, al minuto (14:49:59 no, 14:50:00 si).
+  (C) DE PUNTA A PUNTA, cada caso en su PROCESO, con `supabase` y `requests` sustituidos por
+      dobles en memoria (sin red, sin secretos) y el reloj fijo: el caso real de TCG antes y
+      despues de las 14:50; una «al dia» en medio cuenta como buena (por huella, TCG; por md5,
+      OcioStock), y una con otro contenido no; los fines de semana de OSMA, DBLine y HEO sin
+      falsas alarmas, y su contraste entre semana; el recordatorio (no antes de 6 h) y la vuelta
+      («vuelve a leer, tras 21 h», con la historia real del 27-nov); la noche callada; la marca que
+      FALLA EN ABIERTO (ilegible, no escribible, del formato viejo); Telegram que no confirma; la
+      base que no se lee; ningun proveedor con horario; el ensayo; y que el motivo de una pasada va
+      al Telegram (escapado) y NUNCA al registro (repo publico).
+  (G) EL RELOJ de cron-job.org (RELOJ del .py) cruzado con los horarios de `disp_parametros`
+      medidos el 27-nov-2026: cada lectura vencida se mira en menos de una hora, y ninguna vuelta
+      del reloj cae en horas de silencio. Y el workflow: `workflow_dispatch` con su ensayo apagado
+      por defecto y el `schedule:` de respaldo.
+  (B) POR ESTRUCTURA: el .py no copia ningun horario ni nombra a ningun proveedor (los saca de la
+      base).
+  (R) ROTURAS DE LA REGLA, dentro del banco: se estropea una COPIA del vigilante por estructura
+      (con `ast`) -- tres pasadas en vez de dos, sin el margen, sin las «al dia" -- y se exige que
+      el caso que la vigila cambie de veredicto; mas la copia sin estropear como control. Un banco
+      que no sabe ponerse rojo no prueba nada.
 """
 import ast
 import io
@@ -110,318 +40,291 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import types
+import zoneinfo  # 🔑 antes de cambiar `datetime` en el hijo: zoneinfo se carga con el de verdad
 from datetime import datetime, timedelta, timezone
+import html as _html
 
 import yaml
 
 RUTA = 'centinela_escaner.py'
+MAD = zoneinfo.ZoneInfo('Europe/Madrid')
 
 
-# ===========================================================================
-# LOS ESCENARIOS CON RELOJ FIJO (HEO y OSMA en el escaner 2, 03-oct-2026)
-# ---------------------------------------------------------------------------
-# Cada uno fija el "ahora" y lo que hay en `escaner_memoria` y en `disp_pasada`, y
-# el hijo corre el centinela REAL de punta a punta con ese reloj. Asi el banco no
-# cambia de resultado segun el dia de la semana en que se corra (un martes y un
-# sabado no son lo mismo para OSMA). Los DOS almacenes llevan señuelos a proposito:
-#   - `escaner_memoria` de HEO y de OSMA lleva fechas que, de leerse, darian el
-#     veredicto CONTRARIO al de `disp_pasada`;
-#   - `disp_pasada` lleva pasadas 'rechazada'/'fallida' mas nuevas que la ultima
-#     'aplicada': el doble solo las devuelve si el centinela NO filtra por estado.
-# ===========================================================================
 def _u(txt):
+    """Una hora UTC escrita a mano."""
     return datetime.fromisoformat(txt).replace(tzinfo=timezone.utc)
 
 
-def _escenario(ahora, memoria, disp):
-    # 🆕 07-oct-2026 (OC5): OCIOSTOCK tambien se vigila en `disp_pasada`. Un escenario
-    #    que no hable de OcioStock lo trae al dia (una 'aplicada' de hace 2 h), para que
-    #    no opine; los suyos lo ponen a mano.
-    # 🆕 10-oct-2026 (DB6): DBLINE, igual. 🆕 14-oct-2026 (T5c): TCG, igual.
+def _m(txt):
+    """Una hora de MADRID escrita a mano, en UTC."""
+    return datetime.fromisoformat(txt).replace(tzinfo=MAD).astimezone(timezone.utc)
+
+
+# ===========================================================================
+# LOS HORARIOS DE `disp_parametros`, medidos en produccion el 27-nov-2026 (conector de lectura)
+# ---------------------------------------------------------------------------
+# El vigilante los LEE de la base en cada vuelta; aqui son la foto con la que corren los dobles.
+# Si en la base cambian, este banco no se entera (no sale a la red): lo que clava es la REGLA y el
+# reloj contra estos horarios. BEMS no tiene horario (lo sube Fernando a mano) y no se vigila.
+# ===========================================================================
+PARAMETROS = [
+    {'proveedor': 'BEMS', 'horario_laborables': [], 'horario_finde': [], 'horario_minuto': 0,
+     'horario_margen_min': 30, 'pasadas_para_avisar': 2},
+    {'proveedor': 'DBLINE', 'horario_laborables': list(range(7, 22)), 'horario_finde': [],
+     'horario_minuto': 0, 'horario_margen_min': 30, 'pasadas_para_avisar': 2},
+    {'proveedor': 'HEO', 'horario_laborables': list(range(8, 19)), 'horario_finde': [8, 9],
+     'horario_minuto': 0, 'horario_margen_min': 20, 'pasadas_para_avisar': 2},
+    {'proveedor': 'OCIOSTOCK', 'horario_laborables': [9], 'horario_finde': [9], 'horario_minuto': 12,
+     'horario_margen_min': 30, 'pasadas_para_avisar': 2},
+    {'proveedor': 'OSMA', 'horario_laborables': [7], 'horario_finde': [], 'horario_minuto': 15,
+     'horario_margen_min': 30, 'pasadas_para_avisar': 2},
+    {'proveedor': 'TCG', 'horario_laborables': list(range(9, 20)), 'horario_finde': [12],
+     'horario_minuto': 20, 'horario_margen_min': 30, 'pasadas_para_avisar': 2},
+]
+VIGILADOS = ['DBLINE', 'HEO', 'OCIOSTOCK', 'OSMA', 'TCG']
+PAR = {r['proveedor']: r for r in PARAMETROS}
+
+# LA HISTORIA REAL DE TCG, 26 y 27-nov-2026: `disp_pasada` leida con el conector de lectura el 27-nov
+# (huella y md5, sus 8 primeros caracteres; el motivo, recortado). (estado, terminada_en UTC, huella,
+# md5, motivo)
+_LOGIN = 'la web de TCG no deja: login: no aparece el formulario de entrada'
+_ESTADO = '1 fila(s) con «Estado producto» que no se entiende'
+TCG_REAL = [
+    ('aplicada', '2026-11-26T08:22:48.797756', 'f2578df9', '33de4540', None),
+    ('aplicada', '2026-11-26T09:22:19.068253', '62f97c6e', 'd2fc302c', None),
+    ('aplicada', '2026-11-26T10:22:40.973290', 'dde35a03', 'b04a3851', None),
+    ('aplicada', '2026-11-26T11:23:27.594722', 'b714a805', 'f71a9488', None),
+    ('fallida', '2026-11-26T12:21:23.137368', None, '6587b24a', _ESTADO),
+    ('fallida', '2026-11-26T13:21:07.016316', None, None, _LOGIN),
+    ('fallida', '2026-11-26T13:21:55.061497', None, 'ea6fcb4f', _ESTADO),
+    ('fallida', '2026-11-26T14:21:23.346572', None, '43a03d20', _ESTADO),
+    ('fallida', '2026-11-26T15:21:01.837320', None, None, _LOGIN),
+    ('fallida', '2026-11-26T15:21:49.692213', None, '48ca1fdd', _ESTADO),
+    ('fallida', '2026-11-26T16:21:03.262365', None, '2bd81235', _ESTADO),
+    ('fallida', '2026-11-26T17:21:13.997534', None, '1f64867d', _ESTADO),
+    ('fallida', '2026-11-26T18:21:03.748728', None, None, _LOGIN),
+    ('fallida', '2026-11-26T18:21:59.584739', None, 'b2052f1d', _ESTADO),
+    ('fallida', '2026-11-27T07:52:17.975367', None, None, _LOGIN),
+    ('fallida', '2026-11-27T07:52:51.930990', None, None, _LOGIN),
+    ('fallida', '2026-11-27T07:53:29.991705', None, None, _LOGIN),
+    ('aplicada', '2026-11-27T08:17:10.973105', '4c3b3ded', '50dbc304', None),
+    ('fallida', '2026-11-27T08:28:29.806560', None, None, _LOGIN),
+    ('aplicada', '2026-11-27T08:36:09.240105', '0a7222ff', 'b5309a73', None),
+]
+TCG_REAL = [(e, _u(t), h, m, mo) for (e, t, h, m, mo) in TCG_REAL]
+ULTIMA_BUENA_26 = _u('2026-11-26T11:23:27.594722')   # 12:23 de Madrid
+
+
+# ===========================================================================
+# LOS ESCENARIOS (cada uno corre el vigilante REAL de punta a punta, con el reloj fijo)
+# ===========================================================================
+def _escenario(ahora, disp, **extra):
+    """Los proveedores que el escenario no nombra traen una aplicada de hace 5 minutos: al dia
+    con cualquier horario, para que no opinen."""
     disp = dict(disp)
-    disp.setdefault('OCIOSTOCK', [('aplicada', _u(ahora) - timedelta(hours=2))])
-    disp.setdefault('DBLINE', [('aplicada', _u(ahora) - timedelta(hours=2))])
-    disp.setdefault('TCG', [('aplicada', _u(ahora) - timedelta(hours=2), 'h-tcg')])
-    return {'ahora': _u(ahora), 'memoria': memoria, 'disp': disp}
+    for p in VIGILADOS:
+        disp.setdefault(p, [('aplicada', ahora - timedelta(minutes=5), 'h-' + p, 'm-' + p, None)])
+    esc = {'ahora': ahora, 'params': PARAMETROS, 'disp': disp, 'marca': None}
+    esc.update(extra)
+    return esc
 
 
-def _fresco(ahora, horas):
-    return _u(ahora) - timedelta(hours=horas)
+def _hasta(historia, ahora):
+    return [x for x in historia if x[1] <= ahora]
 
 
-def _tres_al_dia(ahora):
-    """DBLINE, OCIOSTOCK y TCG con 2 h de silencio en escaner_memoria: que no opinen.
-    (Desde el 07-oct-2026 la de OCIOSTOCK es un señuelo: se le mira `disp_pasada`; desde
-    el 10-oct-2026, DB6, la de DBLINE tambien; y desde el 14-oct-2026, T5c, la de TCG.)"""
-    return {p: _fresco(ahora, 2) for p in ('DBLINE', 'OCIOSTOCK', 'TCG')}
+def _marca_tcg(avisado_en, desde=ULTIMA_BUENA_26):
+    return {'TCG': {'desde': desde.isoformat(), 'avisado_en': avisado_en.isoformat()}}
 
 
-# LA FOTO DE VERDAD: produccion, miercoles 14-oct-2026 a las 15:36 Madrid (13:36 UTC),
-# leida con SQL de solo lectura (conector de lectura, encargo T5c), con el T5 ya aplicado
-# (TCG en la foto desde las 15:28 Madrid y su director viejo apagado). HEO lleva trece
-# dias sin tocar escaner_memoria (el director viejo se apago el 01-oct), OSMA dos meses y
-# DBLINE cuatro dias (desde el DB6): de mirarlas ahi saldrian MUDOS, y estan vivas en el
-# escaner 2. OCIOSTOCK y TCG tienen su foto y aun hay escritura reciente en su
-# escaner_memoria (OcioStock 07:02, el director viejo; TCG 12:02 UTC, la ultima antes de
-# apagarse): aqui las dos fuentes dicen «al dia», asi que la foto NO distingue la fuente
-# de ninguno de los dos; eso lo prueban `ocio_jueves_10h`, `tcg_miercoles_14h` y sus
-# roturas (R). Las 'rechazada' «al dia» de OcioStock y las huellas de TCG (sus 8 primeros
-# caracteres), tal cual.
-# (Hasta el 14-oct esta foto era la del sabado 10-oct, 14:46 UTC, sin pasadas de TCG; hasta
-# el 10-oct, la del miercoles 07-oct, 15:02 UTC, sin pasadas de DBLine; y hasta el 07-oct,
-# la del sabado 03-oct, 11:36 UTC, sin pasadas de OcioStock.)
-_FOTO = _escenario(
-    '2026-10-14T13:36:35',
-    {'DBLINE': _u('2026-10-10T10:31:46'), 'OCIOSTOCK': _u('2026-10-14T07:02:20'),
-     'TCG': _u('2026-10-14T12:02:14'), 'HEO': _u('2026-10-01T05:34:35'),
-     'OSMA': _u('2026-08-06T15:37:51')},
-    {'HEO': [('aplicada', _u('2026-10-14T13:06:27')), ('aplicada', _u('2026-10-14T12:06:46')),
-             ('aplicada', _u('2026-10-14T11:05:52'))],
-     'OSMA': [('aplicada', _u('2026-10-14T05:15:52')), ('aplicada', _u('2026-10-13T05:15:49')),
-              ('aplicada', _u('2026-10-12T05:15:55'))],
-     'OCIOSTOCK': [('rechazada', _u('2026-10-14T11:12:34')), ('aplicada', _u('2026-10-14T07:12:57')),
-                   ('rechazada', _u('2026-10-13T15:12:35'))],
-     'DBLINE': [('aplicada', _u('2026-10-14T13:06:24')), ('aplicada', _u('2026-10-14T12:06:32')),
-                ('aplicada', _u('2026-10-14T11:06:20'))],
-     'TCG': [('aplicada', _u('2026-10-14T13:22:24'), '99e613e1'),
-             ('aplicada', _u('2026-10-14T12:22:41'), '7247cf2e'),
-             ('aplicada', _u('2026-10-14T11:21:07'), 'b0699c29')]})
+A_1445, A_1455 = _m('2026-11-26T14:45:00'), _m('2026-11-26T14:55:00')
 
 
 def _escenario_de(caso):
-    if caso == 'foto_hoy':
-        return _FOTO
-    # Martes 6-oct 13:00 UTC. HEO: su ultima aplicada es del lunes a las 07:00 = 30 h.
-    # Su escaner_memoria (señuelo) esta FRESCO: si se mira ahi, HEO sale al dia.
-    if caso == 'heo_30h_martes':
-        a = '2026-10-06T13:00:00'
-        m = _tres_al_dia(a)
-        m['HEO'] = _fresco(a, 1)
-        return _escenario(a, m, {'HEO': [('aplicada', _fresco(a, 30))],
-                                 'OSMA': [('aplicada', _u('2026-10-06T05:15:46'))]})
-    # Miercoles 7-oct 10:00 UTC: la pasada de OSMA de las 05:15 no ha llegado. La ultima
-    # aplicada es la del martes (28,7 h). Señuelos: una 'rechazada' de hoy y un
-    # escaner_memoria fresco.
-    if caso == 'osma_miercoles_10':
-        a = '2026-10-07T10:00:00'
-        m = _tres_al_dia(a)
-        m['OSMA'] = _fresco(a, 1)
-        return _escenario(a, m, {'HEO': [('aplicada', _fresco(a, 1))],
-                                 'OSMA': [('aplicada', _u('2026-10-06T05:15:46')),
-                                          ('rechazada', _u('2026-10-07T08:00:00'))]})
-    # Sabado 10-oct 10:00 UTC: OSMA no trabaja. Su ultima es del viernes: 28,7 h de
-    # reloj y 18,7 h sin el sabado. VERDE.
-    if caso == 'osma_sabado':
-        a = '2026-10-10T10:00:00'
-        return _escenario(a, _tres_al_dia(a),
-                          {'HEO': [('aplicada', _fresco(a, 1))],
-                           'OSMA': [('aplicada', _u('2026-10-09T05:15:46'))]})
-    # Lunes 12-oct. Del viernes 05:15 al lunes 06:00 son 72,7 h de reloj y 24,7 h sin
-    # sabado ni domingo: VERDE. A las 10:00 sin pasada son 76,7 y 28,7: ROJO.
-    if caso in ('osma_lunes_06h', 'osma_lunes_10h'):
-        a = '2026-10-12T06:00:00' if caso == 'osma_lunes_06h' else '2026-10-12T10:00:00'
-        return _escenario(a, _tres_al_dia(a),
-                          {'HEO': [('aplicada', _fresco(a, 1))],
-                           'OSMA': [('aplicada', _u('2026-10-09T05:15:46'))]})
-    # 🆕 OCIOSTOCK (07-oct-2026, OC5): una aplicada al dia, a las 09:12 Madrid (07:12 UTC).
-    # Jueves 8-oct: la del miercoles 07:13 UTC es la ultima aplicada; la de hoy 07:13 salio
-    # 'rechazada' (mismo fichero: «al dia», no cuenta). A las 09:00 UTC van 25,8 h: VERDE.
-    # A las 10:00 UTC, 26,8 h: ROJO. Señuelo: su escaner_memoria (el director viejo), fresco.
-    if caso in ('ocio_jueves_09h', 'ocio_jueves_10h'):
-        a = '2026-10-08T09:00:00' if caso == 'ocio_jueves_09h' else '2026-10-08T10:00:00'
-        m = _tres_al_dia(a)
-        m['OCIOSTOCK'] = _fresco(a, 1)
-        return _escenario(a, m, {'HEO': [('aplicada', _fresco(a, 1))],
-                                 'OSMA': [('aplicada', _u('2026-10-08T05:15:46'))],
-                                 'OCIOSTOCK': [('aplicada', _u('2026-10-07T07:13:00')),
-                                               ('rechazada', _u('2026-10-08T07:13:00'))]})
-    # Domingo 11-oct 10:00 UTC: OcioStock trabaja los siete dias. La ultima aplicada es la
-    # del sabado 07:13 UTC: 26,8 h, y el domingo NO se descuenta. ROJO.
-    if caso == 'ocio_domingo_10h':
-        a = '2026-10-11T10:00:00'
-        return _escenario(a, _tres_al_dia(a),
-                          {'HEO': [('aplicada', _fresco(a, 1))],
-                           'OSMA': [('aplicada', _u('2026-10-09T05:15:46'))],
-                           'OCIOSTOCK': [('aplicada', _u('2026-10-10T07:13:00'))]})
-    # 🆕 DBLINE (10-oct-2026, DB6): cada hora a las :05 Madrid de lunes a sabado.
-    # Martes 13-oct 10:00 UTC: su ultima aplicada es la del lunes 07:06 UTC (26,9 h), y la
-    # de hoy 09:06 salio 'rechazada' (mismo contenido: «al dia», no cuenta). ROJO.
-    # Señuelo: su escaner_memoria (el director viejo), fresco.
-    if caso == 'dbline_martes_10h':
-        a = '2026-10-13T10:00:00'
-        m = _tres_al_dia(a)
-        m['DBLINE'] = _fresco(a, 1)
-        return _escenario(a, m, {'HEO': [('aplicada', _fresco(a, 1))],
-                                 'OSMA': [('aplicada', _u('2026-10-13T05:15:46'))],
-                                 'DBLINE': [('aplicada', _u('2026-10-12T07:06:00')),
-                                            ('rechazada', _u('2026-10-13T09:06:00'))]})
-    # Lunes 12-oct 10:00 UTC: DBLine no pasa el domingo. Su ultima aplicada es la del
-    # sabado 19:06 UTC: 38,9 h de reloj y 14,9 h sin el domingo. VERDE.
-    if caso == 'dbline_lunes_10h':
-        a = '2026-10-12T10:00:00'
-        return _escenario(a, _tres_al_dia(a),
-                          {'HEO': [('aplicada', _fresco(a, 1))],
-                           'OSMA': [('aplicada', _u('2026-10-12T05:15:46'))],
-                           'DBLINE': [('aplicada', _u('2026-10-10T19:06:00'))]})
-    # 🆕 TCG (14-oct-2026, T5c): de lunes a viernes cada hora a las :20 de 07 a 17 UTC; sabado
-    # y domingo una, a las 10:20 UTC. La huella va en el tercer campo: una «al dia» es una
-    # 'rechazada' con la MISMA huella que la ultima aplicada.
-    # Miercoles 21-oct 06:00 UTC: la ultima aplicada es la del martes 17:21 (12,7 h). VERDE.
-    if caso == 'tcg_noche':
-        a = '2026-10-21T06:00:00'
-        return _escenario(a, _tres_al_dia(a),
-                          {'HEO': [('aplicada', _fresco(a, 1))],
-                           'OSMA': [('aplicada', _u('2026-10-20T05:15:46'))],
-                           'TCG': [('aplicada', _u('2026-10-20T17:21:00'), 'h-mar')]})
-    # Miercoles 21-oct 14:00 UTC: la ultima aplicada es la del martes 10:21 (27,7 h) y desde
-    # entonces TODO ha salido «al dia» (martes 11:21-17:21 y miercoles 07:21-13:21): entre
-    # semana no cuentan. ROJO. Señuelo: su escaner_memoria (el director viejo), fresco.
-    if caso == 'tcg_miercoles_14h':
-        a = '2026-10-21T14:00:00'
-        m = _tres_al_dia(a)
-        m['TCG'] = _fresco(a, 1)
-        al_dia = ([('rechazada', _u('2026-10-20T%02d:21:00' % h), 'h-mar') for h in range(11, 18)]
-                  + [('rechazada', _u('2026-10-21T%02d:21:00' % h), 'h-mar') for h in range(7, 14)])
-        return _escenario(a, m, {'HEO': [('aplicada', _fresco(a, 1))],
-                                 'OSMA': [('aplicada', _u('2026-10-21T05:15:46'))],
-                                 'TCG': [('aplicada', _u('2026-10-20T10:21:00'), 'h-mar')] + al_dia})
-    # Domingo 18-oct 06:00 UTC: la ultima aplicada es la del viernes 17:21 y la del sabado
-    # 10:21 salio «al dia» (misma huella): cuenta. 19,7 h desde el sabado: VERDE (36,7 h desde
-    # la aplicada: sin la regla, ROJO).
-    if caso == 'tcg_finde_al_dia_domingo':
-        a = '2026-10-18T06:00:00'
-        return _escenario(a, _tres_al_dia(a),
-                          {'HEO': [('aplicada', _fresco(a, 1))],
-                           'OSMA': [('aplicada', _u('2026-10-16T05:15:46'))],
-                           'TCG': [('aplicada', _u('2026-10-16T17:21:00'), 'h-vie'),
-                                   ('rechazada', _u('2026-10-17T10:21:00'), 'h-vie')]})
-    # Lunes 19-oct 10:00 UTC: dos «al dia» el fin de semana (sabado y domingo 10:21) y las
-    # del lunes 07:21-09:21 tambien «al dia» (esas no cuentan). Desde el domingo 10:21, 23,7 h:
-    # VERDE (64,7 h desde la aplicada del viernes: sin la regla, ROJO).
-    if caso == 'tcg_finde_al_dia_lunes':
-        a = '2026-10-19T10:00:00'
-        return _escenario(a, _tres_al_dia(a),
-                          {'HEO': [('aplicada', _fresco(a, 1))],
-                           'OSMA': [('aplicada', _u('2026-10-19T05:15:46'))],
-                           'TCG': [('aplicada', _u('2026-10-16T17:21:00'), 'h-vie'),
-                                   ('rechazada', _u('2026-10-17T10:21:00'), 'h-vie'),
-                                   ('rechazada', _u('2026-10-18T10:21:00'), 'h-vie')]
-                                  + [('rechazada', _u('2026-10-19T%02d:21:00' % h), 'h-vie')
-                                     for h in (7, 8, 9)]})
-    # Domingo 18-oct 06:00 UTC, sin nada desde el viernes 17:21 (36,7 h). ROJO: el fin de
-    # semana se sigue vigilando.
-    if caso == 'tcg_finde_muerto':
-        a = '2026-10-18T06:00:00'
-        return _escenario(a, _tres_al_dia(a),
-                          {'HEO': [('aplicada', _fresco(a, 1))],
-                           'OSMA': [('aplicada', _u('2026-10-16T05:15:46'))],
-                           'TCG': [('aplicada', _u('2026-10-16T17:21:00'), 'h-vie')]})
-    # Domingo 18-oct 06:00 UTC: el sabado 10:21 hubo una 'rechazada' con OTRA huella (el
-    # freno: contenido nuevo que no se aplica), otra SIN huella y una 'fallida'. Ninguna es
-    # «al dia»: 36,7 h. ROJO.
-    if caso == 'tcg_finde_otra_huella':
-        a = '2026-10-18T06:00:00'
-        return _escenario(a, _tres_al_dia(a),
-                          {'HEO': [('aplicada', _fresco(a, 1))],
-                           'OSMA': [('aplicada', _u('2026-10-16T05:15:46'))],
-                           'TCG': [('aplicada', _u('2026-10-16T17:21:00'), 'h-vie'),
-                                   ('rechazada', _u('2026-10-17T10:21:00'), 'h-otra'),
-                                   ('rechazada', _u('2026-10-17T10:25:00'), None),
-                                   ('fallida', _u('2026-10-17T11:21:00'), 'h-vie')]})
+    # --- El caso real de TCG -------------------------------------------------------------------
+    if caso == 'todo_al_dia':
+        return _escenario(_m('2026-11-25T12:55:00'), {})
+    if caso == 'tcg_26nov_1445':
+        return _escenario(A_1445, {'TCG': _hasta(TCG_REAL, A_1445)})
+    if caso in ('tcg_26nov_1455', 'marca_ilegible', 'marca_no_escribible', 'telegram_falla',
+                'telegram_400', 'ensayo'):
+        return _escenario(A_1455, {'TCG': _hasta(TCG_REAL, A_1455)},
+                          marca={'HEO': {'desde': None, 'avisado_en': None}} if caso == 'marca_ilegible' else None,
+                          ensayo=(caso == 'ensayo'), fallo=caso)
+    if caso == 'marca_vieja':
+        return _escenario(A_1455, {'TCG': _hasta(TCG_REAL, A_1455)}, marca={'TCG': '2026-11-26'})
+    if caso == 'tcg_26nov_1655_ya_avisado':
+        a = _m('2026-11-26T16:55:00')
+        return _escenario(a, {'TCG': _hasta(TCG_REAL, a)}, marca=_marca_tcg(A_1455))
+    if caso == 'tcg_26nov_2055_recordatorio':
+        a = _m('2026-11-26T20:55:00')
+        return _escenario(a, {'TCG': _hasta(TCG_REAL, a)}, marca=_marca_tcg(A_1455))
+    if caso == 'tcg_26nov_2330_noche':
+        a = _m('2026-11-26T23:30:00')
+        return _escenario(a, {'TCG': _hasta(TCG_REAL, a)})
+    if caso == 'tcg_27nov_0955_vuelta':
+        a = _m('2026-11-27T09:55:00')
+        return _escenario(a, {'TCG': _hasta(TCG_REAL, a)}, marca=_marca_tcg(_m('2026-11-27T07:55:00')))
+    # --- Una «al dia» en medio ------------------------------------------------------------------
+    # TCG el 26-nov: aplicada a las 12:23 (Madrid); la de las 13:20 sale «al dia» (misma huella) y
+    # la de las 14:20 falla. A las 14:55 el plazo es la de las 13:20 y la «al dia» de las 13:21 lo
+    # cumple: AL DIA. Con otra huella (contenido distinto que no se aplica), CADUCADO.
+    if caso in ('tcg_al_dia_medio', 'tcg_al_dia_otra_huella'):
+        h = 'b714a805' if caso == 'tcg_al_dia_medio' else 'otra-huella'
+        return _escenario(A_1455, {'TCG': [
+            ('aplicada', ULTIMA_BUENA_26, 'b714a805', 'f71a9488', None),
+            ('rechazada', _m('2026-11-26T13:21:40'), h, 'md5-de-hoy', 'al día: el contenido es el mismo'),
+            ('fallida', _m('2026-11-26T14:21:23'), None, None, _LOGIN)]})
+    # OcioStock, una al dia a las 09:12: su «al dia» se reconoce por el md5 del fichero (no lleva
+    # huella). Martes aplicada; miercoles «al dia»; jueves 09:55 sin nada. El plazo es la del
+    # miercoles: AL DIA. Con otro md5, CADUCADO.
+    if caso in ('ocio_al_dia_md5', 'ocio_md5_distinto'):
+        m = 'f-martes' if caso == 'ocio_al_dia_md5' else 'f-otro'
+        return _escenario(_m('2026-11-26T09:55:00'), {'OCIOSTOCK': [
+            ('aplicada', _m('2026-11-24T09:13:10'), None, 'f-martes', None),
+            ('rechazada', _m('2026-11-25T09:12:35'), None, m, 'al día: el fichero es el mismo')]})
+    # --- Fines de semana ------------------------------------------------------------------------
+    # OSMA, de lunes a viernes a las 07:15: aplicada el viernes 20-nov. El domingo y el lunes a las
+    # 07:55 (la de las 07:15 del lunes vencida y perdida: una sola), AL DIA. El martes a las 07:55,
+    # sin lunes ni martes, CADUCADO.
+    osma_vie = [('aplicada', _m('2026-11-20T07:16:02'), None, None, None)]
+    if caso == 'osma_domingo':
+        return _escenario(_m('2026-11-22T13:00:00'), {'OSMA': osma_vie})
+    if caso == 'osma_lunes_0755':
+        return _escenario(_m('2026-11-23T07:55:00'), {'OSMA': osma_vie})
+    if caso == 'osma_martes_0755':
+        return _escenario(_m('2026-11-24T07:55:00'), {'OSMA': osma_vie})
+    # DBLine, de lunes a viernes de 07 a 21 (el sabado no esta en su horario): aplicada el viernes a
+    # las 21:06. El sabado, el domingo y el lunes a las 07:55 (perdida la de las 07:00), AL DIA. El
+    # lunes a las 09:55 sin nada del lunes, CADUCADO.
+    db_vie = [('aplicada', _m('2026-11-20T21:06:12'), 'h-db', None, None)]
+    if caso == 'dbline_sabado':
+        return _escenario(_m('2026-11-21T13:00:00'), {'DBLINE': db_vie})
+    if caso == 'dbline_domingo':
+        return _escenario(_m('2026-11-22T21:55:00'), {'DBLINE': db_vie})
+    if caso == 'dbline_lunes_0755':
+        return _escenario(_m('2026-11-23T07:55:00'), {'DBLINE': db_vie})
+    if caso == 'dbline_lunes_0955':
+        return _escenario(_m('2026-11-23T09:55:00'), {'DBLINE': db_vie})
+    # HEO, el fin de semana a las 08 y a las 09: aplicada el sabado a las 09:06. El domingo a las
+    # 07:55, antes de su primera, AL DIA.
+    if caso == 'heo_domingo_0755':
+        return _escenario(_m('2026-11-22T07:55:00'),
+                          {'HEO': [('aplicada', _m('2026-11-21T09:06:30'), None, None, None)]})
+    # --- El motivo, solo al Telegram -------------------------------------------------------------
+    if caso == 'motivo_secreto':
+        return _escenario(A_1455, {'TCG': [
+            ('aplicada', ULTIMA_BUENA_26, 'b714a805', None, None),
+            ('fallida', _m('2026-11-26T13:21:00'), None, None, 'x'),
+            ('fallida', _m('2026-11-26T14:21:00'), None, None, 'MOTIVO-SECRETO <b>Tom & Jerry</b> "fila 7"')]})
+    # --- La base -------------------------------------------------------------------------------
+    if caso == 'lectura_falla':
+        return _escenario(A_1455, {}, fallo=caso)
+    if caso == 'lectura_vuelve':
+        return _escenario(A_1455, {}, marca={'_LECTURA': {'desde': None, 'avisado_en': _m('2026-11-26T10:55:00').isoformat()}})
+    if caso == 'sin_horario':
+        return _escenario(A_1455, {}, params=[PARAMETROS[0]])
     return None
 
 
 # ===========================================================================
-# EL HIJO: monta los dobles y corre el centinela de punta a punta
+# EL HIJO: monta los dobles y corre el vigilante de punta a punta
 # ===========================================================================
 def hijo(caso):
     import atexit
 
     ESC = _escenario_de(caso)
-    ENVIADOS = []
-    if ESC is not None:
-        # El reloj del centinela: `from datetime import datetime` encontrara esta
-        # subclase, cuyo now() devuelve el instante del escenario.
-        import datetime as _dtm
+    if ESC is None:
+        print('XX caso desconocido: %s' % caso)
+        sys.exit(2)
+    FALLO = ESC.get('fallo')
+    ENVIADOS, SUBIDAS = [], []
 
-        class _Reloj(_dtm.datetime):
-            @classmethod
-            def now(cls, tz=None):
-                return cls.fromisoformat(ESC['ahora'].isoformat())
+    # El reloj: `from datetime import datetime` encontrara esta subclase.
+    import datetime as _dtm
 
-        _falso = types.ModuleType('datetime')
-        _falso.__dict__.update({k: getattr(_dtm, k) for k in dir(_dtm)
-                                if not k.startswith('__')})
-        _falso.datetime = _Reloj
-        sys.modules['datetime'] = _falso
-        ADELANTE = ESC['ahora']
-    else:
-        ADELANTE = datetime.now(timezone.utc)
-    HOY = ADELANTE.strftime('%Y-%m-%d')
-    AYER = (ADELANTE - timedelta(days=1)).strftime('%Y-%m-%d')
-    MUDO = {'DBLINE': 200, 'HEO': 2, 'OCIOSTOCK': 2, 'OSMA': 2, 'TCG': 2}
-    HORAS = {'al_dia': {'DBLINE': 2, 'HEO': 2, 'OCIOSTOCK': 2, 'OSMA': 2, 'TCG': 2}
-             }.get(caso, MUDO)
-    # La marca de partida, y como se porta Storage en cada caso.
-    MARCA = {'ya_avisado': {'DBLINE': HOY}, 'ayer': {'DBLINE': AYER}}.get(caso, {})
-    ALMACEN = {'marca': json.dumps(MARCA).encode('utf-8')} if MARCA else {}
-    ESCRITA = {}
+    class _Reloj(_dtm.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls.fromisoformat(ESC['ahora'].isoformat())
+
+    _falso = types.ModuleType('datetime')
+    _falso.__dict__.update({k: getattr(_dtm, k) for k in dir(_dtm) if not k.startswith('__')})
+    _falso.datetime = _Reloj
+    sys.modules['datetime'] = _falso
+
+    ALMACEN = {}
+    if ESC['marca'] is not None:
+        ALMACEN['marca'] = json.dumps(ESC['marca']).encode('utf-8')
 
     class _Resp:
         def __init__(self, data):
             self.data = data
 
     class _Query:
+        """Estricto a proposito: un filtro que no este aqui revienta (AttributeError) en vez de
+        tragarse en silencio, que es como un doble deja pasar un vigilante que pregunta mal."""
         def __init__(self, tabla):
-            self.tabla = tabla
-            self.proveedor = None
-            self.filtros = {}
+            self.tabla, self.eqs, self.gts, self.desc, self.n = tabla, {}, {}, False, None
 
-        def eq(self, col, val):
-            self.filtros[col] = val
-            if col == 'proveedor':
-                self.proveedor = val
+        def select(self, columnas):
+            self.columnas = columnas
             return self
 
-        def __getattr__(self, nombre):
-            return lambda *a, **k: self       # select, order, limit…
+        def eq(self, col, val):
+            self.eqs[col] = val
+            return self
+
+        def gt(self, col, val):
+            self.gts[col] = val
+            return self
+
+        def order(self, col, desc=False):
+            assert col == 'terminada_en', col
+            self.desc = desc
+            return self
+
+        def limit(self, n):
+            self.n = n
+            return self
 
         def execute(self):
-            if caso == 'ilegible':
-                raise Exception('doble: la lectura revienta a proposito')
-            if ESC is not None:
-                if self.tabla == 'disp_pasada':
-                    # Solo las pasadas del estado pedido: sin `.eq('estado', ...)` el
-                    # centinela recibiria tambien las 'rechazada' y 'fallida'.
-                    # 🆕 14-oct-2026 (T5c): una pasada puede llevar su huella en un tercer
-                    #    campo (TCG); sin el, sale sin huella.
-                    estado = self.filtros.get('estado')
-                    return _Resp([{'terminada_en': x[1].isoformat(),
-                                   'huella_contenido': x[2] if len(x) > 2 else None}
-                                  for x in ESC['disp'].get(self.proveedor, [])
-                                  if estado is None or x[0] == estado])
-                t = ESC['memoria'].get(self.proveedor)
-                return _Resp([] if t is None else [{'fecha': t.isoformat()}])
-            horas = HORAS.get(self.proveedor)
-            if horas is None:
-                return _Resp([])
-            fecha = ADELANTE - timedelta(hours=horas)
-            return _Resp([{'fecha': fecha.isoformat(), 'terminada_en': fecha.isoformat()}])
+            if FALLO == 'lectura_falla' and self.tabla == 'disp_pasada':
+                raise RuntimeError('SECRETO-DE-LA-BASE: la lectura revienta a proposito')
+            if self.tabla == 'disp_parametros':
+                return _Resp([dict(r) for r in ESC['params']])
+            assert self.tabla == 'disp_pasada', self.tabla
+            filas = []
+            for (estado, t, huella, md5, motivo) in ESC['disp'].get(self.eqs.get('proveedor'), []):
+                if 'estado' in self.eqs and estado != self.eqs['estado']:
+                    continue
+                if 'terminada_en' in self.gts and not t > datetime.fromisoformat(
+                        self.gts['terminada_en'].replace('Z', '+00:00')):
+                    continue
+                filas.append({'estado': estado, 'terminada_en': t.isoformat(), 'huella_contenido': huella,
+                              'fichero_md5': md5, 'motivo': motivo, '_t': t})
+            filas.sort(key=lambda r: r['_t'], reverse=self.desc)
+            if self.n is not None:
+                filas = filas[:self.n]
+            for r in filas:
+                del r['_t']
+            return _Resp(filas)
 
     class _Bucket:
         def download(self, ruta):
-            if caso == 'marca_ilegible':
+            if FALLO == 'marca_ilegible':
                 raise Exception('doble: Storage no responde a proposito')
             if 'marca' not in ALMACEN:
-                raise Exception('404 ' + ruta)      # la marca aun no existe
+                raise Exception('404 ' + ruta)
             return ALMACEN['marca']
 
         def upload(self, ruta, data, opts=None):
-            if caso == 'marca_no_escribible':
+            if FALLO == 'marca_no_escribible':
                 raise Exception('doble: Storage no deja escribir a proposito')
             ALMACEN['marca'] = data
-            ESCRITA.update(json.loads(data.decode('utf-8')))
+            SUBIDAS.append(1)
             return {'path': ruta}
 
     class _Cliente:
@@ -432,10 +335,11 @@ def hijo(caso):
             return _Query(nombre)
 
     def _post(url, data=None, timeout=None):
-        if caso == 'telegram_falla':
+        if FALLO == 'telegram_falla':
             raise Exception('doble: Telegram no contesta a proposito')
-        ENVIADOS.append({'url': url, 'texto': (data or {}).get('text', '')})
-        return types.SimpleNamespace(status_code=200)
+        ENVIADOS.append((data or {}).get('text', ''))
+        codigo = 400 if FALLO == 'telegram_400' else 200
+        return types.SimpleNamespace(status_code=codigo, json=lambda: {'ok': codigo == 200})
 
     sys.modules['supabase'] = types.ModuleType('supabase')
     sys.modules['supabase'].create_client = lambda url, key: _Cliente()
@@ -446,16 +350,19 @@ def hijo(caso):
     os.environ['SUPABASE_SERVICE_KEY'] = 'FAKE-SERVICE'
     os.environ['TELEGRAM_TOKEN'] = 'FAKE-TG'
     os.environ['TELEGRAM_CHAT_ID'] = '123'
+    os.environ['CENTINELA_ENSAYO'] = 'si' if ESC.get('ensayo') else ''
 
     @atexit.register
     def _informe():
-        print('HOY=%s' % HOY)
+        print('@@FIN_DEL_VIGILANTE@@')
         print('TELEGRAMS=%d' % len(ENVIADOS))
-        print('TELEGRAM_TEXTO=%s' % json.dumps('\n'.join(e['texto'] for e in ENVIADOS)))
-        print('MARCA_ESCRITA=%s' % json.dumps(ESCRITA, sort_keys=True))
+        print('TELEGRAM_TEXTO=%s' % json.dumps('\n=====\n'.join(ENVIADOS)))
+        print('SUBIDAS=%d' % len(SUBIDAS))
+        print('MARCA_FINAL=%s' % (ALMACEN['marca'].decode('utf-8').replace('\n', ' ')
+                                  if 'marca' in ALMACEN else 'null'))
 
     import runpy
-    # `CENTINELA_RUTA`: las ROTURAS A MANO (ver (R)) corren una copia estropeada.
+    # `CENTINELA_RUTA`: las ROTURAS (R) corren una copia estropeada.
     runpy.run_path(os.environ.get('CENTINELA_RUTA', RUTA), run_name='__main__')
 
 
@@ -476,696 +383,362 @@ def eq(nombre, obtenido, esperado):
     ok = obtenido == esperado
     if not ok:
         fallos.append(nombre)
-    print(('OK ' if ok else 'XX ') + nombre
-          + ('' if ok else '   got=%r exp=%r' % (obtenido, esperado)))
+    print(('OK ' if ok else 'XX ') + nombre + ('' if ok else '   got=%r exp=%r' % (obtenido, esperado)))
 
 
 def _nodo(nombre):
     for n in ARBOL.body:
         if isinstance(n, ast.FunctionDef) and n.name == nombre:
             return n
-        if isinstance(n, ast.Assign) and any(
-                isinstance(t, ast.Name) and t.id == nombre for t in n.targets):
+        if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == nombre for t in n.targets):
             return n
     print('XX %s ya no esta en %s (o dejo de ser de nivel superior)' % (nombre, RUTA))
     sys.exit(1)
 
 
-NOMBRES = ('horas_en_dia', 'horas_en_domingo', 'horas_de_silencio', 'esta_mudo',
-           'avisos_de_hoy', 'linea_de_aviso', 'franja_de', 'ultima_viva')
-_ns = {'timedelta': timedelta}
-exec(compile(ast.fix_missing_locations(ast.Module(body=[_nodo(n) for n in NOMBRES],
+CONSTANTES = ('DIAS_ATRAS', 'DIAS_ADELANTE', 'RECORDATORIO_H', 'HORAS_DE_AVISAR', 'RELOJ', 'MESES', 'LECTURA')
+FUNCIONES = ('previstas', 'plazo', 'esta_caducado', 'es_al_dia', 'lectura_buena', 'diagnostico', '_iso',
+             'eventos', 'marca_tras', 'hora_de_avisar', 'fecha_madrid', 'hora_madrid', '_motivo', '_detalle',
+             'texto_de')
+_ns = {'timedelta': timedelta, 'datetime': datetime, 'timezone': timezone, 'MADRID': MAD, 'html': _html}
+exec(compile(ast.fix_missing_locations(ast.Module(body=[_nodo(n) for n in CONSTANTES + FUNCIONES],
                                                   type_ignores=[])), RUTA, 'exec'), _ns)
-horas_en_dia = _ns['horas_en_dia']
-horas_en_domingo = _ns['horas_en_domingo']
-horas_de_silencio = _ns['horas_de_silencio']
-esta_mudo = _ns['esta_mudo']
-avisos_de_hoy = _ns['avisos_de_hoy']
-linea_de_aviso = _ns['linea_de_aviso']
-franja_de = _ns['franja_de']
-ultima_viva = _ns['ultima_viva']
-HORARIOS =ast.literal_eval(_nodo('HORARIOS').value)
-print('extraidas de %s: %s, HORARIOS' % (RUTA, ', '.join(NOMBRES)))
+eq('(A) MADRID es Europe/Madrid', ast.unparse(_nodo('MADRID').value), "ZoneInfo('Europe/Madrid')")
+plazo, esta_caducado, diagnostico = _ns['plazo'], _ns['esta_caducado'], _ns['diagnostico']
+eventos, marca_tras, hora_de_avisar = _ns['eventos'], _ns['marca_tras'], _ns['hora_de_avisar']
+print('extraidas de %s: %s' % (RUTA, ', '.join(CONSTANTES + FUNCIONES)))
 print()
 
 
-def utc(txt):
-    return datetime.fromisoformat(txt).replace(tzinfo=timezone.utc)
+def _pasadas(historia):
+    return [{'estado': e, 't': t, 'huella': h, 'md5': m, 'motivo': mo} for (e, t, h, m, mo) in historia]
+
+
+def _fm(t):
+    return None if t is None else t.astimezone(MAD).strftime('%Y-%m-%d %H:%M')
 
 
 # ---------------------------------------------------------------------------
-# (A) Las funciones REALES, con las fechas de verdad
+# (A) La regla, contra la propia migracion y contra el caso real
 # ---------------------------------------------------------------------------
-# El sabado-a-lunes de DBLine, tal cual: sabado 5-sep 11:00 -> lunes 7-sep 06:00.
-SAB, LUN = utc('2026-09-05T11:00:00'), utc('2026-09-07T06:00:00')
-eq('(A) el sabado-a-lunes son 43 h de reloj',
-   round((LUN - SAB).total_seconds() / 3600.0, 2), 43.0)
-eq('(A) 🔴 y 24 de ellas caen en domingo', horas_en_domingo(SAB, LUN), 24.0)
-eq('(A) 🔴 asi que para quien descansa el domingo son 19 h de silencio',
-   horas_de_silencio(SAB, LUN, True), 19.0)
-eq('(A) un tramo sin domingo por medio no descuenta nada',
-   horas_en_domingo(utc('2026-09-09T10:00:00'), utc('2026-09-10T15:00:00')), 0.0)
-eq('(A) un tramo dentro del propio domingo se descuenta entero',
-   horas_en_domingo(utc('2026-09-06T02:00:00'), utc('2026-09-06T08:30:00')), 6.5)
-eq('(A) tres semanas descuentan tres domingos',
-   horas_en_domingo(utc('2026-08-17T00:00:00'), utc('2026-09-07T00:00:00')), 72.0)
-eq('(A) el reloj al reves no da horas negativas',
-   horas_de_silencio(LUN, SAB, True), 0.0)
-eq('(A) sin dato, mudo: no saber no es estar bien', esta_mudo(None, 26), True)
+eq('(A) como en disp_frescura_en: de 15 dias atras a 8 adelante, y 2 pasadas para avisar',
+   (_ns['DIAS_ATRAS'], _ns['DIAS_ADELANTE']), (15, 8))
+# La guarda (g) de 20260930160000_disp_frescura_segun_horario.sql (v2), con el horario de HEO de
+# aquel dia (de 8 a 21 entre semana, 8 y 9 el fin de semana, en punto, 20 min de margen):
+_HEO_MIG = {'horario_laborables': list(range(8, 22)), 'horario_finde': [8, 9], 'horario_minuto': 0,
+            'horario_margen_min': 20, 'pasadas_para_avisar': 2}
+for _ahora, _ultima, _sig in (('2026-10-03 14:00', '2026-10-03 09:00', '2026-10-04 08:00'),
+                              ('2026-10-25 12:00', '2026-10-25 09:00', '2026-10-26 08:00'),
+                              ('2027-03-29 08:10', '2027-03-28 09:00', '2027-03-29 09:00')):
+    _p = plazo(_HEO_MIG, _m(_ahora.replace(' ', 'T')))
+    eq('(A) 🔴 [guarda (g) de la migracion] a las %s de Madrid, ultima prevista %s y siguiente %s'
+       % (_ahora, _ultima, _sig), (_fm(_p['ultima_prevista']), _fm(_p['siguiente_prevista'])), (_ultima, _sig))
 
-# EL APAGON DE VERDAD. DBLine escribio por ultima vez el miercoles 9-sep a las
-# 10:31 UTC. Sin domingo por medio: horas brutas = horas de silencio.
-APAGON = utc('2026-09-09T10:31:00')
-_x_dbline = HORARIOS['DBLINE']['umbral_h']
-eq('(A) 🔴 [apagon] el 10-sep a las 12:00 UTC aun no ha vencido el plazo',
-   esta_mudo(horas_de_silencio(APAGON, utc('2026-09-10T12:00:00'), True), _x_dbline), False)
-eq('(A) 🔴 [apagon] y a las 14:00 UTC del 10-sep SI: 27,5 h > 26',
-   (round(horas_de_silencio(APAGON, utc('2026-09-10T14:00:00'), True), 2),
-    esta_mudo(horas_de_silencio(APAGON, utc('2026-09-10T14:00:00'), True), _x_dbline)),
-   (27.48, True))
+# El caso real de TCG: la ultima buena, las 12:23 del 26-nov; previstas a las :20, 30 min de margen.
+_tcg = _pasadas(TCG_REAL)
+_d1449 = diagnostico(PAR['TCG'], _tcg, _m('2026-11-26T14:49:59'))
+_d1450 = diagnostico(PAR['TCG'], _tcg, _m('2026-11-26T14:50:00'))
+eq('(A) 🔴 [TCG 26-nov] a las 14:49:59 la de las 14:20 aun no ha vencido: plazo, la de las 12:20 -> AL DIA',
+   (_fm(_d1449['umbral']), _d1449['caducado']), ('2026-11-26 12:20', False))
+eq('(A) 🔴 [TCG 26-nov] a las 14:50:00 han vencido la de las 13:20 y la de las 14:20 sin ninguna buena -> CADUCADO',
+   (_fm(_d1450['umbral']), _d1450['caducado'], [_fm(t) for t in _d1450['perdidas']]),
+   ('2026-11-26 13:20', True, ['2026-11-26 13:20', '2026-11-26 14:20']))
+eq('(A) [TCG 26-nov] …desde la ultima buena de las 12:23, con 3 intentos fallidos (13:21, 14:21 y 14:21)',
+   (_fm(_d1450['ultima_buena']), len(_d1450['fallos'])), ('2026-11-26 12:23', 3))
+# Y la regla de antes (mas de 26 h desde la ultima escritura), para que conste el porque:
+_viejo = ULTIMA_BUENA_26 + timedelta(hours=26)
+eq('(A) [la regla de antes] no habria saltado hasta las 14:23 del 27-nov', _fm(_viejo), '2026-11-27 14:23')
+eq('(A) …es decir, %.1f h mas tarde que esta' % ((_viejo - _m('2026-11-26T14:50:00')).total_seconds() / 3600),
+   round((_viejo - _m('2026-11-26T14:50:00')).total_seconds() / 3600, 1), 23.6)
+_d0918 = diagnostico(PAR['TCG'], _tcg, _m('2026-11-27T09:18:00'))
+eq('(A) [TCG 27-nov] con la aplicada de las 09:17, AL DIA', (_d0918['caducado'], _fm(_d0918['ultima_buena'])),
+   (False, '2026-11-27 09:17'))
+eq('(A) sin ninguna lectura buena, CADUCADO: no saber no es estar bien', esta_caducado(None, None), True)
+eq('(A) con lectura buena y sin plazo todavia (un horario recien nacido), no', esta_caducado(_u('2026-11-01T00:00:00'), None),
+   False)
+eq('(A) 🔴 una rechazada SIN huella ni md5 no casa con una aplicada sin huella ni md5 (vacio no es igual)',
+   _ns['es_al_dia']({'estado': 'rechazada', 'huella': None, 'md5': None}, {'huella': None, 'md5': None}), False)
+eq('(A) 🔴 una rechazada_vaciado con la misma huella NO es «al dia» (es otro estado)',
+   _ns['es_al_dia']({'estado': 'rechazada_vaciado', 'huella': 'h', 'md5': None}, {'huella': 'h', 'md5': None}), False)
 
-# OSMA (escaner 2, 03-oct-2026): de lunes a viernes, una pasada a las 05:15 UTC. El
-# viernes-a-lunes: 72 h de reloj, 48 de fin de semana, 24 de las suyas.
-VIE, LUN2 = utc('2026-10-09T05:15:00'), utc('2026-10-12T05:15:00')
-eq('(A) 🔴 [OSMA] el viernes-a-lunes son 72 h de reloj y 24 h SIN sabado ni domingo',
-   (round((LUN2 - VIE).total_seconds() / 3600.0, 2),
-    horas_de_silencio(VIE, LUN2, True, True)), (72.0, 24.0))
-eq('(A) [OSMA] el sabado se descuenta aparte del domingo',
-   (horas_en_dia(VIE, LUN2, 5), horas_en_dia(VIE, LUN2, 6), horas_en_dia(VIE, LUN2, 2)),
-   (24.0, 24.0, 0.0))
-eq('(A) 🔴 sin `descansa_sabado` el mismo hueco descuenta SOLO el domingo (48 h)',
-   horas_de_silencio(VIE, LUN2, True), 48.0)
-eq('(A) 🔴 [OSMA] un dia habil al siguiente son 24 h, y a las 06:00 no ha vencido nada',
-   (horas_de_silencio(utc('2026-10-06T05:15:00'), utc('2026-10-07T06:00:00'), True, True),
-    esta_mudo(horas_de_silencio(utc('2026-10-06T05:15:00'), utc('2026-10-07T06:00:00'),
-                                True, True), HORARIOS['OSMA']['umbral_h'])),
-   (24.75, False))
-eq('(A) 🔴 [OSMA] y a las 10:00 sin pasada ese dia, 28,75 h: MUDO',
-   esta_mudo(horas_de_silencio(utc('2026-10-06T05:15:00'), utc('2026-10-07T10:00:00'),
-                               True, True), HORARIOS['OSMA']['umbral_h']), True)
-eq('(A) 🔴 [OSMA] un sabado entero sin pasada NO es mudo (viernes 05:15 a sabado 23:00)',
-   esta_mudo(horas_de_silencio(utc('2026-10-09T05:15:00'), utc('2026-10-10T23:00:00'),
-                               True, True), HORARIOS['OSMA']['umbral_h']), False)
-# HEO (escaner 2): trabaja TODOS los dias, no se descuenta ninguno.
-eq('(A) 🔴 [HEO] 30 h de silencio un martes: MUDO (X = 26 h, nada descontado)',
-   esta_mudo(horas_de_silencio(utc('2026-10-05T07:00:00'), utc('2026-10-06T13:00:00'),
-                               False, False), HORARIOS['HEO']['umbral_h']), True)
-eq('(A) [HEO] la noche del sabado al domingo medida por horario (09:06 a 08:06 Madrid, 23 h)'
-   ' NO es mudo',
-   esta_mudo(horas_de_silencio(utc('2026-10-03T07:06:00'), utc('2026-10-04T06:06:00'),
-                               False, False), HORARIOS['HEO']['umbral_h']), False)
-eq('(A) [HEO] la noche de entre semana medida (19:06 a 06:06 UTC, 11 h) NO es mudo',
-   esta_mudo(horas_de_silencio(utc('2026-10-01T19:06:00'), utc('2026-10-02T06:06:00'),
-                               False, False), HORARIOS['HEO']['umbral_h']), False)
-eq('(A) 🔴 [HEO] el domingo NO se descuenta (HEO lo trabaja): el hueco entero cuenta',
-   horas_de_silencio(utc('2026-10-03T07:06:00'), utc('2026-10-04T06:06:00'),
-                     HORARIOS['HEO']['descansa_domingo'], HORARIOS['HEO']['descansa_sabado']),
-   23.0)
-
-# 🆕 14-oct-2026 (T5c) · TCG: `ultima_viva`, la ultima señal de vida en `disp_pasada`.
-# Viernes 16-oct 17:21 UTC aplicada (huella 'v'); sabado 17 y domingo 18 a las 10:21, «al dia».
-_VIE, _SAB, _DOM = utc('2026-10-16T17:21:00'), utc('2026-10-17T10:21:00'), utc('2026-10-18T10:21:00')
-_FINDE = tuple(HORARIOS['TCG'].get('al_dia_cuenta', ()))
-eq('(J) [TCG] `al_dia_cuenta` son el sabado y el domingo, y nada mas', tuple(sorted(_FINDE)), (5, 6))
-eq('(J) 🔴 [TCG] sin pasadas aplicadas no hay señal de vida (aunque haya «al dia»)',
-   ultima_viva([], [(_SAB, 'v')], _FINDE), None)
-eq('(J) [TCG] sin rechazadas, la ultima aplicada', ultima_viva([(_VIE, 'v')], [], _FINDE), _VIE)
-eq('(J) 🔴 [TCG] dos «al dia» el fin de semana: la del domingo es la ultima señal de vida',
-   ultima_viva([(_VIE, 'v'), (_VIE - timedelta(hours=1), 'u')], [(_SAB, 'v'), (_DOM, 'v')], _FINDE),
-   _DOM)
-eq('(J) 🔴 [TCG] una «al dia» de un MARTES no cuenta (entre semana, 26 h sin contenido nuevo avisan)',
-   ultima_viva([(_VIE, 'v')], [(utc('2026-10-20T10:21:00'), 'v')], _FINDE), _VIE)
-eq('(J) 🔴 [TCG] una rechazada con OTRA huella (el freno) no es «al dia»',
-   ultima_viva([(_VIE, 'v')], [(_SAB, 'otra')], _FINDE), _VIE)
-eq('(J) 🔴 [TCG] ni una rechazada sin huella (None no casa con None)',
-   ultima_viva([(_VIE, None)], [(_SAB, None)], _FINDE), _VIE)
-eq('(J) [TCG] la huella que vale es la de la ULTIMA aplicada, no la de una anterior',
-   ultima_viva([(_VIE, 'v'), (_VIE - timedelta(hours=1), 'u')], [(_SAB, 'u')], _FINDE), _VIE)
-eq('(J) [TCG] una rechazada ANTERIOR a la ultima aplicada no adelanta nada',
-   ultima_viva([(_DOM, 'v')], [(_SAB, 'v')], _FINDE), _DOM)
-eq('(J) 🔴 [los demas] sin `al_dia_cuenta` una «al dia» del sabado NO cuenta',
-   ultima_viva([(_VIE, 'v')], [(_SAB, 'v')], ()), _VIE)
-_x_tcg = HORARIOS['TCG']['umbral_h']
-eq('(J) 🔴 [TCG] el fin de semana sin nada desde el viernes 17:21: el sabado a las 18:00 aun no '
-   '(24,65 h), el domingo a las 06:00 SI (36,65 h)',
-   (esta_mudo(horas_de_silencio(_VIE, utc('2026-10-17T18:00:00'), False, False), _x_tcg),
-    esta_mudo(horas_de_silencio(_VIE, utc('2026-10-18T06:00:00'), False, False), _x_tcg)),
-   (False, True))
-eq('(J) [TCG] los huecos del horario: noche 14 h, viernes-sabado 17, sabado-domingo 24 y '
-   'domingo-lunes 21: ninguno llega a la X',
-   [esta_mudo(h, _x_tcg) for h in (14.0, 17.0, 24.0, 21.0)], [False] * 4)
+# Los eventos y la marca, como funciones puras
+_ah = _m('2026-11-26T20:55:00')
+_cad = {'TCG': {'caducado': True, 'ultima_buena': ULTIMA_BUENA_26}}
+eq('(A) 🔴 FALLA EN ABIERTO: con la marca vacia, lo caducado sale como aviso nuevo',
+   eventos(_cad, {}, _ah, 6), [('caducado', 'TCG')])
+eq('(A) con la marca de hace 6 h y la misma lectura de partida, recordatorio',
+   eventos(_cad, _marca_tcg(_m('2026-11-26T14:55:00')), _ah, 6), [('recordatorio', 'TCG')])
+eq('(A) con la de hace 5 h 59, nada', eventos(_cad, _marca_tcg(_m('2026-11-26T14:56:00')), _ah, 6), [])
+eq('(A) 🔴 con otra lectura de partida (volvio y se volvio a caer sin que se viera), aviso nuevo',
+   eventos(_cad, _marca_tcg(_m('2026-11-26T20:00:00'), desde=_u('2026-11-20T10:00:00')), _ah, 6),
+   [('caducado', 'TCG')])
+eq('(A) la marca del formato de antes ({proveedor: dia}) cuenta como no avisada',
+   eventos(_cad, {'TCG': '2026-11-26'}, _ah, 6), [('caducado', 'TCG')])
+eq('(A) al dia y avisado antes: vuelta', eventos({'TCG': {'caducado': False, 'ultima_buena': _ah}},
+                                                 _marca_tcg(_ah), _ah, 6), [('vuelta', 'TCG')])
+eq('(A) al dia y sin avisar: nada', eventos({'TCG': {'caducado': False, 'ultima_buena': _ah}}, {}, _ah, 6), [])
+eq('(A) la marca tras enviar: lo que vuelve se borra, lo avisado se apunta, lo demas se queda y lo viejo se tira',
+   marca_tras({'TCG': {'desde': 'x', 'avisado_en': 'y'}, 'HEO': {'desde': 'a', 'avisado_en': 'b'}, 'OSMA': '2026-11-26'},
+              [('vuelta', 'TCG'), ('caducado', 'DBLINE')],
+              {'TCG': {'ultima_buena': _ah}, 'DBLINE': {'ultima_buena': ULTIMA_BUENA_26}}, _ah),
+   {'HEO': {'desde': 'a', 'avisado_en': 'b'},
+    'DBLINE': {'desde': ULTIMA_BUENA_26.isoformat(), 'avisado_en': _ah.isoformat()}})
+eq('(A) suena de 07:00 a 22:59 de Madrid, y no a las 06:59 ni a las 23:00',
+   [hora_de_avisar(_m(t)) for t in ('2026-11-26T06:59:00', '2026-11-26T07:00:00', '2026-11-26T22:59:00',
+                                    '2026-11-26T23:00:00')], [False, True, True, False])
 
 # ---------------------------------------------------------------------------
-# (D) Las dos direcciones del descuento: el MISMO hueco, los DOS calendarios
+# (B) Por estructura: ni un horario ni un proveedor escritos en el vigilante
 # ---------------------------------------------------------------------------
 print()
-eq('(D) 🔴 el sabado-a-lunes NO es mudo para quien descansa el domingo (19 h)',
-   esta_mudo(horas_de_silencio(SAB, LUN, True), _x_dbline), False)
-eq('(D) 🔴 y el MISMO hueco SI es mudo para quien no descansa (43 h)',
-   esta_mudo(horas_de_silencio(SAB, LUN, False), HORARIOS['TCG']['umbral_h']), True)
+_textos = [n.value for n in ast.walk(ARBOL) if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+eq('(B) 🔴 el vigilante no nombra a ningun proveedor: los saca de disp_parametros',
+   sorted(set(_textos) & set(VIGILADOS + ['BEMS'])), [])
+eq('(B) 🔴 ni queda la tabla de horarios copiada a mano (HORARIOS)',
+   [n.targets[0].id for n in ARBOL.body if isinstance(n, ast.Assign)
+    and isinstance(n.targets[0], ast.Name) and n.targets[0].id == 'HORARIOS'], [])
 
 # ---------------------------------------------------------------------------
-# (E) El reparto del freno, como funcion pura
-# ---------------------------------------------------------------------------
-print()
-HOY, AYER = '2026-09-10', '2026-09-09'
-eq('(E) el que ya sono hoy no vuelve a sonar',
-   avisos_de_hoy({'DBLINE': HOY}, HOY, ['DBLINE']), ([], ['DBLINE']))
-eq('(E) 🔴 pero el de AYER si: el freno es por dia, no para siempre',
-   avisos_de_hoy({'DBLINE': AYER}, HOY, ['DBLINE']), (['DBLINE'], []))
-eq('(E) 🔴 es por PROVEEDOR: que hoy sonara DBLine no calla a HEO',
-   avisos_de_hoy({'DBLINE': HOY}, HOY, ['DBLINE', 'HEO']), (['HEO'], ['DBLINE']))
-eq('(E) 🔴 FALLA EN ABIERTO: con la marca vacia salen TODOS a avisar',
-   avisos_de_hoy({}, HOY, ['DBLINE', 'HEO', 'TCG']), (['DBLINE', 'HEO', 'TCG'], []))
-eq('(E) y sin mudos no hay nada que repartir', avisos_de_hoy({'DBLINE': HOY}, HOY, []),
-   ([], []))
-
-# ---------------------------------------------------------------------------
-# (F) La linea del aviso: empieza por CUANTO lleva callado
+# (G) El reloj de cron-job.org contra los horarios, y el workflow
 # ---------------------------------------------------------------------------
 print()
-
-
-def fila(brutas, horas, ultima=APAGON, proveedor='DBLINE'):
-    return {'proveedor': proveedor, 'ultima': ultima, 'brutas': brutas, 'horas': horas,
-            'umbral': 26, 'franja': franja_de(HORARIOS['DBLINE']), 'motivo': None}
-
-
-_sin_domingo = linea_de_aviso(fila(27.48, 27.48))
-eq('(F) 🔴 empieza por las horas y lleva la fecha de la ultima escritura',
-   _sin_domingo,
-   '• <b>DBLINE</b> — lleva 27 h sin escribir (última: 2026-09-09 10:31 UTC). '
-   'Su plazo son 26 h. Horario: 05-19 UTC, L a S (cada hora, :05 de 07 a 21 Madrid).')
-_con_domingo = linea_de_aviso(fila(51.0, 27.0))
-eq('(F) 🔴 con un domingo por medio se dicen los DOS numeros',
-   _con_domingo,
-   '• <b>DBLINE</b> — lleva 51 h sin escribir (última: 2026-09-09 10:31 UTC). '
-   '27 h sin contar los domingos, que es lo que se compara con su plazo de 26 h. '
-   'Horario: 05-19 UTC, L a S (cada hora, :05 de 07 a 21 Madrid).')
-eq('(F) …y sin domingo por medio NO se nombra el descuento (seria ruido)',
-   'sin contar los domingos' in _sin_domingo, False)
-_sin_dato = dict(fila(0, 0), ultima=None, motivo='ni una fila en escaner_memoria')
-eq('(F) 🔴 [OSMA] con sabado y domingo por medio se dicen los DOS numeros y que se descuenta',
-   linea_de_aviso(dict(fila(76.7, 28.7, proveedor='OSMA'), umbral=26,
-                       franja=franja_de(HORARIOS['OSMA']),
-                       descontado='los sábados y domingos')),
-   '• <b>OSMA</b> — lleva 77 h sin escribir (última: 2026-09-09 10:31 UTC). '
-   '29 h sin contar los sábados y domingos, que es lo que se compara con su plazo de 26 h. '
-   'Horario: 05 UTC, L a V (una pasada, 07:15 Madrid).')
-eq('(F) el que no tiene ni una fila lo dice, y dice su plazo',
-   linea_de_aviso(_sin_dato),
-   '• <b>DBLINE</b> — sin dato (ni una fila en escaner_memoria). Su plazo son 26 h.')
-
-# ---------------------------------------------------------------------------
-# (B) La tabla cubre los directores que existen, y con margen
-# ---------------------------------------------------------------------------
-print()
-_dir = os.path.join('.github', 'workflows')
-_directores = sorted(f[len('director-'):-len('.yml')].upper()
-                     for f in os.listdir(_dir)
-                     if f.startswith('director-') and f.endswith('.yml'))
-print('    directores en .github/workflows: %s' % ', '.join(_directores))
-# 🆕 16-oct-2026 (jubilar los escaneres viejos, fase 1): los cuatro director-*.yml se borran. Los CINCO
-#    se vigilan en `disp_pasada` (abajo), asi que lo que se exige ahora es que no vuelva ninguno sin su
-#    linea: la regla de debajo («todo director tiene su linea») sigue en pie para el que naciera.
-eq('(B) 🔴 ya no queda ningun director viejo en .github/workflows (jubilados el 16-oct)', _directores, [])
-# 🆕 03-oct-2026: HEO y OSMA salen de `escaner_memoria` y se vigilan en `disp_pasada`.
-#    El director viejo de HEO sigue en .github/workflows (apagado en cron-job.org) y
-#    OSMA nunca tuvo director viejo (nacio en el escaner 2): por eso la regla ya no es
-#    "la tabla == los directores", sino "todo director tiene su linea, y la unica
-#    linea sin director es una de `disp_pasada`".
-_de_disp = sorted(p for p in HORARIOS if HORARIOS[p]['fuente'] == 'disp_pasada')
-eq('(B) 🔴 todo director que existe tiene su linea en la tabla (si no, saldria verde sin mirarlo)',
-   [p for p in _directores if p not in HORARIOS], [])
-eq('(B) 🔴 y toda linea sin director es del escaner 2 (`disp_pasada`), no un despiste',
-   sorted(p for p in HORARIOS if p not in _directores and p not in _de_disp), [])
-# 🆕 14-oct-2026 (T5c): con TCG en `disp_pasada` ya nadie usa 'escaner_memoria' (el codigo
-#    la conserva: las roturas (R) la usan). Lo que se exige es que no haya una mal escrita.
-eq('(B) 🔴 las fuentes se escriben bien (una fuente mal escrita leeria la otra)',
-   sorted(set(c['fuente'] for c in HORARIOS.values()) - {'disp_pasada', 'escaner_memoria'}), [])
-# 🆕 07-oct-2026 (OC5): OCIOSTOCK pasa a `disp_pasada`. Su director viejo SIGUE en
-#    .github/workflows (director-ociostock.yml) y tiene su linea: la regla de arriba se
-#    cumple igual (todo director tiene linea; las lineas sin director son de disp_pasada).
-# 🆕 10-oct-2026 (DB6): DBLINE pasa a `disp_pasada`, como OCIOSTOCK el 07-oct.
-# 🆕 14-oct-2026 (T5c): TCG pasa a `disp_pasada`, como DBLINE el 10-oct.
-eq('(B) 🔴 los CINCO se vigilan en `disp_pasada` (lo que leen Reponer y el Trackeador)',
-   _de_disp, ['DBLINE', 'HEO', 'OCIOSTOCK', 'OSMA', 'TCG'])
-eq('(B) 🔴 y ninguno sigue en `escaner_memoria` (TCG la dejo el 14-oct: su director viejo se apago)',
-   sorted(p for p in HORARIOS if HORARIOS[p]['fuente'] == 'escaner_memoria'), [])
-eq('(B) 🔴 TCG (T5c): 26 h, ningun dia descontado, franja 07-17 UTC con `ventana_ancha`',
-   (HORARIOS['TCG']['umbral_h'], HORARIOS['TCG']['descansa_domingo'],
-    HORARIOS['TCG']['descansa_sabado'], HORARIOS['TCG'].get('ventana_ancha'),
-    HORARIOS['TCG']['primera_h'], HORARIOS['TCG']['ultima_h']), (26, False, False, True, 7, 17))
-eq('(B) 🔴 …y TCG es el UNICO al que le cuenta una «al dia» (a OcioStock, por ejemplo, NO: su '
-   'fichero se rehace cada noche y un dia entero «al dia» es lo que hay que saber)',
-   sorted(p for p in HORARIOS if HORARIOS[p].get('al_dia_cuenta')), ['TCG'])
-eq('(B) 🔴 DBLINE (DB6): cada hora de lunes a sabado -> 26 h, el domingo descontado y el sabado no, '
-   'franja 05-19 UTC con `ventana_ancha`',
-   (HORARIOS['DBLINE']['umbral_h'], HORARIOS['DBLINE']['descansa_domingo'],
-    HORARIOS['DBLINE']['descansa_sabado'], HORARIOS['DBLINE'].get('ventana_ancha'),
-    HORARIOS['DBLINE']['primera_h'], HORARIOS['DBLINE']['ultima_h']), (26, True, False, True, 5, 19))
-eq('(B) 🔴 OCIOSTOCK: una aplicada al dia los siete dias -> 26 h y ningun dia descontado',
-   (HORARIOS['OCIOSTOCK']['umbral_h'], HORARIOS['OCIOSTOCK']['descansa_sabado'],
-    HORARIOS['OCIOSTOCK']['descansa_domingo']), (26, False, False))
-eq('(B) 🔴 OSMA: de lunes a viernes, el sabado Y el domingo no cuentan',
-   (HORARIOS['OSMA']['descansa_sabado'], HORARIOS['OSMA']['descansa_domingo']), (True, True))
-eq('(B) 🔴 HEO trabaja los siete dias: no se le descuenta ninguno',
-   (HORARIOS['HEO']['descansa_sabado'], HORARIOS['HEO']['descansa_domingo']), (False, False))
-for _p in sorted(HORARIOS):
-    _cfg = HORARIOS[_p]
-    eq('(B) [%s] 🔴 la X (%d h) esta por encima del hueco mayor medido (%.2f h)'
-       % (_p, _cfg['umbral_h'], _cfg['medido_h']), _cfg['umbral_h'] > _cfg['medido_h'], True)
-    eq('(B) [%s] …y el margen no pasa de 6 h (una X floja no avisa a tiempo)' % _p,
-       _cfg['umbral_h'] - _cfg['medido_h'] <= 6, True)
+RELOJ = _ns['RELOJ']
+_ticks = [h * 60 + RELOJ['minuto'] for h in range(RELOJ['desde_h'], RELOJ['hasta_h'] + 1)]
+print('    el reloj de cron-job.org: a las :%02d de %02d a %02d (Madrid), todos los dias'
+      % (RELOJ['minuto'], RELOJ['desde_h'], RELOJ['hasta_h']))
+for _p in VIGILADOS:
+    _r = PAR[_p]
+    _peor = 0
+    _sin = []
+    for _h in sorted(set(_r['horario_laborables']) | set(_r['horario_finde'])):
+        _vence = _h * 60 + _r['horario_minuto'] + _r['horario_margen_min']
+        _sig = [t for t in _ticks if t >= _vence]
+        if not _sig:
+            _sin.append(_h)
+        else:
+            _peor = max(_peor, _sig[0] - _vence)
+    print('    %-10s su lectura mas tardia que vence se mira, como mucho, %d min despues' % (_p, _peor))
+    eq('(G) 🔴 [%s] toda lectura vencida de su horario se mira en menos de una hora' % _p,
+       (_sin, _peor < 60), ([], True))
+eq('(G) 🔴 ninguna vuelta del reloj cae en horas de silencio (si no, el aviso esperaria a la mañana)',
+   all(_ns['HORAS_DE_AVISAR'][0] <= h < _ns['HORAS_DE_AVISAR'][1]
+       for h in range(RELOJ['desde_h'], RELOJ['hasta_h'] + 1)), True)
+eq('(G) el recordatorio, cada 6 h como mucho', _ns['RECORDATORIO_H'], 6)
+_doc = yaml.safe_load(io.open(os.path.join('.github', 'workflows', 'centinela-escaner.yml'), encoding='utf-8'))
+_on = _doc.get('on', _doc.get(True)) or {}   # 🔑 `on:` se lee como el booleano True
+_disp = _on.get('workflow_dispatch') or {}
+eq('(G) 🔴 se lanza con workflow_dispatch (cron-job.org), con el ensayo APAGADO por defecto',
+   (_disp.get('inputs', {}).get('ensayo', {}).get('default'),
+    _disp.get('inputs', {}).get('ensayo', {}).get('options')), ('no', ['no', 'si']))
+eq('(G) y el schedule: de GitHub se queda de respaldo, UNO', len(_on.get('schedule') or []), 1)
+_paso = [s for s in _doc['jobs']['centinela']['steps'] if 'centinela_escaner.py' in str(s.get('run'))]
+eq('(G) 🔴 el paso que lanza el vigilante le pasa el ensayo y la llave de servicio',
+   (len(_paso), _paso[0]['env'].get('CENTINELA_ENSAYO'), 'SUPABASE_SERVICE_KEY' in _paso[0]['env']),
+   (1, '${{ inputs.ensayo }}', True))
 
 # ---------------------------------------------------------------------------
-# (G) EL RELOJ: que las cuatro pasadas del cron cubran de verdad la ventana en la
-#     que cada plazo puede vencerse, con 4 h de demora como mucho.
-# ---------------------------------------------------------------------------
-# 🔴 ESTO ES LO QUE IMPIDE QUE EL HORARIO SEA UNA AFIRMACION. El cron se leyo
-#    del .yml de verdad y la ventana sale de las cifras de HORARIOS: si manana
-#    alguien mueve una franja, una X o una hora del cron, esto se pone rojo solo.
-#    Sin esto, «no hay pasadas de noche porque ningun plazo vence de noche» seria
-#    una frase bonita en un comentario.
-print()
-_doc = yaml.safe_load(io.open(os.path.join('.github', 'workflows', 'centinela-escaner.yml'),
-                              encoding='utf-8'))
-# 🔑 En un .yml, `on:` se lee como el BOOLEANO True (el problema de Noruega).
-_on = _doc.get('on', _doc.get(True)) or {}
-_crons = [x['cron'] for x in (_on.get('schedule') or [])]
-eq('(G) hay UN cron, no cero ni tres', len(_crons), 1)
-_horas_cron = sorted(int(h) for h in _crons[0].split()[1].split(','))
-print('    el cron del workflow mira a las: %s UTC'
-      % ', '.join('%02d:00' % h for h in _horas_cron))
-eq('(G) 🔴 son CUATRO pasadas al dia', len(_horas_cron), 4)
-eq('(G) 🔴 la primera, a primera hora española (06:00 UTC = 07:00/08:00 en casa)',
-   _horas_cron[0], 6)
-eq('(G) 🔴 y la ultima no pasa de las 18:00 UTC: ningun aviso a deshora',
-   _horas_cron[-1] <= 18, True)
-eq('(G) el cron corre TODOS los dias (un mudo del domingo se caza el lunes)',
-   _crons[0].split()[2:], ['*', '*', '*'])
-
-
-def ventana_de_vencimiento(cfg):
-    """Horas UTC (inicio, fin) en las que el plazo de ese proveedor puede vencerse.
-
-    Escribe entre `primera_h` y `ultima_h`; si deja de escribir, su plazo vence
-    `umbral_h` despues de la ultima que llego a hacer. Se devuelve en horas del
-    dia, que es lo que hay que cruzar con el cron."""
-    return ((cfg['primera_h'] + cfg['umbral_h']) % 24,
-            (cfg['ultima_h'] + cfg['umbral_h']) % 24)
-
-
-def ventana_tras_domingo(cfg):
-    """La misma ventana cuando hay un domingo por medio: el reloj descontado esta
-    parado el domingo entero, asi que lo que faltaba se consume el lunes desde las
-    00:00. Escribio el sabado a la hora h -> le faltan `umbral - (24 - h)` horas."""
-    return (cfg['umbral_h'] - 24 + cfg['primera_h'],
-            cfg['umbral_h'] - 24 + cfg['ultima_h'])
-
-
-def demora_maxima(ini, fin, horas_cron):
-    """Cuanto puede tardar el aviso desde que el plazo vence, en horas, si el
-    vencimiento cae en cualquier minuto de [ini, fin]. Se mira minuto a minuto:
-    con horas redondas se podria colar un caso de borde justo despues de una
-    pasada, que es exactamente el que importa."""
-    peor = 0.0
-    minuto = ini * 60
-    while minuto <= fin * 60:
-        espera = min(((h * 60 - minuto) % (24 * 60)) or 24 * 60 for h in horas_cron)
-        # Un vencimiento JUSTO en la hora del cron se avisa en esa pasada: 0 h.
-        if any(h * 60 == minuto for h in horas_cron):
-            espera = 0
-        peor = max(peor, espera / 60.0)
-        minuto += 1
-    return peor
-
-
-for _p in sorted(HORARIOS):
-    _cfg = HORARIOS[_p]
-    _ini, _fin = ventana_de_vencimiento(_cfg)
-    _dem = demora_maxima(_ini, _fin, _horas_cron)
-    print('    %-10s escribe %02d-%02d UTC, X=%d h -> vence entre %02d:00 y %02d:00, demora %.2f h'
-          % (_p, _cfg['primera_h'], _cfg['ultima_h'], _cfg['umbral_h'], _ini, _fin, _dem))
-    if _cfg.get('ventana_ancha'):
-        # HEO (escaner 2): escribe 13 h seguidas, su ventana (13 h) no cabe en las 11 h
-        # de 04:00-15:00. Se le exige OTRA cosa, no se le quita la comprobacion:
-        #  - que de verdad no quepa (si cupiera, la marca seria un pase gratis),
-        #  - que lo diurno (hasta la ultima pasada del cron) se avise en 4 h,
-        #  - y que lo que cae en el hueco de noche espere como mucho a la pasada de
-        #    las 06:00 (el hueco 18:00-06:00 son 12 h).
-        _dia = demora_maxima(_ini, min(_fin, _horas_cron[-1]), _horas_cron)
-        eq('(G) [%s] 🔴 la marca `ventana_ancha` no es un pase gratis: con las reglas '
-           'normales NO cabria' % _p, (4 <= _ini <= 15 and 4 <= _fin <= 15), False)
-        eq('(G) [%s] 🔴 la parte diurna de la ventana (hasta las %02d:00) se avisa en 4 h'
-           % (_p, _horas_cron[-1]), _dia <= 4.0, True)
-        eq('(G) [%s] 🔴 y el peor caso, el del hueco de noche, no pasa de 12 h' % _p,
-           _dem <= 12.0, True)
-    else:
-        eq('(G) [%s] 🔴 el aviso no se retrasa mas de 4 h' % _p, _dem <= 4.0, True)
-        eq('(G) [%s] 🔴 su plazo NUNCA vence de noche (04:00-15:00 UTC)' % _p,
-           (4 <= _ini <= 15, 4 <= _fin <= 15), (True, True))
-    if _cfg['descansa_domingo'] and _cfg.get('ventana_ancha'):
-        # 🆕 10-oct-2026 (DB6): DBLINE descansa el domingo Y tiene ventana ancha. La
-        #    ventana del lunes se mide con las MISMAS reglas que la suya de diario.
-        _i2, _f2 = ventana_tras_domingo(_cfg)
-        eq('(G) [%s] …y con un domingo por medio (vence el lunes entre %02d:00 y %02d:00): lo diurno '
-           'en 4 h y lo de noche en 12 h' % (_p, _i2, _f2),
-           (demora_maxima(_i2, min(_f2, _horas_cron[-1]), _horas_cron) <= 4.0,
-            demora_maxima(_i2, _f2, _horas_cron) <= 12.0, _i2 >= 4), (True, True, True))
-    elif _cfg['descansa_domingo']:
-        _i2, _f2 = ventana_tras_domingo(_cfg)
-        _d2 = demora_maxima(_i2, _f2, _horas_cron)
-        eq('(G) [%s] …y con un domingo por medio tampoco (vence el lunes entre %02d:00 y %02d:00)'
-           % (_p, _i2, _f2), (_d2 <= 4.0, 4 <= _i2 and _f2 <= 15), (True, True))
-
-# La otra direccion: un cron que se dejara la tarde SI tendria que salir mal.
-# 🆕 14-oct-2026 (T5c) · TCG pasa tambien el fin de semana, UNA vez, a las 12:20 Madrid (10:20
-#    UTC en verano, 11:20 en invierno: `disp_parametros.horario_finde` = [12]). Si esa se cae,
-#    su plazo vence a las 12-13 UTC del dia siguiente: dentro del dia, y avisado en 4 h.
-for _h_finde in (10, 11):
-    _vf = (_h_finde + HORARIOS['TCG']['umbral_h']) % 24
-    eq('(G) [TCG] 🔴 la pasada del fin de semana (%02d UTC) vence a las %02d:00 y se avisa en 4 h'
-       % (_h_finde, _vf), (demora_maxima(_vf, _vf + 1, _horas_cron) <= 4.0, 4 <= _vf <= 15), (True, True))
-eq('(G) 🔴 …y un cron que se dejara la tarde daria una demora enorme',
-   demora_maxima(*ventana_de_vencimiento(HORARIOS['HEO']), horas_cron=[6, 8]) > 4.0, True)
-
-
-# ---------------------------------------------------------------------------
-# (C) De punta a punta, ocho veces, cada una en su proceso
+# (C) De punta a punta, cada caso en su proceso
 # ---------------------------------------------------------------------------
 print()
 
 
 def correr(caso, ruta=None):
-    cmd = [sys.executable, '-u', os.path.abspath(__file__), '--hijo', caso]
     env = dict(os.environ, PYTHONIOENCODING='utf-8')
     if ruta:
         env['CENTINELA_RUTA'] = ruta
-    p = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8',
-                       errors='replace', env=env)
+    p = subprocess.run([sys.executable, '-u', os.path.abspath(__file__), '--hijo', caso], capture_output=True,
+                       text=True, encoding='utf-8', errors='replace', env=env)
     out = (p.stdout or '') + (p.stderr or '')
+    registro = out.split('@@FIN_DEL_VIGILANTE@@')[0]      # lo que escribe el vigilante, sin el informe del doble
 
-    def campo(clave, patron=r'(.*)'):
-        m = re.search(r'^%s=%s$' % (clave, patron), out, re.M)
+    def campo(clave):
+        m = re.search(r'^%s=(.*)$' % clave, out, re.M)
         return m.group(1) if m else None
 
-    _n = campo('TELEGRAMS', r'(\d+)')
-    def veredicto(proveedor):
-        m = re.search(r'^  %s +(?:ultima .*-> (MUDO|al dia)|SIN DATO .*-> (MUDO))' % proveedor,
-                      out, re.M)
-        return None if not m else (m.group(1) or m.group(2))
-
-    return {'codigo': p.returncode, 'salida': out,
-            'veredicto': {p_: veredicto(p_) for p_ in HORARIOS},
-            'hoy': campo('HOY'),
-            'telegrams': int(_n) if _n else -1,
+    return {'codigo': p.returncode, 'salida': out, 'registro': registro,
+            'veredicto': {v: (re.search(r'^  %s +ultima buena .*-> (CADUCADO|al dia)$' % v, registro, re.M)
+                              or [None, None])[1] for v in VIGILADOS},
+            'telegrams': int(campo('TELEGRAMS') or -1),
             'texto': json.loads(campo('TELEGRAM_TEXTO') or '""'),
-            'marca': json.loads(campo('MARCA_ESCRITA') or '{}'),
-            'lineas': len(re.findall(r'^  \w+ *(?:ultima|SIN DATO)', out, re.M))}
+            'subidas': int(campo('SUBIDAS') or -1),
+            'marca': json.loads(campo('MARCA_FINAL') or 'null')}
 
 
-_ok = correr('al_dia')
-eq('(C) [al_dia] 🔴 el run sale VERDE (exit 0)', _ok['codigo'], 0)
-eq('(C) [al_dia] 🔴 y NO se manda ningun Telegram', _ok['telegrams'], 0)
-eq('(C) [al_dia] las CINCO lineas del informe estan en el log', _ok['lineas'], len(HORARIOS))
-eq('(C) [al_dia] con su linea de conforme',
-   'CENTINELA OK: los %d directores han escrito dentro de su plazo.' % len(HORARIOS) in _ok['salida'], True)
-eq('(C) [al_dia] y la marca no se toca', _ok['marca'], {})
+_AL_DIA = {p: 'al dia' for p in VIGILADOS}
 
-_mudo = correr('mudo')
-eq('(C) [mudo] 🔴 el run sale en ROJO (exit 1)', _mudo['codigo'], 1)
-eq('(C) [mudo] 🔴 con la etiqueta grepable, y nombrando a DBLINE',
-   'CENTINELA_MUDO: DBLINE' in _mudo['salida'], True)
-eq('(C) [mudo] 🔴 se manda UN Telegram, ni cero ni dos', _mudo['telegrams'], 1)
-eq('(C) [mudo] 🔴 y el aviso dice DESDE CUANDO, no solo que esta mudo',
-   ('DBLINE' in _mudo['texto'] and 'sin escribir' in _mudo['texto']
-    and 'última:' in _mudo['texto']), True)
-eq('(C) [mudo] …y NO nombra a los que estan al dia',
-   ('HEO' in _mudo['texto'], 'TCG' in _mudo['texto']), (False, False))
-eq('(C) [mudo] las CINCO lineas siguen estando: tambien las de los que hablan',
-   _mudo['lineas'], len(HORARIOS))
-eq('(C) [mudo] 🔴 la marca queda escrita con la fecha de hoy',
-   _mudo['marca'], {'DBLINE': _mudo['hoy']})
+_r = correr('todo_al_dia')
+eq('(C) [todo_al_dia] VERDE, cero Telegram, la marca sin tocar, los cinco al dia',
+   (_r['codigo'], _r['telegrams'], _r['subidas'], _r['veredicto']), (0, 0, 0, _AL_DIA))
+eq('(C) [todo_al_dia] 🔴 los cinco en el registro, y BEMS (sin horario) no',
+   (len(re.findall(r'^  \w+ +ultima buena', _r['registro'], re.M)), 'BEMS' in _r['registro']), (5, False))
 
-_ileg = correr('ilegible')
-eq('(C) [ilegible] 🔴 el run sale en ROJO (exit 1)', _ileg['codigo'], 1)
-eq('(C) [ilegible] 🔴 y el log dice que no se pudo leer',
-   'no se pudo leer' in _ileg['salida'], True)
-eq('(C) [ilegible] los cinco salen como SIN DATO, no como al dia',
-   _ileg['salida'].count('SIN DATO'), len(HORARIOS))
-eq('(C) [ilegible] y se avisa por Telegram: un centinela ciego no puede callarse',
-   _ileg['telegrams'], 1)
-
-# --- El freno -------------------------------------------------------------
+# --- El caso real de TCG ---------------------------------------------------------
 print()
-_ya = correr('ya_avisado')
-eq('(C) [ya_avisado] 🔴 CERO Telegram: hoy ya sono', _ya['telegrams'], 0)
-eq('(C) [ya_avisado] 🔴 pero el run sigue ROJO: lo que se calla es el movil',
-   _ya['codigo'], 1)
-eq('(C) [ya_avisado] y el log lo dice, con nombre',
-   'ya avisados hoy (no se repite el Telegram): DBLINE' in _ya['salida'], True)
-eq('(C) [ya_avisado] las cinco lineas siguen en el log', _ya['lineas'], len(HORARIOS))
+_r = correr('tcg_26nov_1445')
+eq('(C) 🔴 [tcg_26nov_1445] a las 14:45 del 26-nov (13:20 perdida, 14:20 sin vencer): VERDE, cero Telegram',
+   (_r['codigo'], _r['telegrams'], _r['veredicto']['TCG']), (0, 0, 'al dia'))
+_r = correr('tcg_26nov_1455')
+eq('(C) 🔴 [tcg_26nov_1455] a las 14:55 (la primera vuelta del reloj tras las 14:50): ROJO, SOLO TCG, UN Telegram',
+   (_r['codigo'], _r['veredicto'], _r['telegrams']), (1, dict(_AL_DIA, TCG='CADUCADO'), 1))
+_t = _r['texto']
+eq('(C) 🔴 [tcg_26nov_1455] el aviso dice desde cuando, cuantas se han perdido y cuantos intentos fallaron',
+   ['TCG no lee desde el 26-nov 12:23' in _t, '2 lectura(s) prevista(s) sin ninguna buena (13:20, 14:20)' in _t,
+    '3 intento(s) fallido(s)' in _t], [True] * 3)
+eq('(C) 🔴 [tcg_26nov_1455] …el motivo del ultimo fallo, y que el Escaneo PRO y Reponer estan con datos de esa hora',
+   ['Último fallo (26-nov 14:21, fallida): «%s»' % _html.escape(_ESTADO) in _t,
+    'El Escaneo PRO y Reponer de TCG están con los datos del 26-nov 12:23.' in _t], [True, True])
+eq('(C) [tcg_26nov_1455] la marca queda escrita: TCG, desde las 12:23, avisado a las 14:55',
+   _r['marca'], {'TCG': {'desde': ULTIMA_BUENA_26.isoformat(), 'avisado_en': A_1455.isoformat()}})
+eq('(C) 🔴 [tcg_26nov_1455] REPO PUBLICO: el motivo no sale en el registro',
+   ('Estado producto' in _r['registro'], 'formulario' in _r['registro']), (False, False))
 
-_ayer = correr('ayer')
-eq('(C) [ayer] 🔴 con la marca de AYER vuelve a avisar', _ayer['telegrams'], 1)
-eq('(C) [ayer] y la marca se pone a hoy', _ayer['marca'], {'DBLINE': _ayer['hoy']})
+_r = correr('tcg_26nov_1655_ya_avisado')
+eq('(C) 🔴 [tcg_26nov_1655_ya_avisado] avisado hace 2 h: CERO Telegram, pero el run sigue ROJO y lo dice',
+   (_r['telegrams'], _r['codigo'], 'TCG: ya avisado hace menos de 6 h' in _r['registro'], _r['subidas']),
+   (0, 1, True, 0))
+_r = correr('tcg_26nov_2055_recordatorio')
+eq('(C) 🔴 [tcg_26nov_2055_recordatorio] a las 6 h, UN recordatorio que dice cuanto lleva',
+   (_r['telegrams'], 'TCG sigue sin leer</b>, desde el 26-nov 12:23 (9 h)' in _r['texto'],
+    _r['marca']['TCG']['avisado_en']), (1, True, _m('2026-11-26T20:55:00').isoformat()))
+_r = correr('tcg_26nov_2330_noche')
+eq('(C) 🔴 [tcg_26nov_2330_noche] a las 23:30 no suena ni toca la marca, pero el run es ROJO y lo dice',
+   (_r['telegrams'], _r['subidas'], _r['codigo'], 'fuera de hora (23:30 Madrid)' in _r['registro']), (0, 0, 1, True))
+_r = correr('tcg_27nov_0955_vuelta')
+eq('(C) 🔴 [tcg_27nov_0955_vuelta] con la historia real del 27-nov: VERDE y UN «TCG vuelve a leer, tras 21 h»',
+   (_r['codigo'], _r['telegrams'], '✅ <b>TCG vuelve a leer, tras 21 h</b>' in _r['texto']), (0, 1, True))
+eq('(C) [tcg_27nov_0955_vuelta] …y TCG sale de la marca', _r['marca'], {})
 
-_mi = correr('marca_ilegible')
-eq('(C) [marca_ilegible] 🔴 FALLA EN ABIERTO: se avisa igual', _mi['telegrams'], 1)
-eq('(C) [marca_ilegible] 🔴 y el log dice por que avisa de todas formas',
-   'Se avisa IGUAL' in _mi['salida'], True)
-eq('(C) [marca_ilegible] el run, rojo', _mi['codigo'], 1)
-
-_mne = correr('marca_no_escribible')
-eq('(C) [marca_no_escribible] 🔴 el aviso sale igual', _mne['telegrams'], 1)
-eq('(C) [marca_no_escribible] 🔴 y se avisa de que hoy puede repetirse',
-   'no se pudo guardar la marca' in _mne['salida'], True)
-eq('(C) [marca_no_escribible] el run, rojo', _mne['codigo'], 1)
-
-_tgf = correr('telegram_falla')
-eq('(C) [telegram_falla] 🔴 la marca queda INTACTA: si no sono, no se apunta',
-   _tgf['marca'], {})
-eq('(C) [telegram_falla] 🔴 y el log lo dice', 'la marca queda intacta' in _tgf['salida'], True)
-eq('(C) [telegram_falla] el run, rojo', _tgf['codigo'], 1)
-
-# --- HEO y OSMA en el escaner 2: de punta a punta, con el reloj FIJO -------
+# --- Las «al dia» ---------------------------------------------------------------
 print()
-_AL_DIA = {p: 'al dia' for p in HORARIOS}
+_r = correr('tcg_al_dia_medio')
+eq('(C) 🔴 [tcg_al_dia_medio] una «al dia» (misma huella) en la de las 13:20 cuenta como buena: VERDE',
+   (_r['codigo'], _r['telegrams'], _r['veredicto']['TCG']), (0, 0, 'al dia'))
+eq('(C) [tcg_al_dia_medio] …y la ultima buena que dice el registro es la «al dia» (12:21 UTC)',
+   bool(re.search(r'^  TCG +ultima buena 2026-11-26 12:21 UTC', _r['registro'], re.M)), True)
+_r = correr('tcg_al_dia_otra_huella')
+eq('(C) 🔴 [tcg_al_dia_otra_huella] la misma rechazada con OTRO contenido no cuenta: ROJO',
+   (_r['codigo'], _r['veredicto']['TCG'], _r['telegrams']), (1, 'CADUCADO', 1))
+_r = correr('ocio_al_dia_md5')
+eq('(C) 🔴 [ocio_al_dia_md5] la «al dia» de OcioStock (mismo md5, sin huella) cuenta: VERDE',
+   (_r['codigo'], _r['veredicto']['OCIOSTOCK']), (0, 'al dia'))
+_r = correr('ocio_md5_distinto')
+eq('(C) 🔴 [ocio_md5_distinto] con otro md5, no: ROJO', (_r['codigo'], _r['veredicto']['OCIOSTOCK']), (1, 'CADUCADO'))
 
-_foto = correr('foto_hoy')
-eq('(C) [foto_hoy] 🔴 con la foto de PRODUCCION de hoy, nada en rojo (exit 0)', _foto['codigo'], 0)
-eq('(C) [foto_hoy] 🔴 los cinco al dia, HEO y OSMA incluidos', _foto['veredicto'], _AL_DIA)
-eq('(C) [foto_hoy] cero Telegram', _foto['telegrams'], 0)
-eq('(C) [foto_hoy] y el log dice DE DONDE sale la fecha de los cinco: disp_pasada',
-   [bool(re.search(r'^  %s .*fuente disp_pasada$' % p, _foto['salida'], re.M))
-    for p in ('DBLINE', 'HEO', 'OCIOSTOCK', 'OSMA', 'TCG')], [True] * 5)
-eq('(C) [foto_hoy] 🔴 OCIOSTOCK lee SU pasada aplicada (07:12 UTC), no su rechazada «al dia» (11:12) '
-   'ni la memoria del viejo (07:02)',
-   bool(re.search(r'^  OCIOSTOCK +ultima 2026-10-14 07:12 UTC .*fuente disp_pasada$',
-                  _foto['salida'], re.M)), True)
-eq('(C) [foto_hoy] 🔴 DBLINE (DB6) lee SU pasada aplicada (13:06 UTC), no la memoria del viejo (10-oct)',
-   bool(re.search(r'^  DBLINE +ultima 2026-10-14 13:06 UTC .*fuente disp_pasada$',
-                  _foto['salida'], re.M)), True)
-eq('(C) [foto_hoy] 🔴 TCG (T5c) lee SU pasada aplicada (13:22 UTC), no la memoria del viejo (12:02)',
-   bool(re.search(r'^  TCG +ultima 2026-10-14 13:22 UTC .*fuente disp_pasada$',
-                  _foto['salida'], re.M)), True)
-
-# 🆕 14-oct-2026 (T5c) · TCG en la foto, con el reloj fijo.
-_tn = correr('tcg_noche')
-eq('(C) [tcg_noche] 🔴 el hueco de la noche (martes 17:21 a miercoles 06:00, 12,7 h): VERDE',
-   (_tn['codigo'], _tn['telegrams'], _tn['veredicto']), (0, 0, _AL_DIA))
-_tm = correr('tcg_miercoles_14h')
-eq('(C) [tcg_miercoles_14h] 🔴 TCG con 27,7 h sin aplicada y todo «al dia» desde entonces, entre semana: '
-   'ROJO y SOLO TCG', (_tm['codigo'], _tm['veredicto']), (1, dict(_AL_DIA, TCG='MUDO')))
-eq('(C) [tcg_miercoles_14h] 🔴 un Telegram que dice cuanto lleva, que es del escaner 2 y lo del fin de semana',
-   (_tm['telegrams'], 'lleva 28 h sin escribir' in _tm['texto'], 'disp_pasada' in _tm['texto'],
-    'a TCG, el fin de semana, también vale una «al día»' in _tm['texto']), (1, True, True, True))
-eq('(C) [tcg_miercoles_14h] 🔴 su escaner_memoria FRESCO (señuelo) no lo salva',
-   _tm['marca'], {'TCG': _tm['hoy']})
-_tfd = correr('tcg_finde_al_dia_domingo')
-eq('(C) [tcg_finde_al_dia_domingo] 🔴 el sabado «al dia» cuenta: el domingo a las 06:00, VERDE',
-   (_tfd['codigo'], _tfd['telegrams'], _tfd['veredicto']), (0, 0, _AL_DIA))
-eq('(C) [tcg_finde_al_dia_domingo] …y el log da como ultima la «al dia» del sabado 10:21',
-   bool(re.search(r'^  TCG +ultima 2026-10-17 10:21 UTC ', _tfd['salida'], re.M)), True)
-_tfl = correr('tcg_finde_al_dia_lunes')
-eq('(C) [tcg_finde_al_dia_lunes] 🔴 dos «al dia» el fin de semana: el lunes a las 10:00, VERDE '
-   '(desde el domingo 10:21; las del lunes no cuentan)',
-   (_tfl['codigo'], _tfl['telegrams'], _tfl['veredicto'],
-    bool(re.search(r'^  TCG +ultima 2026-10-18 10:21 UTC ', _tfl['salida'], re.M))),
-   (0, 0, _AL_DIA, True))
-_tfm = correr('tcg_finde_muerto')
-eq('(C) [tcg_finde_muerto] 🔴 nada desde el viernes 17:21: el domingo a las 06:00, ROJO y SOLO TCG',
-   (_tfm['codigo'], _tfm['veredicto'], _tfm['telegrams']), (1, dict(_AL_DIA, TCG='MUDO'), 1))
-_tfo = correr('tcg_finde_otra_huella')
-eq('(C) [tcg_finde_otra_huella] 🔴 una rechazada con otra huella, otra sin huella y una fallida NO son '
-   '«al dia»: ROJO', (_tfo['codigo'], _tfo['veredicto']['TCG']), (1, 'MUDO'))
-
-# 🆕 10-oct-2026 (DB6) · DBLINE en la foto, con el reloj fijo.
-_dbm = correr('dbline_martes_10h')
-eq('(C) [dbline_martes_10h] 🔴 DBLine con 26,9 h y su pasada de hoy «al dia» (rechazada): ROJO y SOLO DBLINE',
-   (_dbm['codigo'], _dbm['veredicto']), (1, dict(_AL_DIA, DBLINE='MUDO')))
-eq('(C) [dbline_martes_10h] 🔴 un Telegram que dice cuanto lleva y que es del escaner 2',
-   (_dbm['telegrams'], 'DBLINE' in _dbm['texto'], 'lleva 27 h sin escribir' in _dbm['texto'],
-    'disp_pasada' in _dbm['texto']), (1, True, True, True))
-eq('(C) [dbline_martes_10h] 🔴 su escaner_memoria FRESCO (señuelo) no lo salva',
-   _dbm['marca'], {'DBLINE': _dbm['hoy']})
-_dbl = correr('dbline_lunes_10h')
-eq('(C) [dbline_lunes_10h] 🔴 del sabado 19:06 al lunes 10:00 (38,9 h; 14,9 sin el domingo): VERDE',
-   (_dbl['codigo'], _dbl['telegrams'], _dbl['veredicto']), (0, 0, _AL_DIA))
-
-_oc9 = correr('ocio_jueves_09h')
-eq('(C) [ocio_jueves_09h] 🔴 OcioStock con 25,8 h y su pasada de hoy «al dia» (rechazada): VERDE',
-   (_oc9['codigo'], _oc9['telegrams'], _oc9['veredicto']), (0, 0, _AL_DIA))
-_oc10 = correr('ocio_jueves_10h')
-eq('(C) [ocio_jueves_10h] 🔴 …a las 10:00 UTC (26,8 h): ROJO y SOLO OCIOSTOCK',
-   (_oc10['codigo'], _oc10['veredicto']), (1, dict(_AL_DIA, OCIOSTOCK='MUDO')))
-eq('(C) [ocio_jueves_10h] 🔴 un Telegram que dice cuanto lleva y que es del escaner 2',
-   (_oc10['telegrams'], 'OCIOSTOCK' in _oc10['texto'], 'lleva 27 h sin escribir' in _oc10['texto'],
-    'disp_pasada' in _oc10['texto']), (1, True, True, True))
-eq('(C) [ocio_jueves_10h] 🔴 la \'rechazada\' de hoy NO cuenta, y su escaner_memoria FRESCO no lo salva',
-   _oc10['marca'], {'OCIOSTOCK': _oc10['hoy']})
-_ocd = correr('ocio_domingo_10h')
-eq('(C) [ocio_domingo_10h] 🔴 OcioStock trabaja el domingo: 26,8 h sin pasada un domingo es ROJO',
-   (_ocd['codigo'], _ocd['veredicto']), (1, dict(_AL_DIA, OCIOSTOCK='MUDO')))
-
-_heo30 = correr('heo_30h_martes')
-eq('(C) [heo_30h_martes] 🔴 HEO con 30 h sin pasada aplicada un martes: ROJO y SOLO HEO',
-   (_heo30['codigo'], _heo30['veredicto']), (1, dict(_AL_DIA, HEO='MUDO')))
-eq('(C) [heo_30h_martes] 🔴 un Telegram, que dice cuanto lleva y de donde sale la fecha',
-   (_heo30['telegrams'], 'HEO' in _heo30['texto'], 'lleva 30 h sin escribir' in _heo30['texto'],
-    'disp_pasada' in _heo30['texto']), (1, True, True, True))
-eq('(C) [heo_30h_martes] 🔴 y su escaner_memoria FRESCO (señuelo) no lo salva',
-   _heo30['marca'], {'HEO': _heo30['hoy']})
-
-_osma_mi = correr('osma_miercoles_10')
-eq('(C) [osma_miercoles_10] 🔴 OSMA sin pasada un miercoles a las 10:00: ROJO y SOLO OSMA',
-   (_osma_mi['codigo'], _osma_mi['veredicto']), (1, dict(_AL_DIA, OSMA='MUDO')))
-eq('(C) [osma_miercoles_10] 🔴 un Telegram a OSMA, y no nombra a HEO',
-   (_osma_mi['telegrams'], 'OSMA' in _osma_mi['texto'], 'HEO' in _osma_mi['texto']),
-   (1, True, False))
-eq('(C) [osma_miercoles_10] 🔴 una pasada \'rechazada\' de hoy NO cuenta como pasada',
-   _osma_mi['veredicto']['OSMA'], 'MUDO')
-
-_osma_sa = correr('osma_sabado')
-eq('(C) [osma_sabado] 🔴 un sabado sin pasada de OSMA: VERDE (exit 0), cero Telegram',
-   (_osma_sa['codigo'], _osma_sa['telegrams'], _osma_sa['veredicto']), (0, 0, _AL_DIA))
-
-_osma_l6 = correr('osma_lunes_06h')
-eq('(C) [osma_lunes_06h] 🔴 el lunes a las 06:00, antes de su pasada: VERDE (el finde no cuenta)',
-   (_osma_l6['codigo'], _osma_l6['veredicto']), (0, _AL_DIA))
-_osma_l10 = correr('osma_lunes_10h')
-eq('(C) [osma_lunes_10h] 🔴 …y el lunes a las 10:00 sin pasada: ROJO, con los DOS numeros',
-   (_osma_l10['codigo'], _osma_l10['veredicto']['OSMA'], _osma_l10['telegrams'],
-    'lleva 77 h sin escribir' in _osma_l10['texto'],
-    'sin contar los sábados y domingos' in _osma_l10['texto']), (1, 'MUDO', 1, True, True))
-
-# --- (R) ROTURAS A MANO: estropear el centinela y ver que el banco se pone rojo
-# 🔴 Un banco que no sabe ponerse rojo no prueba nada. Se estropea una COPIA del
-#    centinela por ESTRUCTURA (con `ast`, no con un replace de texto: el ancla
-#    `'fuente': 'disp_pasada'` sale dos veces) y se corre la foto de hoy.
+# --- Fines de semana -------------------------------------------------------------
 print()
-import tempfile
+for _caso, _esperado in (('osma_domingo', 'al dia'), ('osma_lunes_0755', 'al dia'), ('osma_martes_0755', 'CADUCADO'),
+                         ('dbline_sabado', 'al dia'), ('dbline_domingo', 'al dia'), ('dbline_lunes_0755', 'al dia'),
+                         ('dbline_lunes_0955', 'CADUCADO'), ('heo_domingo_0755', 'al dia')):
+    _prov = _caso.split('_')[0].upper()
+    _r = correr(_caso)
+    eq('(C) 🔴 [%s] %s %s' % (_caso, _prov, 'sin falsa alarma: VERDE' if _esperado == 'al dia'
+                              else 'entre semana, sin sus dos lecturas: ROJO'),
+       (_r['codigo'], _r['veredicto']), (0 if _esperado == 'al dia' else 1, dict(_AL_DIA, **{_prov: _esperado})))
+
+# --- El motivo, solo al Telegram ---------------------------------------------------
+print()
+_r = correr('motivo_secreto')
+eq('(C) 🔴 [motivo_secreto] el motivo llega al Telegram ESCAPADO (va en HTML: un < suelto da un 400)',
+   '«MOTIVO-SECRETO &lt;b&gt;Tom &amp; Jerry&lt;/b&gt; &quot;fila 7&quot;»' in _r['texto'], True)
+eq('(C) 🔴 [motivo_secreto] REPO PUBLICO: y no sale en el registro del run', 'MOTIVO-SECRETO' in _r['registro'], False)
+
+# --- La marca falla en abierto, y Telegram tiene que confirmar ---------------------
+print()
+_r = correr('marca_ilegible')
+eq('(C) 🔴 [marca_ilegible] FALLA EN ABIERTO: se avisa igual, ROJO, y el registro dice por que',
+   (_r['telegrams'], _r['codigo'], 'Se avisa IGUAL' in _r['registro']), (1, 1, True))
+_r = correr('marca_no_escribible')
+eq('(C) 🔴 [marca_no_escribible] el aviso sale igual, y se dice que se repetira',
+   (_r['telegrams'], 'no se pudo guardar la marca' in _r['registro'], _r['marca']), (1, True, None))
+_r = correr('marca_vieja')
+eq('(C) 🔴 [marca_vieja] la marca de antes ({TCG: dia}) no calla el aviso, y se pasa al formato nuevo',
+   (_r['telegrams'], _r['marca']), (1, {'TCG': {'desde': ULTIMA_BUENA_26.isoformat(), 'avisado_en': A_1455.isoformat()}}))
+_r = correr('telegram_falla')
+eq('(C) 🔴 [telegram_falla] si Telegram no contesta, la marca queda INTACTA y el run ROJO',
+   (_r['subidas'], _r['marca'], _r['codigo'], 'la marca queda intacta' in _r['registro']), (0, None, 1, True))
+_r = correr('telegram_400')
+eq('(C) 🔴 [telegram_400] si Telegram contesta 400, tampoco se apunta como avisado',
+   (_r['telegrams'], _r['subidas'], _r['codigo'], 'HTTP 400' in _r['registro']), (1, 0, 1, True))
+_r = correr('ensayo')
+eq('(C) 🔴 [ensayo] lee y lo dice, pero ni Telegram ni marca',
+   (_r['telegrams'], _r['subidas'], _r['codigo'], 'CENTINELA ENSAYO' in _r['registro'],
+    _r['veredicto']['TCG']), (0, 0, 1, True, 'CADUCADO'))
+
+# --- La base ------------------------------------------------------------------------
+print()
+_r = correr('lectura_falla')
+eq('(C) 🔴 [lectura_falla] la base no se lee: ROJO y UN Telegram (el vigilante ciego no calla)',
+   (_r['codigo'], _r['telegrams'], 'no puede leer la base' in _r['texto'], 'SECRETO-DE-LA-BASE' in _r['texto']),
+   (1, 1, True, True))
+eq('(C) 🔴 [lectura_falla] REPO PUBLICO: el registro da el TIPO del error, no su texto',
+   ('RuntimeError' in _r['registro'], 'SECRETO-DE-LA-BASE' in _r['registro']), (True, False))
+_r = correr('lectura_vuelve')
+eq('(C) [lectura_vuelve] cuando vuelve a leer, se dice, y sale de la marca',
+   (_r['codigo'], _r['telegrams'], 'vuelve a leer la base' in _r['texto'], _r['marca']), (0, 1, True, {}))
+_r = correr('sin_horario')
+eq('(C) 🔴 [sin_horario] ningun proveedor con horario: ROJO y Telegram, nunca un verde que no vigila a nadie',
+   (_r['codigo'], _r['telegrams'], 'ningún proveedor con horario' in _r['texto']), (1, 1, True))
+
+# ---------------------------------------------------------------------------
+# (R) Roturas de la regla: una copia estropeada por estructura tiene que cambiar el veredicto
+# ---------------------------------------------------------------------------
+print()
 
 
-def estropeado(cambia):
-    """Copia de centinela_escaner.py con HORARIOS cambiado por `cambia(horarios)`."""
+def estropeado(funcion, cambia):
+    """Copia del vigilante con la funcion `funcion` cambiada por `cambia(nodo)`."""
     arbol = ast.parse(FUENTE, RUTA)
-    for n in arbol.body:
-        if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'HORARIOS'
-                                             for t in n.targets):
-            tabla = ast.literal_eval(n.value)
-            cambia(tabla)
-            n.value = ast.parse(repr(tabla), mode='eval').body
+    hechos = [cambia(n) for n in arbol.body if isinstance(n, ast.FunctionDef) and n.name == funcion]
+    assert hechos == [True], 'la rotura de %s no encontro lo que romper' % funcion
     ruta = os.path.join(tempfile.mkdtemp(), 'centinela_estropeado.py')
     with io.open(ruta, 'w', encoding='utf-8') as f:
         f.write(ast.unparse(ast.fix_missing_locations(arbol)))
     return ruta
 
 
-def _heo_a_memoria(tabla):
-    tabla['HEO']['fuente'] = 'escaner_memoria'
+def _tres_pasadas(fn):
+    """`vencidas[n - 1]` -> `vencidas[n]`: hacen falta tres lecturas perdidas, no dos."""
+    for nodo in ast.walk(fn):
+        if (isinstance(nodo, ast.Subscript) and isinstance(nodo.slice, ast.BinOp)
+                and isinstance(nodo.slice.op, ast.Sub)):
+            nodo.slice = nodo.slice.left
+            return True
+    return False
 
 
-def _osma_a_memoria(tabla):
-    tabla['OSMA']['fuente'] = 'escaner_memoria'
+def _sin_margen(fn):
+    """`t + margen <= ahora` -> `t <= ahora`: una lectura vence en cuanto llega su hora."""
+    for nodo in ast.walk(fn):
+        if (isinstance(nodo, ast.Compare) and isinstance(nodo.left, ast.BinOp)
+                and isinstance(nodo.left.op, ast.Add)):
+            nodo.left = nodo.left.left
+            return True
+    return False
 
 
-def _osma_sin_sabado(tabla):
-    tabla['OSMA']['descansa_sabado'] = False
+def _sin_al_dia(fn):
+    """`es_al_dia` siempre falso: una «al dia» deja de contar."""
+    fn.body = [ast.Return(value=ast.Constant(value=False))]
+    return True
 
 
-_r1 = correr('foto_hoy', ruta=estropeado(_heo_a_memoria))
-eq('(R) 🔴 HEO mirado otra vez en escaner_memoria: la foto de hoy se pone ROJA, y por HEO',
-   (_r1['codigo'], _r1['veredicto']['HEO'], _r1['telegrams']), (1, 'MUDO', 1))
-_r2 = correr('foto_hoy', ruta=estropeado(_osma_a_memoria))
-eq('(R) 🔴 OSMA mirado en escaner_memoria (06-ago): la foto de hoy se pone ROJA, y por OSMA',
-   (_r2['codigo'], _r2['veredicto']['OSMA']), (1, 'MUDO'))
-_r3 = correr('osma_sabado', ruta=estropeado(_osma_sin_sabado))
-eq('(R) 🔴 OSMA sin el descuento del sabado: el sabado de OSMA daria aviso falso (ROJO)',
-   (_r3['codigo'], _r3['veredicto']['OSMA']), (1, 'MUDO'))
-def _ocio_a_memoria(tabla):
-    tabla['OCIOSTOCK']['fuente'] = 'escaner_memoria'
-
-
-def _ocio_descansa_domingo(tabla):
-    tabla['OCIOSTOCK']['descansa_domingo'] = True
-
-
-# 🆕 07-oct-2026 (OC5) · Las roturas de OcioStock, sobre SUS escenarios: en la foto de hoy
-#    las dos fuentes dicen «al dia» y una rotura ahi no se veria (ver el comentario de _FOTO).
-_r5 = correr('ocio_jueves_10h', ruta=estropeado(_ocio_a_memoria))
-eq('(R) 🔴 OCIOSTOCK mirado otra vez en escaner_memoria: el mudo del jueves sale VERDE (el banco lo caza)',
-   (_r5['codigo'], _r5['veredicto']['OCIOSTOCK']), (0, 'al dia'))
-_r6 = correr('ocio_domingo_10h', ruta=estropeado(_ocio_descansa_domingo))
-eq('(R) 🔴 OCIOSTOCK descontando el domingo: el mudo del domingo sale VERDE (el banco lo caza)',
-   (_r6['codigo'], _r6['veredicto']['OCIOSTOCK']), (0, 'al dia'))
-def _dbline_a_memoria(tabla):
-    tabla['DBLINE']['fuente'] = 'escaner_memoria'
-
-
-def _dbline_sin_domingo(tabla):
-    tabla['DBLINE']['descansa_domingo'] = False
-
-
-# 🆕 10-oct-2026 (DB6) · Las roturas de DBLine, sobre SUS escenarios (en la foto de hoy
-#    las dos fuentes dicen «al dia», como las de OcioStock).
-_r7 = correr('dbline_martes_10h', ruta=estropeado(_dbline_a_memoria))
-eq('(R) 🔴 DBLINE mirado otra vez en escaner_memoria: el mudo del martes sale VERDE (el banco lo caza)',
-   (_r7['codigo'], _r7['veredicto']['DBLINE']), (0, 'al dia'))
-_r8 = correr('dbline_lunes_10h', ruta=estropeado(_dbline_sin_domingo))
-eq('(R) 🔴 DBLINE sin descontar el domingo: el lunes daria aviso falso (ROJO, el banco lo caza)',
-   (_r8['codigo'], _r8['veredicto']['DBLINE']), (1, 'MUDO'))
-def _tcg_a_memoria(tabla):
-    tabla['TCG']['fuente'] = 'escaner_memoria'
-
-
-def _tcg_sin_al_dia(tabla):
-    del tabla['TCG']['al_dia_cuenta']
-
-
-def _tcg_al_dia_siempre(tabla):
-    tabla['TCG']['al_dia_cuenta'] = (0, 1, 2, 3, 4, 5, 6)
-
-
-# 🆕 14-oct-2026 (T5c) · Las roturas de TCG, sobre SUS escenarios (en la foto de hoy las dos
-#    fuentes dicen «al dia», como las de OcioStock).
-_r9 = correr('tcg_miercoles_14h', ruta=estropeado(_tcg_a_memoria))
-eq('(R) 🔴 TCG mirado otra vez en escaner_memoria: el mudo del miercoles sale VERDE (el banco lo caza)',
-   (_r9['codigo'], _r9['veredicto']['TCG']), (0, 'al dia'))
-_r10 = correr('tcg_finde_al_dia_lunes', ruta=estropeado(_tcg_sin_al_dia))
-eq('(R) 🔴 TCG sin contar las «al dia» del fin de semana: el lunes daria aviso falso (ROJO, el banco lo caza)',
-   (_r10['codigo'], _r10['veredicto']['TCG']), (1, 'MUDO'))
-_r11 = correr('tcg_miercoles_14h', ruta=estropeado(_tcg_al_dia_siempre))
-eq('(R) 🔴 TCG contando las «al dia» TAMBIEN entre semana: el mudo del miercoles sale VERDE (el banco lo caza)',
-   (_r11['codigo'], _r11['veredicto']['TCG']), (0, 'al dia'))
-_r4 = correr('foto_hoy', ruta=estropeado(lambda t: None))
-eq('(R) …y la copia SIN estropear (control) sale verde: las roturas no son un banco roto',
-   (_r4['codigo'], _r4['veredicto']), (0, _AL_DIA))
+_r = correr('tcg_26nov_1455', ruta=estropeado('plazo', _tres_pasadas))
+eq('(R) 🔴 con TRES lecturas perdidas en vez de dos, el caso real de las 14:55 sale VERDE (el banco lo caza)',
+   (_r['codigo'], _r['veredicto']['TCG']), (0, 'al dia'))
+_r = correr('tcg_26nov_1445', ruta=estropeado('plazo', _sin_margen))
+eq('(R) 🔴 sin el margen, a las 14:45 ya saldria ROJO (el banco lo caza)', (_r['codigo'], _r['veredicto']['TCG']),
+   (1, 'CADUCADO'))
+_r = correr('tcg_al_dia_medio', ruta=estropeado('es_al_dia', _sin_al_dia))
+eq('(R) 🔴 sin contar las «al dia», la de en medio daria un aviso falso (el banco lo caza)',
+   (_r['codigo'], _r['veredicto']['TCG']), (1, 'CADUCADO'))
+_r = correr('tcg_26nov_1455', ruta=estropeado('plazo', lambda fn: True))
+eq('(R) …y la copia SIN estropear (control) da lo mismo que el original: ROJO por TCG',
+   (_r['codigo'], _r['veredicto']), (1, dict(_AL_DIA, TCG='CADUCADO')))
 
 # ---------------------------------------------------------------------------
 print()
 if fallos:
     print('❌ %d FALLOS: %s' % (len(fallos), '; '.join(fallos)))
     sys.exit(1)
-print('✅ TODO OK (el mudo se detecta, el domingo no da falsos avisos, y el freno falla en abierto)')
+print('✅ TODO OK (avisa a las dos lecturas perdidas de su horario, una «al dia» cuenta, el fin de semana no da '
+      'falsas alarmas, y la marca falla en abierto)')
