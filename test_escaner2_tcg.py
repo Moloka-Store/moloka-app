@@ -150,6 +150,11 @@ eq('A19b «Agotado» (TCG, 25-nov-2026): se entiende, no disponible y guardado c
    (lk_ag[0]['disponible'], lk_ag[0]['disponibilidad'], lk_ag[0]['preorder'], c_ag['n_agotados']), (False, 'Agotado', False, 1))
 lanza('A19 estado desconocido: LecturaInvalida', tcg.LecturaInvalida, tcg.convertir,
       excel([fila('8000000000017', estado='Agotadísimo')]))
+lk_va, c_va, _ = tcg.convertir(excel([fila('800000000017C', estado=None, stock=0)]), {}, AHORA)
+eq('A19c estado vacío y stock 0 (TCG, 27-nov-2026): se lee como «Agotado», no disponible',
+   (lk_va[0]['disponible'], lk_va[0]['disponibilidad'], lk_va[0]['preorder'], c_va['n_agotados']), (False, 'Agotado', False, 1))
+lanza('A19d estado vacío CON stock: sigue siendo LecturaInvalida', tcg.LecturaInvalida, tcg.convertir,
+      excel([fila('8000000000017', estado=None, stock=5)]))
 lanza('A20 stock que no es un número: LecturaInvalida', tcg.LecturaInvalida, tcg.convertir,
       excel([fila('8000000000017', stock='muchos')]))
 lanza('A21 un xlsx que no lo es: LecturaInvalida', tcg.LecturaInvalida, tcg.convertir, b'no soy un excel')

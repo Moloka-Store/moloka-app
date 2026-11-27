@@ -25,7 +25,8 @@ mismo que baja el director viejo (login + smcatalog downloadcatalog?format=excel
   3. DISPONIBLE = «Estado producto» Disponible, Oferta o Saldo, Y Stock > 0 (Fernando: solo disponible). PreOrder →
      `preorder` true; Backorder → `disponibilidad` 'En reposición'. Fuera de lo disponible, pero GUARDADOS (como HEO).
      `disponibilidad` lleva la palabra de la web: Disponible, En reposición, Preventa, Oferta, Saldo, Agotado. `en_oferta` =
-     Oferta. Un estado que no es ninguno de los seis → LecturaInvalida (con un estado nuevo no se sabe si se compra).
+     Oferta. Un estado que no es ninguno de los seis → LecturaInvalida (con un estado nuevo no se sabe si se compra);
+     el estado VACÍO con Stock 0 se lee como Agotado (27-nov-2026), y vacío con stock sigue siendo LecturaInvalida.
   4. STOCK: el del Excel tal cual (50 = «50 o más»; Fernando, 13-oct: «No creo que haga falta leer stock»). No se
      guarda: solo decide «disponible». Compra minima: ni se lee ni se enseña («Compr minima fuera tambien»).
   5. PRECIO: `precio_catalogo` = «Precio» del Excel (en una caja C, el de la caja); `precio_unidad` = ese, ÷ 6 en una
@@ -304,6 +305,15 @@ def _convertir(contenido, tramos, ahora, web=None):
             c['n_sin_gtin'] += 1
             continue
         estado = _texto(v('Estado producto'))
+        if estado is None:
+            # (Encargo TV, 27-nov-2026) El Excel del 26-nov trajo una fila sin estado (una caja «Case 5+1», stock 0) y
+            # paró todas las pasadas desde las 16:20, en pleno Black Friday. Sin estado y sin stock no hay duda: no se
+            # compra, como «Agotado». Sin estado CON stock sigue sin entenderse (no se sabe si se compra).
+            try:
+                if numero(v('Stock')) == 0:
+                    estado = 'Agotado'
+            except ValueError:
+                pass
         if estado not in ESTADOS:
             malos['estado'] += 1
             continue
