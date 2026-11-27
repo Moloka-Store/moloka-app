@@ -153,10 +153,42 @@ class _Cliente:
         return _Consulta(self.bd, nombre)
 
 
-def hijo(ruta_estado, programa):
+def lectura_de_mentira(bd, proveedor):
+    """(Encargo PD) La lectura en directo de mentira, en el hijo: `bd['lector']` dice que hace el lector del proveedor
+    (la pasada de disponibilidad de ESTE run es la fila de disp_pasada con su run_id; `pared` hasta el intento N), y
+    `bd['foto_forzada']` sustituye a toda la lectura (la foto que dice, sin mirar nada: para probar el chequeo del
+    barrido). Se apunta cada llamada en bd['lecturas'] y lo de despues en bd['despues']."""
+    if bd.get('mutante_modulo'):
+        antes, despues = bd['mutante_modulo']
+        fuente = open(os.path.join(AQUI, 'escaner2_pro_en_directo.py'), encoding='utf-8').read()
+        if fuente.count(antes) != 1:
+            print('ANCLA_NO_UNICA=%d' % fuente.count(antes))
+            sys.exit(97)
+        mod = types.ModuleType('escaner2_pro_en_directo')
+        mod.__file__ = os.path.join(AQUI, 'escaner2_pro_en_directo.py')
+        sys.modules['escaner2_pro_en_directo'] = mod
+        exec(compile(fuente.replace(antes, despues), mod.__file__, 'exec'), mod.__dict__)
+    import escaner2_pro_en_directo as epd
+    lec = bd.get('lector')
+    if lec is not None:
+        def _lector(sb, env, run_id, intento, guarda):
+            bd.setdefault('lecturas', []).append({'intento': intento, 'guarda': type(guarda).__name__, 'run_id': run_id})
+            if intento < int(lec.get('pared_hasta') or 0):
+                return epd.Lectura(pared=True, siguiente=intento + 1)
+            pid = next((p['id'] for p in bd['tablas']['disp_pasada'] if str(p.get('run_id')) == run_id), None)
+            aplicada = any(p['id'] == pid and p.get('estado') == 'aplicada' for p in bd['tablas']['disp_pasada'])
+            return epd.Lectura(pid=pid, despues=(lambda: bd.setdefault('despues', []).append(pid) is None)
+                               if aplicada else None)
+        epd.LECTORES[proveedor] = _lector
+    if bd.get('foto_forzada'):
+        epd.leer_en_directo = lambda *a, **k: epd.Lectura(foto=bd['foto_forzada'])
+
+
+def hijo(ruta_estado, programa, args=()):
     with open(ruta_estado, encoding='utf-8') as fh:
         bd = json.load(fh)
     bd['programa'] = programa
+    lectura_de_mentira(bd, 'TCG')
     clientes = []
 
     def crear(url, llave):
@@ -166,10 +198,20 @@ def hijo(ruta_estado, programa):
     sys.modules['supabase'] = types.ModuleType('supabase')
     sys.modules['supabase'].create_client = crear
     import runpy
-    sys.argv = [programa]
+    sys.argv = [programa] + list(args)
     codigo = 0
+    ruta_prog = os.path.join(AQUI, programa)
+    if bd.get('mutante_programa'):
+        antes, despues = bd['mutante_programa']
+        fuente = open(ruta_prog, encoding='utf-8').read()
+        if fuente.count(antes) != 1:
+            print('ANCLA_NO_UNICA=%d' % fuente.count(antes))
+            sys.exit(97)
+        ruta_prog = os.path.join(tempfile.mkdtemp(prefix='e2mut_'), programa)
+        with open(ruta_prog, 'w', encoding='utf-8') as fh:
+            fh.write(fuente.replace(antes, despues))
     try:
-        runpy.run_path(os.path.join(AQUI, programa), run_name='__main__')
+        runpy.run_path(ruta_prog, run_name='__main__')
     except SystemExit as ex:
         codigo = ex.code if isinstance(ex.code, int) else (0 if ex.code is None else 1)
     finally:
@@ -180,15 +222,21 @@ def hijo(ruta_estado, programa):
 
 
 if __name__ == '__main__' and len(sys.argv) >= 4 and sys.argv[1] == '--hijo':
-    hijo(sys.argv[2], sys.argv[3])
+    hijo(sys.argv[2], sys.argv[3], sys.argv[4:])
 
 
-def correr(ruta_estado, programa, env_extra):
+SECRETOS_PROV = ('TCG_USER', 'TCG_PASS')
+
+
+def correr(ruta_estado, programa, env_extra, args=(), secretos=True):
+    """(Encargo PD) Con los secretos del proveedor (de mentira) salvo `secretos=False`, y `args` para el programa."""
     env = {k: v for k, v in os.environ.items()
            if k not in ('SUPABASE_SERVICE_KEY', 'PASADA', 'GITHUB_RUN_ID', 'MODO_BARRIDO', 'MARCAS_ELEGIDAS',
-                        'OFERTAS_ELEGIDAS')}
+                        'OFERTAS_ELEGIDAS', 'INTENTO', 'ESCANER2_PASADA', 'GITHUB_OUTPUT') + SECRETOS_PROV}
+    if secretos:
+        env.update({k: 'secreto-de-mentira' for k in SECRETOS_PROV})
     env.update(env_extra, PYTHONIOENCODING='utf-8', SUPABASE_URL='https://doble.invalid')
-    p = subprocess.run([sys.executable, '-u', os.path.abspath(__file__), '--hijo', ruta_estado, programa],
+    p = subprocess.run([sys.executable, '-u', os.path.abspath(__file__), '--hijo', ruta_estado, programa] + list(args),
                        capture_output=True, text=True, encoding='utf-8', errors='replace', env=env, cwd=AQUI)
     return p.returncode, (p.stdout or '') + (p.stderr or '')
 
@@ -481,10 +529,28 @@ def estado_inicial(escena):
     }, 'storage': {'escaner2': {}}}
 
 
+RUN_PD = 818181
+
+
+def en_directo(inicial, run=RUN_PD):
+    """(Encargo PD) El barrido lee al proveedor antes de la foto: con la lectura de mentira (lectura_de_mentira), la
+    pasada de disponibilidad de ESTE run es la aplicada de siempre (DISP), y disp_parametros trae el freno."""
+    for p in inicial['tablas']['disp_pasada']:
+        if p['id'] == DISP:
+            p['run_id'] = run
+    _par = [p for p in inicial['tablas'].setdefault('disp_parametros', []) if p.get('proveedor') == 'TCG']
+    if not _par:
+        _par = [{'proveedor': 'TCG'}]
+        inicial['tablas']['disp_parametros'].append(_par[0])
+    _par[0].update(rechazos_para_aceptar=3, ausencias_para_salir=2, sin_dato_para_agotar=3)
+    inicial['lector'] = {}
+    return inicial
+
+
 def caso(escena, env=None):
     tmp = tempfile.mkdtemp(prefix='e2tcg_')
     ruta = os.path.join(tmp, 'estado.json')
-    inicial = estado_inicial(escena)
+    inicial = en_directo(estado_inicial(escena))
     with open(ruta, 'w', encoding='utf-8') as fh:
         json.dump(inicial, fh)
     cod, log = correr(ruta, 'escaner2_tcg_barrido.py', dict({'SUPABASE_SERVICE_KEY': 'svc-de-mentira',
@@ -670,6 +736,167 @@ _p = bd['tablas']['escaner2_pasada'][0]
 eq('B5 · 🔴 [lineas] las líneas del Excel no son artículos + sin EAN + repetidos: ROJO, fallida y SIN foto',
    (cod, _p['estado'], 'no cuadra' in (_p['motivo_fallo'] or ''), bd['tablas'].get('escaner2_foto', [])),
    (1, 'fallida', True, []))
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# B6 · 🆕 (ENCARGO PD, 27-nov-2026) EN DIRECTO: el barrido sale SOLO de la lectura de ESTE run
+# ═══════════════════════════════════════════════════════════════════════════════
+print('B6 · EN DIRECTO: el barrido sale SOLO de la lectura de ESTE run, y nunca de la guardada')
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz  # noqa: E402
+_PD_PROV, _PD_NOMBRE, _PD_PROG, _PD_DISP, _PD_OTRA = 'TCG', 'TCG', 'escaner2_tcg_barrido.py', DISP, OTRA
+_PD_COLA = 'no se valora con la lectura del 14-10-2026 a las 09:21'
+
+
+def caso_pd(fila_run=None, lector=None, env=None, args=(), quitar_run=True, extra=(), secretos=True, ruta=None,
+            mutante_modulo=None, mutante_programa=None, foto_forzada=None):
+    """Un barrido con la lectura de mentira. `fila_run`: la pasada de disponibilidad de ESTE run (DISP deja de serlo
+    con `quitar_run`); `extra`: mas filas de disp_pasada. Con `ruta`, sigue sobre ese estado (otro job del run)."""
+    if ruta is None:
+        tmp = tempfile.mkdtemp(prefix='e2pd_')
+        ruta = os.path.join(tmp, 'estado.json')
+        ini = en_directo(estado_inicial('marcas'))
+        if quitar_run:
+            for p in ini['tablas']['disp_pasada']:
+                if p['id'] == _PD_DISP:
+                    p.pop('run_id', None)
+        for f in ([dict({'proveedor': _PD_PROV, 'run_id': RUN_PD}, **fila_run)] if fila_run else []) + list(extra):
+            ini['tablas']['disp_pasada'].append(dict({'proveedor': _PD_PROV}, **f))
+        if lector is not None:
+            ini['lector'] = lector
+    else:
+        ini = json.load(open(ruta, encoding='utf-8'))
+        ini.pop('programa', None)
+    for k, v in (('mutante_modulo', mutante_modulo), ('mutante_programa', mutante_programa),
+                 ('foto_forzada', foto_forzada)):
+        ini.pop(k, None)
+        if v:
+            ini[k] = v
+    with open(ruta, 'w', encoding='utf-8') as fh:
+        json.dump(ini, fh, default=str)
+    salida = ruta + '.salida'
+    open(salida, 'w').close()
+    cod, log = correr(ruta, _PD_PROG, dict({'SUPABASE_SERVICE_KEY': 'svc-de-mentira', 'GITHUB_RUN_ID': str(RUN_PD),
+                                            'GITHUB_OUTPUT': salida}, **(env or {})), args, secretos)
+    bd = json.load(open(ruta, encoding='utf-8'))
+    salidas = dict(x.split('=', 1) for x in open(salida, encoding='utf-8').read().split('\n') if '=' in x)
+    pas = [p for p in bd['tablas']['escaner2_pasada'] if str(p.get('run_id')) == str(RUN_PD)]
+    return cod, log, bd, salidas, pas, ruta
+
+
+def sin_foto(bd):
+    return not bd['tablas'].get('escaner2_foto')
+
+
+_AL_DIA = 'al día: el contenido es el mismo que el de la pasada aplicada %s; nada nuevo' % _PD_DISP
+_DESPUES = '2026-12-01T09:20:00Z'   # la pasada de este run, despues de DISP
+_ESCENAS = {
+    'fallida': dict(fila_run={'id': 'pd-fallida', 'estado': 'fallida', 'creada_en': _DESPUES,
+                              'motivo': 'la web no deja: respondió 403'}),
+    'vaciado': dict(fila_run={'id': 'pd-vaciado', 'estado': 'rechazada_vaciado', 'creada_en': _DESPUES,
+                              'motivo': 'vaciado: disponibles 10 por debajo del 90 % de la última aplicada (900)'}),
+    'otra_rechazada': dict(fila_run={'id': 'pd-cortada', 'estado': 'rechazada', 'creada_en': _DESPUES,
+                                     'motivo': 'descarga cortada: el proveedor dice que tiene 900 y se bajaron 10'}),
+    'al_dia_de_otra': dict(fila_run={'id': 'pd-al-dia-otra', 'estado': 'rechazada', 'creada_en': _DESPUES,
+                                     'motivo': 'al día: el contenido es el mismo que el de la pasada aplicada %s; nada'
+                                               % _PD_OTRA}),
+    'sin_lectura': dict(),
+    'aplicada_y_otra_despues': dict(quitar_run=False, extra=[{'id': 'pd-posterior', 'estado': 'aplicada',
+                                                             'creada_en': _DESPUES}]),
+    'freno': dict(quitar_run=False, extra=[{'id': 'pd-v%d' % i, 'estado': 'rechazada_vaciado',
+                                         'creada_en': '2026-12-01T0%d:00:00Z' % i} for i in (1, 2, 3)]),
+    'turno': dict(quitar_run=False, extra=[{'id': 'pd-leyendo', 'estado': 'leyendo', 'run_id': 1,
+                                         'creada_en': (_dt.now(_tz.utc) - _td(minutes=10)).isoformat()}]),
+}
+_POR_QUE = {'fallida': 'fallida: la web no deja: respondió 403', 'vaciado': 'rechazada_vaciado: vaciado',
+            'otra_rechazada': 'rechazada: descarga cortada', 'al_dia_de_otra': 'no es la que nombra',
+            'sin_lectura': 'la lectura no llegó a abrir su pasada', 'aplicada_y_otra_despues': 'se ha aplicado otra',
+            'freno': 'lleva 3 lecturas rechazadas por vaciado', 'turno': 'está en marcha desde'}
+_LEE = {'freno': 0, 'turno': 0}
+for _esc, _kw in _ESCENAS.items():
+    cod, log, bd, _sal, _p, _r = caso_pd(**_kw)
+    _m = (_p[0].get('motivo_fallo') or '') if _p else ''
+    eq('B6 · 🔴 [%s] ROJO, la pasada fallida con «no he podido leer a %s ahora (…)» y su porqué, y SIN foto'
+       % (_esc, _PD_NOMBRE),
+       (cod, len(_p), _p[0]['estado'] if _p else None, _m.startswith('no he podido leer a %s ahora (' % _PD_NOMBRE),
+        _POR_QUE[_esc] in _m, sin_foto(bd), len(bd.get('lecturas', []))),
+       (1, 1, 'fallida', True, True, True, _LEE.get(_esc, 1)))
+    if _esc == 'fallida':
+        eq('B6 · [fallida] el motivo dice con qué lectura NO se valora (la guardada, en hora de Madrid)',
+           _m.endswith(_PD_COLA), True)
+        eq('B6 · [fallida] la lectura se pidió UNA vez, intento 1, con la guarda del PRO',
+           bd.get('lecturas'), [{'intento': 1, 'guarda': 'GuardaPro', 'run_id': str(RUN_PD)}])
+cod, log, bd, _sal, _p, _r = caso_pd(secretos=False)
+eq('B6 · 🔴 [sin secretos] ROJO, fallida «faltan los secretos …» y sin leer ni foto',
+   (cod, _p[0]['estado'], 'faltan los secretos' in (_p[0].get('motivo_fallo') or ''), bd.get('lecturas'), sin_foto(bd)),
+   (1, 'fallida', True, None, True))
+cod, log, bd, _sal, _p, _r = caso_pd(fila_run={'id': 'pd-al-dia', 'estado': 'rechazada', 'motivo': _AL_DIA,
+                                               'creada_en': _DESPUES}, lector={})
+_side = json.loads(base64.b64decode(bd['storage']['escaner2'][[k for k in bd['storage']['escaner2']
+                                                                if k.endswith('barrido.json')][0]]).decode('utf-8'))
+eq('B6 · [al día] VERDE: la lectura de ahora confirma la foto aplicada y el barrido sale de ella (sin lo de después)',
+   (cod, _p[0]['estado'], _side['disp_pasada'], bd.get('despues')), (0, 'esperando_csv', _PD_DISP, None))
+cod, log, bd, _sal, _p, _r = caso_pd(quitar_run=False, lector={})
+eq('B6 · [aplicada] VERDE, de la pasada de este run, y lo de después de aplicar (novedades…) se hace, al final',
+   (cod, _p[0]['estado'], bd.get('despues'), log.index('PASADA LISTA') < log.index('TRAS LA LECTURA')),
+   (0, 'esperando_csv', [_PD_DISP], True))
+# --abrir y la pasada que retoma el job siguiente del MISMO run
+cod, log, bd, _sal, _p, _r = caso_pd(quitar_run=False, lector={}, args=['--abrir'])
+eq('B6 · [abrir] VERDE: abre la pasada (descargando), deja su id en GITHUB_OUTPUT y NO lee',
+   (cod, [x['estado'] for x in _p], _sal.get('pasada') == (_p[0]['id'] if _p else None), bd.get('lecturas')),
+   (0, ['descargando'], True, None))
+_abierta = _p[0]['id']
+cod, log, bd, _sal, _p, _r = caso_pd(ruta=_r, env={'ESCANER2_PASADA': _abierta})
+eq('B6 · [retoma] el job de la lectura retoma ESA pasada: una sola fila, lista',
+   (cod, [(x['id'], x['estado']) for x in _p]), (0, [(_abierta, 'esperando_csv')]))
+_ini = json.load(open(_r, encoding='utf-8'))
+for _x in _ini['tablas']['escaner2_pasada']:
+    _x.update(estado='descargando', run_id=4)
+json.dump(_ini, open(_r, 'w', encoding='utf-8'))
+cod, log, bd, _sal, _p, _r = caso_pd(ruta=_r, env={'ESCANER2_PASADA': _abierta})
+eq('B6 · 🔴 [retoma ajena] una pasada de OTRO run: ROJO, sin abrir otra ni leer',
+   (cod, 'ESCANER2_NO_EJECUTADO' in log, _p, len(bd.get('lecturas', []))), (1, True, [], 1))
+cod, log, bd, _sal, _p, _r = caso_pd(quitar_run=False, lector={}, foto_forzada=_PD_OTRA)
+eq('B6 · 🔴 [foto forzada] si la lectura diera otra foto que la última aplicada, el barrido no la usa: ROJO y fallida',
+   (cod, _p[0]['estado'], 'no es la de la lectura de ahora' in (_p[0].get('motivo_fallo') or ''), sin_foto(bd)),
+   (1, 'fallida', True, True))
+
+# La pagina anti-robots: la pasada sigue «descargando» y la retoma el job del intento 2, en otra maquina, del MISMO run
+cod, log, bd, _sal, _p, _r = caso_pd(quitar_run=False, lector={'pared_hasta': 2})
+eq('B6 · [pared] intento 1: VERDE, la pasada SIGUE descargando y GITHUB_OUTPUT pide el 2 con ESA pasada, sin foto',
+   (cod, [x['estado'] for x in _p], _sal.get('pared'), _sal.get('siguiente'), _sal.get('pasada') == _p[0]['id'],
+    sin_foto(bd)), (0, ['descargando'], '1', '2', True, True))
+_abierta = _p[0]['id']
+cod, log, bd, _sal, _p, _r = caso_pd(ruta=_r, env={'ESCANER2_PASADA': _abierta, 'INTENTO': '2'})
+eq('B6 · [pared] intento 2, en otra máquina: retoma la MISMA pasada y sale de la lectura de ahora',
+   (cod, [(x['id'], x['estado']) for x in _p], [x['intento'] for x in bd['lecturas']], _sal.get('pared')),
+   (0, [(_abierta, 'esperando_csv')], [1, 2], None))
+cod, log, bd, _sal, _p, _r = caso_pd(quitar_run=False, lector={}, env={'INTENTO': '4'})
+eq('B6 · INTENTO fuera de 1 a 3: ROJO y sin abrir nada', (cod, _p), (1, []))
+
+# 🔴 LA MITAD ROJA: quitar la comprobacion (volver a «la ultima aplicada») tiene que poner el banco en ROJO.
+_MUTANTES = [
+    ('modulo', 'sin leer: la última aplicada, como antes',
+     "        lectura = leer_en_directo(sb, proveedor, env, env.get('GITHUB_RUN_ID') or '', intento, lectores)\n",
+     "        lectura = Lectura(foto=_ultima_aplicada(sb, proveedor)['id'])\n", 'fallida'),
+    ('modulo', 'decidir da la última aplicada pase lo que pase',
+     "    if not pid:\n        return None, 'la lectura no llegó a abrir su pasada'\n",
+     "    return _ultima_aplicada(sb, proveedor)['id'], None\n", 'otra_rechazada'),
+    ('modulo', 'sin el freno', "    if n >= k:\n", "    if False:\n", 'freno'),
+    ('modulo', 'sin mirar los secretos', "    if falta:\n        return Lectura(", "    if False:\n        return Lectura(",
+     'sin_secretos'),
+    ('programa', 'sin la comprobación de la foto del barrido', "    if ult['id'] != foto:\n", "    if False:\n",
+     'foto_forzada'),
+]
+for _donde, _nombre, _antes, _despues, _esc in _MUTANTES:
+    _kw = dict(_ESCENAS.get(_esc, {}))
+    if _esc == 'sin_secretos':
+        _kw = dict(quitar_run=False, secretos=False)
+    if _esc == 'foto_forzada':
+        _kw = dict(quitar_run=False, lector={}, foto_forzada=_PD_OTRA)
+    _kw['mutante_modulo' if _donde == 'modulo' else 'mutante_programa'] = (_antes, _despues)
+    cod, log, bd, _sal, _p, _r = caso_pd(**_kw)
+    _verde = cod == 0 and _p and _p[0]['estado'] == 'esperando_csv' and not sin_foto(bd)
+    eq('B6 · 🔴 mutante «%s»: el ancla es única y el barrido SALE con foto (el banco lo ve)' % _nombre,
+       ('ANCLA_NO_UNICA' in log, bool(_verde)), (False, True))
 
 print()
 if fallos:

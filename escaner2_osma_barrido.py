@@ -6,6 +6,14 @@ Lo lanza el boton «Barrer OSMA» de la v2 (Escaneo PRO · pestaña OSMA) por el
 No entra en la web de OSMA: trabaja sobre la DESCARGA DIARIA que ya esta en la base (escaner2_osma_disponibilidad.py,
 cada dia a las 07:15, encargo AE). Cero Keepa, cero Amazon.
 
+🆕 EN DIRECTO (encargo PD, 27-nov-2026; Fernando: «El PRO tiene que ser en directo»). Lo de arriba de que no entra en la
+web ni baja el fichero YA NO VALE: antes del paso 2, `escaner2_pro_en_directo.leer_en_directo` corre la lectura de OSMA
+de AHORA, la MISMA pasada que la horaria (escaner2_osma_disponibilidad.py, con sus guardas y disp_aplicar_pasada). Solo se sigue si
+esa pasada de ESTE run queda 'aplicada' o «al día», y el paso 2 exige que la ultima aplicada sea la suya; si no, la
+pasada queda 'fallida' con el motivo y sin foto. Lo que la horaria hace tras aplicar (la copia del Excel y las fechas de vuelta) se hace al final, con la
+pasada ya cerrada. Con `--abrir` (el job `abrir` del workflow) solo abre la pasada y deja su id en GITHUB_OUTPUT; sin
+argumentos, retoma esa (ESCANER2_PASADA). Lo que escribe de mas, lo escribe esa lectura (disp_*), no este programa.
+
 QUE HACE, EN ORDEN:
   1. abre una pasada en `escaner2_pasada` (proveedor OSMA, modo 'todas', estado 'descargando') con el id del run;
   2. lee la ULTIMA pasada APLICADA de OSMA en `disp_pasada` y sus articulos en `disp_estado` (los vistos en ella,
