@@ -1294,11 +1294,14 @@ def imprimir_discreto(*a, **_k):
 
 
 def novedades_tras_la_pasada(sb, pasada, proveedor, keepa_llave=None, imprimir=print, run_id=None, http=None,
-                             dormir=time.sleep, ahora=_ahora, env=None, post=None):
+                             dormir=time.sleep, ahora=_ahora, env=None, post=None, valorar=True):
     """LAS NOVEDADES DE UNA PASADA YA APLICADA (encargo OC4), en dos pasos aparte, como la foto de HEO: la seleccion
     (`nov_seleccionar_pasada`, en la base) y la valoracion (`valorar_pasada`). NUNCA LANZA: la pasada sigue aplicada.
     Si la seleccion falla, se apunta en nov_pasada ('fallida', con su motivo; si la pasada ya tenia fila no se toca) y
-    no se valora. Devuelve (ok, lo que devolvio la seleccion o None): ok=False -> el run en rojo al final."""
+    no se valora. Devuelve (ok, lo que devolvio la seleccion o None): ok=False -> el run en rojo al final.
+    (Encargo TO, 27-nov-2026) `valorar=False`: SOLO la seleccion (la lectura de TCG desde la maquina de la oficina, que no
+    tiene la llave de Keepa ni la de Telegram): la pasada queda con su fila en nov_pasada y `valoracion_estado` vacio, que
+    es lo que busca escaner2_tcg_valorar.py para valorarla."""
     try:
         seleccion = sb.rpc('nov_seleccionar_pasada', {'p_pasada': pasada}).execute().data
         imprimir('>>> NOVEDADES DE %s (%s): %s' % (marcas_de(proveedor).upper(), proveedor, seleccion), flush=True)
@@ -1315,6 +1318,8 @@ def novedades_tras_la_pasada(sb, pasada, proveedor, keepa_llave=None, imprimir=p
             imprimir('NOVEDADES_FALLO_SIN_APUNTAR: tampoco se ha podido apuntar en nov_pasada: %s: %s'
                      % (type(ex2).__name__, str(ex2)[:500]), flush=True)
         return False, None
+    if not valorar:
+        return True, seleccion
     ok, _res = valorar_pasada(sb, pasada, keepa_llave=keepa_llave, http=http, dormir=dormir, ahora=ahora, imprimir=imprimir,
                               run_id=run_id, novedades_pasada=novedades_a_valorar(seleccion), env=env, post=post,
                               proveedor=proveedor)

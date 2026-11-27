@@ -518,6 +518,13 @@ jobs:
       - name: 25 septendecies quindecies) test_escaner2_tcg_pro.py
         run: python -u test_escaner2_tcg_pro.py
 
+      # (Encargo TO, 27-nov-2026) La valoracion de las novedades de TCG y los avisos de la lectura desde el ordenador de la
+      # oficina (escaner2_tcg_valorar.py y escaner2-tcg-valorar.yml): todo lo pendiente (seleccion hecha, valoracion sin
+      # cerrar) de la mas vieja a la mas nueva, la que se quedo sin encargo la recoge la siguiente, los avisos con el motivo
+      # de la base, las guardas, el registro limpio y el workflow por estructura. Sin red, sin secretos y sin base.
+      - name: 25 septendecies sexdecies) test_escaner2_tcg_valorar.py
+        run: python -u test_escaner2_tcg_valorar.py
+
       # (Encadenado de Keepa, 1-oct-2026) El job `encadenar` de procesar-keepa-escaparate.yml: el titulo de la
       # corrida igual en el YAML y en el codigo; el job por estructura (tras `procesar`, solo en aplicar, exito o
       # fallo, continue-on-error, actions: write solo en el); la decision con el buzon, las cargas y las corridas
@@ -646,6 +653,7 @@ jobs:
             test_escaner2_tcg.py
             test_escaner2_tcg_disponibilidad.py
             test_escaner2_tcg_pro.py
+            test_escaner2_tcg_valorar.py
             test_encadenar_keepa.py
             test_keepa_cabeceras.py
             test_escaner2_factura.py
