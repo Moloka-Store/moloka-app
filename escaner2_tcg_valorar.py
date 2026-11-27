@@ -14,7 +14,7 @@ Lo demas lo encarga aqui:
     TCG_VALORACION_NO_ENCARGADA) o porque una corrida de este workflow fallo. Asi ninguna novedad seleccionada se queda
     sin valorar en silencio: el hueco esta en la base (valoracion_estado vacio) y lo cierra la corrida siguiente.
     Las que no son la de PASADA, solo si llevan mas de PENDIENTE_MIN_S sin cerrar: la horaria del fin de semana y el
-    Escaneo PRO valoran las suyas en el acto, segundos despues de seleccionarlas, y no hay que pisarlas.
+    Escaneo PRO valoran las suyas en el acto, justo despues de seleccionarlas (hasta 227 s medidos), y no hay que pisarlas.
   · AVISO=parada · ademas, el Telegram de una pasada que se ha parado porque la web de TCG no deja (el motivo lo lee de
     disp_pasada, que es privada), como el de la horaria.
   · AVISO=tramos · ademas, el Telegram del lector de tramos parado. El detalle queda en el registro de la corrida de la v2.
@@ -35,9 +35,10 @@ from datetime import datetime, timedelta, timezone
 
 PROVEEDOR = 'TCG'
 AVISOS = ('valorar', 'parada', 'tramos')
-# 2 min: la horaria del fin de semana y el PRO valoran su pasada en el mismo proceso, segundos despues de la seleccion;
-# una pendiente de mas de 2 min ya no la va a cerrar nadie mas.
-PENDIENTE_MIN_S = 120
+# 15 min: la horaria del fin de semana y el PRO valoran su pasada en el mismo proceso, justo despues de la seleccion. Medido el
+# 27-nov-2026 en nov_pasada de TCG (30 dias, 218 valoradas): de la seleccion al cierre de la valoracion, mediana 1,5 s, p99 84 s
+# y maximo 227 s. Con 15 min no se pisa ninguna en marcha, y lo atrasado se recoge igual: la siguiente corrida es en una hora.
+PENDIENTE_MIN_S = 900
 _RE_UUID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
 
 

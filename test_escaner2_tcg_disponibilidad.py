@@ -1156,14 +1156,17 @@ ENV_OFICINA = {'MAQUINA': 'oficina', 'DISPARO_GH_TOKEN': TOKEN_DISPARO, 'GITHUB_
 class GitHub:
     """La API de GitHub de mentira: la edad de la corrida (GET) y los encargos a la v1 (POST)."""
 
-    def __init__(self, hace_min=1, codigo_run=200, codigo_encargo=204, falla_encargo=False):
+    def __init__(self, hace_min=1, codigo_run=200, codigo_encargo=204, falla_encargo=False, arranco_hace_min=None):
         self.hace_min, self.codigo_run, self.codigo_encargo, self.falla_encargo = hace_min, codigo_run, codigo_encargo, falla_encargo
+        # run_started_at: el del intento (en un relanzamiento, posterior a created_at); por defecto, el mismo (medido).
+        self.arranco_hace_min = hace_min if arranco_hace_min is None else arranco_hace_min
         self.gets, self.encargos = [], []
 
     def pedir(self, url, headers=None, timeout=None):
         self.gets.append((url, (headers or {}).get('Authorization')))
         creada = (datetime.now(timezone.utc) - timedelta(minutes=self.hace_min)).isoformat().replace('+00:00', 'Z')
-        return types.SimpleNamespace(status_code=self.codigo_run, json=lambda: {'created_at': creada, 'run_started_at': creada})
+        arranco = (datetime.now(timezone.utc) - timedelta(minutes=self.arranco_hace_min)).isoformat().replace('+00:00', 'Z')
+        return types.SimpleNamespace(status_code=self.codigo_run, json=lambda: {'created_at': creada, 'run_started_at': arranco})
 
     def post(self, url, json=None, headers=None, timeout=None):
         self.encargos.append({'url': url, 'cuerpo': json, 'auth': (headers or {}).get('Authorization')})
@@ -1241,6 +1244,14 @@ for hace, lee in ((prog.EDAD_MAXIMA_MIN + 1, False), (prog.EDAD_MAXIMA_MIN - 1, 
     eq('TO11 corrida pedida hace %d min (umbral %d): %s' % (hace, prog.EDAD_MAXIMA_MIN, 'lee' if lee else 'VERDE sin leer'),
        (codigo, bool(base.pasadas()), bool(web.pedidas), 'TCG_CORRIDA_VIEJA' in reg), (0, lee, lee, not lee))
 eq('TO12 el umbral es el margen del horario de TCG (30 min)', prog.EDAD_MAXIMA_MIN, 30)
+base, web = Base(), Web(catalogo(), FICHAS)
+codigo, reg = correr_oficina(base, web, GitHub(hace_min=180, arranco_hace_min=1))
+eq('TO12b un relanzamiento a mano de una corrida de hace 3 h (run_started_at de hace 1 min): cuenta el relanzamiento, lee',
+   (codigo, [p['estado'] for p in base.pasadas()], 'TCG_CORRIDA_VIEJA' in reg), (0, ['aplicada'], False))
+base, web = Base(), Web(catalogo(), FICHAS)
+codigo, reg = correr_oficina(base, web, GitHub(hace_min=45, arranco_hace_min=45))
+eq('TO12c pedida hace 45 min y en cola desde entonces (run_started_at = created_at, como se midió): VERDE sin leer',
+   (codigo, base.pasadas(), 'TCG_CORRIDA_VIEJA' in reg), (0, [], True))
 for nombre, g in (('la API da 500', GitHub(codigo_run=500)), ('sin token del run', None)):
     base, web = Base(), Web(catalogo(), FICHAS)
     if g is None:

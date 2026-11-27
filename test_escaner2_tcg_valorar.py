@@ -7,7 +7,7 @@ escaner2_novedades.valorar_pasada, tiene su banco en test_escaner2_novedades.py)
 
 QUE PRUEBA:
   (A) valora TODAS las pasadas de TCG con la seleccion hecha y la valoracion sin cerrar, de la mas vieja a la mas nueva: la
-      encargada siempre (aunque sea de hace un segundo) y las demas solo si llevan mas de PENDIENTE_MIN_S; ni las ya
+      encargada siempre (aunque sea de hace un segundo) y las demas solo si llevan mas de PENDIENTE_MIN_S (15 min); ni las ya
       valoradas, ni las de seleccion fallida, ni las de otro proveedor; cada una con su cifra de novedades para la
       avalancha (novedades menos subidas fuera) y la llave de Keepa;
   (B) 🔴 NINGUNA SE QUEDA SIN VALORAR EN SILENCIO: una pasada cuyo encargo no llego (selección hecha, valoracion vacia) la
@@ -141,13 +141,13 @@ def limpio(nombre, registro):
 # ── (A) Qué se valora ─────────────────────────────────────────────────────────────────────
 base = Base(nov=[nov(P[1], 3600, novedades=5, subidas=2),                 # se quedó atrás hace 1 h
                  nov(P[2], 30),                                           # la encargada, de hace 30 s
-                 nov(P[3], 60),                                           # otra de hace 1 min: la está valorando su dueño
+                 nov(P[3], 300),                                          # otra de hace 5 min: la puede estar valorando su dueño
                  nov(P[4], 7200, valoracion='hecha'),                     # ya valorada
                  nov(P[5], 7200, estado='fallida'),                       # la selección falló: no hay nada que valorar
                  nov(P[6], 7200, proveedor='DBLINE')])                    # de otro proveedor
 telegramas.clear()
 codigo, reg, val = correr(base, env={'AVISO': 'valorar', 'PASADA': P[2]})
-eq('A1 valora la que se quedó atrás y la encargada, de la más vieja a la más nueva; ni la de hace 1 min (su dueño), ni '
+eq('A1 valora la que se quedó atrás y la encargada, de la más vieja a la más nueva; ni la de hace 5 min (su dueño), ni '
    'las valoradas, ni las de selección fallida, ni las de otro proveedor', [c[0] for c in val.llamadas], [P[1], P[2]])
 eq('A2 …cada una con sus novedades para la avalancha (novedades − subidas fuera), la llave de Keepa, TCG y el run',
    [(c[1], c[2], c[3], c[4]) for c in val.llamadas],
@@ -155,10 +155,10 @@ eq('A2 …cada una con sus novedades para la avalancha (novedades − subidas fu
 eq('A3 …VERDE, sin Telegram propio, y el registro lo cuenta',
    (codigo, len(telegramas), 'pendientes 2 (la encargada sí está entre ellas) · bien 2 · en ROJO 0' in reg), (0, 0, True))
 limpio('A4', reg)
-eq('A5 el umbral de las ajenas son 2 min', prog.PENDIENTE_MIN_S, 120)
+eq('A5 el umbral de las ajenas son 15 min (la valoración en el acto de TCG tarda hasta 227 s medidos)', prog.PENDIENTE_MIN_S, 900)
 base = Base(nov=[nov(P[3], prog.PENDIENTE_MIN_S + 1), nov(P[4], prog.PENDIENTE_MIN_S - 1)])
 codigo, reg, val = correr(base)
-eq('A6 sin pasada (a mano): solo lo pendiente de más de 2 min', [c[0] for c in val.llamadas], [P[3]])
+eq('A6 sin pasada (a mano): solo lo pendiente de más de 15 min', [c[0] for c in val.llamadas], [P[3]])
 base = Base(nov=[nov(P[2], 7200, valoracion='hecha')])
 codigo, reg, val = correr(base, env={'PASADA': P[2]})
 eq('A7 la encargada ya valorada (un relanzamiento): no se repite, VERDE y lo dice',

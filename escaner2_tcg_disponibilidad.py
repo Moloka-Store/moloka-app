@@ -129,9 +129,12 @@ HORA_LISTADO = 9  # Madrid, de lunes a viernes: la pasada de las 09:00
 #     (escaner2-tcg-valorar.yml, con esas llaves), encargados con un workflow_dispatch (DISPARO_GH_TOKEN). Si el encargo no
 #     llega, la pasada queda en nov_pasada con `valoracion_estado` vacio y la valora la siguiente corrida de ese workflow.
 MAQUINA_OFICINA = 'oficina'
-# 30 min = disp_parametros.horario_margen_min de TCG. Una lectura que arranca con mas retraso que ese sobre su hora la base ya
-# la da por perdida, y la siguiente prevista esta a menos de 30 min (son cada hora a las y 20): leer ahora solo sumaria otra
-# entrada en la web. Asi, al encender el equipo con una corrida en cola de la tarde anterior, no se lee nada atrasado.
+# 30 min = disp_parametros.horario_margen_min de TCG: la base da cada lectura prevista por vencida 30 min despues de su hora
+# (disp_frescura_en). Una corrida que arranca mas tarde ya no es la de su hora, y la siguiente prevista esta a menos de 30 min
+# (son cada hora a las y 20): leer ahora solo sumaria otra entrada en la web. Saltarla no hace saltar el aviso, que pide DOS
+# previstas vencidas sin ninguna pasada aplicada desde entonces. Asi, al encender el equipo con corridas en cola de la tarde
+# anterior, no se lee nada atrasado. La edad se cuenta desde que se pidio la corrida, cola incluida: medido el 27-nov-2026 en
+# una corrida que espero 450 s en cola, run_started_at = created_at (en un relanzamiento, run_started_at es el del relanzamiento).
 EDAD_MAXIMA_MIN = 30
 # 10 min: la pasada de TCG (de abrirse a quedar terminada) tarda 92 s de mediana y 513 s el p90 (aplicadas y «al día» de los
 # ultimos 30 dias, medido el 27-nov-2026). Se mira la base cada 15 s.
