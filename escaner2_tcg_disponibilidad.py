@@ -632,7 +632,7 @@ def edad_de_la_corrida(env, pedir=None, ahora=_ahora):
             return None, None
         servidor = parsedate_to_datetime(fecha)   # una fecha que no se entiende lanza: (None, None), abajo
         return (servidor - max(momentos)).total_seconds() / 60, (local - servidor).total_seconds() / 60
-    except Exception:  # noqa: BLE001 — sin saberlo, se lee (una lectura de mas no rompe nada)
+    except Exception:  # noqa: BLE001 — sin saberlo, quien llama (principal) sale en ROJO sin leer: TCG_SIN_EDAD
         return None, None
 
 
