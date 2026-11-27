@@ -1157,17 +1157,22 @@ ENV_OFICINA = {'MAQUINA': 'oficina', 'GITHUB_TOKEN': TOKEN_RUN, 'GITHUB_REPOSITO
 class GitHub:
     """La API de GitHub de mentira: la edad de la corrida (GET), lo unico que la oficina le pregunta."""
 
-    def __init__(self, hace_min=1, codigo_run=200, arranco_hace_min=None):
+    def __init__(self, hace_min=1, codigo_run=200, arranco_hace_min=None, desfase_min=0, sin_hora=False):
         self.hace_min, self.codigo_run = hace_min, codigo_run
+        # El reloj de ESTE equipo va `desfase_min` adelantado respecto a GitHub; las horas de la corrida son de GitHub.
+        self.desfase_min, self.sin_hora = desfase_min, sin_hora
         # run_started_at: el del intento (en un relanzamiento, posterior a created_at); por defecto, el mismo (medido).
         self.arranco_hace_min = hace_min if arranco_hace_min is None else arranco_hace_min
         self.gets = []
 
     def pedir(self, url, headers=None, timeout=None):
         self.gets.append((url, (headers or {}).get('Authorization')))
-        creada = (datetime.now(timezone.utc) - timedelta(minutes=self.hace_min)).isoformat().replace('+00:00', 'Z')
-        arranco = (datetime.now(timezone.utc) - timedelta(minutes=self.arranco_hace_min)).isoformat().replace('+00:00', 'Z')
-        return types.SimpleNamespace(status_code=self.codigo_run, json=lambda: {'created_at': creada, 'run_started_at': arranco})
+        from email.utils import format_datetime
+        servidor = datetime.now(timezone.utc) - timedelta(minutes=self.desfase_min)
+        creada = (servidor - timedelta(minutes=self.hace_min)).isoformat().replace('+00:00', 'Z')
+        arranco = (servidor - timedelta(minutes=self.arranco_hace_min)).isoformat().replace('+00:00', 'Z')
+        return types.SimpleNamespace(status_code=self.codigo_run, headers={} if self.sin_hora else {'Date': format_datetime(servidor, usegmt=True)},
+                                     json=lambda: {'created_at': creada, 'run_started_at': arranco})
 
 
 def correr_oficina(base, web, gh, env=None, dormir=None, argv=()):
@@ -1405,6 +1410,30 @@ finally:
     prog._ahora = _ahora_de_verdad
 eq('TO32 sin MAQUINA (GitHub no se suspende) la regla no se aplica: la horaria aplica como siempre',
    (codigo, [p['estado'] for p in base.pasadas()]), (0, ['aplicada']))
+
+
+# TO33-TO36 · 🔴 el reloj del ordenador: la edad se mide con la hora de GitHub; un reloj muy desfasado, ROJO sin leer.
+base, web = Base(), Web(catalogo(), FICHAS)
+codigo, reg = correr_oficina(base, web, GitHub(hace_min=2, desfase_min=45))
+eq('TO33 🔴 el reloj del equipo va 45 min adelantado: ROJO sin leer, y lo dice (no la confunde con una corrida vieja)',
+   (codigo, base.pasadas(), web.pedidas, 'TCG_RELOJ_DESFASADO: el reloj de este equipo va 45 min adelantado' in reg,
+    'TCG_CORRIDA_VIEJA' in reg), (1, [], [], True, False))
+base, web = Base(), Web(catalogo(), FICHAS)
+codigo, reg = correr_oficina(base, web, GitHub(hace_min=2, desfase_min=-45))
+eq('TO34 …y 45 min atrasado, igual', (codigo, base.pasadas(), 'atrasado' in reg), (1, [], True))
+base, web = Base(), Web(catalogo(), FICHAS)
+codigo, reg = correr_oficina(base, web, GitHub(hace_min=prog.EDAD_MAXIMA_MIN - 2, desfase_min=4))
+eq('TO35 un desfase pequeño (4 min) con una corrida de %d min según GitHub: la edad es la de GitHub (con el reloj del '
+   'equipo pasaría de 30), y se lee' % (prog.EDAD_MAXIMA_MIN - 2), (codigo, [p['estado'] for p in base.pasadas()]), (0, ['aplicada']))
+base, web = Base(), Web(catalogo(), FICHAS)
+codigo, reg = correr_oficina(base, web, GitHub(hace_min=prog.EDAD_MAXIMA_MIN + 5, desfase_min=2))
+eq('TO36 la corrida vieja dice la edad según GitHub y cuánto va el reloj del equipo',
+   (codigo, 'según la hora de GitHub' in reg, 'el reloj del equipo va +2.0 min respecto a GitHub' in reg), (0, True, True))
+base, web = Base(), Web(catalogo(), FICHAS)
+codigo, reg = correr_oficina(base, web, GitHub(hace_min=prog.EDAD_MAXIMA_MIN + 5, sin_hora=True))
+eq('TO37 si GitHub no da su hora, la del equipo (y no se puede ver el desfase)', (codigo, base.pasadas(), "va ¿? respecto" in reg),
+   (0, [], True))
+eq('TO38 el desfase que se consiente: 5 min', prog.DESFASE_MAX_MIN, 5)
 
 print()
 print('TODO OK' if not fallos else 'FALLOS: %d (%s)' % (len(fallos), ', '.join(fallos)))

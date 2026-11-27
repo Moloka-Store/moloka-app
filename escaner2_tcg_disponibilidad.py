@@ -147,6 +147,9 @@ OFICINA_VERSION = 2
 # anterior, no se lee nada atrasado. La edad se cuenta desde que se pidio la corrida, cola incluida: medido el 27-nov-2026 en
 # una corrida que espero 450 s en cola, run_started_at = created_at (en un relanzamiento, run_started_at es el del relanzamiento).
 EDAD_MAXIMA_MIN = 30
+# 5 min: lo que se le consiente al reloj del ordenador de la oficina frente a la hora de GitHub. Con mas, las horas que la pasada
+# deja en la base serian falsas (y una lectura reciente pareceria vieja o al reves): ROJO sin leer, y se dice cuanto.
+DESFASE_MAX_MIN = 5
 # 10 min: la pasada de TCG (de abrirse a quedar terminada) tarda 92 s de mediana y 513 s el p90 (aplicadas y «al día» de los
 # ultimos 30 dias, medido el 27-nov-2026). Se mira la base cada 15 s.
 ESPERA_TURNO_S = 600
@@ -598,11 +601,14 @@ def _fecha_iso(v):
 
 
 def edad_de_la_corrida(env, pedir=None, ahora=_ahora):
-    """Minutos desde que GitHub creo (o relanzo) ESTA corrida, o None si no se puede saber. Lee la API del repo de la
-    corrida con su token (permiso actions: read). NUNCA LANZA. 🔴 No imprime nada: ni la URL ni la respuesta."""
+    """(edad, desfase): los minutos desde que GitHub creo (o relanzo) ESTA corrida, medidos con la HORA DEL SERVIDOR de
+    GitHub (la cabecera Date de su respuesta), y cuantos minutos va adelantado (+) o atrasado (-) el reloj de este equipo
+    respecto a ella. (None, None) si no se puede saber; desfase None si la respuesta no trae la hora. Asi un reloj del
+    ordenador desfasado no hace «viejas» todas las corridas. Lee la API del repo de la corrida con su token (permiso
+    actions: read). NUNCA LANZA. 🔴 No imprime nada: ni la URL ni la respuesta."""
     run, repo, token = (env.get('GITHUB_RUN_ID') or ''), (env.get('GITHUB_REPOSITORY') or ''), (env.get('GITHUB_TOKEN') or '')
     if not (run.isdigit() and repo and token):
-        return None
+        return None, None
     api = (env.get('GITHUB_API_URL') or 'https://api.github.com').rstrip('/')
     try:
         if pedir is None:
@@ -612,15 +618,25 @@ def edad_de_la_corrida(env, pedir=None, ahora=_ahora):
                   headers={'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json',
                            'X-GitHub-Api-Version': '2022-11-28'})
         if getattr(r, 'status_code', 0) != 200:
-            return None
+            return None, None
         d = r.json()
         # created_at: cuando se pidio; run_started_at: cuando arranco el intento (un relanzamiento a mano es nuevo).
         momentos = [m for m in (_fecha_iso(d.get('created_at')), _fecha_iso(d.get('run_started_at'))) if m]
         if not momentos:
-            return None
-        return (ahora() - max(momentos)).total_seconds() / 60
+            return None, None
+        local = ahora()
+        servidor, desfase = local, None
+        try:
+            from email.utils import parsedate_to_datetime
+            fecha = (getattr(r, 'headers', None) or {}).get('Date')
+            if fecha:
+                servidor = parsedate_to_datetime(fecha)
+                desfase = (local - servidor).total_seconds() / 60
+        except Exception:  # noqa: BLE001 — sin la hora del servidor, la del equipo
+            servidor, desfase = local, None
+        return (servidor - max(momentos)).total_seconds() / 60, desfase
     except Exception:  # noqa: BLE001 — sin saberlo, se lee (una lectura de mas no rompe nada)
-        return None
+        return None, None
 
 
 def esperar_turno(sb, ahora=_ahora, dormir=time.sleep, espera_s=ESPERA_TURNO_S):
@@ -665,13 +681,20 @@ def principal(argv, env=None, sb=None, sesion=None, dormir=None, pedir=None):
         abortar(f'MAQUINA tiene que estar vacía o ser {MAQUINA_OFICINA}')
     oficina = maquina == MAQUINA_OFICINA and not rescate
     if oficina:
-        edad = edad_de_la_corrida(env, pedir)
+        edad, desfase = edad_de_la_corrida(env, pedir)
+        if desfase is not None and abs(desfase) > DESFASE_MAX_MIN:
+            # Con el reloj del equipo mal, las horas que la pasada deja en la base (terminada_en) serian falsas: no se lee.
+            print(f"TCG_RELOJ_DESFASADO: el reloj de este equipo va {abs(desfase):.0f} min "
+                  f"{'adelantado' if desfase > 0 else 'atrasado'} respecto a GitHub (más de {DESFASE_MAX_MIN}); no se lee "
+                  f"hasta que se ponga en hora.", flush=True)
+            return 1
         if edad is None:
             print(">>> OFICINA: no se ha podido saber cuándo se pidió esta corrida; se lee.", flush=True)
         elif edad > EDAD_MAXIMA_MIN:
-            print(f"TCG_CORRIDA_VIEJA: esta corrida se pidió hace {int(edad)} min (más de {EDAD_MAXIMA_MIN}: el equipo estaba "
-                  f"apagado o la máquina ocupada); no se lee. La base ya la cuenta como perdida y la siguiente prevista está "
-                  f"cerca.", flush=True)
+            print(f"TCG_CORRIDA_VIEJA: esta corrida se pidió hace {int(edad)} min según la hora de GitHub (más de "
+                  f"{EDAD_MAXIMA_MIN}: el equipo estaba apagado o la máquina ocupada; el reloj del equipo va "
+                  f"{'¿?' if desfase is None else f'{desfase:+.1f} min'} respecto a GitHub); no se lee. La base ya la cuenta "
+                  f"como perdida y la siguiente prevista está cerca.", flush=True)
             return 0
     if sb is None:
         from escaner2_base import cliente
