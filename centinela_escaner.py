@@ -101,6 +101,11 @@ DIAS_ADELANTE = 8
 # de 07:55 a 21:55, un fallo de la mañana da el aviso, uno por la tarde y otro a primera
 # hora del dia siguiente (el de la noche espera a las 07:55).
 RECORDATORIO_H = 6
+# 🔑 Con holgura: la marca apunta la hora REAL de la vuelta, que se corre unos segundos o
+#    minutos de una a otra (el dispatch no arranca al segundo). Sin ella, el recordatorio de
+#    las 21:55 de un aviso de las 15:55 podria caer en 5 h 59 y saltar a las 07:55 del dia
+#    siguiente.
+HOLGURA_RECORDATORIO_MIN = 15
 
 # Horas de Madrid en las que se manda Telegram: de las 07:00 a las 22:59.
 HORAS_DE_AVISAR = (7, 23)
@@ -212,7 +217,7 @@ def _iso(t):
 def eventos(estados, marca, ahora, recordatorio_h):
     """[(tipo, proveedor)] de lo que toca contar en esta vuelta: 'caducado' (nuevo, o con
     otra lectura buena de partida que la avisada), 'recordatorio' (sigue igual y el ultimo
-    aviso tiene `recordatorio_h` horas o mas) o 'vuelta' (ya no lo esta y se habia avisado).
+    aviso tiene `recordatorio_h` horas o mas, menos la holgura) o 'vuelta' (ya no lo esta y se habia avisado).
 
     🔴 FALLA EN ABIERTO: con la marca vacia (no se pudo leer) todo lo caducado sale como
     'caducado'. Una entrada de la marca que no se entienda (el formato de antes del
@@ -231,7 +236,8 @@ def eventos(estados, marca, ahora, recordatorio_h):
                     avisado = datetime.fromisoformat(st['avisado_en'])
                 except (TypeError, ValueError):
                     avisado = None
-                if avisado is None or ahora - avisado >= timedelta(hours=recordatorio_h):
+                if avisado is None or ahora - avisado >= (timedelta(hours=recordatorio_h)
+                                                          - timedelta(minutes=HOLGURA_RECORDATORIO_MIN)):
                     salida.append(('recordatorio', prov))
         elif st is not None:
             salida.append(('vuelta', prov))

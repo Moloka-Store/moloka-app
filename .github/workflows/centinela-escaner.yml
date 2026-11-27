@@ -10,7 +10,8 @@
 #
 # >>> EL RELOJ ES CRON-JOB.ORG, NO ESTE FICHERO <<<  Como las pasadas: el `schedule:` de
 #     GitHub llega horas tarde en esta cuenta (medido del 17 al 27-nov-2026: dos vueltas al
-#     dia de las cuatro previstas, a las 01-03 UTC y a las 14-16 UTC). El trabajo de
+#     dia de las cuatro previstas, una entre las 13:45 y las 16:47 UTC y otra entre las 20:17
+#     y las 03:35 UTC). El trabajo de
 #     cron-job.org (lo da de alta Fernando): POST a la API de dispatches de este workflow
 #     con {"ref":"main"} y sin inputs, todos los dias a las :55 de 07 a 21 (Europe/Madrid).
 #     Tiene que coincidir con RELOJ del .py, que el banco cruza con los horarios.

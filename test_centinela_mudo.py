@@ -396,7 +396,7 @@ def _nodo(nombre):
     sys.exit(1)
 
 
-CONSTANTES = ('DIAS_ATRAS', 'DIAS_ADELANTE', 'RECORDATORIO_H', 'HORAS_DE_AVISAR', 'RELOJ', 'MESES', 'LECTURA')
+CONSTANTES = ('DIAS_ATRAS', 'DIAS_ADELANTE', 'RECORDATORIO_H', 'HOLGURA_RECORDATORIO_MIN', 'HORAS_DE_AVISAR', 'RELOJ', 'MESES', 'LECTURA')
 FUNCIONES = ('previstas', 'plazo', 'esta_caducado', 'es_al_dia', 'lectura_buena', 'diagnostico', '_iso',
              'eventos', 'marca_tras', 'hora_de_avisar', 'fecha_madrid', 'hora_madrid', '_motivo', '_detalle',
              'texto_de')
@@ -468,7 +468,10 @@ eq('(A) 🔴 FALLA EN ABIERTO: con la marca vacia, lo caducado sale como aviso n
    eventos(_cad, {}, _ah, 6), [('caducado', 'TCG')])
 eq('(A) con la marca de hace 6 h y la misma lectura de partida, recordatorio',
    eventos(_cad, _marca_tcg(_m('2026-11-26T14:55:00')), _ah, 6), [('recordatorio', 'TCG')])
-eq('(A) con la de hace 5 h 59, nada', eventos(_cad, _marca_tcg(_m('2026-11-26T14:56:00')), _ah, 6), [])
+eq('(A) 🔴 con la de hace 5 h 59 (la vuelta anterior arranco un minuto tarde), recordatorio igual: la holgura',
+   eventos(_cad, _marca_tcg(_m('2026-11-26T14:56:00')), _ah, 6), [('recordatorio', 'TCG')])
+eq('(A) con la de hace 5 h 44, nada (la holgura es de 15 min, no de horas)',
+   eventos(_cad, _marca_tcg(_m('2026-11-26T15:11:00')), _ah, 6), [])
 eq('(A) 🔴 con otra lectura de partida (volvio y se volvio a caer sin que se viera), aviso nuevo',
    eventos(_cad, _marca_tcg(_m('2026-11-26T20:00:00'), desde=_u('2026-11-20T10:00:00')), _ah, 6),
    [('caducado', 'TCG')])
