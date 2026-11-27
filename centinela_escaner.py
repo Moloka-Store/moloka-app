@@ -34,6 +34,14 @@
 #    una perdida» es lo que evita la falsa alarma del fin de semana: sin lectura prevista no
 #    hay nada que perder (OSMA del viernes al lunes son 72 h, y no avisa hasta que se pierde
 #    la del lunes). Reponer no lleva el suelo: su franja sigue siendo la de la base.
+#    🔑 El suelo salta tambien con un INTENTO FALLIDO (una pasada 'fallida' o
+#    'rechazada_vaciado'; una 'rechazada' a secas, como la de OSMA «no ha regenerado», no)
+#    aunque no haya ninguna prevista perdida: el proveedor que pasa fuera de su horario de
+#    la base y falla tambien cuenta. Es el sabado de DBLine: lee de 07 a 21, pero
+#    `horario_finde` vale para el sabado y el domingo a la vez y lo tiene vacio. Muerto el
+#    viernes por la noche y con las del sabado fallando, avisa el domingo a las 07:55, como el
+#    viejo. Si el sabado ni arrancan, el lunes a las 07:55: eso es de la migracion del
+#    horario del sabado, no de aqui.
 # 🔑 Por que no se llama a la funcion de la base y ya: cuenta SOLO las 'aplicada' y no
 #    devuelve el plazo, asi que no hay forma de sumarle las «al dia» (abajo). Cambiarla es
 #    una migracion con Fernando delante; esta copia de la cuenta la clava el banco con los
@@ -200,11 +208,17 @@ def esta_caducado(ultima_buena, umbral):
     return umbral is not None and ultima_buena < umbral
 
 
-def suelo_vencido(ultima_buena, perdidas, ahora):
-    """El suelo de 26 h: AL MENOS una lectura prevista perdida desde la ultima buena y mas de
-    SUELO_H horas desde ella. Sin ninguna prevista perdida (un fin de semana sin horario) no
-    salta, lleve las horas que lleve."""
-    if ultima_buena is None or not perdidas:
+INTENTOS_FALLIDOS = ('fallida', 'rechazada_vaciado')
+
+
+def suelo_vencido(ultima_buena, perdidas, fallidos, ahora):
+    """El suelo de 26 h: AL MENOS una lectura prevista perdida O un intento fallido
+    (INTENTOS_FALLIDOS) desde la ultima buena, y mas de SUELO_H horas desde ella. Sin ninguna
+    de las dos cosas (un fin de semana sin horario y sin pasadas) no salta, lleve las horas que
+    lleve."""
+    if ultima_buena is None:
+        return False
+    if not (perdidas or fallidos):
         return False
     return (ahora - ultima_buena).total_seconds() / 3600.0 > SUELO_H
 
@@ -252,8 +266,9 @@ def diagnostico(par, pasadas, ahora):
                      and (ultima_buena is None or x['t'] > ultima_buena) and x['t'] not in al_dias),
                     key=lambda x: x['t'])
     perdidas = sorted(t for t in p['vencidas'] if ultima_buena is None or t > ultima_buena)
+    fallidos = [x for x in fallos if x['estado'] in INTENTOS_FALLIDOS]
     return {'caducado': (mismo_contenido or esta_caducado(ultima_buena, p['umbral'])
-                         or suelo_vencido(ultima_buena, perdidas, ahora)),
+                         or suelo_vencido(ultima_buena, perdidas, fallidos, ahora)),
             'mismo_contenido': mismo_contenido, 'al_dias': al_dias,
             'ultima_buena': ultima_buena, 'ultima_aplicada': ultima_aplicada,
             'ultima_prevista': p['ultima_prevista'], 'siguiente_prevista': p['siguiente_prevista'],

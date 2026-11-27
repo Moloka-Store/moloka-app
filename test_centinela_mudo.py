@@ -208,6 +208,22 @@ def _escenario_de(caso):
         return _escenario(_m('2026-11-21T13:00:00'), {'DBLINE': db_vie})
     if caso == 'dbline_domingo':
         return _escenario(_m('2026-11-22T21:55:00'), {'DBLINE': db_vie})
+    # DBLine muerto el viernes por la noche, con las del SABADO arrancando y fallando (lee el sabado,
+    # aunque `horario_finde` este vacio): el suelo salta por los intentos fallidos -> el domingo a
+    # las 07:55 (34,8 h). Sin ninguna pasada el sabado, el domingo a las 07:55 AL DIA (el lunes a las
+    # 07:55, ya CADUCADO: dbline_lunes_0755).
+    db_sab_falla = db_vie + [('fallida', _m('2026-11-21T%02d:06:00' % h), None, None, 'x') for h in range(7, 22)]
+    if caso == 'dbline_sabado_fallidas_domingo_0755':
+        return _escenario(_m('2026-11-22T07:55:00'), {'DBLINE': db_sab_falla})
+    if caso == 'dbline_sabado_fallidas_sabado_2155':
+        return _escenario(_m('2026-11-21T21:55:00'), {'DBLINE': _hasta(db_sab_falla, _m('2026-11-21T21:55:00'))})
+    if caso == 'dbline_sin_pasadas_domingo_0755':
+        return _escenario(_m('2026-11-22T07:55:00'), {'DBLINE': db_vie})
+    # OSMA del viernes al lunes con una 'rechazada' «no ha regenerado» el sabado: no es un intento
+    # fallido. El domingo a las 13:00, AL DIA.
+    if caso == 'osma_rechazada_finde':
+        return _escenario(_m('2026-11-22T13:00:00'), {'OSMA': osma_vie + [
+            ('rechazada', _m('2026-11-21T07:16:00'), None, None, 'OSMA no ha regenerado el fichero')]})
     if caso == 'dbline_lunes_0725':
         return _escenario(_m('2026-11-23T07:25:00'), {'DBLINE': db_vie})
     if caso == 'dbline_lunes_0755':
@@ -456,7 +472,7 @@ def _nodo(nombre):
     sys.exit(1)
 
 
-CONSTANTES = ('DIAS_ATRAS', 'DIAS_ADELANTE', 'SUELO_H', 'TOPE_AL_DIA_H', 'RECORDATORIO_H', 'HOLGURA_RECORDATORIO_MIN', 'HORAS_DE_AVISAR', 'RELOJ', 'MESES', 'LECTURA')
+CONSTANTES = ('DIAS_ATRAS', 'DIAS_ADELANTE', 'SUELO_H', 'INTENTOS_FALLIDOS', 'TOPE_AL_DIA_H', 'RECORDATORIO_H', 'HOLGURA_RECORDATORIO_MIN', 'HORAS_DE_AVISAR', 'RELOJ', 'MESES', 'LECTURA')
 FUNCIONES = ('previstas', 'plazo', 'esta_caducado', 'suelo_vencido', 'es_al_dia', 'al_dia_vale', 'lectura_buena', 'diagnostico', '_iso',
              'eventos', 'marca_tras', 'hora_de_avisar', 'fecha_madrid', 'hora_madrid', '_motivo', '_detalle',
              'texto_de')
@@ -717,12 +733,29 @@ for _caso, _prov, _esperado, _dice in (
        (_r['codigo'], _r['veredicto']), (0 if _esperado == 'al dia' else 1, dict(_AL_DIA, **{_prov: _esperado})))
 eq('(A) el suelo son 26 h, las del vigilante viejo', _ns['SUELO_H'], 26)
 eq('(A) 🔴 el suelo NO salta sin ninguna prevista perdida, lleve las horas que lleve (el fin de semana de OSMA)',
-   _ns['suelo_vencido'](_m('2026-11-20T07:16:00'), [], _m('2026-11-23T07:44:00')), False)
+   _ns['suelo_vencido'](_m('2026-11-20T07:16:00'), [], [], _m('2026-11-23T07:44:00')), False)
 eq('(A) ...ni sin lectura buena (eso ya es caducado por la otra regla)',
-   _ns['suelo_vencido'](None, [1], _m('2026-11-23T07:44:00')), False)
+   _ns['suelo_vencido'](None, [1], [], _m('2026-11-23T07:44:00')), False)
 eq('(A) con una perdida: 26 h justas no, 26 h y un minuto si (mas de 26)',
-   [_ns['suelo_vencido'](_m('2026-11-24T09:13:00'), [1], _m(t))
+   [_ns['suelo_vencido'](_m('2026-11-24T09:13:00'), [1], [], _m(t))
     for t in ('2026-11-25T11:13:00', '2026-11-25T11:14:00')], [False, True])
+
+eq('(A) 🔴 sin prevista perdida pero con un intento fallido, el suelo SI salta pasadas las 26 h',
+   _ns['suelo_vencido'](_m('2026-11-20T21:06:00'), [], [1], _m('2026-11-22T07:55:00')), True)
+eq('(A) los intentos fallidos son las fallida y las rechazada_vaciado; una rechazada a secas, no',
+   tuple(_ns['INTENTOS_FALLIDOS']), ('fallida', 'rechazada_vaciado'))
+for _caso, _prov, _esperado, _dice in (
+        ('dbline_sabado_fallidas_sabado_2155', 'DBLINE', 'al dia', 'muerto el viernes 21:06 y el sabado fallando, '
+         'el sabado a las 21:55 (24,8 h): aun no'),
+        ('dbline_sabado_fallidas_domingo_0755', 'DBLINE', 'CADUCADO', '…el domingo a las 07:55 (34,8 h, intentos '
+         'fallidos): SI, como el viejo, sin copiar ningun horario'),
+        ('dbline_sin_pasadas_domingo_0755', 'DBLINE', 'al dia', 'el mismo viernes sin NINGUNA pasada el sabado: el '
+         'domingo a las 07:55, aun no (el lunes a las 07:55, si)'),
+        ('osma_rechazada_finde', 'OSMA', 'al dia', 'una rechazada «no ha regenerado» el sabado no es un intento '
+         'fallido: el domingo, sin aviso')):
+    _r = correr(_caso)
+    eq('(C) 🔴 [%s] %s: %s' % (_caso, _prov, _dice),
+       (_r['codigo'], _r['veredicto']), (0 if _esperado == 'al dia' else 1, dict(_AL_DIA, **{_prov: _esperado})))
 
 # --- El tope de las «al dia»: 96 h sin ninguna aplicada es un dato viejo ------------
 print()
@@ -856,6 +889,18 @@ def _siempre_vale(fn):
     return True
 
 
+def _sin_intentos(fn):
+    """`perdidas or fallidos` -> `perdidas`: el suelo deja de saltar por los intentos fallidos."""
+    for nodo in ast.walk(fn):
+        if isinstance(nodo, ast.UnaryOp) and isinstance(nodo.operand, ast.BoolOp) and isinstance(nodo.operand.op, ast.Or):
+            nodo.operand = nodo.operand.values[0]
+            return True
+    return False
+
+
+_r = correr('dbline_sabado_fallidas_domingo_0755', ruta=estropeado('suelo_vencido', _sin_intentos))
+eq('(R) 🔴 sin la rama de los intentos fallidos, DBLine muerto el viernes sale VERDE el domingo (el banco lo caza)',
+   (_r['codigo'], _r['veredicto']['DBLINE']), (0, 'al dia'))
 _r = correr('ocio_igual_viernes', ruta=estropeado('al_dia_vale', _siempre_vale))
 eq('(R) 🔴 sin el tope de 96 h, OcioStock con el mismo md5 cuatro dias sale VERDE (el banco lo caza)',
    (_r['codigo'], _r['veredicto']['OCIOSTOCK']), (0, 'al dia'))
