@@ -255,6 +255,24 @@ def _escenario_de(caso):
         return _escenario(_m('2026-11-23T08:55:00'), {'HEO': [
             ('aplicada', _m('2026-11-22T09:06:00'), None, None, None),
             ('fallida', _m('2026-11-23T08:01:00'), None, None, 'x')]})
+    # --- EL TOPE DE LAS «AL DIA» (96 h desde la ultima aplicada; quien dirige, revision del #403) ---
+    # TCG, el fin de semana: aplicada el viernes 20 a las 19:22 (huella h-vie) y «al dia» el sabado y el
+    # domingo a las 12:21 y el lunes a las 09:21. El lunes a las 09:55 van 62,6 h desde la aplicada:
+    # las «al dia» valen -> AL DIA.
+    if caso == 'tcg_finde_al_dia':
+        return _escenario(_m('2026-11-23T09:55:00'), {'TCG': [
+            ('aplicada', _m('2026-11-20T19:22:00'), 'h-vie', None, None),
+            ('rechazada', _m('2026-11-21T12:21:00'), 'h-vie', None, 'al día'),
+            ('rechazada', _m('2026-11-22T12:21:00'), 'h-vie', None, 'al día'),
+            ('rechazada', _m('2026-11-23T09:21:00'), 'h-vie', None, 'al día')]})
+    # OcioStock con el MISMO md5 cuatro dias seguidos: aplicada el lunes 23 a las 09:13 y «al dia» de
+    # martes a viernes a las 09:12. El jueves a las 09:55 (72,7 h), AL DIA; el viernes a las 09:55
+    # (96,7 h), CADUCADO con su texto propio.
+    ocio_igual = [('aplicada', _m('2026-11-23T09:13:00'), None, 'f-lun', None)] + [
+        ('rechazada', _m('2026-11-%02dT09:12:40' % d), None, 'f-lun', 'al día') for d in (24, 25, 26, 27)]
+    if caso in ('ocio_igual_jueves', 'ocio_igual_viernes'):
+        a = _m('2026-11-26T09:55:00' if caso == 'ocio_igual_jueves' else '2026-11-27T09:55:00')
+        return _escenario(a, {'OCIOSTOCK': _hasta(ocio_igual, a)})
     # --- El motivo, solo al Telegram -------------------------------------------------------------
     if caso == 'motivo_secreto':
         return _escenario(A_1455, {'TCG': [
@@ -438,8 +456,8 @@ def _nodo(nombre):
     sys.exit(1)
 
 
-CONSTANTES = ('DIAS_ATRAS', 'DIAS_ADELANTE', 'SUELO_H', 'RECORDATORIO_H', 'HOLGURA_RECORDATORIO_MIN', 'HORAS_DE_AVISAR', 'RELOJ', 'MESES', 'LECTURA')
-FUNCIONES = ('previstas', 'plazo', 'esta_caducado', 'suelo_vencido', 'es_al_dia', 'lectura_buena', 'diagnostico', '_iso',
+CONSTANTES = ('DIAS_ATRAS', 'DIAS_ADELANTE', 'SUELO_H', 'TOPE_AL_DIA_H', 'RECORDATORIO_H', 'HOLGURA_RECORDATORIO_MIN', 'HORAS_DE_AVISAR', 'RELOJ', 'MESES', 'LECTURA')
+FUNCIONES = ('previstas', 'plazo', 'esta_caducado', 'suelo_vencido', 'es_al_dia', 'al_dia_vale', 'lectura_buena', 'diagnostico', '_iso',
              'eventos', 'marca_tras', 'hora_de_avisar', 'fecha_madrid', 'hora_madrid', '_motivo', '_detalle',
              'texto_de')
 _ns = {'timedelta': timedelta, 'datetime': datetime, 'timezone': timezone, 'MADRID': MAD, 'html': _html}
@@ -706,6 +724,32 @@ eq('(A) con una perdida: 26 h justas no, 26 h y un minuto si (mas de 26)',
    [_ns['suelo_vencido'](_m('2026-11-24T09:13:00'), [1], _m(t))
     for t in ('2026-11-25T11:13:00', '2026-11-25T11:14:00')], [False, True])
 
+# --- El tope de las «al dia»: 96 h sin ninguna aplicada es un dato viejo ------------
+print()
+eq('(A) el tope de las «al dia» son 96 h desde la ultima aplicada', _ns['TOPE_AL_DIA_H'], 96)
+eq('(A) 🔴 95 h 59 min, la «al dia» vale; 96 h justas, ya no',
+   [_ns['al_dia_vale'](_m('2026-11-23T09:13:00'), _m(t)) for t in ('2026-11-27T09:12:00', '2026-11-27T09:13:00')],
+   [True, False])
+_r = correr('tcg_finde_al_dia')
+eq('(C) 🔴 [tcg_finde_al_dia] TCG con «al dia» el sabado, el domingo y el lunes (62,6 h desde la aplicada): '
+   'NO avisa', (_r['codigo'], _r['telegrams'], _r['veredicto']['TCG']), (0, 0, 'al dia'))
+_r = correr('ocio_igual_jueves')
+eq('(C) 🔴 [ocio_igual_jueves] OcioStock con el mismo md5 tres dias (72,7 h): AL DIA',
+   (_r['codigo'], _r['veredicto']['OCIOSTOCK']), (0, 'al dia'))
+_r = correr('ocio_igual_viernes')
+eq('(C) 🔴 [ocio_igual_viernes] …el cuarto dia (96,7 h sin ninguna aplicada): ROJO, SOLO OcioStock, UN Telegram',
+   (_r['codigo'], _r['veredicto'], _r['telegrams']), (1, dict(_AL_DIA, OCIOSTOCK='CADUCADO'), 1))
+eq('(C) 🔴 [ocio_igual_viernes] con su texto propio, no el de «no lee»',
+   ['OCIOSTOCK contesta, pero con el mismo contenido desde el 23-nov 09:13' in _r['texto'],
+    '4 lectura(s) «al día» (la última, el 27-nov 09:12) y 0 intento(s) fallido(s)' in _r['texto'],
+    'El Escaneo PRO y Reponer de OCIOSTOCK están con los datos del 23-nov 09:13.' in _r['texto'],
+    'no lee desde' in _r['texto']], [True, True, True, False])
+eq('(C) [ocio_igual_viernes] el registro lo dice, sin motivos',
+   bool(re.search(r'^  OCIOSTOCK .*4 al dia \| MISMO CONTENIDO desde 2026-11-23 08:13 UTC -> CADUCADO$',
+                  _r['registro'], re.M)), True)
+eq('(C) [ocio_igual_viernes] la marca apunta desde la ultima aplicada',
+   _r['marca']['OCIOSTOCK']['desde'], _m('2026-11-23T09:13:00').isoformat())
+
 # --- El motivo, solo al Telegram ---------------------------------------------------
 print()
 _r = correr('motivo_secreto')
@@ -805,6 +849,15 @@ eq('(R) 🔴 sin contar las «al dia», la de en medio daria un aviso falso (el 
    (_r['codigo'], _r['veredicto']['TCG']), (1, 'CADUCADO'))
 _r = correr('ocio_d1_1155', ruta=estropeado('suelo_vencido', _sin_al_dia))
 eq('(R) 🔴 sin el suelo de 26 h, OcioStock el dia siguiente a las 11:55 sale VERDE (el banco lo caza)',
+   (_r['codigo'], _r['veredicto']['OCIOSTOCK']), (0, 'al dia'))
+def _siempre_vale(fn):
+    """`al_dia_vale` siempre cierto: el tope de 96 h desaparece."""
+    fn.body = [ast.Return(value=ast.Constant(value=True))]
+    return True
+
+
+_r = correr('ocio_igual_viernes', ruta=estropeado('al_dia_vale', _siempre_vale))
+eq('(R) 🔴 sin el tope de 96 h, OcioStock con el mismo md5 cuatro dias sale VERDE (el banco lo caza)',
    (_r['codigo'], _r['veredicto']['OCIOSTOCK']), (0, 'al dia'))
 _r = correr('tcg_26nov_1455', ruta=estropeado('plazo', lambda fn: True))
 eq('(R) …y la copia SIN estropear (control) da lo mismo que el original: ROJO por TCG',

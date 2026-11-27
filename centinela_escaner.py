@@ -49,6 +49,11 @@
 #    del mismo dia, despues de su aplicada: no adelanta nada), y su otra 'rechazada' («OSMA
 #    no ha regenerado el fichero») NO es una lectura buena: no casa, bien. Una
 #    'rechazada_vaciado' o una 'fallida', nunca.
+# 🔴 PERO CON TOPE: una «al dia» vale como buena solo mientras la ultima 'aplicada' tenga
+#    menos de TOPE_AL_DIA_H (96) horas (quien dirige, revision del #403, 27-nov-2026). Un
+#    fichero que el proveedor deja de rehacer es un dato viejo aunque conteste: pasadas las
+#    96 h sin ninguna aplicada, sale caducado con su propio texto («contesta, pero con el
+#    mismo contenido desde…»), distinto del de «no lee».
 #
 # LOS TRES AVISOS, por Telegram (en UN mensaje por vuelta, si hay varios):
 #   🔴 CADUCADO: desde cuando no hay lectura buena, cuantas lecturas previstas se han
@@ -57,6 +62,8 @@
 #   ⏰ RECORDATORIO, mientras siga caducado: uno cada RECORDATORIO_H horas como mucho, no
 #      cada hora (el que suena cada hora se aprende a ignorar).
 #   ✅ VUELTA: «<proveedor> vuelve a leer, tras N h».
+#   Y si contesta «al dia» pero sin ninguna aplicada en 96 h: «<proveedor> contesta, pero con
+#   el mismo contenido desde el <fecha de la ultima aplicada>», con su recordatorio.
 #   Y si la base no se puede leer, un aviso propio (el vigilante ciego no calla).
 #
 # LA MARCA, en Storage (`informes/centinela/ultimo_aviso.json`): por proveedor, desde que
@@ -114,6 +121,13 @@ DIAS_ADELANTE = 8
 # El suelo: con una lectura prevista perdida, mas de estas horas sin lectura buena es
 # caducado aunque la regla del horario aun no lo diga (ver la cabecera).
 SUELO_H = 26
+
+# El tope de las «al dia»: con la ultima aplicada de TOPE_AL_DIA_H horas o mas, una «al dia»
+# deja de valer como lectura buena. 96 h cubre sin falsas alarmas los fines de semana
+# normales: el de TCG (del viernes 19:20 al lunes 09:20, 62 h, con «al dia» el sabado y el
+# domingo) y el de OSMA (del viernes al lunes, 72 h). Y un fichero que lleva cuatro dias sin
+# cambiar es lo que hay que saber.
+TOPE_AL_DIA_H = 96
 
 RECORDATORIO_H = 6
 # 🔑 Con holgura: la marca apunta la hora REAL de la vuelta, que se corre unos segundos o
@@ -206,30 +220,41 @@ def es_al_dia(pasada, aplicada):
     return False
 
 
+def al_dia_vale(ultima_aplicada, ahora):
+    """Si una «al dia» vale todavia como lectura buena: solo mientras la ultima aplicada
+    tenga menos de TOPE_AL_DIA_H horas."""
+    return ahora - ultima_aplicada < timedelta(hours=TOPE_AL_DIA_H)
+
+
 def lectura_buena(pasadas, ahora):
-    """(ultima lectura buena, ultima aplicada): la ultima 'aplicada' terminada hasta
-    `ahora`, o una «al dia» posterior a ella. (None, None) sin ninguna aplicada."""
+    """(ultima lectura buena, ultima aplicada, [horas de las «al dia» posteriores a ella]).
+    La buena es la ultima 'aplicada' terminada hasta `ahora`, o la ultima «al dia» posterior
+    si todavia vale (`al_dia_vale`). (None, None, []) sin ninguna aplicada."""
     hechas = [p for p in pasadas if p['t'] is not None and p['t'] <= ahora]
     aplicadas = [p for p in hechas if p['estado'] == 'aplicada']
     if not aplicadas:
-        return None, None
+        return None, None, []
     aplicada = max(aplicadas, key=lambda p: p['t'])
-    buenas = [aplicada['t']] + [p['t'] for p in hechas
-                                if p['t'] > aplicada['t'] and es_al_dia(p, aplicada)]
-    return max(buenas), aplicada['t']
+    al_dias = sorted(p['t'] for p in hechas if p['t'] > aplicada['t'] and es_al_dia(p, aplicada))
+    if al_dias and al_dia_vale(aplicada['t'], ahora):
+        return al_dias[-1], aplicada['t'], al_dias
+    return aplicada['t'], aplicada['t'], al_dias
 
 
 def diagnostico(par, pasadas, ahora):
     """Todo lo que hace falta para decidir y para contarlo: si esta caducado, desde que
     lectura buena, las previstas perdidas desde entonces y los intentos que fallaron."""
-    ultima_buena, ultima_aplicada = lectura_buena(pasadas, ahora)
+    ultima_buena, ultima_aplicada, al_dias = lectura_buena(pasadas, ahora)
     p = plazo(par, ahora)
+    # El tope: hay «al dia» despues de la ultima aplicada, pero ya no valen (96 h o mas).
+    mismo_contenido = bool(al_dias) and not al_dia_vale(ultima_aplicada, ahora)
     fallos = sorted((x for x in pasadas if x['t'] is not None and x['t'] <= ahora
-                     and (ultima_buena is None or x['t'] > ultima_buena)),
+                     and (ultima_buena is None or x['t'] > ultima_buena) and x['t'] not in al_dias),
                     key=lambda x: x['t'])
     perdidas = sorted(t for t in p['vencidas'] if ultima_buena is None or t > ultima_buena)
-    return {'caducado': (esta_caducado(ultima_buena, p['umbral'])
+    return {'caducado': (mismo_contenido or esta_caducado(ultima_buena, p['umbral'])
                          or suelo_vencido(ultima_buena, perdidas, ahora)),
+            'mismo_contenido': mismo_contenido, 'al_dias': al_dias,
             'ultima_buena': ultima_buena, 'ultima_aplicada': ultima_aplicada,
             'ultima_prevista': p['ultima_prevista'], 'siguiente_prevista': p['siguiente_prevista'],
             'umbral': p['umbral'], 'perdidas': perdidas, 'fallos': fallos}
@@ -354,6 +379,19 @@ def texto_de(tipo, prov, d, st, ahora):
                     'la de ahora, %s).' % (prov, (d['ultima_buena'] - desde).total_seconds() / 3600.0,
                                            fecha_madrid(desde), fecha_madrid(d['ultima_buena'])))
         return '✅ <b>%s vuelve a leer</b> (lectura buena del %s).' % (prov, fecha_madrid(d['ultima_buena']))
+    if d.get('mismo_contenido'):
+        desde = fecha_madrid(d['ultima_aplicada'])
+        if tipo == 'caducado':
+            cabeza = '🔴 <b>%s contesta, pero con el mismo contenido desde el %s</b>' % (prov, desde)
+        else:
+            cabeza = ('⏰ <b>%s sigue contestando con el mismo contenido</b>, desde el %s (%.0f h)'
+                      % (prov, desde, (ahora - d['ultima_aplicada']).total_seconds() / 3600.0))
+        return '\n'.join([
+            cabeza,
+            'Desde entonces, %d lectura(s) «al día» (la última, el %s) y %d intento(s) fallido(s), sin '
+            'ninguna aplicada en %d h: un fichero que el proveedor no rehace es un dato viejo aunque '
+            'conteste.' % (len(d['al_dias']), fecha_madrid(d['al_dias'][-1]), len(d['fallos']), TOPE_AL_DIA_H),
+            'El Escaneo PRO y Reponer de %s están con los datos del %s.' % (prov, desde)])
     if d['ultima_buena'] is None:
         cabeza = '<b>%s no tiene ninguna lectura buena</b>' % prov
     elif tipo == 'caducado':
@@ -469,9 +507,10 @@ def _linea(prov, d):
     def h(t):
         return '-' if t is None else t.strftime('%Y-%m-%d %H:%M')
     return ('  %-10s ultima buena %s UTC | plazo %s UTC | %d prevista(s) perdida(s), %d intento(s) '
-            'fallido(s) -> %s'
+            'fallido(s), %d al dia%s -> %s'
             % (prov, h(d['ultima_buena']), h(d['umbral']), len(d['perdidas']), len(d['fallos']),
-               'CADUCADO' if d['caducado'] else 'al dia'))
+               len(d['al_dias']), ' | MISMO CONTENIDO desde %s UTC' % h(d['ultima_aplicada'])
+               if d['mismo_contenido'] else '', 'CADUCADO' if d['caducado'] else 'al dia'))
 
 
 # ============================================================
