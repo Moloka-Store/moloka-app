@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Banco de LA VALORACION DE LAS NOVEDADES DE TCG Y LOS AVISOS DE LA LECTURA DESDE LA OFICINA (encargo TO, 27-nov-2026):
+"""Banco de LA VALORACION DE LAS NOVEDADES DE TCG DE LA LECTURA DESDE LA OFICINA (encargo TO, 27-nov-2026):
 escaner2_tcg_valorar.py, su workflow (escaner2-tcg-valorar.yml) y su red con reloj (escaner2-tcg-novedades-cuentas.yml).
 
 SIN RED, SIN SECRETOS Y SIN BASE: una base de mentira en memoria y una valoracion de mentira FIEL a la de verdad
@@ -14,13 +14,10 @@ QUE PRUEBA:
   (B) 🔴 LAS AVALANCHAS ANTES DE TOCAR KEEPA, sea cual sea el orden; 🔴 NINGUNA SE QUEDA SIN VALORAR EN SILENCIO: la que se
       quedo sin encargo la recoge la corrida siguiente; una valoracion fallida queda a la vista (fallida en la base,
       ROJO y dicho en el registro) y la siguiente corrida la reintenta, durante RECOGER_FALLIDAS_H; pasado ese tiempo, no;
-  (C) los avisos: «parada» manda SOLO el Telegram con el motivo de la base (sin Keepa ni valorar nada); «tramos», el suyo;
-      un Telegram que no sale, ROJO;
-  (D) guardas: AVISO de la lista, PASADA un uuid o nada, sin la base ROJO; sin Keepa no se valora (el aviso sí sale);
+  (D) guardas: PASADA un uuid o nada; sin la base o sin Keepa, ROJO sin valorar nada;
   (E) 🔴 el registro no suelta el motivo de la base, ni un token, ni un EAN;
-  (F) por estructura, el workflow: solo a mano; el job del aviso SIN grupo (nada lo espera ni lo sustituye) y sin Keepa; el
-      job de valorar en el grupo `escaner2-tcg` (el de las cuentas) sin cancelar; inputs por env:; secretos solo en sus
-      pasos; topes; sin artefactos;
+  (F) por estructura, el workflow: solo por dispatch (el reloj es cron-job.org); un job, en el grupo `escaner2-tcg` (el de
+      las cuentas) sin cancelar; el input por env:; secretos solo en su paso; topes; sin artefactos;
   (G) por estructura, la red: escaner2-tcg-novedades-cuentas.yml valora lo pendiente ANTES de sus cuentas, en el mismo job
       (grupo escaner2-tcg), solo en las cuentas sueltas, y las cuentas corren aunque la valoracion falle.
 """
@@ -46,7 +43,6 @@ AHORA = datetime(2026, 11, 27, 10, 30, tzinfo=timezone.utc)
 ENV = {'SUPABASE_URL': 'https://base.invalid', 'SUPABASE_SERVICE_KEY': 'LLAVE-BASE-SECRETA',
        'KEEPA_API_KEY': 'LLAVE-KEEPA-SECRETA', 'TELEGRAM_TOKEN': 'TOKEN-TG', 'TELEGRAM_CHAT_ID': 'CHAT-TG',
        'GITHUB_RUN_ID': '555'}
-MOTIVO = 'la web de TCG no deja: login: HTTP 403 · desde la máquina de la oficina · EAN 8000000000017'
 MOTIVO_BASE = 'NO CUADRA: Failing row contains (8000000000017, 9.77)'
 P = ['%08d-0000-4000-8000-000000000000' % i for i in range(10)]
 
@@ -160,13 +156,13 @@ def limpio(nombre, registro):
 # ── (A) Qué se valora ─────────────────────────────────────────────────────────────────────
 base = Base(nov=[nov(P[1], 3600, novedades=5, subidas=2),                 # se quedó atrás hace 1 h
                  nov(P[2], 30),                                           # la encargada, de hace 30 s
-                 nov(P[3], 300),                                          # otra de hace 5 min: la puede estar valorando su dueño
+                 nov(P[3], 120),                                          # otra de hace 2 min: la puede estar valorando su dueño
                  nov(P[4], 7200, valoracion='hecha', valorada_hace_s=7000),   # ya valorada
                  nov(P[5], 7200, estado='fallida'),                       # la selección falló: no hay nada que valorar
                  nov(P[6], 7200, proveedor='DBLINE')])                    # de otro proveedor
 telegramas.clear()
-codigo, reg, val = correr(base, env={'AVISO': 'valorar', 'PASADA': P[2]})
-eq('A1 valora la que se quedó atrás y la encargada, de la más vieja a la más nueva; ni la de hace 5 min (su dueño), ni '
+codigo, reg, val = correr(base, env={'PASADA': P[2]})
+eq('A1 valora la que se quedó atrás y la encargada, de la más vieja a la más nueva; ni la de hace 2 min (su dueño), ni '
    'las valoradas, ni las de selección fallida, ni las de otro proveedor', [c[0] for c in val.llamadas], [P[1], P[2]])
 eq('A2 …cada una con sus novedades para la avalancha (novedades − subidas fuera), la llave de Keepa, TCG y el run',
    [(c[1], c[2], c[3], c[4]) for c in val.llamadas],
@@ -176,10 +172,10 @@ eq('A3 …VERDE, sin Telegram propio, y el registro lo cuenta, pasada a pasada, 
     '>>> VALORACION de la pasada %s (pendiente): hecha · novedades 12 · pendientes 0 · valoradas 4 · bien.' % P[2] in reg),
    (0, 0, True, True))
 limpio('A4', reg)
-eq('A5 el umbral de las ajenas son 15 min (la valoración en el acto de TCG tarda hasta 227 s medidos)', prog.PENDIENTE_MIN_S, 900)
+eq('A5 el umbral de las ajenas son 5 min (la valoración en el acto de TCG tarda hasta 227 s medidos)', prog.PENDIENTE_MIN_S, 300)
 base = Base(nov=[nov(P[3], prog.PENDIENTE_MIN_S + 1), nov(P[4], prog.PENDIENTE_MIN_S - 1)])
 codigo, reg, val = correr(base)
-eq('A6 sin pasada (a mano o la red): solo lo pendiente de más de 15 min', [c[0] for c in val.llamadas], [P[3]])
+eq('A6 sin pasada (el reloj o la red): solo lo pendiente de más de 5 min', [c[0] for c in val.llamadas], [P[3]])
 base = Base(nov=[nov(P[2], 7200, valoracion='hecha', valorada_hace_s=7000)])
 codigo, reg, val = correr(base, env={'PASADA': P[2]})
 eq('A7 la encargada ya valorada (un relanzamiento): no se repite, VERDE y lo dice',
@@ -234,40 +230,12 @@ eq('B10 una valoración que revienta (la de verdad no lanza): ROJO, sin cerrar (
    (codigo, base.t['nov_pasada'][0]['valoracion_estado'], 'sin cerrar (RuntimeError)' in salida.getvalue()), (1, None, True))
 limpio('B11', salida.getvalue())
 
-# ── (C) Los avisos: solo el Telegram ──────────────────────────────────────────────────────
-base = Base(nov=[nov(P[1], 3600)], disp=[{'id': P[7], 'proveedor': 'TCG', 'estado': 'fallida', 'motivo': MOTIVO}])
-telegramas.clear()
-codigo, reg, val = correr(base, env={'AVISO': 'parada', 'PASADA': P[7]})
-eq('C1 «parada»: un Telegram con el motivo de la base, que dice que era la oficina; VERDE',
-   (codigo, len(telegramas), MOTIVO in telegramas[0] if telegramas else None, 'oficina' in (telegramas or [''])[0]),
-   (0, 1, True, True))
-eq('C2 …y SOLO eso: ni Keepa ni valorar (eso es el otro job)', (val.llamadas, base.t['nov_pasada'][0]['valoracion_estado']),
-   ([], None))
-limpio('C3', reg)
-telegramas.clear()
-codigo, reg, val = correr(Base(), env={'AVISO': 'parada', 'PASADA': P[8]})
-eq('C4 «parada» de una pasada que no está en la base: el Telegram lo dice igual', (codigo, len(telegramas),
-   'no está en la base' in (telegramas or [''])[0]), (0, 1, True))
-telegramas.clear()
-codigo, reg, val = correr(Base(), env={'AVISO': 'tramos', 'PASADA': P[8]})
-eq('C5 «tramos»: el Telegram del lector parado', (codigo, len(telegramas), 'lector de tramos' in (telegramas or [''])[0]),
-   (0, 1, True))
-telegramas.clear()
-codigo, reg, val = correr(Base(), env={'AVISO': 'valorar', 'PASADA': P[8]})
-eq('C6 «valorar»: ningún Telegram propio', (codigo, len(telegramas)), (0, 0))
-codigo, reg, val = correr(Base(), env={'AVISO': 'parada', 'PASADA': P[8]},
-                         post=lambda url, data, timeout: types.SimpleNamespace(status_code=500))
-eq('C7 🔴 el Telegram de la parada no sale: ROJO', codigo, 1)
-
 # ── (D) Guardas ───────────────────────────────────────────────────────────────────────────
-for nombre, env in (('AVISO raro', {'AVISO': 'todo'}), ('PASADA que no es un uuid', {'PASADA': "x'; drop table"}),
+for nombre, env in (('PASADA que no es un uuid', {'PASADA': "x'; drop table"}),
                     ('sin la base', {'SUPABASE_SERVICE_KEY': ''}), ('sin Keepa', {'KEEPA_API_KEY': ''})):
     base = Base(nov=[nov(P[1], 3600)])
     codigo, reg, val = correr(base, env=env)
     eq('D1 %s: ROJO sin valorar nada' % nombre, (codigo, val.llamadas, 'TCG_VALORAR_NO_EJECUTADO' in reg), (1, [], True))
-telegramas.clear()
-codigo, reg, val = correr(Base(), env={'AVISO': 'tramos', 'KEEPA_API_KEY': ''})
-eq('D2 el aviso no necesita Keepa (su job no la lleva)', (codigo, len(telegramas)), (0, 1))
 codigo, reg, val = correr(Base(nov=[nov(P[2], 5)]), env={'PASADA': P[2].upper()})
 eq('D3 el uuid en mayúsculas vale (se normaliza)', [c[0] for c in val.llamadas], [P[2]])
 
@@ -276,15 +244,11 @@ texto_wf = open(WORKFLOW, encoding='utf-8').read()
 wf = yaml.safe_load(texto_wf)
 disparo = wf.get(True) or wf.get('on')
 eq('F1 solo se lanza a mano (workflow_dispatch), sin reloj', sorted(disparo), ['workflow_dispatch'])
-eq('F2 los inputs: aviso de la lista (por defecto valorar) y pasada',
-   (disparo['workflow_dispatch']['inputs']['aviso']['options'], disparo['workflow_dispatch']['inputs']['aviso']['default'],
-    sorted(disparo['workflow_dispatch']['inputs'])), (list(prog.AVISOS), 'valorar', ['aviso', 'pasada']))
-eq('F3 dos jobs: el aviso y la valoración', sorted(wf['jobs']), ['aviso', 'valorar'])
-j_av, j_val = wf['jobs']['aviso'], wf['jobs']['valorar']
-eq('F4 🔴 el aviso: solo si se pide, SIN grupo de concurrency (nada lo espera ni lo sustituye), ni a nivel de workflow',
-   (j_av.get('if'), 'concurrency' in j_av, 'concurrency' in wf), ("inputs.aviso != 'valorar'", False, False))
-eq('F5 🔴 la valoración: siempre, en el grupo de las cuentas (escaner2-tcg) y sin cancelar la que corre',
-   ('if' in j_val, j_val.get('concurrency')), (False, {'group': 'escaner2-tcg', 'cancel-in-progress': False}))
+eq('F2 un solo input, la pasada (a mano)', sorted(disparo['workflow_dispatch']['inputs']), ['pasada'])
+eq('F3 un job: la valoración', sorted(wf['jobs']), ['valorar'])
+j_val = wf['jobs']['valorar']
+eq('F4 🔴 en el grupo de las cuentas (escaner2-tcg) y sin cancelar la que corre; nada de grupo a nivel de workflow',
+   (j_val.get('concurrency'), 'concurrency' in wf), ({'group': 'escaner2-tcg', 'cancel-in-progress': False}, False))
 
 
 def secretos(paso):
@@ -292,22 +256,17 @@ def secretos(paso):
     return sorted(set(re.findall(r'secrets\.([A-Z_]+)', yaml.safe_dump(paso))))
 
 
-p_av, p_val = j_av['steps'][-1], j_val['steps'][-1]
-eq('F6 los secretos, solo en el último paso de cada job',
-   [p.get('name') for j in (j_av, j_val) for p in j['steps'] if secretos(p)], [p_av['name'], p_val['name']])
-eq('F7 el aviso, sin Keepa; la valoración, con ella',
-   (secretos(p_av), secretos(p_val)),
-   (['SUPABASE_SERVICE_KEY', 'SUPABASE_URL', 'TELEGRAM_CHAT_ID', 'TELEGRAM_TOKEN'],
-    ['KEEPA_API_KEY', 'SUPABASE_SERVICE_KEY', 'SUPABASE_URL', 'TELEGRAM_CHAT_ID', 'TELEGRAM_TOKEN']))
-eq('F8 los inputs llegan por env:, nunca dentro de run:; la valoración siempre con AVISO=valorar',
-   ('inputs.' in p_av['run'] + p_val['run'], p_av['env']['AVISO'], p_val['env']['AVISO'], p_val['env']['PASADA']),
-   (False, '${{ inputs.aviso }}', 'valorar', '${{ inputs.pasada }}'))
-eq('F9 corren el programa, con tope en los jobs y en los pasos, y sin artefactos',
-   (p_av['run'], p_val['run'], all(bool(j.get('timeout-minutes')) and bool(j['steps'][-1].get('timeout-minutes'))
-                                   for j in (j_av, j_val)), 'upload-artifact' in texto_wf),
-   ('python -u escaner2_tcg_valorar.py', 'python -u escaner2_tcg_valorar.py', True, False))
-eq('F10 el token del run, solo para leer el repo', wf['permissions'], {'contents': 'read'})
-eq('F11 🔑 el workflow que encarga la lectura de la oficina es ESTE (mismo nombre en los dos lados)',
+p_val = j_val['steps'][-1]
+eq('F5 los secretos, solo en el último paso', [p.get('name') for p in j_val['steps'] if secretos(p)], [p_val['name']])
+eq('F6 …y son los de la valoración', secretos(p_val),
+   ['KEEPA_API_KEY', 'SUPABASE_SERVICE_KEY', 'SUPABASE_URL', 'TELEGRAM_CHAT_ID', 'TELEGRAM_TOKEN'])
+eq('F7 el input llega por env:, nunca dentro de run:', ('inputs.' in p_val['run'], p_val['env']['PASADA']),
+   (False, '${{ inputs.pasada }}'))
+eq('F8 corre el programa, con tope en el job y en el paso, y sin artefactos',
+   (p_val['run'], bool(j_val.get('timeout-minutes')) and bool(p_val.get('timeout-minutes')), 'upload-artifact' in texto_wf),
+   ('python -u escaner2_tcg_valorar.py', True, False))
+eq('F9 el token del run, solo para leer el repo', wf['permissions'], {'contents': 'read'})
+eq('F10 🔑 el workflow que nombra la lectura de la oficina es ESTE (mismo nombre en los dos lados)',
    os.path.basename(WORKFLOW), __import__('escaner2_tcg_disponibilidad').WORKFLOW_VALORAR)
 
 # ── (G) La red con reloj: las cuentas valoran antes lo pendiente ──────────────────────────
@@ -320,9 +279,8 @@ i_val = next((i for i, r in enumerate(nombres) if 'escaner2_tcg_valorar.py' in r
 i_cue = next((i for i, r in enumerate(nombres) if 'escaner2_tcg_novedades_cuentas.py' in r), -1)
 eq('G2 🔴 en el MISMO job, la valoración de lo pendiente va ANTES de las cuentas', 0 <= i_val < i_cue, True)
 pv, pc = pasos_cu[i_val], pasos_cu[i_cue]
-eq('G3 …solo en las cuentas sueltas, con AVISO=valorar, su tope y Keepa',
-   (pv.get('if'), pv['env'].get('AVISO'), bool(pv.get('timeout-minutes')), 'KEEPA_API_KEY' in secretos(pv)),
-   ("inputs.pasada == ''", 'valorar', True, True))
+eq('G3 …solo en las cuentas sueltas, con su tope y Keepa',
+   (pv.get('if'), bool(pv.get('timeout-minutes')), 'KEEPA_API_KEY' in secretos(pv)), ("inputs.pasada == ''", True, True))
 eq('G4 …y las cuentas corren aunque la valoración falle (no si se cancela)', pc.get('if'), '${{ !cancelled() }}')
 eq('G5 el tope del job cabe la valoración y las cuentas',
    cu['jobs']['cuentas']['timeout-minutes'] >= pv['timeout-minutes'] + pc['timeout-minutes'], True)

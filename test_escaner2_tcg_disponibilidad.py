@@ -35,14 +35,12 @@ QUE PRUEBA:
       ficha» ni «otro_ean»): 6 de 100 no para, 19 de 20 no, 25 de 100 sí, 21 de 200 no; la forma rota sigue parando a la
       primera; y el registro, limpio.
   (TO) 🆕 (encargo TO, 27-nov-2026) LA LECTURA DESDE EL ORDENADOR DE LA OFICINA (MAQUINA=oficina): aplica, selecciona las
-      novedades en el acto, no las valora y encarga la valoración a la v1 (escaner2-tcg-valorar.yml) con la pasada; si el
-      encargo no llega, ROJO y dicho (la selección queda en la base para la corrida siguiente); la corrida pedida hace más
-      de EDAD_MAXIMA_MIN no lee (justo por debajo, sí; sin saber la edad, sí); sin token de disparo, ROJO sin pasada; con
-      otra lectura de TCG viva espera hasta ESPERA_TURNO_S (si acaba, lee; si no, no lee; una muerta o de otro proveedor no
-      frena); la página anti-robots, ROJO sin relanzar y el aviso encargado; el lector parado, su aviso encargado; el
-      rescate, sin token; el vigía de la marca no impide encargar la valoración; la horaria de GitHub también espera a otra
-      lectura viva; un fallo de la base al mirar el turno, ROJO sin pasada; GITHUB_API_URL; sin MAQUINA, todo lo demás como
-      siempre; y el registro sin tokens ni la URL de la API.
+      novedades en el acto y no las valora (la v1 las valora por reloj), y no lanza nada en GitHub (solo pregunta la edad de
+      su corrida); la corrida pedida hace más de EDAD_MAXIMA_MIN no lee (justo por debajo, sí; sin saber la edad, sí; un
+      relanzamiento cuenta desde el relanzamiento); con otra lectura de TCG viva espera hasta ESPERA_TURNO_S (también la
+      horaria de GitHub); un fallo de la base al mirarlo, ROJO sin pasada; la página anti-robots, ROJO sin relanzar; si al ir
+      a aplicar ya lleva más de APLICAR_MAX_MIN (equipo suspendido), no aplica; el rescate, sin preguntar; sin MAQUINA, todo
+      lo demás como siempre; y el registro sin el token ni la URL de la API.
 """
 import contextlib
 import io
@@ -1147,22 +1145,23 @@ correr(base, Web(catalogo(), FICHAS, login=403))
 eq('PD10 …y la horaria, con el mismo 403, sí manda su Telegram (no cambia)', len(telegramas), 1)
 
 # ── (TO) 🆕 (Encargo TO, 27-nov-2026) LA LECTURA DESDE EL ORDENADOR DE LA OFICINA (MAQUINA=oficina) ──────────────────────
-# La corre escaner2-tcg-oficina.yml (repo privado de la v2) en una maquina propia sin Keepa ni Telegram: la corrida vieja
-# no lee; con otra lectura en marcha espera; la pagina anti-robots, ROJO sin relanzar; la seleccion de novedades en el acto
-# y la valoracion y los avisos, encargados a la v1 (escaner2-tcg-valorar.yml) por workflow_dispatch.
-TOKEN_DISPARO, TOKEN_RUN = 'TOKEN-DISPARO-SECRETO', 'TOKEN-RUN-SECRETO'
-ENV_OFICINA = {'MAQUINA': 'oficina', 'DISPARO_GH_TOKEN': TOKEN_DISPARO, 'GITHUB_TOKEN': TOKEN_RUN,
-               'GITHUB_REPOSITORY': 'Moloka-Store/moloka-app-v2', 'GITHUB_RUN_ID': '45999000001'}
+# La corre escaner2-tcg-oficina.yml (repo privado de la v2) en una maquina propia sin Keepa ni Telegram y que NO lanza nada en
+# GitHub: la corrida vieja no lee; con otra lectura en marcha espera; la pagina anti-robots, ROJO sin relanzar; la seleccion
+# de novedades en el acto y sin valorar (la valoracion la hace la v1 por reloj); y si al ir a aplicar ya lleva mas de
+# APLICAR_MAX_MIN (equipo suspendido), no aplica.
+TOKEN_RUN = 'TOKEN-RUN-SECRETO'
+ENV_OFICINA = {'MAQUINA': 'oficina', 'GITHUB_TOKEN': TOKEN_RUN, 'GITHUB_REPOSITORY': 'Moloka-Store/moloka-app-v2',
+               'GITHUB_RUN_ID': '45999000001'}
 
 
 class GitHub:
-    """La API de GitHub de mentira: la edad de la corrida (GET) y los encargos a la v1 (POST)."""
+    """La API de GitHub de mentira: la edad de la corrida (GET), lo unico que la oficina le pregunta."""
 
-    def __init__(self, hace_min=1, codigo_run=200, codigo_encargo=204, falla_encargo=False, arranco_hace_min=None):
-        self.hace_min, self.codigo_run, self.codigo_encargo, self.falla_encargo = hace_min, codigo_run, codigo_encargo, falla_encargo
+    def __init__(self, hace_min=1, codigo_run=200, arranco_hace_min=None):
+        self.hace_min, self.codigo_run = hace_min, codigo_run
         # run_started_at: el del intento (en un relanzamiento, posterior a created_at); por defecto, el mismo (medido).
         self.arranco_hace_min = hace_min if arranco_hace_min is None else arranco_hace_min
-        self.gets, self.encargos = [], []
+        self.gets = []
 
     def pedir(self, url, headers=None, timeout=None):
         self.gets.append((url, (headers or {}).get('Authorization')))
@@ -1170,20 +1169,14 @@ class GitHub:
         arranco = (datetime.now(timezone.utc) - timedelta(minutes=self.arranco_hace_min)).isoformat().replace('+00:00', 'Z')
         return types.SimpleNamespace(status_code=self.codigo_run, json=lambda: {'created_at': creada, 'run_started_at': arranco})
 
-    def post(self, url, json=None, headers=None, timeout=None):
-        self.encargos.append({'url': url, 'cuerpo': json, 'auth': (headers or {}).get('Authorization')})
-        if self.falla_encargo:
-            raise ConnectionError('fallo de red hacia https://api.github.com con ' + TOKEN_DISPARO)
-        return types.SimpleNamespace(status_code=self.codigo_encargo, text='{"message": "Bad credentials"}')
 
-
-def correr_oficina(base, web, gh, env=None, dormir=None):
+def correr_oficina(base, web, gh, env=None, dormir=None, argv=()):
     salida = io.StringIO()
     codigo = None
     with contextlib.redirect_stdout(salida):
         try:
-            codigo = prog.principal([], env={**ENV, **ENV_OFICINA, **(env or {})}, sb=base, sesion=web,
-                                    dormir=dormir or (lambda s: None), pedir=gh.pedir, post=gh.post)
+            codigo = prog.principal(list(argv), env={**ENV, **ENV_OFICINA, **(env or {})}, sb=base, sesion=web,
+                                    dormir=dormir or (lambda s: None), pedir=gh.pedir)
         except SystemExit as ex:
             codigo = ex.code
     return codigo, salida.getvalue()
@@ -1191,89 +1184,70 @@ def correr_oficina(base, web, gh, env=None, dormir=None):
 
 def limpio_oficina(nombre, registro):
     limpio(nombre, registro)
-    eq(nombre + ': el registro tampoco suelta los tokens ni la URL de la API', [p for p in (TOKEN_DISPARO, TOKEN_RUN,
-       'api.github.com', 'Bad credentials') if p in registro], [])
+    eq(nombre + ': el registro tampoco suelta el token ni la URL de la API', [p for p in (TOKEN_RUN, 'api.github.com')
+       if p in registro], [])
 
 
 def rpcs_de(base):
     return [n for n, _p in base.rpcs]
 
 
-# TO1-TO3 · una lectura normal: aplica, SELECCIONA en el acto, NO valora (ni Keepa ni el cierre de la valoración) y encarga
-#           la valoración a la v1 con la pasada; sin Telegram.
-telegramas.clear()
+# TO1-TO6 · una lectura normal: aplica, SELECCIONA en el acto, NO valora (ni Keepa ni el cierre de la valoración) y no lanza
+#           nada en GitHub.
 base, web, gh = Base(), Web(catalogo(), FICHAS), GitHub()
 codigo, reg = correr_oficina(base, web, gh)
-pid = base.pasadas()[0]['id'] if base.pasadas() else None
-eq('TO1 desde la oficina: la pasada se aplica y sale VERDE, sin Telegram',
-   (codigo, [p['estado'] for p in base.pasadas()], len(telegramas)), (0, ['aplicada'], 0))
+eq('TO1 desde la oficina: la pasada se aplica y sale VERDE', (codigo, [p['estado'] for p in base.pasadas()]), (0, ['aplicada']))
 eq('TO2 …las novedades se SELECCIONAN en el acto y NO se valoran aquí (ni nov_cerrar_valoracion)',
    ('nov_seleccionar_pasada' in rpcs_de(base), 'nov_cerrar_valoracion' in rpcs_de(base)), (True, False))
-eq('TO3 …y la valoración se encarga UNA vez a la v1: su workflow, sobre main, con la pasada y el token de disparo',
-   [(e['url'], e['cuerpo'], e['auth']) for e in gh.encargos],
-   [('https://api.github.com/repos/Moloka-Store/moloka-app/actions/workflows/escaner2-tcg-valorar.yml/dispatches',
-     {'ref': 'main', 'inputs': {'aviso': 'valorar', 'pasada': pid}}, 'Bearer ' + TOKEN_DISPARO)])
-eq('TO4 …la edad de la corrida se pregunta a la API de SU repo, con el token del run',
+eq('TO3 …y el registro dice quién las valora (el reloj de escaner2-tcg-valorar.yml o la red de las cuentas)',
+   ('>>> NOVEDADES: seleccionadas en la base, sin valorar aquí; las valora escaner2-tcg-valorar.yml' in reg), True)
+_fuente_prog = open(prog.__file__, encoding='utf-8').read()
+eq('TO4 🔴 la oficina NO lanza nada en GitHub: ni dispatches, ni token de disparo, ni la función que encargaba',
+   ('dispatches' in _fuente_prog, 'DISPARO_GH_TOKEN' in _fuente_prog, hasattr(prog, 'encargar_a_la_v1')), (False, False, False))
+eq('TO5 …lo único que pregunta a GitHub es la edad de su corrida, a la API de SU repo, con el token del run',
    gh.gets, [('https://api.github.com/repos/Moloka-Store/moloka-app-v2/actions/runs/45999000001', 'Bearer ' + TOKEN_RUN)])
-eq('TO5 …el registro dice que se ha encargado', '>>> ENCARGO A LA V1 (valorar): aceptado.' in reg, True)
 limpio_oficina('TO6', reg)
-# TO7 · 🔴 sin MAQUINA (la horaria de GitHub de siempre) nada de esto: valora aquí y no encarga nada.
+eq('TO6b la versión del modo oficina que comprueba el workflow de la v2', prog.OFICINA_VERSION, 2)
+# TO7 · 🔴 sin MAQUINA (la horaria de GitHub de siempre) nada de esto: valora aquí y no pregunta nada a GitHub.
 base, gh = Base(), GitHub()
 salida = io.StringIO()
 with contextlib.redirect_stdout(salida):
-    codigo = prog.principal([], env=dict(ENV), sb=base, sesion=Web(catalogo(), FICHAS), dormir=lambda s: None,
-                            pedir=gh.pedir, post=gh.post)
-eq('TO7 sin MAQUINA, la horaria de siempre: valora en el acto y no pregunta ni encarga nada a GitHub',
-   (codigo, 'nov_cerrar_valoracion' in rpcs_de(base), gh.gets, gh.encargos), (0, True, [], []))
+    codigo = prog.principal([], env=dict(ENV), sb=base, sesion=Web(catalogo(), FICHAS), dormir=lambda s: None, pedir=gh.pedir)
+eq('TO7 sin MAQUINA, la horaria de siempre: valora en el acto y no pregunta nada a GitHub',
+   (codigo, 'nov_cerrar_valoracion' in rpcs_de(base), gh.gets), (0, True, []))
 
-# TO8-TO10 · el encargo que no llega: la selección queda en la base, ROJO y dicho; la siguiente corrida lo valorará.
-for nombre, g in (('GitHub contesta 401', GitHub(codigo_encargo=401)), ('falla la red', GitHub(falla_encargo=True))):
-    base = Base()
-    codigo, reg = correr_oficina(base, Web(catalogo(), FICHAS), g)
-    eq('TO8 el encargo no llega (%s): ROJO, la pasada sigue aplicada y la selección hecha' % nombre,
-       (codigo, [p['estado'] for p in base.pasadas()], 'nov_seleccionar_pasada' in rpcs_de(base),
-        'nov_cerrar_valoracion' in rpcs_de(base)), (1, ['aplicada'], True, False))
-    eq('TO9 …y el registro lo dice con la pasada y quién la valorará',
-       ('TCG_VALORACION_NO_ENCARGADA' in reg, 'escaner2-tcg-valorar.yml' in reg, base.pasadas()[0]['id'] in reg),
-       (True, True, True))
-    limpio_oficina('TO10 (%s)' % nombre, reg)
-
-# TO11-TO13 · la corrida vieja (el equipo estaba apagado): sale VERDE sin abrir pasada ni tocar la web; justo por debajo
-#             del umbral, lee; si no se sabe la edad, lee.
+# TO8-TO13 · la corrida vieja (el equipo estaba apagado): sale VERDE sin abrir pasada ni tocar la web; justo por debajo
+#            del umbral, lee; si no se sabe la edad, lee; un relanzamiento cuenta desde el relanzamiento.
 for hace, lee in ((prog.EDAD_MAXIMA_MIN + 1, False), (prog.EDAD_MAXIMA_MIN - 1, True), (60 * 15, False)):
     base, web = Base(), Web(catalogo(), FICHAS)
     codigo, reg = correr_oficina(base, web, GitHub(hace_min=hace))
-    eq('TO11 corrida pedida hace %d min (umbral %d): %s' % (hace, prog.EDAD_MAXIMA_MIN, 'lee' if lee else 'VERDE sin leer'),
+    eq('TO8 corrida pedida hace %d min (umbral %d): %s' % (hace, prog.EDAD_MAXIMA_MIN, 'lee' if lee else 'VERDE sin leer'),
        (codigo, bool(base.pasadas()), bool(web.pedidas), 'TCG_CORRIDA_VIEJA' in reg), (0, lee, lee, not lee))
-eq('TO12 el umbral es el margen del horario de TCG (30 min)', prog.EDAD_MAXIMA_MIN, 30)
+eq('TO9 el umbral es el margen del horario de TCG (30 min)', prog.EDAD_MAXIMA_MIN, 30)
 base, web = Base(), Web(catalogo(), FICHAS)
 codigo, reg = correr_oficina(base, web, GitHub(hace_min=180, arranco_hace_min=1))
-eq('TO12b un relanzamiento a mano de una corrida de hace 3 h (run_started_at de hace 1 min): cuenta el relanzamiento, lee',
+eq('TO10 un relanzamiento a mano de una corrida de hace 3 h (run_started_at de hace 1 min): cuenta el relanzamiento, lee',
    (codigo, [p['estado'] for p in base.pasadas()], 'TCG_CORRIDA_VIEJA' in reg), (0, ['aplicada'], False))
 base, web = Base(), Web(catalogo(), FICHAS)
 codigo, reg = correr_oficina(base, web, GitHub(hace_min=45, arranco_hace_min=45))
-eq('TO12c pedida hace 45 min y en cola desde entonces (run_started_at = created_at, como se midió): VERDE sin leer',
+eq('TO11 pedida hace 45 min y en cola desde entonces (run_started_at = created_at, como se midió): VERDE sin leer',
    (codigo, base.pasadas(), 'TCG_CORRIDA_VIEJA' in reg), (0, [], True))
-for nombre, g in (('la API da 500', GitHub(codigo_run=500)), ('sin token del run', None)):
+for nombre, g, extra in (('la API da 500', GitHub(codigo_run=500), {}), ('sin token del run', GitHub(), {'GITHUB_TOKEN': ''})):
     base, web = Base(), Web(catalogo(), FICHAS)
-    if g is None:
-        codigo, reg = correr_oficina(base, web, GitHub(), env={'GITHUB_TOKEN': ''})
-    else:
-        codigo, reg = correr_oficina(base, web, g)
-    eq('TO13 sin poder saber la edad (%s): se lee y se dice' % nombre,
+    codigo, reg = correr_oficina(base, web, g, env=extra)
+    eq('TO12 sin poder saber la edad (%s): se lee y se dice' % nombre,
        (codigo, [p['estado'] for p in base.pasadas()], 'no se ha podido saber cuándo se pidió' in reg), (0, ['aplicada'], True))
-
-# TO14 · sin token de disparo: ROJO sin abrir pasada ni preguntar nada.
-base, web, gh = Base(), Web(catalogo(), FICHAS), GitHub()
-codigo, reg = correr_oficina(base, web, gh, env={'DISPARO_GH_TOKEN': ''})
-eq('TO14 🔴 sin DISPARO_GH_TOKEN: ROJO, sin pasada, sin web y sin API', (codigo, base.pasadas(), web.pedidas, gh.gets),
-   (1, [], [], []))
+gh = GitHub()
+codigo, reg = correr_oficina(Base(), Web(catalogo(), FICHAS), gh, env={'GITHUB_API_URL': 'https://github.ejemplo.invalid/api/v3/'})
+eq('TO13 la edad se pregunta a GITHUB_API_URL (sin la barra del final)', [u for u, _a in gh.gets],
+   ['https://github.ejemplo.invalid/api/v3/repos/Moloka-Store/moloka-app-v2/actions/runs/45999000001'])
 for malo in ('Oficina', 'github', 'x'):
     base = Base()
     codigo, reg = correr_oficina(base, Web(catalogo(), FICHAS), GitHub(), env={'MAQUINA': malo})
-    eq('TO15 MAQUINA %r no vale: ROJO sin abrir pasada' % malo, (codigo, base.pasadas()), (1, []))
+    eq('TO14 MAQUINA %r no vale: ROJO sin abrir pasada' % malo, (codigo, base.pasadas()), (1, []))
 
-# TO16-TO19 · otra lectura de TCG en marcha (la de otro repo: su grupo de concurrency no ve este job).
+
+# TO15-TO20 · otra lectura de TCG en marcha (la de otro repo: su grupo de concurrency no ve este job). Las DOS horarias esperan.
 def leyendo_hace(minutos, id_='PASADA-OTRA'):
     return {'id': id_, 'proveedor': 'TCG', 'estado': 'leyendo',
             'creada_en': (datetime.now(timezone.utc) - timedelta(minutes=minutos)).isoformat()}
@@ -1283,7 +1257,7 @@ base, web = Base(), Web(catalogo(), FICHAS)
 base.t['disp_pasada'] = [leyendo_hace(3)]
 esperas = []
 codigo, reg = correr_oficina(base, web, GitHub(), dormir=lambda s: esperas.append(s))
-eq('TO16 otra lectura viva que no acaba: espera 10 min mirando cada 15 s y sale VERDE sin abrir pasada ni tocar la web',
+eq('TO15 otra lectura viva que no acaba: espera 10 min mirando cada 15 s y sale VERDE sin abrir pasada ni tocar la web',
    (codigo, len(base.pasadas()), web.pedidas, sum(s for s in esperas if s == prog.ESPERA_TURNO_CADA_S),
     'TCG_OTRA_EN_MARCHA' in reg), (0, 1, [], prog.ESPERA_TURNO_S, True))
 base, web = Base(), Web(catalogo(), FICHAS)
@@ -1299,81 +1273,26 @@ def acaba_a_la_tercera(s):
 
 
 codigo, reg = correr_oficina(base, web, GitHub(), dormir=acaba_a_la_tercera)
-eq('TO17 la otra acaba a los 45 s: entonces lee, aplica y lo dice',
+eq('TO16 la otra acaba a los 45 s: entonces lee, aplica y lo dice',
    (codigo, [p['estado'] for p in base.pasadas()], 'ha acabado tras 45 s' in reg), (0, ['aplicada', 'aplicada'], True))
 base, web = Base(), Web(catalogo(), FICHAS)
 base.t['disp_pasada'] = [leyendo_hace(90)]
 esperas = []
 codigo, reg = correr_oficina(base, web, GitHub(), dormir=lambda s: esperas.append(s))
-eq('TO18 una «leyendo» de hace más de 1 h es una muerta: no se espera, se lee',
+eq('TO17 una «leyendo» de hace más de 1 h es una muerta (la cierra la base al aplicar la siguiente): no se espera, se lee',
    (codigo, [p['estado'] for p in base.pasadas()][-1], prog.ESPERA_TURNO_CADA_S in esperas), (0, 'aplicada', False))
 base, web = Base(), Web(catalogo(), FICHAS)
 base.t['disp_pasada'] = [dict(leyendo_hace(3), proveedor='DBLINE')]
 codigo, reg = correr_oficina(base, web, GitHub())
-eq('TO19 una lectura de OTRO proveedor no frena a TCG', [p['estado'] for p in base.pasadas() if p['proveedor'] == 'TCG'
-   or p['id'] != 'PASADA-OTRA'][-1], 'aplicada')
-
-# TO20-TO23 · la página anti-robots desde la oficina: ROJO, sin relanzar (no hay otra máquina), el aviso encargado a la v1.
-telegramas.clear()
-import tempfile  # noqa: E402
-fd, ruta_salida = tempfile.mkstemp(suffix='.out')
-os.close(fd)
-base, gh = Base(), GitHub()
-codigo, reg = correr_oficina(base, WebPared(catalogo(), FICHAS), gh, env={'GITHUB_OUTPUT': ruta_salida})
-with open(ruta_salida, encoding='utf-8') as fh:
-    escrito = fh.read()
-os.remove(ruta_salida)
-eq('TO20 🔴 la página anti-robots desde la oficina: ROJO, la pasada fallida y SIN pedir otro intento',
-   (codigo, [p['estado'] for p in base.pasadas()], escrito, 'TCG_PARED_REINTENTO' in reg), (1, ['fallida'], '', False))
-eq('TO21 …el motivo dice que era la oficina, no un intento de tres',
-   (base.pasadas()[0]['motivo'].endswith('· desde la máquina de la oficina'), 'intento' in base.pasadas()[0]['motivo']),
-   (True, False))
-eq('TO22 …sin Telegram aquí: el aviso de la parada se encarga a la v1 con la pasada',
-   (len(telegramas), [e['cuerpo']['inputs'] for e in gh.encargos]),
-   (0, [{'aviso': 'parada', 'pasada': base.pasadas()[0]['id']}]))
-limpio_oficina('TO23', reg)
-
-# TO24 · un bloqueo en una ficha del lector de tramos: el aviso «tramos» a la v1, sin Telegram.
-telegramas.clear()
-base, gh = Base(), GitHub()
-fichas_429 = dict(FICHAS)
-fichas_429[EANS['D'].lower()] = 429
-codigo, reg = correr_oficina(base, Web(catalogo(), fichas_429), gh)
-eq('TO24 el lector de tramos se para en la oficina: ROJO, la valoración y el aviso «tramos» encargados, sin Telegram',
-   (codigo, [e['cuerpo']['inputs']['aviso'] for e in gh.encargos], len(telegramas)), (1, ['valorar', 'tramos'], 0))
-limpio_oficina('TO25', reg)
-
-# TO26 · el rescate con MAQUINA=oficina: no pide token de disparo ni edad; cierra solo la pasada de ESTE run.
-base, gh = Base(), GitHub()
-base.t['disp_pasada'] = [dict(leyendo_hace(3), run_id=45999000001), dict(leyendo_hace(3, 'PASADA-AJENA'), run_id=4242)]
-salida = io.StringIO()
-with contextlib.redirect_stdout(salida):
-    codigo = prog.principal(['--rescate'], env={**ENV, **ENV_OFICINA, 'DISPARO_GH_TOKEN': ''}, sb=base, pedir=gh.pedir,
-                            post=gh.post)
-eq('TO26 el rescate desde la oficina: solo la pasada de ESTE run pasa a fallida, sin preguntar ni encargar nada',
-   (codigo, [(p['id'], p['estado']) for p in base.pasadas()], gh.gets, gh.encargos),
-   (0, [('PASADA-OTRA', 'fallida'), ('PASADA-AJENA', 'leyendo')], [], []))
-
-# TO27 · 🔴 el vigía de la marca parecida en la oficina: ROJO, pero la valoración se encarga igual (la selección está hecha).
-base, gh = Base(), GitHub()
-base.marca_parecida = 1
-codigo, reg = correr_oficina(base, Web(catalogo(), FICHAS), gh)
-eq('TO27 🔴 con el vigía de la marca parecida: ROJO por el vigía, y la valoración SE ENCARGA igual (la selección está hecha)',
-   (codigo, [e['cuerpo']['inputs']['aviso'] for e in gh.encargos], 'MARCA_PARECIDA' in reg,
-    'TCG_VALORACION_NO_ENCARGADA' in reg), (1, ['valorar'], True, False))
-base, gh = Base(), GitHub()
-base.falla_novedades = True
-codigo, reg = correr_oficina(base, Web(catalogo(), FICHAS), gh)
-eq('TO28 si la SELECCIÓN falla (nada seleccionado): ROJO y no se encarga valorar nada', (codigo, gh.encargos), (1, []))
-
-# TO29-TO31 · la horaria de GitHub (sin MAQUINA) también espera a otra lectura de TCG viva (una de la oficina, a mano).
+eq('TO18 una lectura de OTRO proveedor no frena a TCG', [p['estado'] for p in base.pasadas() if p['proveedor'] == 'TCG'],
+   ['aplicada'])
 base, web = Base(), Web(catalogo(), FICHAS)
 base.t['disp_pasada'] = [leyendo_hace(3)]
 esperas = []
 salida = io.StringIO()
 with contextlib.redirect_stdout(salida):
     codigo = prog.principal([], env=dict(ENV), sb=base, sesion=web, dormir=lambda s: esperas.append(s))
-eq('TO29 🔴 la horaria de GitHub con una lectura de la oficina viva: espera 10 min y sale VERDE sin abrir pasada ni tocar '
+eq('TO19 🔴 la horaria de GitHub con una lectura de la oficina viva: espera 10 min y sale VERDE sin abrir pasada ni tocar '
    'la web', (codigo, len(base.pasadas()), web.pedidas, 'TCG_OTRA_EN_MARCHA' in salida.getvalue(),
               sum(s for s in esperas if s == prog.ESPERA_TURNO_CADA_S)), (0, 1, [], True, prog.ESPERA_TURNO_S))
 
@@ -1393,19 +1312,99 @@ for nombre, extra in (('la de la oficina', ENV_OFICINA), ('la de GitHub', {})):
     salida = io.StringIO()
     with contextlib.redirect_stdout(salida):
         try:
-            codigo = prog.principal([], env={**ENV, **extra}, sb=base, sesion=web, dormir=lambda s: None, pedir=gh.pedir,
-                                    post=gh.post)
+            codigo = prog.principal([], env={**ENV, **extra}, sb=base, sesion=web, dormir=lambda s: None, pedir=gh.pedir)
         except SystemExit as ex:
             codigo = ex.code
-    eq('TO30 🔴 %s: si la base no contesta al mirar el turno, ROJO sin abrir pasada ni tocar la web' % nombre,
+    eq('TO20 🔴 %s: si la base no contesta al mirar el turno, ROJO sin abrir pasada ni tocar la web' % nombre,
        (codigo, base.t.get('disp_pasada', []), web.pedidas, 'TCG_NO_EJECUTADA' in salida.getvalue()), (1, [], [], True))
-    limpio('TO31 (%s)' % nombre, salida.getvalue())
+    limpio('TO20b (%s)' % nombre, salida.getvalue())
 
-# TO32 · la API de GitHub de la corrida, la que diga GITHUB_API_URL (GitHub Enterprise o la de siempre).
-gh = GitHub()
-codigo, reg = correr_oficina(Base(), Web(catalogo(), FICHAS), gh, env={'GITHUB_API_URL': 'https://github.ejemplo.invalid/api/v3/'})
-eq('TO32 la edad se pregunta a GITHUB_API_URL (sin la barra del final)', [u for u, _a in gh.gets],
-   ['https://github.ejemplo.invalid/api/v3/repos/Moloka-Store/moloka-app-v2/actions/runs/45999000001'])
+# TO21-TO23 · la página anti-robots desde la oficina: ROJO, sin relanzar (no hay otra máquina).
+import tempfile  # noqa: E402
+fd, ruta_salida = tempfile.mkstemp(suffix='.out')
+os.close(fd)
+base, gh = Base(), GitHub()
+codigo, reg = correr_oficina(base, WebPared(catalogo(), FICHAS), gh, env={'GITHUB_OUTPUT': ruta_salida})
+with open(ruta_salida, encoding='utf-8') as fh:
+    escrito = fh.read()
+os.remove(ruta_salida)
+eq('TO21 🔴 la página anti-robots desde la oficina: ROJO, la pasada fallida y SIN pedir otro intento',
+   (codigo, [p['estado'] for p in base.pasadas()], escrito, 'TCG_PARED_REINTENTO' in reg), (1, ['fallida'], '', False))
+eq('TO22 …el motivo dice que era la oficina, no un intento de tres',
+   (base.pasadas()[0]['motivo'].endswith('· desde la máquina de la oficina'), 'intento' in base.pasadas()[0]['motivo']),
+   (True, False))
+limpio_oficina('TO23', reg)
+
+# TO24 · un bloqueo en una ficha del lector de tramos: ROJO (el vigilante y el registro lo dicen; aquí no hay Telegram).
+base = Base()
+fichas_429 = dict(FICHAS)
+fichas_429[EANS['D'].lower()] = 429
+codigo, reg = correr_oficina(base, Web(catalogo(), fichas_429), GitHub())
+eq('TO24 el lector de tramos se para en la oficina: ROJO, con la pasada aplicada y la selección hecha',
+   (codigo, [p['estado'] for p in base.pasadas()], 'nov_seleccionar_pasada' in rpcs_de(base), 'TCG_TRAMOS_PARADO' in reg),
+   (1, ['aplicada'], True, True))
+limpio_oficina('TO25', reg)
+
+# TO26 · el rescate con MAQUINA=oficina: no pregunta la edad; cierra solo la pasada de ESTE run.
+base, gh = Base(), GitHub()
+base.t['disp_pasada'] = [dict(leyendo_hace(3), run_id=45999000001), dict(leyendo_hace(3, 'PASADA-AJENA'), run_id=4242)]
+codigo, reg = correr_oficina(base, Web(catalogo(), FICHAS), gh, argv=['--rescate'])
+eq('TO26 el rescate desde la oficina: solo la pasada de ESTE run pasa a fallida, sin preguntar nada a GitHub',
+   (codigo, [(p['id'], p['estado']) for p in base.pasadas()], gh.gets),
+   (0, [('PASADA-OTRA', 'fallida'), ('PASADA-AJENA', 'leyendo')], []))
+
+# TO27-TO28 · el vigía de la marca parecida y una selección que falla: ROJO; nada se valora aquí.
+base = Base()
+base.marca_parecida = 1
+codigo, reg = correr_oficina(base, Web(catalogo(), FICHAS), GitHub())
+eq('TO27 con el vigía de la marca parecida: ROJO por el vigía, la selección hecha y nada valorado aquí',
+   (codigo, 'MARCA_PARECIDA' in reg, 'nov_seleccionar_pasada' in rpcs_de(base), 'nov_cerrar_valoracion' in rpcs_de(base)),
+   (1, True, True, False))
+base = Base()
+base.falla_novedades = True
+codigo, reg = correr_oficina(base, Web(catalogo(), FICHAS), GitHub())
+eq('TO28 si la SELECCIÓN falla: ROJO, la pasada sigue aplicada', (codigo, [p['estado'] for p in base.pasadas()]), (1, ['aplicada']))
+
+
+# TO29-TO32 · 🔴 la edad JUSTO ANTES DE APLICAR: un equipo suspendido a media lectura no aplica lo de ayer.
+class Reloj:
+    """`prog._ahora` de mentira: la primera llamada (el arranque de la pasada) da T0; las siguientes, T0 + `salto`."""
+
+    def __init__(self, salto_min):
+        self.t0, self.salto, self.n = datetime.now(timezone.utc), timedelta(minutes=salto_min), 0
+
+    def __call__(self):
+        self.n += 1
+        return self.t0 if self.n == 1 else self.t0 + self.salto
+
+
+_ahora_de_verdad = prog._ahora
+for salto, aplica in ((prog.APLICAR_MAX_MIN + 1, False), (prog.APLICAR_MAX_MIN - 1, True), (60 * 14, False)):
+    base = Base()
+    prog._ahora = Reloj(salto)
+    try:
+        codigo, reg = correr_oficina(base, Web(catalogo(), FICHAS), GitHub())
+    finally:
+        prog._ahora = _ahora_de_verdad
+    p = base.pasadas()[0] if base.pasadas() else {}
+    eq('TO29 al ir a aplicar lleva %d min (máximo %d): %s' % (salto, prog.APLICAR_MAX_MIN, 'aplica' if aplica else
+                                                              'NO aplica, fallida y ROJO'),
+       (codigo, p.get('estado'), 'disp_aplicar_pasada' in rpcs_de(base), bool(base.t.get('disp_lectura'))),
+       (0, 'aplicada', True, True) if aplica else (1, 'fallida', False, False))
+    if not aplica:
+        eq('TO30 …el motivo dice que la lectura se interrumpió (%d min)' % salto,
+           str(p.get('motivo', '')).startswith('lectura de la oficina interrumpida: al ir a aplicar llevaba %d min' % salto), True)
+eq('TO31 el máximo es el de una «leyendo» viva (1 h)', (prog.APLICAR_MAX_MIN, prog.TURNO), (60, timedelta(hours=1)))
+base = Base()
+prog._ahora = Reloj(prog.APLICAR_MAX_MIN + 30)
+try:
+    salida = io.StringIO()
+    with contextlib.redirect_stdout(salida):
+        codigo = prog.principal([], env=dict(ENV), sb=base, sesion=Web(catalogo(), FICHAS), dormir=lambda s: None)
+finally:
+    prog._ahora = _ahora_de_verdad
+eq('TO32 sin MAQUINA (GitHub no se suspende) la regla no se aplica: la horaria aplica como siempre',
+   (codigo, [p['estado'] for p in base.pasadas()]), (0, ['aplicada']))
 
 print()
 print('TODO OK' if not fallos else 'FALLOS: %d (%s)' % (len(fallos), ', '.join(fallos)))

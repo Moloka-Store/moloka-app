@@ -76,7 +76,7 @@ QUE HACE, EN ORDEN:
 Uso:  python escaner2_tcg_disponibilidad.py            (la pasada; FICHAS_MAX y LISTADO por el entorno)
       python escaner2_tcg_disponibilidad.py --rescate  (ultimo paso del workflow si el run fallo)
       MAQUINA=oficina python escaner2_tcg_disponibilidad.py   (encargo TO: la lectura desde el ordenador de la oficina,
-                                                               con DISPARO_GH_TOKEN y GITHUB_TOKEN; ver MAQUINA_OFICINA)
+                                                               con GITHUB_TOKEN; ver MAQUINA_OFICINA)
 """
 import os
 import re
@@ -125,11 +125,21 @@ HORA_LISTADO = 9  # Madrid, de lunes a viernes: la pasada de las 09:00
 #     no lee (los grupos de `concurrency` son por repo: el de la v1 no ve el job de la v2). Esto lo hace TAMBIEN la horaria
 #     de GitHub, sin MAQUINA: una lanzada a mano no se cruza con la de la oficina;
 #   · la pagina anti-robots NO se reintenta en otra maquina (no hay otra): ROJO, como cualquier bloqueo;
+#   · si la lectura ya lleva mas de APLICAR_MAX_MIN cuando va a aplicar (o a dar la foto por «al día»), NO aplica: el equipo
+#     se ha suspendido a medias y lo leido es de antes;
 #   · las novedades: la SELECCION en el acto (nov_seleccionar_pasada solo vale para la ULTIMA pasada aplicada de TCG, que
-#     va por precio_pa), y la VALORACION (Keepa, Excel, Telegram) y los avisos de una parada, en la v1
-#     (escaner2-tcg-valorar.yml, con esas llaves), encargados con un workflow_dispatch (DISPARO_GH_TOKEN). Si el encargo no
-#     llega, la pasada queda en nov_pasada con `valoracion_estado` vacio y la valora la siguiente corrida de ese workflow.
+#     va por precio_pa). La VALORACION (Keepa, Excel, Telegram) la hace la v1 con sus llaves (escaner2-tcg-valorar.yml, que
+#     lanza un reloj de cron-job.org, y la red de escaner2-tcg-novedades-cuentas.yml a y 45): busca en nov_pasada las
+#     pasadas con la seleccion hecha y la valoracion sin cerrar. La maquina de la oficina NO lanza nada en GitHub ni tiene
+#     llaves de Keepa ni de Telegram (quien dirige, 27-nov-2026): el aviso de una parada lo da el vigilante del escaner
+#     (las lecturas perdidas), y el Telegram de la pasada dice «NO enviado (sin claves)» en el registro.
+#   · una pasada que se queda «leyendo» porque el equipo se apaga a media lectura (el rescate es un paso del mismo job y no
+#     llega a correr) la cierra la base: disp_aplicar_pasada pasa a 'fallida' toda 'leyendo' de TCG de mas de 1 h al aplicar
+#     la siguiente (leido el 27-nov-2026), y nadie toma por viva una 'leyendo' de mas de 1 h (esperar_turno, el PRO).
 MAQUINA_OFICINA = 'oficina'
+# 🔑 La version del modo «oficina» que entiende este programa. El workflow de la v2 la comprueba antes de leer y, si la
+#    v1 que baja no la tiene (el PR de la v2 fusionado antes que el de la v1, o una vuelta atras), sale sin leer.
+OFICINA_VERSION = 2
 # 30 min = disp_parametros.horario_margen_min de TCG: la base da cada lectura prevista por vencida 30 min despues de su hora
 # (disp_frescura_en). Una corrida que arranca mas tarde ya no es la de su hora, y la siguiente prevista esta a menos de 30 min
 # (son cada hora a las y 20): leer ahora solo sumaria otra entrada en la web. Saltarla no hace saltar el aviso, que pide DOS
@@ -142,11 +152,12 @@ EDAD_MAXIMA_MIN = 30
 ESPERA_TURNO_S = 600
 ESPERA_TURNO_CADA_S = 15
 TURNO = timedelta(hours=1)   # una 'leyendo' de menos de 1 h es una lectura viva (disp_aplicar_pasada da por muerta la de mas)
-REPO_V1 = 'Moloka-Store/moloka-app'
+# 60 min = TURNO: una pasada que lleva mas de 1 h abierta la base ya la da por muerta (la cierra la siguiente que se aplique),
+# y una lectura normal de la oficina llega a aplicar en minutos (la mas larga medida en GitHub, con 300 fichas de Funko antes
+# de la foto, ~35 min de job entero). Si al ir a aplicar ya ha pasado mas, el equipo se suspendio a media lectura (se apaga a
+# las 18:00): lo leido es de antes y no se aplica.
+APLICAR_MAX_MIN = 60
 WORKFLOW_VALORAR = 'escaner2-tcg-valorar.yml'
-ENCARGOS = ('valorar', 'parada', 'tramos')
-# Quien recibe los avisos de una parada en la oficina (principal lo pone; None: el Telegram de siempre).
-_ENCARGAR = None
 _RE_HEX = re.compile(r'[0-9a-fA-F]{24,}')
 _RE_URL = re.compile(r'https?://\S+')
 
@@ -214,12 +225,10 @@ def cocientes(guardados):
             for k, g in guardados.items() if g.get('cociente') is not None and g.get('leido_en')}
 
 
-def avisar(texto, env=None, post=None, tipo=None, pasada=None):
+def avisar(texto, env=None, post=None):
     """El Telegram de una parada, como el del resto del escaner (escaner2_novedades.enviar_telegram). NUNCA LANZA y no
-    imprime nada suyo: el registro solo dice si se ha mandado. (Encargo TO) En la oficina (sin llave de Telegram) no se
-    manda: se encarga a la v1 (`tipo` 'parada' o 'tramos'), que lo manda con el motivo que lee de la base."""
-    if _ENCARGAR is not None and tipo:
-        return _ENCARGAR(tipo, pasada)
+    imprime nada suyo: el registro solo dice si se ha mandado. (Encargo TO) En la oficina no hay llave de Telegram: dice
+    «NO enviado» y el aviso lo da el vigilante (las lecturas perdidas)."""
     try:
         import escaner2_novedades as nv
         import contextlib
@@ -322,6 +331,14 @@ def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX
               f"a agotado {c['n_web_a_agotado']}, en la web y aún no en el Excel {c['n_web_sin_excel']}", flush=True)
         _minimos(c, minimo, min_disp)
         catalogo = catalogo_leido
+        if oficina:
+            # (Encargo TO) Justo antes de aplicar (o de confirmar la foto como «al día»): si el equipo se suspendio a media
+            # lectura, lo leido es de antes y no se aplica.
+            lleva = (_ahora() - ahora).total_seconds() / 60
+            if lleva > APLICAR_MAX_MIN:
+                raise Rechazo('fallida', f'lectura de la oficina interrumpida: al ir a aplicar llevaba {int(lleva)} min '
+                                         f'(más de {APLICAR_MAX_MIN}; el equipo se suspendió a media lectura); lo leído es '
+                                         f'de antes y no se aplica')
         if ult[0].get('huella_contenido') == c['huella_contenido']:
             raise AlDia(ult[0].get('id'))
         print(">>> Contenido nuevo (la huella no es la de la última pasada aplicada): se sube.", flush=True)
@@ -355,7 +372,7 @@ def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX
         if ex.bloqueo and not getattr(guarda, 'sin_telegram', False):   # (encargo PD) el PRO: lo ve en la pantalla
             tras = f' Ya van {INTENTOS} intentos, cada uno en otra máquina.' if ex.pared and not oficina else ''
             avisar(f'⚠️ Escáner 2 · TCG: la pasada de la foto se ha parado porque la web de TCG no deja ({ex.motivo}).'
-                   f'{tras} Nada inventado; el escáner viejo sigue como siempre.', tipo='parada', pasada=pid)
+                   f'{tras} Nada inventado; el escáner viejo sigue como siempre.')
         return 1, ex.estado, None, None, pid, previos
     except Exception as ex:
         # 🔴 REPO PÚBLICO: el texto de un error puede llevar una URL, la respuesta de la web o una fila de la base.
@@ -390,13 +407,6 @@ def pasada(sb, web, run_id, usuario, clave, ahora, fichas_funko=FICHAS_FUNKO_MAX
 def novedades(sb, pid, run_id, valorar=True):
     """(Encargo T4) Las novedades de Funko de la pasada aplicada `pid` (como DBLine y OcioStock). NUNCA LANZA. Devuelve
     True si todo fue bien (sin el vigia de la marca). 🔴 Repo publico: el registro, discreto (solo estados y recuentos)."""
-    return _novedades(sb, pid, run_id, valorar)[0]
-
-
-def _novedades(sb, pid, run_id, valorar=True):
-    """`novedades`, devolviendo ademas si la SELECCION quedo hecha (en la base): (ok, seleccionada). (Encargo TO) La lectura
-    de la oficina encarga la valoracion siempre que la seleccion este hecha, aunque el vigia de la marca ponga el run en
-    rojo: si no, esas novedades se quedarian seleccionadas y sin valorar en cada pasada mientras dure el aviso."""
     try:
         import escaner2_novedades as nv
         ok, seleccion = nv.novedades_tras_la_pasada(sb, pid, PROVEEDOR, keepa_llave=os.environ.get('KEEPA_API_KEY'),
@@ -405,7 +415,7 @@ def _novedades(sb, pid, run_id, valorar=True):
     except Exception as ex:
         print(f"TCG_NOVEDADES_NO_HECHAS: la pasada {pid} sigue aplicada; las novedades han fallado antes de poder "
               f"apuntarse ({type(ex).__name__})", flush=True)
-        return False, False
+        return False
     marca_parecida = (seleccion or {}).get('marca_parecida') or 0
     if marca_parecida:
         print(f"MARCA_PARECIDA: {marca_parecida} producto(s) de TCG tienen una marca que se parece a {MARCA_NOVEDADES} y no "
@@ -414,7 +424,7 @@ def _novedades(sb, pid, run_id, valorar=True):
     if not ok:
         print(f"TCG_NOVEDADES_EN_ROJO: la pasada {pid} sigue aplicada; las novedades no han salido bien (el detalle, en "
               f"nov_pasada de esa pasada).", flush=True)
-    return ok and not marca_parecida, seleccion is not None
+    return ok and not marca_parecida
 
 
 # ── El lector de tramos ───────────────────────────────────────────────────────────────────
@@ -630,41 +640,10 @@ def esperar_turno(sb, ahora=_ahora, dormir=time.sleep, espera_s=ESPERA_TURNO_S):
         esperado += ESPERA_TURNO_CADA_S
 
 
-def encargar_a_la_v1(tipo, pasada_id, env, post=None):
-    """Lanza escaner2-tcg-valorar.yml en la v1 (workflow_dispatch sobre main) con `aviso`=tipo y `pasada`. Devuelve True si
-    GitHub lo acepta. NUNCA LANZA. 🔴 Al registro, solo si se ha encargado (ni la URL ni la respuesta)."""
-    token = env.get('DISPARO_GH_TOKEN') or ''
-    ok = False
-    if token and tipo in ENCARGOS:
-        try:
-            if post is None:
-                import requests
-                post = requests.post
-            r = post(f'https://api.github.com/repos/{REPO_V1}/actions/workflows/{WORKFLOW_VALORAR}/dispatches', timeout=20,
-                     json={'ref': 'main', 'inputs': {'aviso': tipo, 'pasada': str(pasada_id or '')}},
-                     headers={'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json',
-                              'X-GitHub-Api-Version': '2022-11-28'})
-            ok = getattr(r, 'status_code', 0) == 204
-        except Exception:  # noqa: BLE001
-            ok = False
-    print(f">>> ENCARGO A LA V1 ({tipo}): {'aceptado' if ok else 'NO aceptado'}.", flush=True)
-    return ok
-
-
-def principal(argv, env=None, sb=None, sesion=None, dormir=None, pedir=None, post=None):
-    """`pedir` y `post`: los de mentira del banco para la API de GitHub (la maquina de la oficina); en el workflow, los de
+def principal(argv, env=None, sb=None, sesion=None, dormir=None, pedir=None):
+    """`pedir`: el de mentira del banco para la API de GitHub (la edad de la corrida, en la oficina); en el workflow, el de
     verdad."""
-    global _ENCARGAR
     env = os.environ if env is None else env
-    _ENCARGAR = None
-    try:
-        return _principal(argv, env, sb, sesion, dormir, pedir, post)
-    finally:
-        _ENCARGAR = None
-
-
-def _principal(argv, env, sb, sesion, dormir, pedir, post):
-    global _ENCARGAR
     rescate = argv == ['--rescate']
     if argv not in ([], ['--rescate']):
         abortar('uso: escaner2_tcg_disponibilidad.py [--rescate]')
@@ -686,8 +665,6 @@ def _principal(argv, env, sb, sesion, dormir, pedir, post):
         abortar(f'MAQUINA tiene que estar vacía o ser {MAQUINA_OFICINA}')
     oficina = maquina == MAQUINA_OFICINA and not rescate
     if oficina:
-        if not env.get('DISPARO_GH_TOKEN'):
-            abortar('falta DISPARO_GH_TOKEN: sin él, desde la oficina las novedades no se valorarían; no se abre ninguna pasada')
         edad = edad_de_la_corrida(env, pedir)
         if edad is None:
             print(">>> OFICINA: no se ha podido saber cuándo se pidió esta corrida; se lee.", flush=True)
@@ -696,7 +673,6 @@ def _principal(argv, env, sb, sesion, dormir, pedir, post):
                   f"apagado o la máquina ocupada); no se lee. La base ya la cuenta como perdida y la siguiente prevista está "
                   f"cerca.", flush=True)
             return 0
-        _ENCARGAR = lambda tipo, pid: encargar_a_la_v1(tipo, pid, env, post)  # noqa: E731
     if sb is None:
         from escaner2_base import cliente
         sb = cliente(env['SUPABASE_URL'], env['SUPABASE_SERVICE_KEY'])
@@ -741,15 +717,11 @@ def _principal(argv, env, sb, sesion, dormir, pedir, post):
         return codigo or 1
     # 5 bis · (encargo T4) las novedades de Funko, con la pasada aplicada y antes del lector (no esperan a sus fichas).
     if estado == 'aplicada':
-        ok_nov, seleccionada = _novedades(sb, pid, run_id, valorar=not oficina)
-        if not ok_nov:
+        if not novedades(sb, pid, run_id, valorar=not oficina):
             codigo = 1
-        if oficina and seleccionada and not _ENCARGAR('valorar', pid):
-            # La seleccion ya esta en la base; la valoracion la recoge la siguiente corrida de escaner2-tcg-valorar.yml.
-            print(f"TCG_VALORACION_NO_ENCARGADA: la pasada {pid} queda con sus novedades seleccionadas y SIN valorar "
-                  f"(nov_pasada.valoracion_estado vacío); las valorará la siguiente corrida de {WORKFLOW_VALORAR}.",
-                  flush=True)
-            codigo = 1
+        elif oficina:
+            print(f">>> NOVEDADES: seleccionadas en la base, sin valorar aquí; las valora {WORKFLOW_VALORAR} (reloj) o las "
+                  f"cuentas de novedades de TCG (a y 45).", flush=True)
 
     hacer_listado = toca_listado(listado, ahora.astimezone(ZoneInfo('Europe/Madrid')))
     try:
@@ -768,8 +740,7 @@ def _principal(argv, env, sb, sesion, dormir, pedir, post):
     if r['parada']:
         print(f"TCG_TRAMOS_PARADO: {r['parada']}. Lo leído queda guardado; ningún cociente inventado.", flush=True)
         avisar(f"⚠️ Escáner 2 · TCG: el lector de tramos se ha parado ({r['parada']}). Fichas leídas bien en esta "
-               f"corrida: {r['ok']} (guardadas). Ningún cociente inventado; la foto de TCG sigue con lo que tenía.",
-               tipo='tramos', pasada=pid)
+               f"corrida: {r['ok']} (guardadas). Ningún cociente inventado; la foto de TCG sigue con lo que tenía.")
         return 1
     return codigo
 

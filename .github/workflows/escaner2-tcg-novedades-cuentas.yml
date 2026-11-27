@@ -22,7 +22,7 @@
 #    siempre.
 #
 # 🆕 (Encargo TO, 27-nov-2026) LA RED CON RELOJ DE LA VALORACION: la lectura de laborables sale del ordenador de la oficina,
-#    que selecciona las novedades y encarga su valoracion a escaner2-tcg-valorar.yml. Si ese encargo no llega o falla,
+#    que selecciona las novedades; las valora escaner2-tcg-valorar.yml, con un reloj a y 35. Si ese reloj no corre o falla,
 #    ESTE workflow, que ya corre cada hora (cron-job.org: a y 45 en laborables, a las 13:45 en fin de semana), valora antes
 #    de sus cuentas todo lo pendiente de TCG (escaner2_tcg_valorar.py: la selección hecha y la valoración sin cerrar, y las
 #    fallidas del último día; las avalanchas, cerradas antes de tocar Keepa). En el mismo job, así que valoración y
@@ -79,7 +79,6 @@ jobs:
           KEEPA_API_KEY:        ${{ secrets.KEEPA_API_KEY }}
           TELEGRAM_TOKEN:       ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
-          AVISO:                'valorar'
           PYTHONIOENCODING:     utf-8
         run: python -u escaner2_tcg_valorar.py
 
